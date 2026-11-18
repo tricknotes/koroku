@@ -70,6 +70,8 @@ func (r *realRunner) Run(ctx context.Context, cmd runner.Cmd) error {
 }
 
 // site is a Manager on a real restic repository in a temporary directory.
+// Each test has its own site and shares nothing with the others, so the
+// tests run in parallel.
 type site struct {
 	t     *testing.T
 	m     *Manager
@@ -177,6 +179,7 @@ func count(snaps []Snapshot, kind Kind, target string) int {
 }
 
 func TestIntegrationVolumeBackupAndRestore(t *testing.T) {
+	t.Parallel()
 	s := newSite(t)
 	ctx := testContext(t)
 	original := map[string]string{"index.html": "<h1>blog</h1>", "2026/11/post.md": "first post", "empty": ""}
@@ -259,6 +262,7 @@ func TestIntegrationVolumeBackupAndRestore(t *testing.T) {
 }
 
 func TestIntegrationRestoreOfAMissingSnapshotDataRollsBack(t *testing.T) {
+	t.Parallel()
 	s := newSite(t)
 	ctx := testContext(t)
 	current := map[string]string{"a.txt": "current"}
@@ -288,6 +292,7 @@ func TestIntegrationRestoreOfAMissingSnapshotDataRollsBack(t *testing.T) {
 }
 
 func TestIntegrationDumpRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := newSite(t)
 	ctx := testContext(t)
 	// 3 MiB of incompressible data: several pipe buffers and restic chunks.
@@ -372,6 +377,7 @@ func TestIntegrationDumpRoundTrip(t *testing.T) {
 }
 
 func TestIntegrationRetentionKeepsGenerationsPerTarget(t *testing.T) {
+	t.Parallel()
 	s := newSite(t)
 	ctx := testContext(t)
 	uploads := s.volume(blog, "uploads", map[string]string{"a.txt": "1"})
@@ -421,6 +427,7 @@ func TestIntegrationRetentionKeepsGenerationsPerTarget(t *testing.T) {
 }
 
 func TestIntegrationSystemBackupAndRestore(t *testing.T) {
+	t.Parallel()
 	s := newSite(t)
 	ctx := testContext(t)
 
