@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -246,7 +247,14 @@ func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message s
 	for _, id := range superseded {
 		appendLogLine(e.LogPath(app.Slug, id), "Canceled: "+store.SupersededError+".")
 	}
-	appendLogLine(e.LogPath(app.Slug, d.ID), fmt.Sprintf("Queued deployment of %s.", sha))
+	// A file under this ID can only be left over from an earlier database
+	// (the local state was reset but the data directory kept); the new
+	// deployment must not show its lines.
+	path := e.LogPath(app.Slug, d.ID)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		e.opts.Logger.Warn("removing a stale deploy log failed", "path", path, "error", err)
+	}
+	appendLogLine(path, fmt.Sprintf("Queued deployment of %s.", sha))
 	e.notify()
 	return d, nil
 }
