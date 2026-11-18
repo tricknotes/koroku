@@ -48,10 +48,15 @@ func TestNoAuthModeStillGuardsTheBrowser(t *testing.T) {
 		t.Fatalf("a cross-origin text/plain POST created an app: %s", attack.Body)
 	}
 	cases := map[string]func(*http.Request){
-		"foreign origin":       func(r *http.Request) { r.Header.Set("Origin", "https://evil.example") },
-		"origin null":          func(r *http.Request) { r.Header.Set("Origin", "null") },
-		"other local port":     func(r *http.Request) { r.Header.Set("Origin", "http://127.0.0.1:9999") },
-		"rebound host name":    func(r *http.Request) { r.Host = "attacker.example:8080" },
+		"foreign origin":      func(r *http.Request) { r.Header.Set("Origin", "https://evil.example") },
+		"origin null":         func(r *http.Request) { r.Header.Set("Origin", "null") },
+		"other local port":    func(r *http.Request) { r.Header.Set("Origin", "http://127.0.0.1:9999") },
+		"rebound host name":   func(r *http.Request) { r.Host = "attacker.example:8080" },
+		"localhost-like name": func(r *http.Request) { r.Host = "localhost.attacker.example" },
+		"app next to console": func(r *http.Request) {
+			r.Host = "console.dev.localhost"
+			r.Header.Set("Origin", "https://blog.dev.localhost")
+		},
 		"cross-site per fetch": func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "cross-site") },
 		"same-site per fetch":  func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "same-site") },
 		"form content type":    func(r *http.Request) { r.Header.Set("Content-Type", "application/x-www-form-urlencoded") },
@@ -79,6 +84,11 @@ func TestNoAuthModeStillGuardsTheBrowser(t *testing.T) {
 		"localhost":         func(r *http.Request) { r.Host = "localhost:4200"; r.Header.Set("Origin", "http://localhost:4200") },
 		"ipv6 loopback":     func(r *http.Request) { r.Host = "[::1]:8080" },
 		"fetch same-origin": func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "same-origin") },
+		// The console behind the local Caddy (loopback only, internal CA).
+		"console.dev.localhost": func(r *http.Request) {
+			r.Host = "console.dev.localhost"
+			r.Header.Set("Origin", "https://console.dev.localhost")
+		},
 	} {
 		rec := post(func(r *http.Request) {
 			mutate(r)

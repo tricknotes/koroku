@@ -36,10 +36,28 @@ jobs:
     name: Go (integration, real Docker)
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    env:
+      # The "go" target of dev/Dockerfile: no Chromium, fonts or Node.js,
+      # which the Go tests do not use and which took most of the image build.
+      KOROKU_DEV_TARGET: go
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      # The Go module and build caches live in a host directory instead of
+      # named volumes, so that actions/cache can carry them between runs.
+      # (actions/cache refuses paths with "..", and the runner context is
+      # not available in job-level env, hence the step.)
+      - name: Choose the cache directory
+        run: echo "KOROKU_DEV_CACHE=$RUNNER_TEMP/koroku-dev-cache" >> "$GITHUB_ENV"
+      - name: Restore the Go caches
+        uses: actions/cache@v6.1.0
+        with:
+          path: ${{ env.KOROKU_DEV_CACHE }}
+          # The Dockerfile pins the Go version and go.sum the modules. The
+          # cache is saved once per key: what it holds is mostly the
+          # dependencies, and the project's own packages compile quickly.
+          key: integration-go-${{ hashFiles('dev/Dockerfile', 'go.sum') }}
       # The integration tests run inside the development image, the same way
       # as on a developer machine (bin/dev), so they have restic and the
       # Compose version the project is developed against.

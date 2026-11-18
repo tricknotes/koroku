@@ -29,8 +29,15 @@ timezone = "Asia/Tokyo"
 allow_file_repos = true
 
 [caddy]
-# No reverse proxy: apps answer on their host port only.
-enabled = false
+# The caddy service of compose.yaml: loopback only, certificates from Caddy's
+# local CA. Apps answer on https://<slug>.dev.localhost. Set enabled = false
+# to run without Caddy (apps then answer on their host port only).
+enabled = true
+admin_url = "http://127.0.0.1:2019"
+listen_ip = "127.0.0.1"
+internal_ca = true
+# Caddy runs as root in its container; its log files would not be readable here.
+access_log_dir = ""
 EOF
     )
     echo "dev/serve.sh: wrote $config" >&2

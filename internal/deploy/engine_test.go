@@ -59,12 +59,18 @@ type fakeRouter struct {
 	mu    sync.Mutex
 	calls int
 	err   error
+	// onSync, when set, runs on every call (to look at the database the
+	// real router would build the configuration from).
+	onSync func()
 }
 
 func (r *fakeRouter) Sync(context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls++
+	if r.onSync != nil {
+		r.onSync()
+	}
 	return r.err
 }
 
@@ -423,7 +429,8 @@ func TestDeploySucceeds(t *testing.T) {
 	if len(h.health.urls) != 1 || h.health.urls[0] != "http://127.0.0.1:20000/up" {
 		t.Errorf("health URLs = %v", h.health.urls)
 	}
-	if h.router.calls != 1 {
+	// Once before the health check, once after the deployment became current.
+	if h.router.calls != 2 {
 		t.Errorf("router calls = %d", h.router.calls)
 	}
 	got, _ := h.store.GetApp(context.Background(), "blog")
@@ -1034,6 +1041,41 @@ func TestDeployLogStartsEmpty(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "Queued deployment of "+shaA) {
 		t.Errorf("the log does not start with the queued line:\n%s", got)
+	}
+}
+
+// TestFirstDeployIsRouted: the router builds the proxy configuration from
+// the database, and an app without a current deployment gets the 503 page.
+// The last sync must therefore see the new deployment as current and the app
+// as running; otherwise the first release stays unreachable until the
+// periodic sync.
+func TestFirstDeployIsRouted(t *testing.T) {
+	h := newHarness(t, nil)
+	app := h.createApp("blog")
+	if err := h.store.SetAppDesiredState(context.Background(), app.ID, store.DesiredStopped, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var lastSeen store.App
+	h.router.onSync = func() {
+		got, err := h.store.GetApp(context.Background(), "blog")
+		if err != nil {
+			t.Errorf("GetApp: %v", err)
+			return
+		}
+		lastSeen = got
+	}
+	h.start()
+	d := h.deploy("blog", shaA)
+	if d.Status != store.StatusSucceeded {
+		t.Fatalf("deployment = %+v", d)
+	}
+	h.router.mu.Lock()
+	defer h.router.mu.Unlock()
+	if lastSeen.CurrentDeploymentID == nil || *lastSeen.CurrentDeploymentID != d.ID {
+		t.Errorf("last sync saw current deployment %v, want %d", lastSeen.CurrentDeploymentID, d.ID)
+	}
+	if lastSeen.DesiredState != store.DesiredRunning {
+		t.Errorf("last sync saw desired state %q", lastSeen.DesiredState)
 	}
 }
 

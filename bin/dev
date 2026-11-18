@@ -10,6 +10,13 @@
 #
 # The image is built from dev/Dockerfile on first use and rebuilt whenever
 # that file changes.
+#
+# Environment:
+#   KOROKU_DEV_TARGET  Dockerfile target to build and run: "full" (default)
+#                      or "go" (no browser or Node.js; see dev/Dockerfile).
+#   KOROKU_DEV_CACHE   Host directory to keep the Go and pnpm caches in,
+#                      instead of the koroku-dev-* named volumes. CI sets it
+#                      so that the caches can be saved between runs.
 set -eu
 
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -20,11 +27,33 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 common=$(git -C "$here" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "$here/.git")
 root=$(dirname "$common")
 
+target=${KOROKU_DEV_TARGET:-full}
+case "$target" in
+full) suffix="" ;;
+go) suffix="-go" ;;
+*)
+    echo "bin/dev: unknown KOROKU_DEV_TARGET: $target (want full or go)" >&2
+    exit 2
+    ;;
+esac
+
 tag=$(sha256sum "$here/dev/Dockerfile" | cut -c1-12)
-image="koroku-dev:$tag"
+image="koroku-dev:$tag$suffix"
 if ! docker image inspect "$image" >/dev/null 2>&1; then
     echo "bin/dev: building $image (first use or dev/Dockerfile changed)..." >&2
-    docker build --tag "$image" "$here/dev" >&2
+    docker build --target "$target" --tag "$image" "$here/dev" >&2
+fi
+
+if [ -n "${KOROKU_DEV_CACHE:-}" ]; then
+    mkdir -p "$KOROKU_DEV_CACHE/go" "$KOROKU_DEV_CACHE/go-build" "$KOROKU_DEV_CACHE/pnpm-store"
+    cache=$(cd "$KOROKU_DEV_CACHE" && pwd)
+    cache_go=$cache/go
+    cache_go_build=$cache/go-build
+    cache_pnpm=$cache/pnpm-store
+else
+    cache_go=koroku-dev-go
+    cache_go_build=koroku-dev-go-build
+    cache_pnpm=koroku-dev-pnpm
 fi
 
 socket=${DOCKER_SOCKET:-/var/run/docker.sock}
@@ -51,7 +80,7 @@ exec docker run --rm --interactive --init $flags \
     --volume "$socket:/var/run/docker.sock" \
     --volume "$root:$root" \
     --workdir "$PWD" \
-    --volume koroku-dev-go:/cache/go \
-    --volume koroku-dev-go-build:/cache/go-build \
-    --volume koroku-dev-pnpm:/cache/pnpm-store \
+    --volume "$cache_go:/cache/go" \
+    --volume "$cache_go_build:/cache/go-build" \
+    --volume "$cache_pnpm:/cache/pnpm-store" \
     "$image" "$@"

@@ -71,6 +71,15 @@ type Input struct {
 	// AccessLogDir is optional. When set, each app writes its access log to
 	// <AccessLogDir>/<slug>.log.
 	AccessLogDir string
+	// ListenIP is optional. When set, Caddy binds ports 80 and 443 on this
+	// address only (for example 127.0.0.1 for local development) instead of
+	// on every interface.
+	ListenIP string
+	// InternalCA makes Caddy issue certificates from its own local CA
+	// instead of obtaining them over ACME. For local development, where
+	// hostnames such as *.localhost cannot get a public certificate. ACMECA
+	// and ACMEEmail are ignored.
+	InternalCA bool
 	// Apps are the applications to route. Order does not matter.
 	Apps []App
 }
@@ -111,7 +120,7 @@ func Generate(in Input) ([]byte, error) {
 	routes = append(routes, notFoundRoute())
 
 	httpsServer := obj{
-		"listen": []string{":443"},
+		"listen": []string{listenAddr(in, 443)},
 		"routes": routes,
 	}
 	if logs := serverLogs(in); logs != nil {
@@ -127,7 +136,7 @@ func Generate(in Input) ([]byte, error) {
 					// for every served hostname in front of this catch-all, so
 					// unknown hosts get a 404 and nothing else.
 					"http": obj{
-						"listen": []string{":80"},
+						"listen": []string{listenAddr(in, 80)},
 						"routes": []obj{notFoundRoute()},
 					},
 					"https": httpsServer,
@@ -142,6 +151,14 @@ func Generate(in Input) ([]byte, error) {
 				},
 			},
 		},
+	}
+	if in.InternalCA {
+		// The container or service Caddy runs in cannot change the trust
+		// store of the machine the browser runs on; the operator imports
+		// the root certificate by hand.
+		cfg["apps"].(obj)["pki"] = obj{
+			"certificate_authorities": obj{"local": obj{"install_trust": false}},
+		}
 	}
 	if logging := logging(in); logging != nil {
 		cfg["logging"] = logging
@@ -213,6 +230,9 @@ func validate(in Input) error {
 		if at := strings.IndexByte(in.ACMEEmail, '@'); at <= 0 || at == len(in.ACMEEmail)-1 || strings.ContainsAny(in.ACMEEmail, " \t\r\n{}") {
 			fail("ACME email is not an e-mail address")
 		}
+	}
+	if in.ListenIP != "" && net.ParseIP(in.ListenIP) == nil {
+		fail("listen IP %q is not an IP address", in.ListenIP)
 	}
 	if in.AccessLogDir != "" && (!path.IsAbs(in.AccessLogDir) || strings.ContainsAny(in.AccessLogDir, "{}")) {
 		fail("access log dir %q must be an absolute path without placeholders", in.AccessLogDir)
@@ -334,7 +354,15 @@ func notFoundRoute() obj {
 	return obj{"handle": []obj{{"handler": "static_response", "status_code": 404}}}
 }
 
+// listenAddr is the address of a server on port.
+func listenAddr(in Input, port int) string {
+	return net.JoinHostPort(in.ListenIP, strconv.Itoa(port))
+}
+
 func acmeIssuer(in Input) obj {
+	if in.InternalCA {
+		return obj{"module": "internal"}
+	}
 	issuer := obj{"module": "acme"}
 	if in.ACMECA != "" {
 		issuer["ca"] = in.ACMECA

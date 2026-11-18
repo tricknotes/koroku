@@ -168,7 +168,10 @@ func (s *Server) guard(next http.Handler) http.Handler {
 				writeError(w, http.StatusForbidden, "forbidden_host", "in --insecure-no-auth mode the API answers only on a loopback host name")
 				return
 			}
-			if origin := r.Header.Get("Origin"); isMutating(r.Method) && origin != "" && origin != "http://"+r.Host {
+			// The console is served over plain HTTP by koroku itself, or over
+			// HTTPS by a Caddy that listens on loopback only.
+			if origin := r.Header.Get("Origin"); isMutating(r.Method) && origin != "" &&
+				origin != "http://"+r.Host && origin != "https://"+r.Host {
 				writeError(w, http.StatusForbidden, "forbidden_origin", "the request does not come from the console")
 				return
 			}
@@ -208,13 +211,16 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
 // isLoopbackHost reports whether a Host header names this machine itself.
+// Names under .localhost always resolve to loopback (RFC 6761), so a page
+// served from another site cannot reach them through DNS rebinding; the
+// local Caddy serves the console as console.dev.localhost.
 func isLoopbackHost(hostport string) bool {
 	host := hostport
 	if h, _, err := net.SplitHostPort(hostport); err == nil {
 		host = h
 	}
-	host = strings.Trim(host, "[]")
-	if host == "localhost" {
+	host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
 	ip := net.ParseIP(host)
