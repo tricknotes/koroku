@@ -530,6 +530,163 @@ function tabs(count) {
   return Array.from({ length: count }, () => 'Tab');
 }
 
+const LOGS = '/apps/blog/logs';
+const LOG_ROW = '[data-test-log-row]';
+const PHONE_SCREEN = { ...PHONE, fullPage: false };
+
+/** Sets a `<select>` the way a reader would. */
+function choose(selector, value) {
+  return `(() => {
+    const control = document.querySelector(${JSON.stringify(selector)});
+    control.value = ${JSON.stringify(value)};
+    control.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`;
+}
+
+/** Moves the selection of the log list with the keyboard. */
+const SELECT_BY_KEYBOARD = `(() => {
+  const list = document.querySelector('[data-test-log-viewport]');
+  list.focus();
+  for (let i = 0; i < 4; i++) {
+    list.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }),
+    );
+  }
+})()`;
+
+/**
+ * The log screen. `script` is evaluated in the page before the capture, for
+ * states that a URL cannot express (a scroll position, a selected row).
+ */
+const LOG_SHOTS = [
+  { name: 'logs-live', path: `${LOGS}?scenario=healthy`, wait: LOG_ROW },
+  {
+    name: 'logs-live-phone',
+    path: `${LOGS}?scenario=healthy`,
+    wait: LOG_ROW,
+    ...PHONE_SCREEN,
+  },
+  {
+    name: 'logs-detail',
+    path: `${LOGS}?scenario=healthy`,
+    wait: LOG_ROW,
+    click: `${LOG_ROW}:nth-last-child(12)`,
+  },
+  {
+    name: 'logs-detail-phone',
+    path: `${LOGS}?scenario=healthy`,
+    wait: LOG_ROW,
+    click: `${LOG_ROW}:nth-last-child(6)`,
+    ...PHONE_SCREEN,
+    themes: ['light'],
+  },
+  {
+    name: 'logs-keyboard',
+    path: `${LOGS}?scenario=healthy&service=web`,
+    wait: LOG_ROW,
+    script: SELECT_BY_KEYBOARD,
+    themes: ['dark'],
+  },
+  {
+    name: 'logs-paused',
+    path: `${LOGS}?scenario=healthy`,
+    wait: LOG_ROW,
+    script: `document.querySelector('[data-test-log-viewport]').scrollTop = 4000`,
+    // Long enough for the mock to send a few new lines.
+    settle: 5000,
+    themes: ['light'],
+  },
+  {
+    name: 'logs-nowrap',
+    path: `${LOGS}?scenario=healthy`,
+    wait: LOG_ROW,
+    // The choice is remembered per browser; forget it for the next shots.
+    script: `(() => {
+      document.querySelector('[data-test-log-wrap]').click();
+      localStorage.removeItem('paasd.logs.wrap');
+    })()`,
+    themes: ['dark'],
+  },
+  {
+    name: 'logs-search',
+    path: `${LOGS}?scenario=healthy&service=web&period=1h&q=Completed`,
+    wait: LOG_ROW,
+    themes: ['light'],
+  },
+  {
+    name: 'logs-truncated',
+    path: `${LOGS}?scenario=healthy&service=web&period=24h`,
+    wait: '[data-test-log-truncated]',
+  },
+  {
+    name: 'logs-custom-range',
+    path: `${LOGS}?scenario=healthy`,
+    wait: LOG_ROW,
+    script: choose('[data-test-log-period]', 'custom'),
+    themes: ['light'],
+  },
+  {
+    name: 'logs-custom-range-phone',
+    path: `${LOGS}?scenario=healthy`,
+    wait: LOG_ROW,
+    script: choose('[data-test-log-period]', 'custom'),
+    ...PHONE_SCREEN,
+    themes: ['dark'],
+  },
+  {
+    name: 'logs-archives',
+    path: `${LOGS}?scenario=healthy&period=archive`,
+    wait: '[data-test-archive]',
+  },
+  {
+    name: 'logs-archives-phone',
+    path: `${LOGS}?scenario=healthy&period=archive`,
+    wait: '[data-test-archive]',
+    ...PHONE_SCREEN,
+    themes: ['light'],
+  },
+  {
+    name: 'logs-archives-no-storage',
+    path: `${LOGS}?scenario=logs-no-storage&period=archive`,
+    wait: '[data-test-archives-not-configured]',
+  },
+  {
+    name: 'logs-empty',
+    path: `${LOGS}?scenario=logs-empty`,
+    wait: '[data-test-log-empty]',
+  },
+  {
+    name: 'logs-empty-search',
+    path: `${LOGS}?scenario=healthy&period=1h&q=no-such-text`,
+    wait: '[data-test-log-empty]',
+    themes: ['light'],
+  },
+  {
+    name: 'logs-empty-phone',
+    path: `${LOGS}?scenario=logs-empty`,
+    wait: '[data-test-log-empty]',
+    ...PHONE_SCREEN,
+    themes: ['light'],
+  },
+  {
+    name: 'logs-error',
+    path: `${LOGS}?scenario=logs-error`,
+    wait: '[data-test-log-error]',
+  },
+  {
+    name: 'logs-error-search',
+    path: `${LOGS}?scenario=logs-error&period=1h`,
+    wait: '[data-test-log-error]',
+    themes: ['light'],
+  },
+  {
+    name: 'logs-loading',
+    path: `${LOGS}?scenario=logs-loading&period=1h`,
+    wait: '[data-test-loading]',
+    themes: ['light'],
+  },
+];
+
 /** Starts a process and resolves once its output matches `ready`. */
 function start(command, args, ready, env = {}) {
   const child = spawn(command, args, {
@@ -700,7 +857,8 @@ try {
   await mock.match;
   const [, endpoint] = await chromium.match;
   const browser = await connect(endpoint);
-  for (const shot of SHOTS.filter((entry) => entry.name.startsWith(only))) {
+  const shots = [...SHOTS, ...LOG_SHOTS];
+  for (const shot of shots.filter((entry) => entry.name.startsWith(only))) {
     for (const theme of shot.themes ?? ['light', 'dark']) {
       console.log(await capture(browser, shot, theme));
     }

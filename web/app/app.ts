@@ -14,6 +14,7 @@ import './styles/shell.css';
 import './styles/app-list.css';
 import './styles/app-detail.css';
 import './styles/deploy.css';
+import './styles/logs.css';
 import './styles/panes.css';
 import './styles/backups.css';
 import './styles/settings.css';

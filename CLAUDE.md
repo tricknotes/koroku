@@ -68,6 +68,23 @@ bin/dev sh -c 'cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm tes
 - override 生成、Caddy 設定生成、ポリシー検査は golden file で固定する。
 - マイルストーンを終えるときは、下の完了条件を実際に実行して確かめ、結果（コマンドと出力の要点）を報告する。確認していないものを完了と書かない。
 
+## 画面を変える PR
+
+管理 UI の見た目や画面構成を変える PR には、変更後のスクリーンショットを添付する。
+
+- 撮り方: `bin/dev sh -c 'cd web && pnpm build && node mock/screenshots.mjs <名前の接頭辞>'`。`web/tmp/shots/`（git の管理外）に出力される。新しい画面や状態を足したら、`web/mock/screenshots.mjs` とモックのシナリオにも足す。
+- 添付するもの: 変えた画面のライトとダーク、390px 幅、変えた状態（空、エラー、警告、ダイアログなど）。自分で開いて崩れがないことを確かめてから添付する。
+- 添付の方法: `gh` の `--attach` を使う。本文のファイルに `![説明](./list-healthy-light.png)` のように相対パスで書き、同じファイルを `--attach` で渡すと、アップロード先の URL に書き換わる（本文のファイルは画像と同じディレクトリに置く）。
+
+  ```sh
+  gh pr create --title "..." --body-file web/tmp/shots/body.md \
+    --attach web/tmp/shots/list-healthy-light.png \
+    --attach web/tmp/shots/list-healthy-dark.png
+  ```
+
+  既存の PR には `gh pr edit <番号> --body-file ... --attach ...`（本文ごと置き換える）か、`gh pr comment <番号> --body-file ... --attach ...` を使う。画像は 1 枚 10MB まで、1 コマンド 50 枚まで。
+- public リポジトリなので、添付した画像は誰でも見られる。モック API（`web/mock/`）のデータで撮ったものだけを添付し、手元の環境や実データが写ったものは添付しない。
+
 ## マイルストーン
 
 M0 から順に進める。各マイルストーンの着手時に作業計画を示し、完了時に完了条件の確認結果を報告する。

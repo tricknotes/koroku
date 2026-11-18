@@ -489,43 +489,6 @@ export const ENV_VARS = [
   { key: 'SECRET_KEY_BASE', value: '0000000000000000000000000000000000000000' },
 ];
 
-const LOG_MESSAGES = [
-  ['web', 'Started GET "/" for 198.51.100.7'],
-  ['web', 'Completed 200 OK in 23ms (Views: 14.1ms | ActiveRecord: 3.2ms)'],
-  ['worker', 'Performed SessionCleanupJob in 41.8ms'],
-  ['db', 'checkpoint complete: wrote 12 buffers (0.1%)'],
-  ['web', 'Started GET "/posts/42" for 198.51.100.23'],
-  ['web', 'Completed 200 OK in 31ms (Views: 20.4ms | ActiveRecord: 5.9ms)'],
-];
-
-/** `count` runtime log lines ending now, oldest first. */
-export function logLines(count, service) {
-  const lines = [];
-  for (let i = count; i > 0; i--) {
-    const [name, line] = LOG_MESSAGES[i % LOG_MESSAGES.length];
-    if (service && service !== name) continue;
-    lines.push({ service: name, time: ago(i * 7000), line });
-  }
-  return lines;
-}
-
-export function logArchives(slug) {
-  const hour = 4 * HOUR;
-  const latest = Math.floor(Date.now() / hour) * hour;
-  return [0, 1, 2, 3, 4, 5].flatMap((n) =>
-    ['web', 'db'].map((service) => {
-      const at = new Date(latest - n * hour);
-      const day = at.toISOString().slice(0, 10).replaceAll('-', '/');
-      return {
-        key: `logs/${slug}/${service}/${day}/${String(at.getUTCHours()).padStart(2, '0')}.log.gz`,
-        service,
-        hour: at.toISOString(),
-        size: 18000 + n * 2311 + service.length * 977,
-      };
-    }),
-  );
-}
-
 /** Starts a backup that the mock finishes by itself a little later. */
 export function startBackup(state) {
   const run = {

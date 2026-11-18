@@ -102,18 +102,6 @@
   flex: 3 1 16rem;
 }
 
-.field-inline {
-  flex-direction: row;
-  gap: var(--space-2);
-  align-items: center;
-  margin-bottom: 0;
-  white-space: nowrap;
-}
-
-.field-inline select {
-  width: auto;
-}
-
 ul.field-error {
   padding-left: var(--space-5);
 }
@@ -178,7 +166,6 @@ ul.field-error {
   align-items: baseline;
 }
 
-.log,
 .code {
   margin: var(--space-2) 0;
   padding: var(--space-3);
@@ -191,11 +178,6 @@ ul.field-error {
   line-height: var(--leading-normal);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.log {
-  height: 24rem;
-  max-height: 70vh;
 }
 
 .env-row {
@@ -243,9 +225,5 @@ ul.field-error {
 
   .env-row {
     grid-template-columns: 1fr;
-  }
-
-  .log {
-    height: 18rem;
   }
 }
