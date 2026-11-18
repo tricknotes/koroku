@@ -22,6 +22,10 @@ type Config struct {
 	BaseDomain string `toml:"base_domain"`
 	// ConsoleHost is the hostname of the management UI. Defaults to console.<BaseDomain>.
 	ConsoleHost string `toml:"console_host"`
+	// ConsoleURL is the public origin of the console. It defaults to
+	// https://<ConsoleHost> and only needs to be set for local development
+	// (for example http://localhost:8080).
+	ConsoleURL string `toml:"console_url"`
 	// Listen is the address paasd binds to. It must be a loopback address in production.
 	Listen string `toml:"listen"`
 	// DataDir holds the SQLite database, releases, env files and logs.
@@ -33,6 +37,23 @@ type Config struct {
 
 	Deploy Deploy `toml:"deploy"`
 	Caddy  Caddy  `toml:"caddy"`
+	GitHub GitHub `toml:"github"`
+}
+
+// GitHub holds the GitHub App used for login and repository access.
+type GitHub struct {
+	AppID        int64  `toml:"app_id"`
+	ClientID     string `toml:"client_id"`
+	ClientSecret string `toml:"client_secret"`
+	// PrivateKeyFile is the App's private key in PEM format (mode 0600).
+	PrivateKeyFile string `toml:"private_key_file"`
+	// AllowedUserID is the numeric ID of the only GitHub user who may log in.
+	AllowedUserID int64 `toml:"allowed_user_id"`
+}
+
+// Configured reports whether a GitHub App is set up at all.
+func (g GitHub) Configured() bool {
+	return g.AppID != 0 || g.ClientID != "" || g.ClientSecret != "" || g.AllowedUserID != 0
 }
 
 // Caddy holds reverse proxy settings.
@@ -74,6 +95,7 @@ func Default() Config {
 		Listen:        "127.0.0.1:8080",
 		DataDir:       "/var/lib/paas",
 		MasterKeyFile: "/etc/paas/master.key",
+		GitHub:        GitHub{PrivateKeyFile: "/etc/paas/github-app.pem"},
 		Caddy: Caddy{
 			Enabled:      true,
 			AdminURL:     "http://127.0.0.1:2019",
@@ -115,6 +137,10 @@ func Parse(text string) (Config, error) {
 	if cfg.ConsoleHost == "" && cfg.BaseDomain != "" {
 		cfg.ConsoleHost = "console." + cfg.BaseDomain
 	}
+	if cfg.ConsoleURL == "" && cfg.ConsoleHost != "" {
+		cfg.ConsoleURL = "https://" + cfg.ConsoleHost
+	}
+	cfg.ConsoleURL = strings.TrimRight(cfg.ConsoleURL, "/")
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("invalid config: %w", err)
 	}
@@ -143,6 +169,29 @@ func (c Config) Validate() error {
 	}
 	if s, e := c.Deploy.PortRangeStart, c.Deploy.PortRangeEnd; s < 1024 || e > 65535 || s > e {
 		errs = append(errs, fmt.Errorf("deploy port range %d-%d is invalid", s, e))
+	}
+	if u, err := url.Parse(c.ConsoleURL); c.ConsoleURL != "" &&
+		(err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "") {
+		errs = append(errs, fmt.Errorf("console_url %q must be an origin such as https://console.example.com", c.ConsoleURL))
+	}
+	if g := c.GitHub; g.Configured() {
+		// A half-configured App would lock the console or, worse, look
+		// configured while accepting nobody. Require everything.
+		if g.AppID <= 0 {
+			errs = append(errs, errors.New("github.app_id is required"))
+		}
+		if g.ClientID == "" {
+			errs = append(errs, errors.New("github.client_id is required"))
+		}
+		if g.ClientSecret == "" {
+			errs = append(errs, errors.New("github.client_secret is required"))
+		}
+		if !filepath.IsAbs(g.PrivateKeyFile) {
+			errs = append(errs, fmt.Errorf("github.private_key_file %q must be an absolute path", g.PrivateKeyFile))
+		}
+		if g.AllowedUserID <= 0 {
+			errs = append(errs, errors.New("github.allowed_user_id is required"))
+		}
 	}
 	if c.Caddy.Enabled {
 		if host, err := adminHost(c.Caddy.AdminURL); err != nil {

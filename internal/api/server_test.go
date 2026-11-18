@@ -46,6 +46,7 @@ func newTestServer(t *testing.T, mutate func(*Options)) *Server {
 		t.Fatal(err)
 	}
 	opts := Options{
+		Auth:     AuthOptions{InsecureNoAuth: true},
 		Clock:    clock.NewFake(time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC)),
 		Box:      box,
 		Deployer: &fakeDeployer{store: st, logDir: t.TempDir()},

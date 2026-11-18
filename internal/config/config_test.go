@@ -107,6 +107,55 @@ func TestCaddyDefaultsAndOptOut(t *testing.T) {
 	}
 }
 
+func TestGitHubConfig(t *testing.T) {
+	cfg, err := Parse(`base_domain = "dev.example.com"`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.GitHub.Configured() {
+		t.Error("GitHub must not count as configured by default")
+	}
+	if cfg.ConsoleURL != "https://console.dev.example.com" {
+		t.Errorf("ConsoleURL = %q", cfg.ConsoleURL)
+	}
+
+	full := `base_domain = "dev.example.com"
+console_url = "http://localhost:8080/"
+[github]
+app_id = 12345
+client_id = "Iv1.example"
+client_secret = "example-secret"
+private_key_file = "/etc/paas/github-app.pem"
+allowed_user_id = 42
+`
+	cfg, err = Parse(full)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !cfg.GitHub.Configured() || cfg.GitHub.AllowedUserID != 42 || cfg.ConsoleURL != "http://localhost:8080" {
+		t.Errorf("config = %+v / %q", cfg.GitHub, cfg.ConsoleURL)
+	}
+
+	// A partly filled section is rejected instead of half-working.
+	for name, text := range map[string]string{
+		"no allowed user": "[github]\napp_id = 1\nclient_id = \"a\"\nclient_secret = \"b\"",
+		"no secret":       "[github]\napp_id = 1\nclient_id = \"a\"\nallowed_user_id = 42",
+		"no app id":       "[github]\nclient_id = \"a\"\nclient_secret = \"b\"\nallowed_user_id = 42",
+		"relative key":    "[github]\napp_id = 1\nclient_id = \"a\"\nclient_secret = \"b\"\nallowed_user_id = 42\nprivate_key_file = \"key.pem\"",
+		"bad console url": "console_url = \"console.example.com\"",
+		"console path":    "console_url = \"https://example.com/console\"",
+	} {
+		if _, err := Parse("base_domain = \"dev.example.com\"\n" + text); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+	// Errors must not echo the client secret.
+	_, err = Parse("base_domain = \"dev.example.com\"\n[github]\nclient_secret = \"super-secret-value\"")
+	if err == nil || strings.Contains(err.Error(), "super-secret-value") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte(`base_domain = "dev.example.com"`), 0o600); err != nil {

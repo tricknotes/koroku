@@ -21,6 +21,7 @@ import (
 	"github.com/tricknotes/koroku/internal/config"
 	"github.com/tricknotes/koroku/internal/deploy"
 	"github.com/tricknotes/koroku/internal/domains"
+	"github.com/tricknotes/koroku/internal/github"
 	"github.com/tricknotes/koroku/internal/gitrepo"
 	"github.com/tricknotes/koroku/internal/routing"
 	"github.com/tricknotes/koroku/internal/runner"
@@ -71,12 +72,40 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 }
 
+// newGitHubClient builds the GitHub App client from the configuration.
+func newGitHubClient(cfg config.GitHub) (*github.Client, error) {
+	info, err := os.Stat(cfg.PrivateKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("github private key: %w", err)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("github private key %s: permissions %04o are too open, want 0600",
+			cfg.PrivateKeyFile, info.Mode().Perm())
+	}
+	pemBytes, err := os.ReadFile(cfg.PrivateKeyFile)
+	if err != nil {
+		return nil, fmt.Errorf("github private key: %w", err)
+	}
+	key, err := github.ParsePrivateKey(pemBytes)
+	if err != nil {
+		return nil, fmt.Errorf("github private key %s: %w", cfg.PrivateKeyFile, err)
+	}
+	return github.New(github.Config{
+		AppID:        cfg.AppID,
+		PrivateKey:   key,
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
+	})
+}
+
 // serve runs the HTTP server until ctx is canceled. When ready is non-nil it
 // receives the bound address once the listener is up (used by tests).
 func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", config.DefaultPath, "path to config.toml")
+	insecureNoAuth := flags.Bool("insecure-no-auth", false,
+		"disable login and the Origin check (local development only; anyone who can reach the port controls Docker)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -145,6 +174,21 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		Clock:    clk,
 		Logger:   logger,
 	}
+
+	// GitHub App: login and repository access. Without it nobody can log
+	// in and only public repositories given by URL can be deployed.
+	var gh *github.Client
+	if cfg.GitHub.Configured() {
+		gh, err = newGitHubClient(cfg.GitHub)
+		if err != nil {
+			return err
+		}
+	} else {
+		logger.Warn("the [github] section is not configured: login is unavailable")
+	}
+	if *insecureNoAuth {
+		logger.Warn("AUTHENTICATION IS DISABLED (--insecure-no-auth): do not use this on a reachable host")
+	}
 	deployOpts := deploy.Options{
 		Store:            st,
 		Runner:           run,
@@ -167,8 +211,21 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		Version: version,
 		Clock:   clk,
 		Box:     box,
-		Refs:    deploy.GitRefResolver{Fetcher: fetcher},
 		Domains: checker,
+		Auth: api.AuthOptions{
+			AllowedUserID:  cfg.GitHub.AllowedUserID,
+			ConsoleURL:     cfg.ConsoleURL,
+			InsecureNoAuth: *insecureNoAuth,
+		},
+	}
+	gitRefs := deploy.GitRefResolver{Fetcher: fetcher}
+	apiOpts.Refs = gitRefs
+	if gh != nil {
+		tokens := deploy.GitHubTokens{Client: gh}
+		deployOpts.Tokens = tokens
+		gitRefs.Tokens = tokens
+		apiOpts.Refs = deploy.GitHubRefResolver{Client: gh, Fallback: gitRefs}
+		apiOpts.Auth.GitHub = gh
 	}
 	// Assign the interfaces only when there is a router: a nil *Router
 	// stored in an interface would not compare equal to nil.

@@ -43,3 +43,15 @@ acme_ca = "https://acme-staging-v02.api.letsencrypt.org/directory"
 # acme_email = "admin@example.com"
 # One access log per app; the caddy user must be able to write here.
 access_log_dir = "/var/log/caddy/apps"
+
+[github]
+# The GitHub App used for login and for fetching repositories. Without this
+# section nobody can log in. Permissions: Contents (read-only) and Metadata
+# (read-only); callback URL: https://<console_host>/auth/github/callback.
+# app_id = 123456
+# client_id = "Iv1.xxxxxxxxxxxxxxxx"
+# client_secret = "..."
+# private_key_file = "/etc/paas/github-app.pem"
+# Numeric ID of the only GitHub user allowed to log in
+# (see https://api.github.com/users/<login>).
+# allowed_user_id = 0

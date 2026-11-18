@@ -40,6 +40,8 @@ type Options struct {
 	Router Router
 	// Domains verifies custom domains. Optional.
 	Domains DomainChecker
+	// Auth configures login and request protection.
+	Auth AuthOptions
 }
 
 // Server routes HTTP requests.
@@ -57,6 +59,7 @@ type Server struct {
 	refs     RefResolver
 	router   Router
 	domains  DomainChecker
+	auth     AuthOptions
 }
 
 // New builds a Server.
@@ -82,13 +85,27 @@ func New(opts Options) *Server {
 		refs:     opts.Refs,
 		router:   opts.Router,
 		domains:  opts.Domains,
+		auth:     opts.Auth,
 	}
 }
 
 // Handler returns the root HTTP handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/session", s.handleSession)
+	mux.HandleFunc("GET /auth/github/login", s.handleLogin)
+	mux.HandleFunc("GET /auth/github/callback", s.handleCallback)
+	mux.HandleFunc("POST /auth/logout", s.handleLogout)
+	mux.HandleFunc("/auth/", func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
+	})
+
 	mux.HandleFunc("GET /api/system", s.handleSystem)
+
+	mux.HandleFunc("GET /api/repos", s.handleListRepos)
+	mux.HandleFunc("GET /api/repos/{owner}/{repo}/branches", s.handleListBranches)
+	mux.HandleFunc("GET /api/repos/{owner}/{repo}/commits", s.handleListCommits)
+	mux.HandleFunc("GET /api/repos/{owner}/{repo}/compose", s.handleDetectCompose)
 
 	mux.HandleFunc("GET /api/apps", s.handleListApps)
 	mux.HandleFunc("POST /api/apps", s.handleCreateApp)
@@ -113,7 +130,7 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "not_found", "no such API endpoint")
 	})
 	mux.Handle("/", s.spaHandler())
-	return s.recoverPanics(s.logRequests(mux))
+	return s.recoverPanics(s.logRequests(securityHeaders(s.guard(mux))))
 }
 
 type errorBody struct {
