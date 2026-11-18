@@ -20,6 +20,7 @@ import {
   ENV_VARS,
   REPOS,
   SCENARIOS,
+  appVolumes,
   buildScenario,
   commits,
   dockerUsage,
@@ -355,6 +356,12 @@ route('POST', '/api/apps/:slug/backups/restore', async (context) => {
 route('GET', '/api/apps/:slug/backups/:id/download', () => ({
   text: '-- mock database dump\n',
 }));
+// Listing volumes takes Docker only: it answers without backups, too.
+route('GET', '/api/apps/:slug/volumes', (context) => {
+  const app = appOf(context);
+  if (context.state.volumesDown) throw new HttpError(500, 'internal');
+  return { volumes: appVolumes(context.state, app) };
+});
 
 route('GET', '/api/repos', ({ state }) => {
   if (state.github === false) throw new HttpError(503, 'not_configured');

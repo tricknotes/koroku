@@ -70,7 +70,8 @@ The page URL selects what the API answers and, optionally, the theme:
 | `...&theme=dark`        | pins the theme (`light`, `dark`, or `system` to unpin)                                                        |
 
 Further scenarios cover single screens (`host-trouble`, `unconfigured`,
-`fresh`, `backups-down`); `/__mock` lists every scenario with what it shows.
+`fresh`, `backups-down`, `volumes-down`); `/__mock` lists every scenario with
+what it shows.
 
 The scenario is kept in a cookie, so it stays while navigating; changes made
 in the UI (deploying, adding a domain, ...) are kept in memory until the mock

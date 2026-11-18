@@ -304,6 +304,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 			return api.RouteStatus{LastLoadedAt: status.LastLoadedAt, LastError: status.LastError}
 		}
 	}
+	// Listing an app's volumes takes Docker only, so it does not depend on
+	// the backup configuration below.
+	apiOpts.Volumes = appVolumes{runner: run}
 	// Backups need object storage and the restic password. The backup
 	// service stops and starts apps through the engine, and the engine
 	// calls the backup service before a deploy, so the controller gets its

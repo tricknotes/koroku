@@ -5,6 +5,7 @@ import {
   settled,
   triggerKeyEvent,
   visit,
+  waitFor,
 } from '@ember/test-helpers';
 import { setupApplicationTest } from 'paas-console/tests/helpers';
 import {
@@ -12,10 +13,16 @@ import {
   makeApp,
   makeBackups,
   makeDeployment,
+  makeVolume,
   type FakeCall,
   type Fakes,
 } from 'paas-console/tests/helpers/fakes';
-import type { App, BackupRun, Snapshot } from 'paas-console/utils/types';
+import type {
+  App,
+  AppVolume,
+  BackupRun,
+  Snapshot,
+} from 'paas-console/utils/types';
 
 const VOLUME: Snapshot = {
   id: '4bba301e',
@@ -51,6 +58,22 @@ module('Acceptance | backups', function (hooks) {
   let fakes: Fakes;
   let app: App;
   let snapshots: Snapshot[];
+  /** The volumes "Docker has" for the app. */
+  let existing: string[];
+
+  /** The volume list as the backend builds it from those two sources. */
+  function volumeList(): { volumes: AppVolume[] } {
+    const excluded = app.backup_exclude_volumes ?? [];
+    const names = [...new Set([...existing, ...excluded])].sort();
+    return {
+      volumes: names.map((name) =>
+        makeVolume(name, {
+          excluded: excluded.includes(name),
+          exists: existing.includes(name),
+        }),
+      ),
+    };
+  }
 
   hooks.beforeEach(function () {
     fakes = installFakes(this.owner);
@@ -64,6 +87,8 @@ module('Acceptance | backups', function (hooks) {
       backup_before_deploy: false,
     });
     snapshots = [VOLUME, DUMP];
+    // `cache` was added by a deployment after the last backup.
+    existing = ['cache', 'pgdata', 'uploads'];
     fakes.api
       .on('GET', '/api/apps/blog', () => app)
       .on('PATCH', '/api/apps/blog', (call: FakeCall) => {
@@ -71,7 +96,8 @@ module('Acceptance | backups', function (hooks) {
         return app;
       })
       .on('GET', '/api/backups', makeBackups({ runs: [run()] }))
-      .on('GET', '/api/apps/blog/backups', () => ({ snapshots }));
+      .on('GET', '/api/apps/blog/backups', () => ({ snapshots }))
+      .on('GET', '/api/apps/blog/volumes', volumeList);
   });
 
   module('status and snapshots', function () {
@@ -208,11 +234,13 @@ module('Acceptance | backups', function (hooks) {
         .hasAttribute('aria-busy', 'true');
 
       // The run ends and leaves a new snapshot; nobody reloads the page.
+      // A volume a deployment created in the meantime shows up with it.
       running = false;
       snapshots = [
         { ...VOLUME, id: 'aaaa1111', time: '2026-11-18T03:00:10Z' },
         ...snapshots,
       ];
+      existing = [...existing, 'media'];
       await fakes.poller.tick();
       await settled();
 
@@ -222,6 +250,7 @@ module('Acceptance | backups', function (hooks) {
         .isNotDisabled()
         .hasText('今すぐ実行');
       assert.dom('[data-test-snapshot="aaaa1111"]').exists();
+      assert.dom('[data-test-volume="media"]').exists();
       assert.strictEqual(fakes.api.callsTo('POST', '/api/backups').length, 1);
     });
 
@@ -324,10 +353,14 @@ module('Acceptance | backups', function (hooks) {
   });
 
   module('settings', function () {
-    test('volumes are listed from the snapshots and the exclusions', async function (assert) {
+    test('every volume of the app is listed, with its newest snapshot', async function (assert) {
       await visit('/apps/blog/backups');
 
-      assert.dom('[data-test-volume]').exists({ count: 2 });
+      assert.strictEqual(
+        fakes.api.callsTo('GET', '/api/apps/blog/volumes').length,
+        1,
+      );
+      assert.dom('[data-test-volume]').exists({ count: 3 });
       assert
         .dom('[data-test-volume="uploads"] [data-test-volume-include]')
         .isChecked();
@@ -335,11 +368,22 @@ module('Acceptance | backups', function (hooks) {
         .dom('[data-test-volume="uploads"]')
         .includesText('最終取得', 'with the time of its newest snapshot');
       assert
+        .dom('[data-test-volume="uploads"] time')
+        .hasAttribute('datetime', '2026-11-17T18:00:12Z');
+      assert
         .dom('[data-test-volume="pgdata"] [data-test-volume-include]')
         .isNotChecked();
       assert
-        .dom('[data-test-volume="pgdata"]')
-        .includesText('バックアップしません');
+        .dom('[data-test-volume="pgdata"] [data-test-volume-hint]')
+        .hasText('バックアップしません');
+      assert
+        .dom('[data-test-volume="cache"] [data-test-volume-include]')
+        .isChecked('a volume without a snapshot is listed all the same');
+      assert
+        .dom('[data-test-volume="cache"] [data-test-volume-hint]')
+        .hasText('次回のバックアップから取ります');
+      assert.dom('[data-test-volumes-error]').doesNotExist();
+      assert.dom('[data-test-volumes-loading]').doesNotExist();
       assert.dom('[data-test-field="dump_hook_service"]').hasValue('db');
       assert
         .dom('[data-test-field="dump_hook_command"]')
@@ -355,17 +399,11 @@ module('Acceptance | backups', function (hooks) {
       assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
 
       await click('[data-test-volume="uploads"] [data-test-volume-include]');
-      await fillIn('[data-test-exclude-name]', 'cache');
-      await click('[data-test-exclude-add]');
-      assert
-        .dom('[data-test-volume="cache"] [data-test-volume-include]')
-        .isNotChecked('a volume typed in by name is listed as excluded');
-      assert.dom('[data-test-exclude-name]').hasValue('');
       await click('[data-test-field="backup_before_deploy"]');
       await click('[data-test-backup-save]');
 
       assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
-        backup_exclude_volumes: ['pgdata', 'uploads', 'cache'],
+        backup_exclude_volumes: ['pgdata', 'uploads'],
         backup_before_deploy: true,
       });
       assert.dom('[data-test-backup-saved]').exists();
@@ -376,8 +414,93 @@ module('Acceptance | backups', function (hooks) {
       await click('[data-test-backup-save]');
 
       assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[1]?.body, {
-        backup_exclude_volumes: ['uploads', 'cache'],
+        backup_exclude_volumes: ['uploads'],
       });
+    });
+
+    test('a volume that never had a snapshot is excluded with its checkbox', async function (assert) {
+      await visit('/apps/blog/backups');
+      await click('[data-test-volume="cache"] [data-test-volume-include]');
+
+      assert
+        .dom('[data-test-volume="cache"] [data-test-volume-hint]')
+        .hasText('バックアップしません');
+
+      await click('[data-test-backup-save]');
+
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        backup_exclude_volumes: ['pgdata', 'cache'],
+      });
+      assert.dom('[data-test-exclude-name]').hasValue('', 'nothing was typed');
+      assert.strictEqual(
+        fakes.api.callsTo('GET', '/api/apps/blog/volumes').length,
+        2,
+        'the list is read again after the save',
+      );
+      assert.dom('[data-test-volume]').exists({ count: 3 });
+      assert
+        .dom('[data-test-volume="cache"] [data-test-volume-include]')
+        .isNotChecked();
+    });
+
+    test('an excluded name that matches no volume is listed and can be put back', async function (assert) {
+      // `pgdata` is excluded, but Docker has no such volume (any more).
+      existing = ['uploads'];
+
+      await visit('/apps/blog/backups');
+
+      assert.dom('[data-test-volume]').exists({ count: 2 });
+      assert
+        .dom('[data-test-volume="pgdata"] [data-test-volume-include]')
+        .isNotChecked();
+      assert
+        .dom('[data-test-volume="pgdata"] [data-test-volume-hint]')
+        .includesText('バックアップしません')
+        .includesText('いまはありません');
+
+      await click('[data-test-volume="pgdata"] [data-test-volume-include]');
+      assert
+        .dom('[data-test-volume="pgdata"] [data-test-volume-hint]')
+        .includesText('作られたらバックアップします');
+
+      await click('[data-test-backup-save]');
+
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        backup_exclude_volumes: [],
+      });
+      assert
+        .dom('[data-test-volume="pgdata"]')
+        .doesNotExist('no longer excluded and not a volume: off the list');
+      assert.dom('[data-test-volume="uploads"]').exists();
+    });
+
+    test('a volume that does not exist yet is excluded by name', async function (assert) {
+      await visit('/apps/blog/backups');
+
+      assert
+        .dom('[data-test-field-group="backup_exclude_volumes"]')
+        .includesText('一覧にない volume')
+        .includesText('まだ作られていない volume');
+
+      await fillIn('[data-test-exclude-name]', 'media');
+      await click('[data-test-exclude-add]');
+
+      assert
+        .dom('[data-test-volume="media"] [data-test-volume-include]')
+        .isNotChecked('a volume typed in by name is listed as excluded');
+      assert
+        .dom('[data-test-volume="media"] [data-test-volume-hint]')
+        .includesText('いまはありません');
+      assert.dom('[data-test-exclude-name]').hasValue('');
+
+      await click('[data-test-backup-save]');
+
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        backup_exclude_volumes: ['pgdata', 'media'],
+      });
+      assert
+        .dom('[data-test-volume="media"] [data-test-volume-include]')
+        .isNotChecked('it stays listed: the backend reports excluded names');
     });
 
     test('Enter in the volume name field adds the name and does not save', async function (assert) {
@@ -385,9 +508,113 @@ module('Acceptance | backups', function (hooks) {
       await fillIn('[data-test-exclude-name]', 'cache, tmp');
       await triggerKeyEvent('[data-test-exclude-name]', 'keydown', 'Enter');
 
-      assert.dom('[data-test-volume="cache"]').exists();
-      assert.dom('[data-test-volume="tmp"]').exists();
+      assert
+        .dom('[data-test-volume="cache"] [data-test-volume-include]')
+        .isNotChecked('the name of a listed volume unchecks that volume');
+      assert.dom('[data-test-volume="cache"]').exists({ count: 1 });
+      assert
+        .dom('[data-test-volume="tmp"] [data-test-volume-include]')
+        .isNotChecked();
       assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
+    });
+
+    test('skeleton lines stand in while the volume list loads', async function (assert) {
+      let release: (value: unknown) => void = () => {};
+      fakes.api.on(
+        'GET',
+        '/api/apps/blog/volumes',
+        () => new Promise((resolve) => (release = resolve)),
+      );
+
+      // `visit` would wait for the request that is held open.
+      void visit('/apps/blog/backups');
+      await waitFor('[data-test-volumes-loading]');
+      await waitFor('[data-test-snapshot]');
+
+      assert
+        .dom('[data-test-volumes-loading]')
+        .hasAttribute('role', 'status')
+        .hasAttribute('aria-label', 'volume の一覧を読み込み中');
+      assert.dom('[data-test-volumes-loading] .skeleton').exists();
+      assert.dom('[data-test-volume]').doesNotExist();
+      assert.dom('[data-test-no-volumes]').doesNotExist();
+      assert
+        .dom('[data-test-field="dump_hook_service"]')
+        .hasValue('db', 'the rest of the settings does not wait');
+
+      release(volumeList());
+      await settled();
+
+      assert.dom('[data-test-volumes-loading]').doesNotExist();
+      assert.dom('[data-test-volume]').exists({ count: 3 });
+    });
+
+    test('a failing volume list keeps the tab and shows what is known', async function (assert) {
+      fakes.api.fail('GET', '/api/apps/blog/volumes', 500, 'internal');
+
+      await visit('/apps/blog/backups');
+
+      assert
+        .dom('[data-test-volumes-error]')
+        .hasAttribute('role', 'status')
+        .includesText('volume の一覧を取得できませんでした')
+        .includesText('サーバーでエラーが発生しました');
+      assert.dom('[data-test-error]').doesNotExist();
+      assert.dom('[data-test-backup-summary]').exists();
+      assert.dom('[data-test-snapshot]').exists({ count: 2 });
+      // What the snapshots and the exclusions tell stands in for the list.
+      assert
+        .dom('[data-test-volume="uploads"] [data-test-volume-include]')
+        .isChecked();
+      assert
+        .dom('[data-test-volume="pgdata"] [data-test-volume-include]')
+        .isNotChecked();
+      assert
+        .dom('[data-test-volume="pgdata"] [data-test-volume-hint]')
+        .hasText('バックアップしません', 'nothing is said about existence');
+      assert.dom('[data-test-volume="cache"]').doesNotExist();
+
+      // The settings can still be changed and saved.
+      await click('[data-test-field="backup_before_deploy"]');
+      await click('[data-test-backup-save]');
+
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        backup_before_deploy: true,
+      });
+      assert.dom('[data-test-backup-saved]').exists();
+      assert.dom('[data-test-volumes-error]').exists();
+
+      fakes.api.on('GET', '/api/apps/blog/volumes', volumeList);
+      await click('[data-test-volumes-retry]');
+
+      assert.dom('[data-test-volumes-error]').doesNotExist();
+      assert.dom('[data-test-volume]').exists({ count: 3 });
+      assert.dom('[data-test-volume="cache"]').exists();
+    });
+
+    test('a backend without the volume list works from the snapshots', async function (assert) {
+      fakes.api.fail('GET', '/api/apps/blog/volumes', 404, 'not_found');
+
+      await visit('/apps/blog/backups');
+
+      assert.dom('[data-test-volumes-error]').doesNotExist();
+      assert.dom('[data-test-unavailable]').doesNotExist();
+      assert.dom('[data-test-volume]').exists({ count: 2 });
+      assert.dom('[data-test-volume="uploads"]').exists();
+      assert.dom('[data-test-volume="pgdata"]').exists();
+    });
+
+    test('an app without named volumes says so', async function (assert) {
+      existing = [];
+      app = { ...app, backup_exclude_volumes: [] };
+
+      await visit('/apps/blog/backups');
+
+      assert.dom('[data-test-volumes]').doesNotExist();
+      assert
+        .dom('[data-test-no-volumes]')
+        .includesText('このアプリには named volume がありません');
+      assert.dom('[data-test-exclude-name]').exists();
     });
 
     test('the dump hook is saved as a pair', async function (assert) {
@@ -445,6 +672,7 @@ module('Acceptance | backups', function (hooks) {
   module('empty, missing and failing', function () {
     test('without snapshots there is exactly one next step', async function (assert) {
       snapshots = [];
+      existing = [];
       app = { ...app, backup_exclude_volumes: [] };
       fakes.api.on(
         'GET',
@@ -496,6 +724,11 @@ module('Acceptance | backups', function (hooks) {
         [],
         'the snapshots are not asked for',
       );
+      assert.deepEqual(
+        fakes.api.callsTo('GET', '/api/apps/blog/volumes'),
+        [],
+        'nor are the volumes: there are no settings to show them in',
+      );
       assert.dom('[data-test-tab="backups"]').hasClass('active');
 
       // Once the server is set up, checking again shows the tab.
@@ -506,6 +739,7 @@ module('Acceptance | backups', function (hooks) {
 
       assert.dom('[data-test-backups-unconfigured]').doesNotExist();
       assert.dom('[data-test-snapshot="4bba301e"]').exists();
+      assert.dom('[data-test-volume]').exists({ count: 3 });
     });
 
     test('a failing status offers a retry', async function (assert) {

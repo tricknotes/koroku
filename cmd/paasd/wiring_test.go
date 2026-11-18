@@ -65,6 +65,48 @@ func TestToBackupApp(t *testing.T) {
 	}
 }
 
+// The API lists an app's volumes through the backup package, by the Compose
+// project of the app, and without a backup manager.
+func TestAppVolumesAdapter(t *testing.T) {
+	fake := &runner.Fake{Handler: func(_ context.Context, cmd runner.Cmd) (string, error) {
+		switch strings.Join(cmd.Args[:2], " ") {
+		case "volume ls":
+			return "paas-blog_uploads\npaas-blog_pgdata\n", nil
+		case "volume inspect":
+			return `[
+				{"Name": "paas-blog_pgdata", "Mountpoint": "/var/lib/docker/volumes/paas-blog_pgdata/_data",
+				 "Labels": {"com.docker.compose.project": "paas-blog", "com.docker.compose.volume": "pgdata"}},
+				{"Name": "paas-blog_uploads", "Mountpoint": "/var/lib/docker/volumes/paas-blog_uploads/_data",
+				 "Labels": {"com.docker.compose.project": "paas-blog", "com.docker.compose.volume": "uploads"}}
+			]`, nil
+		}
+		return "", errors.New("unexpected command: " + cmd.String())
+	}}
+	var lister api.AppVolumes = appVolumes{runner: fake}
+
+	names, err := lister.VolumeNames(context.Background(), store.App{Slug: "blog"})
+	if err != nil || strings.Join(names, ",") != "pgdata,uploads" {
+		t.Errorf("VolumeNames = %v, %v", names, err)
+	}
+	var commands []string
+	for _, cmd := range fake.Calls() {
+		commands = append(commands, cmd.String())
+	}
+	want := []string{
+		"docker volume ls --filter label=com.docker.compose.project=paas-blog --format {{.Name}}",
+		"docker volume inspect -- paas-blog_pgdata paas-blog_uploads",
+	}
+	if strings.Join(commands, "\n") != strings.Join(want, "\n") {
+		t.Errorf("commands = %q, want %q", commands, want)
+	}
+
+	// An app that was never deployed has no volumes.
+	fake.Handler = func(context.Context, runner.Cmd) (string, error) { return "", nil }
+	if names, err := lister.VolumeNames(context.Background(), store.App{Slug: "notes"}); err != nil || len(names) != 0 {
+		t.Errorf("never deployed app: %v, %v", names, err)
+	}
+}
+
 func TestBackupRecorder(t *testing.T) {
 	st := testStore(t)
 	ctx := context.Background()

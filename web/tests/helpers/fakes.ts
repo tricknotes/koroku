@@ -11,6 +11,7 @@ import StorageService from 'paas-console/services/storage';
 import { ApiError } from 'paas-console/utils/errors';
 import type {
   App,
+  AppVolume,
   BackupOverview,
   Deployment,
   SystemInfo,
@@ -323,6 +324,14 @@ export function makeSystem(overrides: Partial<SystemInfo> = {}): SystemInfo {
     },
     ...overrides,
   };
+}
+
+/** One entry of `GET /api/apps/{slug}/volumes`: backed up and existing. */
+export function makeVolume(
+  name: string,
+  overrides: Partial<AppVolume> = {},
+): AppVolume {
+  return { name, excluded: false, exists: true, ...overrides };
 }
 
 export function makeBackups(

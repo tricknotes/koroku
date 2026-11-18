@@ -22,7 +22,11 @@ import TimeUntil from 'paas-console/components/time-until';
 import type ApiService from 'paas-console/services/api';
 import type PollerService from 'paas-console/services/poller';
 import type AppContext from 'paas-console/utils/app-context';
-import BackupForm, { parseList } from 'paas-console/utils/backup-form';
+import BackupForm, {
+  parseList,
+  volumeChoices,
+  type VolumeChoice,
+} from 'paas-console/utils/backup-form';
 import { backupHealth } from 'paas-console/utils/backup-status';
 import {
   inputChecked,
@@ -37,6 +41,7 @@ import Loadable from 'paas-console/utils/loadable';
 import { BACKUP_TRIGGER_LABELS } from 'paas-console/utils/status';
 import type {
   App,
+  AppVolume,
   BackupOverview,
   BackupRun,
   Snapshot,
@@ -77,14 +82,6 @@ function triggerLabel(run: BackupRun): string {
   return BACKUP_TRIGGER_LABELS[run.trigger] ?? run.trigger;
 }
 
-/** One named volume of the app and whether it is backed up. */
-interface VolumeChoice {
-  name: string;
-  included: boolean;
-  /** Time of its newest snapshot, if it has one. */
-  latest: string | null;
-}
-
 interface Signature {
   Args: { model: AppContext };
 }
@@ -95,6 +92,8 @@ export default class AppBackupsTemplate extends Component<Signature> {
 
   overview = new Loadable<BackupOverview>(() => this.api.getBackups());
   snapshots = new Loadable<Snapshot[]>(() => this.api.listSnapshots(this.slug));
+  /** The app's named volumes; the settings offer them as checkboxes. */
+  volumeList = new Loadable<AppVolume[]>(() => this.api.listVolumes(this.slug));
 
   @tracked starting = false;
   @tracked runError: unknown = null;
@@ -105,7 +104,7 @@ export default class AppBackupsTemplate extends Component<Signature> {
   @tracked restoreError: unknown = null;
 
   @tracked form: BackupForm;
-  /** Volume names typed in by hand, so they stay listed while unsaved. */
+  /** Volume names typed in by hand, so they stay listed until saved. */
   @tracked addedVolumes: string[] = [];
   @tracked volumeName = '';
   @tracked saving = false;
@@ -143,29 +142,36 @@ export default class AppBackupsTemplate extends Component<Signature> {
     return this.snapshots.loaded && this.snapshots.value?.length === 0;
   }
 
+  /** The first answer about the volumes is still on its way. */
+  get volumesLoading(): boolean {
+    return !this.volumeList.loaded && !this.volumeList.error;
+  }
+
   /**
-   * The app's named volumes as far as they are known here: those that have
-   * a snapshot, those that are excluded, and those just typed in.
+   * The volume list could not be read. A backend that does not have the
+   * endpoint is not a failure to report: the tab then works as it did
+   * before the list existed.
+   */
+  get volumesFailed(): boolean {
+    return Boolean(this.volumeList.error) && !this.volumeList.unavailable;
+  }
+
+  /** The volume list is on screen (and not what stands in for it). */
+  get volumesListed(): boolean {
+    return this.volumeList.loaded && !this.volumeList.error;
+  }
+
+  /**
+   * The app's named volumes with what the form says about each. Without
+   * the volume list, the volumes that have a snapshot stand in for it.
    */
   get volumes(): VolumeChoice[] {
-    const latest = new Map<string, string>();
-    for (const snapshot of this.snapshots.value ?? []) {
-      if (snapshot.kind !== 'volume') continue;
-      const seen = latest.get(snapshot.target);
-      if (!seen || snapshot.time > seen) {
-        latest.set(snapshot.target, snapshot.time);
-      }
-    }
-    const names = new Set([
-      ...latest.keys(),
-      ...(this.app.backup_exclude_volumes ?? []),
-      ...this.addedVolumes,
-    ]);
-    return [...names].sort().map((name) => ({
-      name,
-      included: !this.form.isExcluded(name),
-      latest: latest.get(name) ?? null,
-    }));
+    return volumeChoices({
+      listed: this.volumesListed ? this.volumeList.value : null,
+      snapshots: this.snapshots.value ?? [],
+      excluded: this.form.excluded,
+      also: [...(this.app.backup_exclude_volumes ?? []), ...this.addedVolumes],
+    });
   }
 
   get restoreExample(): string {
@@ -184,10 +190,22 @@ export default class AppBackupsTemplate extends Component<Signature> {
       .map(([name, reason]) => `${name}: ${reason}`);
   }
 
-  /** The overview first: without backups there are no snapshots to ask for. */
+  /**
+   * The overview first: without backups there are no snapshots to ask for
+   * and no settings to show the volumes in.
+   */
   private async load(): Promise<void> {
     await this.overview.load();
-    if (this.overview.value?.configured) await this.snapshots.load();
+    if (!this.overview.value?.configured) return;
+    await Promise.all([this.snapshots.load(), this.volumeList.load()]);
+  }
+
+  /** What a finished run may have changed: snapshots, and volumes it saw. */
+  private async refreshResults(): Promise<void> {
+    await Promise.all([
+      this.snapshots.load({ quiet: true }),
+      this.volumeList.load({ quiet: true }),
+    ]);
   }
 
   reload = () => this.load();
@@ -196,7 +214,7 @@ export default class AppBackupsTemplate extends Component<Signature> {
   private async followRun(): Promise<void> {
     if (!this.running) return;
     await this.overview.load({ quiet: true });
-    if (!this.running) await this.snapshots.load({ quiet: true });
+    if (!this.running) await this.refreshResults();
   }
 
   /** Notices a scheduled run that started while the tab was open. */
@@ -220,7 +238,7 @@ export default class AppBackupsTemplate extends Component<Signature> {
       this.starting = false;
     }
     await this.overview.load({ quiet: true });
-    if (!this.running) await this.snapshots.load({ quiet: true });
+    if (!this.running) await this.refreshResults();
   };
 
   requestRestore = (snapshot: Snapshot) => {
@@ -299,6 +317,8 @@ export default class AppBackupsTemplate extends Component<Signature> {
       const app = await this.api.updateApp(this.slug, patch);
       this.args.model.set(app);
       this.form = new BackupForm(app);
+      // What was typed in is saved now, or was put back in and is gone.
+      this.addedVolumes = [];
       this.saved = true;
     } catch (error) {
       this.saveError = error;
@@ -306,6 +326,9 @@ export default class AppBackupsTemplate extends Component<Signature> {
     } finally {
       this.saving = false;
     }
+    // The list follows the saved exclusions: a name that matches no volume
+    // is only listed while it is excluded.
+    if (this.saved) await this.volumeList.load({ quiet: true });
   };
 
   <template>
@@ -561,46 +584,102 @@ export default class AppBackupsTemplate extends Component<Signature> {
                   </p>
                 </div>
                 <div class="form-group-body">
-                  {{#if this.volumes.length}}
-                    <fieldset class="option-group" data-test-volumes>
-                      <legend>バックアップする volume</legend>
-                      {{#each this.volumes key="name" as |volume|}}
-                        <label class="option" data-test-volume={{volume.name}}>
-                          <input
-                            type="checkbox"
-                            checked={{volume.included}}
-                            data-test-volume-include
-                            {{on "change" (fn this.toggleVolume volume.name)}}
-                          />
-                          <span class="option-body">
-                            <span class="option-label">{{volume.name}}</span>
-                            <span class="option-hint">
-                              {{#if volume.included}}
-                                {{#if volume.latest}}
-                                  最終取得
-                                  <RelativeTime @time={{volume.latest}} />
-                                {{else}}
-                                  次回のバックアップから取ります
-                                {{/if}}
-                              {{else}}
-                                バックアップしません
-                              {{/if}}
-                            </span>
-                          </span>
-                        </label>
+                  {{#if this.volumesLoading}}
+                    <div
+                      class="volume-loading"
+                      role="status"
+                      aria-label="volume の一覧を読み込み中"
+                      data-test-volumes-loading
+                    >
+                      {{#each SKELETON_ROWS as |n|}}
+                        <span
+                          class="skeleton"
+                          aria-hidden="true"
+                          data-skeleton={{n}}
+                        ></span>
                       {{/each}}
-                    </fieldset>
+                    </div>
                   {{else}}
-                    <p class="muted" data-test-no-volumes>
-                      volume
-                      のスナップショットがまだないため、一覧は空です。初回のバックアップのあと、ここに
-                      volume が並びます。
-                    </p>
+                    {{#if this.volumesFailed}}
+                      <Banner
+                        class="volume-list-error"
+                        @tone="warning"
+                        @title="volume の一覧を取得できませんでした"
+                        data-test-volumes-error
+                      >
+                        <:default>
+                          <span>{{this.volumeList.errorMessage}}</span>
+                          <span class="banner-detail">
+                            スナップショットのある volume と、対象から外した
+                            volume だけを表示しています。
+                          </span>
+                        </:default>
+                        <:actions>
+                          <Button
+                            @size="small"
+                            @busy={{this.volumeList.loading}}
+                            data-test-volumes-retry
+                            {{on "click" this.volumeList.reload}}
+                          >再読み込み</Button>
+                        </:actions>
+                      </Banner>
+                    {{/if}}
+                    {{#if this.volumes.length}}
+                      <fieldset class="option-group" data-test-volumes>
+                        <legend>バックアップする volume</legend>
+                        {{#each this.volumes key="name" as |volume|}}
+                          <label
+                            class="option"
+                            data-test-volume={{volume.name}}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={{volume.included}}
+                              data-test-volume-include
+                              {{on "change" (fn this.toggleVolume volume.name)}}
+                            />
+                            <span class="option-body">
+                              <span class="option-label">{{volume.name}}</span>
+                              <span class="option-hint" data-test-volume-hint>
+                                {{#if volume.missing}}
+                                  {{#if volume.included}}
+                                    この名前の volume
+                                    は、いまはありません。作られたらバックアップします
+                                  {{else}}
+                                    バックアップしません（この名前の volume
+                                    は、いまはありません）
+                                  {{/if}}
+                                {{else if volume.included}}
+                                  {{#if volume.latest}}
+                                    最終取得
+                                    <RelativeTime @time={{volume.latest}} />
+                                  {{else}}
+                                    次回のバックアップから取ります
+                                  {{/if}}
+                                {{else}}
+                                  バックアップしません
+                                {{/if}}
+                              </span>
+                            </span>
+                          </label>
+                        {{/each}}
+                      </fieldset>
+                    {{else if this.volumesListed}}
+                      <p class="muted" data-test-no-volumes>
+                        このアプリには named volume がありません。Compose
+                        ファイルに named volume
+                        があれば、デプロイのあと、ここに並びます。
+                      </p>
+                    {{else}}
+                      <p class="muted" data-test-no-volumes>
+                        表示できる volume がありません。
+                      </p>
+                    {{/if}}
                   {{/if}}
 
                   <FormField
-                    @label="名前を指定して対象から外す"
-                    @hint="Compose ファイルに書いた volume 名。まだ一覧にない volume を、先に外しておけます。"
+                    @label="一覧にない volume を名前で外す"
+                    @hint="まだ作られていない volume を、先に対象から外しておけます。Compose ファイルに書いた volume 名を入力します。"
                     @error={{this.errors.backup_exclude_volumes}}
                     data-test-field-group="backup_exclude_volumes"
                     as |field|

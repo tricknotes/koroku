@@ -456,6 +456,14 @@ SHOTS.push(
     wait: '[data-test-error]',
     themes: ['dark'],
   },
+  // The volume list fails on its own; the rest of the tab stays usable.
+  {
+    name: 'backups-volumes-error',
+    path: '/apps/blog/backups?scenario=volumes-down',
+    wait: '[data-test-volumes-error]',
+    fullPage: true,
+    themes: ['light'],
+  },
   {
     name: 'backups-normal-phone',
     path: '/apps/blog/backups?scenario=healthy',

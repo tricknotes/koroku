@@ -5,6 +5,7 @@ import type SessionService from './session';
 import type {
   App,
   AppPatch,
+  AppVolume,
   BackupOverview,
   BackupRun,
   Branch,
@@ -378,6 +379,15 @@ export default class ApiService extends Service {
       `/api/apps/${seg(slug)}/backups`,
     );
     return snapshots ?? [];
+  }
+
+  /** The app's named volumes, each with whether it is left out of backups. */
+  async listVolumes(slug: string): Promise<AppVolume[]> {
+    const { volumes } = await this.request<{ volumes: AppVolume[] | null }>(
+      'GET',
+      `/api/apps/${seg(slug)}/volumes`,
+    );
+    return volumes ?? [];
   }
 
   restoreSnapshot(

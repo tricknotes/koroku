@@ -274,6 +274,24 @@ func TestServeBackupLogsAndSystemRestore(t *testing.T) {
 		t.Fatalf("deployment %s: %s", deployment.Status, deployment.Error)
 	}
 
+	// --- volumes -------------------------------------------------------
+	// The deployment created the app's one named volume; the API lists it
+	// by its Compose name together with the exclusion set above.
+	type appVolume struct {
+		Name     string `json:"name"`
+		Excluded bool   `json:"excluded"`
+		Exists   bool   `json:"exists"`
+	}
+	var listed struct {
+		Volumes []appVolume `json:"volumes"`
+	}
+	if status := env.call(http.MethodGet, "/api/apps/"+slug+"/volumes", nil, &listed); status != http.StatusOK {
+		t.Fatalf("list volumes: %d", status)
+	}
+	if len(listed.Volumes) != 1 || listed.Volumes[0] != (appVolume{Name: "data", Excluded: true, Exists: true}) {
+		t.Errorf("volumes = %+v, want the excluded volume data", listed.Volumes)
+	}
+
 	// --- backups -------------------------------------------------------
 	type backupStatus struct {
 		Configured    bool       `json:"configured"`

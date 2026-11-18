@@ -210,6 +210,16 @@ export interface LogArchive {
   size: number;
 }
 
+/** One named volume of an app (`GET /api/apps/{slug}/volumes`). */
+export interface AppVolume {
+  /** The name in the Compose file, as the exclude list and snapshots use it. */
+  name: string;
+  /** Whether the name is in `backup_exclude_volumes`. */
+  excluded: boolean;
+  /** `false` for an excluded name that matches no volume in Docker. */
+  exists: boolean;
+}
+
 export interface BackupRun {
   id: number;
   trigger: 'scheduled' | 'manual' | 'pre_deploy';

@@ -134,6 +134,16 @@ func (c *appController) Start(ctx context.Context, app backup.App) error {
 	return c.engine.Start(ctx, current)
 }
 
+// appVolumes lists the named volumes of an app for the API. It goes through
+// the backup package so that the API and the backup runs agree on what the
+// volumes of an app are, but it needs no backup repository: it is wired up
+// whether or not backups are configured.
+type appVolumes struct{ runner runner.Runner }
+
+func (v appVolumes) VolumeNames(ctx context.Context, app store.App) ([]string, error) {
+	return backup.VolumeNames(ctx, v.runner, app.ProjectName())
+}
+
 // backupManager is the part of *backup.Manager the service uses.
 type backupManager interface {
 	State() backup.State
