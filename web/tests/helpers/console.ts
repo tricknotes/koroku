@@ -1,0 +1,326 @@
+import {
+  SHA_A,
+  SHA_B,
+  makeApp,
+  makeBackups,
+  makeDeployment,
+  makeSystem,
+  makeVolume,
+  type Fakes,
+} from './fakes';
+import type {
+  App,
+  BackupOverview,
+  Deployment,
+  Domain,
+  EnvVar,
+  Snapshot,
+} from 'koroku-console/utils/types';
+
+const GB = 1024 ** 3;
+
+/** What the fake backend holds; tests change it between requests. */
+export interface Console {
+  app: App;
+  deployments: Deployment[];
+  domains: Domain[];
+  backups: BackupOverview;
+  snapshots: Snapshot[];
+  env: EnvVar[];
+}
+
+/** One screen of the console, by the URL that restores it. */
+export interface Screen {
+  name: string;
+  url: string;
+  /** The tab of the app detail it shows, if any. */
+  tab?: string;
+}
+
+/** Every screen behind the login, with the app `blog` of `serveConsole`. */
+export const SCREENS: Screen[] = [
+  { name: 'app list', url: '/' },
+  { name: 'create app', url: '/apps/new' },
+  { name: 'overview', url: '/apps/blog', tab: 'index' },
+  { name: 'deploy', url: '/apps/blog/deploy', tab: 'deploy' },
+  { name: 'logs', url: '/apps/blog/logs', tab: 'logs' },
+  { name: 'log search', url: '/apps/blog/logs?period=1h', tab: 'logs' },
+  { name: 'log archives', url: '/apps/blog/logs?period=archive', tab: 'logs' },
+  { name: 'environment variables', url: '/apps/blog/env', tab: 'env' },
+  { name: 'domains', url: '/apps/blog/domains', tab: 'domains' },
+  { name: 'backups', url: '/apps/blog/backups', tab: 'backups' },
+  { name: 'settings', url: '/apps/blog/settings', tab: 'settings' },
+  { name: 'system', url: '/system' },
+];
+
+/**
+ * Answers every read of the console for one host with the app `blog`, so
+ * any screen can be opened with something on it. The app is running, with a
+ * primary domain and one that still waits for its DNS record. Mutations are
+ * left to the test.
+ */
+export function serveConsole(
+  fakes: Fakes,
+  overrides: Partial<App> = {},
+): Console {
+  const running = makeDeployment({ id: 42 });
+  const state: Console = {
+    app: makeApp({
+      current_deployment: running,
+      latest_deployment: running,
+      primary_url: 'https://www.example.org',
+      pending_domains: 1,
+      backup_exclude_volumes: [],
+      dump_hook_service: 'db',
+      dump_hook_command: 'pg_dump -U postgres app',
+      backup_before_deploy: false,
+      ...overrides,
+    }),
+    deployments: [
+      running,
+      makeDeployment({
+        id: 41,
+        commit_sha: SHA_B,
+        commit_message: 'Add search',
+        queued_at: '2026-11-17T03:00:00Z',
+        started_at: '2026-11-17T03:00:01Z',
+        finished_at: '2026-11-17T03:01:10Z',
+      }),
+    ],
+    domains: [
+      {
+        id: 2,
+        hostname: 'www.example.org',
+        status: 'active',
+        is_primary: true,
+        force_active: false,
+        last_checked_at: '2026-11-18T03:00:00Z',
+        last_error: '',
+        records: [
+          {
+            type: 'CNAME',
+            name: 'www.example.org',
+            value: 'blog.dev.example.com',
+          },
+        ],
+      },
+      {
+        id: 3,
+        hostname: 'example.net',
+        status: 'pending',
+        is_primary: false,
+        force_active: false,
+        last_checked_at: '2026-11-18T03:05:00Z',
+        last_error: 'lookup example.net: no such host',
+        records: [{ type: 'A', name: 'example.net', value: '203.0.113.10' }],
+      },
+    ],
+    backups: makeBackups({
+      runs: [
+        {
+          id: 12,
+          trigger: 'scheduled',
+          status: 'succeeded',
+          started_at: '2026-11-17T18:00:00Z',
+          finished_at: '2026-11-17T18:00:40Z',
+          error: '',
+        },
+      ],
+    }),
+    snapshots: [
+      {
+        id: '4bba301e',
+        time: '2026-11-17T18:00:12Z',
+        kind: 'volume',
+        target: 'uploads',
+        size_bytes: 214748364,
+      },
+      {
+        id: '77aa00ff',
+        time: '2026-11-17T18:00:30Z',
+        kind: 'dump',
+        target: 'db',
+        size_bytes: null,
+      },
+    ],
+    env: [
+      { key: 'DATABASE_URL', value: 'postgres://app:hunter2@db/app' },
+      { key: 'RAILS_ENV', value: 'production' },
+    ],
+  };
+  const { slug } = state.app;
+  const app = `/api/apps/${slug}`;
+
+  fakes.api
+    .on('GET', '/api/apps', () => ({ apps: [state.app] }))
+    .on('GET', '/api/system', () =>
+      makeSystem({
+        swap: { total_bytes: 2 * GB, used_bytes: 0.5 * GB },
+        log_archive: {
+          configured: true,
+          last_success_at: '2026-11-18T03:10:05Z',
+          last_error: '',
+          next_run_at: '2026-11-18T07:10:00Z',
+        },
+      }),
+    )
+    .on('GET', '/api/system/docker', {
+      items: [
+        {
+          type: 'images',
+          total_bytes: 5 * GB,
+          reclaimable_bytes: GB,
+          count: 12,
+        },
+        {
+          type: 'containers',
+          total_bytes: 1048576,
+          reclaimable_bytes: 0,
+          count: 6,
+        },
+        {
+          type: 'volumes',
+          total_bytes: 2 * GB,
+          reclaimable_bytes: 0,
+          count: 4,
+        },
+        {
+          type: 'build_cache',
+          total_bytes: 3 * GB,
+          reclaimable_bytes: 3 * GB,
+          count: 58,
+        },
+      ],
+    })
+    .on('GET', '/api/backups', () => state.backups)
+    .on('GET', app, () => state.app)
+    .on('GET', `${app}/services`, {
+      services: [
+        {
+          name: 'db',
+          state: 'running',
+          status: 'Up 2 hours (healthy)',
+          health: 'healthy',
+          memory_bytes: 180 * 1024 ** 2,
+          memory_limit_bytes: GB,
+        },
+        {
+          name: 'web',
+          state: 'running',
+          status: 'Up 2 hours',
+          health: '',
+          memory_bytes: 300 * 1024 ** 2,
+          memory_limit_bytes: 512 * 1024 ** 2,
+        },
+      ],
+    })
+    .on('GET', `${app}/deployments`, () => ({
+      deployments: state.deployments,
+    }))
+    .on('GET', `${app}/env`, () => ({ vars: state.env }))
+    .on('GET', `${app}/domains`, () => ({
+      default_hostname: `${slug}.dev.example.com`,
+      domains: state.domains,
+    }))
+    .on('GET', `${app}/backups`, () => ({ snapshots: state.snapshots }))
+    .on('GET', `${app}/volumes`, {
+      volumes: [makeVolume('pgdata'), makeVolume('uploads')],
+    })
+    .on('GET', `${app}/logs/history`, {
+      lines: [
+        {
+          service: 'web',
+          time: '2026-11-18T03:00:00.123Z',
+          line: 'GET /up 200',
+        },
+        {
+          service: 'db',
+          time: '2026-11-18T03:00:01.456Z',
+          line: 'checkpoint complete',
+        },
+      ],
+      truncated: false,
+    })
+    .on('GET', `${app}/logs/archives`, {
+      archives: [
+        {
+          key: `logs/${slug}/web/2026/11/01/04.log.gz`,
+          service: 'web',
+          hour: '2026-11-01T04:00:00+09:00',
+          size: 12345,
+        },
+      ],
+    })
+    .on('GET', '/api/repos', {
+      repos: [
+        {
+          id: 1,
+          full_name: 'octo/blog',
+          private: true,
+          default_branch: 'main',
+        },
+      ],
+    })
+    .on('GET', '/api/repos/octo/blog/branches', {
+      branches: [
+        { name: 'main', sha: SHA_A },
+        { name: 'feature/search', sha: SHA_B },
+      ],
+    })
+    .on('GET', '/api/repos/octo/blog/commits', {
+      commits: [
+        {
+          sha: SHA_A,
+          message: 'Fix login',
+          author: 'octo',
+          date: '2026-11-18T03:00:00Z',
+        },
+        {
+          sha: SHA_B,
+          message: 'Add search',
+          author: 'octo',
+          date: '2026-11-17T03:00:00Z',
+        },
+      ],
+    })
+    .on('GET', '/api/repos/octo/blog/compose', {
+      files: ['compose.yaml'],
+      path: 'compose.yaml',
+      services: [
+        { name: 'db', ports: [5432] },
+        { name: 'web', ports: [3000] },
+      ],
+    });
+
+  return state;
+}
+
+/**
+ * Puts the console into its busiest state, the one in which every screen
+ * has something to follow: a deployment in progress, a domain waiting for
+ * DNS (already there) and a backup that is running.
+ */
+export function makeBusy(state: Console): void {
+  const deploying = makeDeployment({
+    id: 43,
+    status: 'running',
+    finished_at: null,
+  });
+  state.deployments = [deploying, ...state.deployments];
+  state.app = { ...state.app, latest_deployment: deploying };
+  state.backups = {
+    ...state.backups,
+    running: true,
+    runs: [
+      {
+        id: 13,
+        trigger: 'manual',
+        status: 'running',
+        started_at: '2026-11-18T03:20:00Z',
+        finished_at: null,
+        error: '',
+      },
+      ...(state.backups.runs ?? []),
+    ],
+  };
+}

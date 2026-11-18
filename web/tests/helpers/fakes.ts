@@ -26,6 +26,12 @@ export interface FakeCall {
 
 type Handler = (call: FakeCall) => unknown;
 
+/** A request the fake API has received and not answered yet. */
+export interface HeldRequest {
+  release(response?: unknown): void;
+  refuse(status: number, code: string, details?: Record<string, unknown>): void;
+}
+
 /**
  * Stands in for the `api` service. Only the transport is replaced, so the
  * real service still builds every path, query and body. Endpoints without a
@@ -54,6 +60,40 @@ export class FakeApi extends ApiService {
     return this.on(method, path, () => {
       throw apiError(status, code, details);
     });
+  }
+
+  /**
+   * Keeps the answer of an endpoint back, so a test can look at the screen
+   * while the request runs. The request stays open until `release` (the
+   * response) or `refuse` (an API error) is called.
+   */
+  hold(method: string, path: string): HeldRequest {
+    let settle: (answer: () => unknown) => void = () => {};
+    const answered = new Promise<() => unknown>((resolve) => {
+      settle = resolve;
+    });
+    this.on(method, path, () => answered.then((answer) => answer()));
+    return {
+      release: (response?: unknown) => settle(() => response),
+      refuse: (status, code, details = {}) =>
+        settle(() => {
+          throw apiError(status, code, details);
+        }),
+    };
+  }
+
+  /**
+   * Makes every read that has a handler fail (the backend is in trouble),
+   * except the given paths.
+   */
+  failReads(status: number, code: string, except: string[] = []): this {
+    for (const key of [...this.handlers.keys()]) {
+      const [method = '', path = ''] = key.split(' ');
+      if (method === 'GET' && !except.includes(path)) {
+        this.fail(method, path, status, code);
+      }
+    }
+    return this;
   }
 
   callsTo(method: string, path: string): FakeCall[] {
