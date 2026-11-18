@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 	"github.com/tricknotes/koroku/internal/domains"
 	"github.com/tricknotes/koroku/internal/github"
 	"github.com/tricknotes/koroku/internal/gitrepo"
+	"github.com/tricknotes/koroku/internal/logs"
+	"github.com/tricknotes/koroku/internal/objstore"
 	"github.com/tricknotes/koroku/internal/routing"
 	"github.com/tricknotes/koroku/internal/runner"
 	"github.com/tricknotes/koroku/internal/secrets"
@@ -46,8 +49,9 @@ func main() {
 const usage = `Usage: paasd <command> [flags]
 
 Commands:
-  serve     Run the API server and deploy worker
-  version   Print the version
+  serve            Run the API server and deploy worker
+  restore-system   Restore the database and configuration from a backup (new host)
+  version          Print the version
 
 Run "paasd <command> -h" for the flags of a command.
 `
@@ -60,6 +64,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "serve":
 		return serve(ctx, args[1:], stderr, nil)
+	case "restore-system":
+		return restoreSystem(ctx, args[1:], stdout, stderr)
 	case "version":
 		fmt.Fprintln(stdout, version)
 		return nil
@@ -218,6 +224,60 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 			InsecureNoAuth: *insecureNoAuth,
 		},
 	}
+
+	// Runtime logs: collected to local files for every app, and archived to
+	// object storage when it is configured.
+	accessLogDir := ""
+	if cfg.Caddy.Enabled {
+		accessLogDir = cfg.Caddy.AccessLogDir
+	}
+	collector, err := logs.New(logs.Options{
+		Dir:           cfg.Logs.Dir,
+		Runner:        run,
+		Clock:         clk,
+		Location:      cfg.Location(),
+		Apps:          collectedApps(st, accessLogDir),
+		Logger:        logger,
+		RetentionDays: cfg.Logs.RetentionDays,
+	})
+	if err != nil {
+		return err
+	}
+	logsAPI := &appLogs{collector: collector}
+	var objects *objstore.S3
+	if cfg.Storage.Configured() {
+		objects, err = objstore.NewS3(objstore.S3Config{
+			Endpoint:        cfg.Storage.Endpoint,
+			Region:          cfg.Storage.Region,
+			Bucket:          cfg.Storage.Bucket,
+			AccessKeyID:     cfg.Storage.AccessKeyID,
+			SecretAccessKey: cfg.Storage.SecretAccessKey,
+		})
+		if err != nil {
+			return fmt.Errorf("object storage: %w", err)
+		}
+		archiver, err := logs.NewArchiver(logs.ArchiverOptions{
+			Collector:     collector,
+			Store:         objects,
+			IntervalHours: cfg.Logs.ArchiveIntervalHours,
+			AppsDir:       cfg.AppsDir(),
+		})
+		if err != nil {
+			return err
+		}
+		logsAPI.archiver, logsAPI.objects = archiver, objects
+		go archiver.Run(ctx)
+	} else {
+		logger.Warn("the [storage] section is not configured: logs stay local and backups are disabled")
+	}
+	go func() {
+		if err := collector.Run(ctx); err != nil {
+			logger.Error("the log collector stopped", "error", err)
+		}
+	}()
+	go collector.RunMaintenance(ctx)
+	apiOpts.Logs = logsAPI
+
 	gitRefs := deploy.GitRefResolver{Fetcher: fetcher}
 	apiOpts.Refs = gitRefs
 	if gh != nil {
@@ -238,7 +298,36 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 			return api.RouteStatus{LastLoadedAt: status.LastLoadedAt, LastError: status.LastError}
 		}
 	}
+	// Backups need object storage and the restic password. The backup
+	// service stops and starts apps through the engine, and the engine
+	// calls the backup service before a deploy, so the controller gets its
+	// engine once both exist.
+	controller := &appController{store: st}
+	var backups *backupService
+	if ok, reason := backupsConfigured(cfg); ok {
+		if err := st.FailInterruptedBackupRuns(ctx, clk.Now()); err != nil {
+			return err
+		}
+		backups, err = newBackupService(ctx, cfg, filepath.Dir(*configPath), st,
+			backupDeps{runner: run, clock: clk, logger: logger, controller: controller})
+		if err != nil {
+			return err
+		}
+		deployOpts.Backup = backups
+		apiOpts.Backups = backups
+	} else {
+		logger.Warn("backups are disabled: " + reason)
+	}
+
 	engine := deploy.New(deployOpts)
+	controller.engine = engine
+	if backups != nil {
+		go func() {
+			if err := backups.scheduler.Run(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("the backup scheduler stopped", "error", err)
+			}
+		}()
+	}
 	apiOpts.Deployer = engine
 	apiOpts.Ops = engine
 	go engine.RunMaintenance(ctx)
