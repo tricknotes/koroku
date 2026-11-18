@@ -1,0 +1,713 @@
+#!/usr/bin/env bash
+# Provision a fresh host for paasd: Ubuntu 24.04, amd64, run as root.
+#
+#   sudo ./provision.sh [options] /path/to/paasd
+#
+# The paasd binary is built elsewhere with `make build` (bin/paasd). The files
+# next to this script (paasd.service, caddy-initial.json, caddy-paasd.conf,
+# config.example.toml) are installed as they are, so copy the whole deploy/
+# directory to the host.
+#
+# The script is safe to run again: it only changes what differs, and it never
+# overwrites /etc/paas/config.toml or any key under /etc/paas. It never
+# reboots; it says at the end when a reboot is needed.
+#
+# See docs/OPERATIONS.md for the full procedure.
+
+# -E: the ERR trap below also fires inside functions.
+set -Eeuo pipefail
+
+# --- Settings ---------------------------------------------------------------
+
+# Compose merges the generated override with !override and !reset.
+readonly MIN_COMPOSE_VERSION=2.24.4
+# The generated Caddy configuration uses stream_close_delay.
+readonly MIN_CADDY_VERSION=2.7.0
+# restic comes from the official release, pinned by checksum (the reason is in
+# docs/OPERATIONS.md). To move to another release, change both values; the
+# checksum is in the SHA256SUMS file of that release.
+readonly RESTIC_VERSION=0.19.1
+readonly RESTIC_SHA256=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c
+
+readonly SWAP_FILE=/swapfile
+readonly SWAP_SIZE_MIB=2048
+
+readonly CONFIG_DIR=/etc/paas
+readonly CONFIG_FILE=$CONFIG_DIR/config.toml
+readonly DATA_DIR=/var/lib/paas
+readonly CADDY_LOG_DIR=/var/log/caddy
+readonly CADDY_ADMIN_URL=http://127.0.0.1:2019
+
+# --- Output -----------------------------------------------------------------
+
+NOTES=()
+
+step() { printf '\n==> %s\n' "$*"; }
+info() { printf '    %s\n' "$*"; }
+# note prints a message now and repeats it in the final summary.
+note() {
+  printf '    NOTE: %s\n' "$*"
+  NOTES+=("$*")
+}
+die() {
+  printf '\nprovision.sh: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage: provision.sh [options] /path/to/paasd
+
+Sets up Docker, Caddy, restic, swap, the firewall and the paasd service on a
+fresh Ubuntu 24.04 (amd64) host. Run it as root. It can be run again safely.
+
+Options:
+  --skip-upgrade  Do not upgrade packages that are already installed. Use it
+                  to re-apply the configuration on a host with running apps:
+                  a Docker upgrade restarts every container.
+  --http3         Also open 443/udp so that HTTP/3 reaches Caddy. Off by
+                  default; see docs/OPERATIONS.md.
+  --force         Run on a system other than Ubuntu 24.04 amd64 (untested).
+  -h, --help      Show this help.
+EOF
+}
+
+# --- Helpers ----------------------------------------------------------------
+
+# install_file SRC DST MODE [OWNER:GROUP]
+# Puts a copy of SRC at DST, atomically, when the content differs, and sets
+# FILE_CHANGED to 1 or 0. It reports through a variable rather than its exit
+# status so that it is never called from a condition, where bash would ignore
+# a failing command inside it.
+FILE_CHANGED=0
+install_file() {
+  local src=$1 dst=$2 mode=$3 owner=${4:-root:root} tmp
+  if [[ -f $dst ]] && cmp -s -- "$src" "$dst"; then
+    FILE_CHANGED=0
+  else
+    tmp=$(mktemp -- "$dst.XXXXXX")
+    cat -- "$src" >"$tmp"
+    chown -- "$owner" "$tmp"
+    chmod -- "$mode" "$tmp"
+    mv -f -- "$tmp" "$dst"
+    FILE_CHANGED=1
+  fi
+  chown -- "$owner" "$dst"
+  chmod -- "$mode" "$dst"
+}
+
+# version_ge A B: true when version A is at least version B.
+version_ge() { dpkg --compare-versions "$1" ge "$2"; }
+
+fetch() {
+  local url=$1 out=$2
+  curl --fail --silent --show-error --location \
+    --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 300 \
+    --output "$out" "$url"
+}
+
+APT_OPTIONS=(
+  --yes
+  -o Dpkg::Options::=--force-confdef
+  -o Dpkg::Options::=--force-confold
+  # A fresh host often runs unattended-upgrades right after its first boot.
+  -o DPkg::Lock::Timeout=600
+)
+
+apt_update() {
+  local attempt
+  for attempt in 1 2 3 4 5 6; do
+    # Error-Mode=any: a repository that cannot be fetched is an error, not a
+    # warning that surfaces later as "unable to locate package".
+    if apt-get -o APT::Update::Error-Mode=any -o Acquire::Retries=3 update; then
+      return 0
+    fi
+    info "apt-get update failed (attempt $attempt of 6), trying again in 10 s"
+    sleep 10
+  done
+  die "apt-get update keeps failing; see the messages above"
+}
+
+apt_install() {
+  if [[ $SKIP_UPGRADE == 1 ]]; then
+    apt-get "${APT_OPTIONS[@]}" install --no-upgrade "$@"
+  else
+    apt-get "${APT_OPTIONS[@]}" install "$@"
+  fi
+}
+
+# --- Steps ------------------------------------------------------------------
+
+check_host() {
+  step "Checking the host"
+  if [[ $EUID -ne 0 ]]; then
+    die "must be run as root (sudo $0 ...)"
+  fi
+
+  local id='' version='' codename='' arch=''
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    id=$(. /etc/os-release && printf '%s' "${ID:-}")
+    # shellcheck source=/dev/null
+    version=$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")
+    # shellcheck source=/dev/null
+    codename=$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-}")
+  fi
+  if command -v dpkg >/dev/null 2>&1; then
+    arch=$(dpkg --print-architecture)
+  fi
+  info "system: ${id:-unknown} ${version:-unknown} (${codename:-unknown}), ${arch:-unknown}"
+  if [[ $id != ubuntu || $version != 24.04 || $arch != amd64 ]]; then
+    if [[ $FORCE != 1 ]]; then
+      die "this script supports Ubuntu 24.04 amd64 only (use --force to try anyway)"
+    fi
+    note "running on an unsupported system because of --force"
+  fi
+  if [[ -z $codename || -z $arch ]]; then
+    die "cannot determine the release codename or the architecture"
+  fi
+  OS_CODENAME=$codename
+  OS_ARCH=$arch
+
+  local file
+  for file in paasd.service caddy-initial.json caddy-paasd.conf config.example.toml; do
+    if [[ ! -f $SCRIPT_DIR/$file ]]; then
+      die "$SCRIPT_DIR/$file is missing; copy the whole deploy/ directory to the host"
+    fi
+  done
+
+  if [[ ! -f $PAASD_BINARY ]]; then
+    die "$PAASD_BINARY: no such file (build it with 'make build' and copy bin/paasd here)"
+  fi
+  if [[ ! -x $PAASD_BINARY ]]; then
+    die "$PAASD_BINARY is not executable (chmod +x it)"
+  fi
+  # Running it proves that it is a binary for this machine before anything
+  # on the host is changed.
+  local version_output
+  if ! version_output=$("$PAASD_BINARY" version 2>&1); then
+    die "$PAASD_BINARY does not run on this machine: $version_output"
+  fi
+  PAASD_VERSION=$version_output
+  info "paasd binary: $PAASD_BINARY (version $PAASD_VERSION)"
+}
+
+install_base_packages() {
+  step "Installing base packages"
+  apt_update
+  # curl, gnupg, ca-certificates: package repositories and downloads.
+  # git: paasd fetches repositories with it. jq: merges Docker's daemon.json.
+  # bzip2: unpacks the restic release. tzdata: the backup schedule is in JST.
+  apt_install ca-certificates curl gnupg git jq bzip2 tzdata ufw
+}
+
+# Docker's log rotation settings go in before the package is installed, so
+# that the daemon starts with them the first time.
+configure_docker_daemon() {
+  step "Configuring Docker log rotation (/etc/docker/daemon.json)"
+  local file=/etc/docker/daemon.json current='{}' merged
+  mkdir -p /etc/docker
+  if [[ -s $file ]]; then
+    if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+      die "$file is not a JSON object; fix or remove it and run this script again"
+    fi
+    current=$(jq -S . "$file")
+  fi
+  # Keep every other setting, and other log options, of an existing file.
+  merged=$(jq -S '
+    .["log-driver"] = "json-file"
+    | .["log-opts"] = ((.["log-opts"] // {}) + {"max-size": "10m", "max-file": "3"})
+  ' <<<"$current")
+
+  DOCKER_DAEMON_CHANGED=0
+  if [[ -f $file && $merged == "$current" ]]; then
+    info "already set"
+    return 0
+  fi
+  if [[ -s $file && ! -e $file.before-paasd ]]; then
+    cp -p -- "$file" "$file.before-paasd"
+    info "kept the previous file as $file.before-paasd"
+  fi
+  printf '%s\n' "$merged" >"$WORK_DIR/daemon.json"
+  install_file "$WORK_DIR/daemon.json" "$file" 0644
+  DOCKER_DAEMON_CHANGED=$FILE_CHANGED
+  info "written (applies to containers created from now on)"
+}
+
+# Caddy's first start must already use the drop-in: the package's default
+# configuration serves a welcome page on port 80.
+configure_caddy_unit() {
+  step "Configuring Caddy for paasd"
+  mkdir -p /etc/caddy /etc/systemd/system/caddy.service.d
+  install_file "$SCRIPT_DIR/caddy-initial.json" /etc/caddy/paasd-initial.json 0644
+  info "/etc/caddy/paasd-initial.json: $(changed_word "$FILE_CHANGED")"
+  install_file "$SCRIPT_DIR/caddy-paasd.conf" /etc/systemd/system/caddy.service.d/paasd.conf 0644
+  info "/etc/systemd/system/caddy.service.d/paasd.conf: $(changed_word "$FILE_CHANGED")"
+}
+
+changed_word() {
+  if [[ $1 == 1 ]]; then printf 'installed'; else printf 'unchanged'; fi
+}
+
+add_package_repositories() {
+  step "Adding the Docker and Caddy package repositories"
+  mkdir -p /etc/apt/keyrings /usr/share/keyrings
+
+  # Docker: https://docs.docker.com/engine/install/ubuntu/
+  fetch https://download.docker.com/linux/ubuntu/gpg "$WORK_DIR/docker.asc"
+  install_file "$WORK_DIR/docker.asc" /etc/apt/keyrings/docker.asc 0644
+  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' \
+    "$OS_ARCH" "$OS_CODENAME" >"$WORK_DIR/docker.list"
+  install_file "$WORK_DIR/docker.list" /etc/apt/sources.list.d/docker.list 0644
+
+  # Caddy: https://caddyserver.com/docs/install#debian-ubuntu-raspbian
+  # Ubuntu's own caddy package is older than MIN_CADDY_VERSION.
+  fetch https://dl.cloudsmith.io/public/caddy/stable/gpg.key "$WORK_DIR/caddy.asc"
+  gpg --batch --yes --dearmor --output "$WORK_DIR/caddy.gpg" "$WORK_DIR/caddy.asc"
+  install_file "$WORK_DIR/caddy.gpg" /usr/share/keyrings/caddy-stable-archive-keyring.gpg 0644
+  printf 'deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main\n' \
+    >"$WORK_DIR/caddy.list"
+  install_file "$WORK_DIR/caddy.list" /etc/apt/sources.list.d/caddy-stable.list 0644
+
+  apt_update
+}
+
+upgrade_system() {
+  if [[ $SKIP_UPGRADE == 1 ]]; then
+    step "Skipping the system upgrade (--skip-upgrade)"
+    return 0
+  fi
+  step "Upgrading all packages, including the kernel"
+  apt-get "${APT_OPTIONS[@]}" full-upgrade
+}
+
+install_docker() {
+  step "Installing Docker Engine and the Compose plugin"
+  local had_docker=0
+  if command -v dockerd >/dev/null 2>&1; then
+    had_docker=1
+  fi
+  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+  systemctl enable docker.service
+  if [[ $had_docker == 1 && $DOCKER_DAEMON_CHANGED == 1 ]]; then
+    note "restarted Docker to apply daemon.json; running containers were restarted with it"
+    systemctl restart docker.service
+  else
+    systemctl start docker.service
+  fi
+
+  local i ready=0
+  for ((i = 0; i < 30; i++)); do
+    if docker info >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ $ready != 1 ]]; then
+    die "the Docker daemon does not answer; see 'journalctl -u docker'"
+  fi
+
+  DOCKER_VERSION=$(docker --version | sed -E 's/^Docker version ([^, ]+).*/\1/')
+  COMPOSE_VERSION=$(docker compose version --short)
+  COMPOSE_VERSION=${COMPOSE_VERSION#v}
+  info "Docker $DOCKER_VERSION, Compose $COMPOSE_VERSION"
+  if ! version_ge "$COMPOSE_VERSION" "$MIN_COMPOSE_VERSION"; then
+    die "Docker Compose $COMPOSE_VERSION is older than $MIN_COMPOSE_VERSION, which paasd needs for !override and !reset"
+  fi
+}
+
+caddy_runs_with_resume() {
+  local pid cmdline
+  pid=$(systemctl show --property MainPID --value caddy.service 2>/dev/null || true)
+  if [[ ! $pid =~ ^[1-9][0-9]*$ || ! -r /proc/$pid/cmdline ]]; then
+    return 1
+  fi
+  cmdline=$(tr '\0' ' ' <"/proc/$pid/cmdline")
+  [[ $cmdline == *' --resume '* ]]
+}
+
+install_caddy() {
+  step "Installing Caddy"
+  apt_install caddy
+
+  CADDY_VERSION=$(caddy version | awk '{print $1}')
+  CADDY_VERSION=${CADDY_VERSION#v}
+  info "Caddy $CADDY_VERSION"
+  if ! version_ge "$CADDY_VERSION" "$MIN_CADDY_VERSION"; then
+    die "Caddy $CADDY_VERSION is older than $MIN_CADDY_VERSION, which paasd needs for stream_close_delay"
+  fi
+
+  # One access log per app is written here by Caddy and read by paasd (root).
+  if [[ ! -d $CADDY_LOG_DIR ]]; then
+    install -d -m 0755 -o caddy -g caddy "$CADDY_LOG_DIR"
+  fi
+  install -d -m 0750 -o caddy -g caddy "$CADDY_LOG_DIR/apps"
+
+  systemctl daemon-reload
+  systemctl enable caddy.service
+  if caddy_runs_with_resume; then
+    info "Caddy already runs with --resume"
+  else
+    # Either not running yet, or started before the drop-in existed. With
+    # --resume a restart comes back with the configuration paasd loaded last.
+    systemctl restart caddy.service
+  fi
+
+  local i ready=0
+  for ((i = 0; i < 15; i++)); do
+    if curl --silent --fail --max-time 3 --output /dev/null "$CADDY_ADMIN_URL/config/"; then
+      ready=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ $ready != 1 ]]; then
+    die "the Caddy admin API does not answer on $CADDY_ADMIN_URL; see 'journalctl -u caddy'"
+  fi
+  info "admin API answers on $CADDY_ADMIN_URL"
+}
+
+install_restic() {
+  step "Installing restic $RESTIC_VERSION"
+  local target=/usr/local/bin/restic have=''
+  if [[ -x $target ]]; then
+    have=$("$target" version 2>/dev/null | awk 'NR == 1 && $1 == "restic" { print $2 }' || true)
+  fi
+  if [[ -n $have ]] && version_ge "$have" "$RESTIC_VERSION"; then
+    RESTIC_INSTALLED_VERSION=$have
+    info "restic $have is already installed"
+    return 0
+  fi
+
+  local archive=$WORK_DIR/restic.bz2
+  # The pinned checksum is the one of the amd64 build.
+  fetch "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_amd64.bz2" "$archive"
+  if ! printf '%s  %s\n' "$RESTIC_SHA256" "$archive" | sha256sum --check --status; then
+    die "the restic download does not match the pinned SHA-256 checksum"
+  fi
+  bunzip2 --stdout "$archive" >"$WORK_DIR/restic"
+  install_file "$WORK_DIR/restic" "$target" 0755
+  RESTIC_INSTALLED_VERSION=$("$target" version | awk 'NR == 1 && $1 == "restic" { print $2 }')
+  if [[ $RESTIC_INSTALLED_VERSION != "$RESTIC_VERSION" ]]; then
+    die "$target reports version '$RESTIC_INSTALLED_VERSION', expected $RESTIC_VERSION"
+  fi
+  info "installed $target (checksum verified)"
+}
+
+active_swap_bytes() {
+  local total=0 size
+  while read -r size; do
+    if [[ $size =~ ^[0-9]+$ ]]; then
+      total=$((total + size))
+    fi
+  done < <(swapon --show=SIZE --bytes --noheadings)
+  printf '%s' "$total"
+}
+
+swap_file_is_active() {
+  local names
+  names=$(swapon --show=NAME --noheadings)
+  grep -qxF -- "$SWAP_FILE" <<<"$names"
+}
+
+setup_swap() {
+  step "Setting up swap"
+  # A swap area reports slightly less than the size of its file.
+  local wanted=$(((SWAP_SIZE_MIB - 1) * 1024 * 1024)) total
+  total=$(active_swap_bytes)
+  if ((total >= wanted)); then
+    info "$((total / 1024 / 1024)) MiB of swap is already active"
+  else
+    if [[ ! -e $SWAP_FILE ]]; then
+      # Built under another name, so that an interrupted run never leaves a
+      # half-made file at SWAP_FILE.
+      local tmp=$SWAP_FILE.paasd-tmp
+      rm -f -- "$tmp"
+      (
+        umask 077
+        if ! fallocate --length "${SWAP_SIZE_MIB}MiB" "$tmp" 2>/dev/null; then
+          dd if=/dev/zero of="$tmp" bs=1M count="$SWAP_SIZE_MIB" status=none
+        fi
+      )
+      chmod 0600 "$tmp"
+      mkswap "$tmp" >/dev/null
+      mv -- "$tmp" "$SWAP_FILE"
+      info "created $SWAP_FILE (${SWAP_SIZE_MIB} MiB)"
+    fi
+    if ! swap_file_is_active; then
+      swapon "$SWAP_FILE"
+    fi
+    info "enabled $SWAP_FILE"
+  fi
+
+  # Persist only the file this script manages; other swap is not its business.
+  if swap_file_is_active; then
+    if awk -v file="$SWAP_FILE" '$1 == file { found = 1 } END { exit !found }' /etc/fstab; then
+      info "$SWAP_FILE is already in /etc/fstab"
+    else
+      printf '%s none swap sw 0 0\n' "$SWAP_FILE" >>/etc/fstab
+      info "added $SWAP_FILE to /etc/fstab"
+    fi
+  fi
+}
+
+# Placeholders of config.example.toml: example.com names and the
+# documentation address range 203.0.113.0/24, outside comments.
+config_has_placeholders() {
+  awk '
+    !/^[[:space:]]*#/ && /example\.com|203\.0\.113\./ { found = 1 }
+    END { exit !found }
+  ' "$CONFIG_FILE"
+}
+
+install_paasd() {
+  step "Installing paasd"
+  install -d -m 0700 -o root -g root "$CONFIG_DIR" "$DATA_DIR"
+
+  CONFIG_CREATED=0
+  if [[ -e $CONFIG_FILE ]]; then
+    info "$CONFIG_FILE exists, left untouched"
+  else
+    install -m 0600 -o root -g root "$SCRIPT_DIR/config.example.toml" "$CONFIG_FILE"
+    CONFIG_CREATED=1
+    info "created $CONFIG_FILE from config.example.toml"
+  fi
+
+  # Keys are never created, replaced or modified here; only report loose
+  # permissions, which paasd refuses for the master key.
+  local name file mode
+  for name in config.toml master.key restic.key github-app.pem; do
+    file=$CONFIG_DIR/$name
+    if [[ -e $file ]]; then
+      mode=$(stat -c '%a' "$file")
+      if [[ $mode != 600 && $mode != 400 ]]; then
+        note "$file has mode $mode; run: chmod 600 $file"
+      fi
+    fi
+  done
+
+  install_file "$PAASD_BINARY" /usr/local/bin/paasd 0755
+  PAASD_BINARY_CHANGED=$FILE_CHANGED
+  info "/usr/local/bin/paasd (version $PAASD_VERSION): $(changed_word "$FILE_CHANGED")"
+
+  install_file "$SCRIPT_DIR/paasd.service" /etc/systemd/system/paasd.service 0644
+  PAASD_UNIT_CHANGED=$FILE_CHANGED
+  info "/etc/systemd/system/paasd.service: $(changed_word "$FILE_CHANGED")"
+  systemctl daemon-reload
+}
+
+setup_firewall() {
+  step "Configuring the firewall (ufw)"
+  # Never lock out SSH: allow 22, every port sshd is configured for, and the
+  # port of the session this script runs in, before the firewall is enabled.
+  local ports=(22) port
+  if command -v sshd >/dev/null 2>&1; then
+    while read -r port; do
+      ports+=("$port")
+    done < <(sshd -T 2>/dev/null | awk '$1 == "port" { print $2 }')
+  fi
+  if [[ -n ${SSH_CONNECTION:-} ]]; then
+    read -r _ _ _ port <<<"$SSH_CONNECTION"
+    ports+=("$port")
+  fi
+  local seen=' '
+  for port in "${ports[@]}"; do
+    if [[ $port =~ ^[0-9]+$ && $seen != *" $port "* ]]; then
+      seen+="$port "
+      ufw allow "$port/tcp"
+    fi
+  done
+  ufw allow 80/tcp
+  ufw allow 443/tcp
+  if [[ $HTTP3 == 1 ]]; then
+    ufw allow 443/udp
+  fi
+  # These are Ubuntu's defaults; changing them on an active firewall reloads
+  # it, so only do it when they differ.
+  if ! grep -qx 'DEFAULT_INPUT_POLICY="DROP"' /etc/default/ufw 2>/dev/null; then
+    ufw default deny incoming
+  fi
+  if ! grep -qx 'DEFAULT_OUTPUT_POLICY="ACCEPT"' /etc/default/ufw 2>/dev/null; then
+    ufw default allow outgoing
+  fi
+  local status
+  status=$(ufw status)
+  if [[ $status == 'Status: active'* ]]; then
+    info "ufw is already active"
+  else
+    ufw --force enable
+  fi
+  SSH_PORTS=${seen# }
+  # Ports that Docker publishes bypass ufw. paasd binds every app port to
+  # 127.0.0.1, which is what actually keeps them private.
+}
+
+start_paasd() {
+  step "Starting paasd"
+  systemctl enable paasd.service
+  PAASD_STATE=''
+  if config_has_placeholders; then
+    PAASD_STATE='not started: /etc/paas/config.toml still contains example values'
+    info "$PAASD_STATE"
+    return 0
+  fi
+  if systemctl is-active --quiet paasd.service; then
+    if [[ $PAASD_BINARY_CHANGED == 1 || $PAASD_UNIT_CHANGED == 1 ]]; then
+      systemctl restart paasd.service
+      PAASD_STATE='restarted with the new binary or unit'
+    else
+      PAASD_STATE='already running, left alone'
+    fi
+  else
+    systemctl start paasd.service
+    PAASD_STATE='started'
+  fi
+  sleep 3
+  if ! systemctl is-active --quiet paasd.service; then
+    PAASD_STATE="FAILED to stay up; see 'journalctl -u paasd -n 50'"
+    PAASD_FAILED=1
+  fi
+  info "$PAASD_STATE"
+}
+
+reboot_needed() {
+  if [[ -e /var/run/reboot-required ]]; then
+    return 0
+  fi
+  # Fallback for hosts without the package that writes reboot-required: a
+  # kernel newer than the running one is installed.
+  local newest=''
+  newest=$(find /boot -maxdepth 1 -name 'vmlinuz-*' -printf '%f\n' 2>/dev/null | sed 's/^vmlinuz-//' | sort -V | tail -n 1 || true)
+  [[ -n $newest && $newest != "$(uname -r)" ]]
+}
+
+summary() {
+  step "Summary"
+  info "Docker $DOCKER_VERSION, Compose $COMPOSE_VERSION, Caddy $CADDY_VERSION, restic $RESTIC_INSTALLED_VERSION"
+  info "paasd $PAASD_VERSION: $PAASD_STATE"
+  if [[ $HTTP3 == 1 ]]; then
+    info "firewall: tcp ${SSH_PORTS% } (ssh), 80, 443 and udp 443 (HTTP/3)"
+  else
+    info "firewall: tcp ${SSH_PORTS% } (ssh), 80, 443; udp 443 stays closed (no HTTP/3)"
+  fi
+  if ((${#NOTES[@]} > 0)); then
+    printf '\n    Notes:\n'
+    printf '      - %s\n' "${NOTES[@]}"
+  fi
+
+  cat <<EOF
+
+    Manual steps (details in docs/OPERATIONS.md; skip what is done):
+      1. DNS: point *.<base_domain> (or console.<base_domain> and every
+         <slug>.<base_domain>) to the public address of this host. If the
+         hosting provider has a packet filter in front of the host, open
+         80/tcp and 443/tcp there as well.
+      2. Edit $CONFIG_FILE: base_domain, public_ip, the GitHub App
+         values and the object storage (R2) values. Put the GitHub App
+         private key in $CONFIG_DIR/github-app.pem (mode 0600).
+      3. Put the restic repository password in $CONFIG_DIR/restic.key
+         (mode 0600) and keep a copy outside this host, together with
+         $CONFIG_DIR/master.key (created at the first start of paasd)
+         and the R2 credentials.
+      4. Start paasd: systemctl restart paasd && journalctl -u paasd -f
+EOF
+  if [[ $CONFIG_CREATED == 1 ]]; then
+    info "(this run created $CONFIG_FILE; it holds example values only)"
+  fi
+
+  if reboot_needed; then
+    cat <<EOF
+
+    *** REBOOT REQUIRED ***
+    The upgrade installed a new kernel or core libraries (running kernel:
+    $(uname -r)). Reboot when convenient:  systemctl reboot
+    Docker, Caddy and paasd start again on boot.
+EOF
+    if [[ -r /var/run/reboot-required.pkgs ]]; then
+      info "packages asking for the reboot: $(sort -u /var/run/reboot-required.pkgs | tr '\n' ' ')"
+    fi
+  else
+    printf '\n    No reboot is required.\n'
+  fi
+
+  if [[ $PAASD_FAILED == 1 ]]; then
+    die "paasd did not stay up; see 'journalctl -u paasd -n 50'"
+  fi
+}
+
+# --- Main -------------------------------------------------------------------
+
+FORCE=0
+SKIP_UPGRADE=0
+HTTP3=0
+PAASD_BINARY=''
+while (($# > 0)); do
+  case $1 in
+    --force) FORCE=1 ;;
+    --skip-upgrade) SKIP_UPGRADE=1 ;;
+    --http3) HTTP3=1 ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*)
+      usage >&2
+      die "unknown option: $1"
+      ;;
+    *)
+      if [[ -n $PAASD_BINARY ]]; then
+        usage >&2
+        die "only one paasd binary can be given"
+      fi
+      PAASD_BINARY=$1
+      ;;
+  esac
+  shift
+done
+if [[ -z $PAASD_BINARY ]]; then
+  usage >&2
+  die "the path of the paasd binary is required"
+fi
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+readonly SCRIPT_DIR
+
+# Values filled in by the steps and read by the summary.
+OS_CODENAME='' OS_ARCH='' PAASD_VERSION='' PAASD_STATE='' PAASD_FAILED=0
+DOCKER_VERSION='' COMPOSE_VERSION='' CADDY_VERSION='' RESTIC_INSTALLED_VERSION=''
+DOCKER_DAEMON_CHANGED=0 PAASD_BINARY_CHANGED=0 PAASD_UNIT_CHANGED=0 CONFIG_CREATED=0
+SSH_PORTS=''
+
+export DEBIAN_FRONTEND=noninteractive
+# needrestart (run by apt) must only list services that use outdated
+# libraries. Its automatic mode could restart Docker, and every container
+# with it, in the middle of this script.
+export NEEDRESTART_MODE=l
+
+WORK_DIR=$(mktemp -d)
+readonly WORK_DIR
+trap 'rm -rf -- "$WORK_DIR"' EXIT
+on_error() {
+  # Command substitutions run this trap too; report once, from the main shell.
+  if [[ $BASHPID == "$$" ]]; then
+    printf '\nprovision.sh: "%s" failed at line %s. Fix the cause and run the script again.\n' "$2" "$1" >&2
+  fi
+}
+trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
+
+check_host
+install_base_packages
+configure_docker_daemon
+configure_caddy_unit
+add_package_repositories
+upgrade_system
+install_docker
+install_caddy
+install_restic
+setup_swap
+install_paasd
+setup_firewall
+start_paasd
+summary
