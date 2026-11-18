@@ -104,10 +104,10 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 
 ### M3 GitHub App
 
-- [ ] Web application flow でのログイン、許可ユーザー ID との照合、セッション Cookie
-- [ ] 変更系 API の `Origin` 検証
-- [ ] リポジトリ / ブランチ / コミット一覧
-- [ ] installation token による private リポジトリの取得（トークンを `.git/config` とログに残さない）
+- [x] Web application flow でのログイン、許可ユーザー ID との照合、セッション Cookie
+- [x] 変更系 API の `Origin` 検証
+- [x] リポジトリ / ブランチ / コミット一覧
+- [x] installation token による private リポジトリの取得（トークンを `.git/config` とログに残さない）
 - 完了条件: 許可 ID 以外はログインできない。private リポジトリをデプロイできる
 
 ### M4 UI

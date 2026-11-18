@@ -27,9 +27,11 @@ cd web && pnpm install && pnpm lint && pnpm test
 ```sh
 cp deploy/config.example.toml config.toml   # listen と data_dir を手元向けに書き換える
 make web                                     # Ember をビルドして web/dist に出力
-go run ./cmd/paasd serve --config config.toml
+go run ./cmd/paasd serve --config config.toml --insecure-no-auth
 curl http://127.0.0.1:8080/api/system
 ```
+
+`--insecure-no-auth` はログインと Origin 検証を外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。手元に Caddy がなければ、`config.toml` の `[caddy]` で `enabled = false` にします。
 
 フロントエンドだけを開発するときは `cd web && pnpm start` で Vite の開発サーバーを起動します。`/api` と `/auth` は `127.0.0.1:8080` の `paasd` に転送されます。
 
