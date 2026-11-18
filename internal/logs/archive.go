@@ -77,9 +77,31 @@ type Archiver struct {
 
 	mu    sync.Mutex
 	state *archiveState
+
+	// statusMu guards status. It is separate from mu so that Status does
+	// not wait for an upload.
+	statusMu sync.Mutex
+	status   ArchiveStatus
 }
 
-// NewArchiver returns an Archiver for the files of opts.Collector.
+// maxStatusError bounds ArchiveStatus.LastError.
+const maxStatusError = 1000
+
+// ArchiveStatus says how the runs of Archiver.Run are going.
+type ArchiveStatus struct {
+	// LastAttempt is when the last run ended. It is zero until the first
+	// run of this process.
+	LastAttempt time.Time
+	// LastSuccess is when a run last ended without an error. It is kept
+	// across restarts, and zero when no run ever succeeded.
+	LastSuccess time.Time
+	// LastError describes what failed in the last run, and is empty when
+	// that run succeeded. It names keys and files, never log content.
+	LastError string
+}
+
+// NewArchiver returns an Archiver for the files of opts.Collector. It reads
+// the state a previous process left behind.
 func NewArchiver(opts ArchiverOptions) (*Archiver, error) {
 	if opts.Collector == nil || opts.Store == nil {
 		return nil, errors.New("logs: the archiver needs a Collector and a Store")
@@ -88,7 +110,7 @@ func NewArchiver(opts ArchiverOptions) (*Archiver, error) {
 	if hours < 1 || hours > 24 {
 		return nil, fmt.Errorf("logs: archive interval of %d hours is out of range (1 to 24)", hours)
 	}
-	return &Archiver{
+	a := &Archiver{
 		c:             opts.Collector,
 		store:         opts.Store,
 		interval:      time.Duration(hours) * time.Hour,
@@ -98,7 +120,46 @@ func NewArchiver(opts ArchiverOptions) (*Archiver, error) {
 		uploadTimeout: orDefault(opts.UploadTimeout, 5*time.Minute),
 		pollEvery:     orDefault(opts.PollInterval, 30*time.Second),
 		retryEvery:    orDefault(opts.RetryInterval, 10*time.Minute),
-	}, nil
+	}
+	if err := a.loadState(); err != nil {
+		return nil, err
+	}
+	a.status.LastSuccess = a.state.LastSuccess
+	return a, nil
+}
+
+// Status reports the outcome of the runs made by Run. It does not block
+// while a run is in progress.
+func (a *Archiver) Status() ArchiveStatus {
+	a.statusMu.Lock()
+	defer a.statusMu.Unlock()
+	return a.status
+}
+
+// record notes the outcome of a run for Status and keeps the time of a
+// success in the state file.
+func (a *Archiver) record(runErr error) {
+	now := a.c.clk.Now().UTC()
+	a.statusMu.Lock()
+	a.status.LastAttempt = now
+	if runErr == nil {
+		a.status.LastSuccess, a.status.LastError = now, ""
+	} else {
+		a.status.LastError = runErr.Error()
+		if len(a.status.LastError) > maxStatusError {
+			a.status.LastError = strings.ToValidUTF8(a.status.LastError[:maxStatusError], "") + "..."
+		}
+	}
+	a.statusMu.Unlock()
+	if runErr != nil {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.state.LastSuccess = now
+	if err := a.saveState(); err != nil {
+		a.c.log.Warn("cannot save archive state", "error", err)
+	}
 }
 
 // List returns the archived logs of slug, newest first, with hours in the
@@ -173,12 +234,18 @@ func (a *Archiver) runOnce(ctx context.Context, windowEnd time.Time) error {
 	if a.appsDir != "" {
 		err = errors.Join(err, a.ArchiveDeployLogs(ctx))
 	}
+	// Being shut down in the middle of a run is not an outcome.
+	if ctx.Err() == nil {
+		a.record(err)
+	}
 	return err
 }
 
 // archiveState is the content of the state file.
 type archiveState struct {
 	Version int `json:"version"`
+	// LastSuccess is when a run of Run last ended without an error.
+	LastSuccess time.Time `json:"last_success,omitzero"`
 	// Services is keyed by "<slug>/<service>".
 	Services map[string]*serviceState `json:"services"`
 }
