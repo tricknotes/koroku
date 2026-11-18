@@ -73,9 +73,9 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 
 ### M0 骨格
 
-- [ ] リポジトリ構成、`config.toml` 読込、SQLite マイグレーション（埋め込み SQL を起動時に適用）
-- [ ] Ember の空アプリを embed して配信
-- [ ] CI（vet、ユニットテスト、フロントの lint とテスト）
+- [x] リポジトリ構成、`config.toml` 読込、SQLite マイグレーション（埋め込み SQL を起動時に適用）
+- [x] Ember の空アプリを embed して配信
+- [x] CI（vet、ユニットテスト、フロントの lint とテスト）
 - 完了条件: `paasd serve` が起動し、`GET /api/system` が応答する
 
 ### M1 デプロイエンジン
