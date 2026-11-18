@@ -1,0 +1,29 @@
+# paasd configuration. Copy to /etc/paas/config.toml and adjust.
+# Values here are placeholders; do not commit real addresses or secrets.
+
+# Apps are served at <slug>.<base_domain>.
+base_domain = "dev.example.com"
+
+# Hostname of the management UI. Defaults to console.<base_domain>.
+# console_host = "console.dev.example.com"
+
+# paasd listens on loopback only; Caddy terminates TLS in front of it.
+listen = "127.0.0.1:8080"
+
+# SQLite database, releases, env files and logs live here.
+data_dir = "/var/lib/paas"
+
+# Public address of this host. Custom domains must resolve to it.
+public_ip = "203.0.113.10"
+
+# Key used to encrypt environment variable values (32 random bytes, mode 0600).
+master_key_file = "/etc/paas/master.key"
+
+[deploy]
+# Memory limit applied to every service unless the app overrides it.
+default_memory_limit = "512m"
+# New deployments are rejected while the data disk is fuller than this.
+disk_usage_limit_percent = 85
+# Host ports assigned to apps (bound to 127.0.0.1 only).
+port_range_start = 20000
+port_range_end = 20999

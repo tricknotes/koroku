@@ -1,0 +1,13 @@
+# Build output
+/bin/
+
+# Local configuration and data (never commit real config or keys)
+/config.toml
+/data/
+*.pem
+*.key
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
