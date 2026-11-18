@@ -104,6 +104,7 @@ func newEnv(t *testing.T) *env {
 		Clock:    clock.System{},
 		Box:      box,
 		Deployer: engine,
+		Ops:      engine,
 		Refs:     deploy.GitRefResolver{Fetcher: fetcher},
 		// Authentication is covered by the API unit tests.
 		Auth: api.AuthOptions{InsecureNoAuth: true},
@@ -465,6 +466,123 @@ func TestImageOnlyApp(t *testing.T) {
 	log := e.logText(d.ID)
 	if strings.Contains(log, "==> Building images") || !strings.Contains(log, "==> Pulling images") {
 		t.Errorf("an image-only app must pull and not build:\n%s", log)
+	}
+}
+
+// containerStates maps service name to container state for a project.
+func containerStates(t *testing.T, project string) map[string]string {
+	t.Helper()
+	out, err := exec.Command("docker", "ps", "--all",
+		"--filter", "label=com.docker.compose.project="+project,
+		"--format", `{{.Label "com.docker.compose.service"}}|{{.State}}`).Output()
+	if err != nil {
+		t.Fatalf("docker ps: %v", err)
+	}
+	states := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if service, state, ok := strings.Cut(line, "|"); ok {
+			states[service] = state
+		}
+	}
+	return states
+}
+
+func projectVolumes(t *testing.T, project string) []string {
+	t.Helper()
+	out, err := exec.Command("docker", "volume", "ls", "--quiet",
+		"--filter", "label=com.docker.compose.project="+project).Output()
+	if err != nil {
+		t.Fatalf("docker volume ls: %v", err)
+	}
+	return strings.Fields(string(out))
+}
+
+// TestStopStartDelete covers the manual operations of M5 on a real app:
+// stop, start (data survives), the services listing, and deletion with and
+// without volumes.
+func TestStopStartDelete(t *testing.T) {
+	e := newEnv(t)
+	source := newRepo(t, "build-app")
+	sha := source.commit("Version 1")
+	slug := e.slug("ops")
+	project := "paas-" + slug
+	app := e.createApp(slug, source.url())
+
+	if status := e.call(http.MethodPost, "/api/apps/"+slug+"/start", nil, nil); status != http.StatusConflict {
+		t.Errorf("starting an app that was never deployed: status %d, want 409", status)
+	}
+	if d := e.deploy(slug, map[string]string{"sha": sha}); d.Status != "succeeded" {
+		t.Fatalf("deployment %s: %s\n%s", d.Status, d.Error, e.logText(d.ID))
+	}
+
+	var listing struct {
+		Services []struct{ Name, State string } `json:"services"`
+	}
+	e.call(http.MethodGet, "/api/apps/"+slug+"/services", nil, &listing)
+	if len(listing.Services) != 2 || listing.Services[0].Name != "sidecar" || listing.Services[1].Name != "web" ||
+		listing.Services[1].State != "running" {
+		t.Errorf("services = %+v", listing.Services)
+	}
+
+	var state struct {
+		DesiredState string `json:"desired_state"`
+	}
+	if status := e.call(http.MethodPost, "/api/apps/"+slug+"/stop", nil, &state); status != http.StatusOK || state.DesiredState != "stopped" {
+		t.Fatalf("stop: status %d, state %q", status, state.DesiredState)
+	}
+	for service, s := range containerStates(t, project) {
+		if s != "exited" {
+			t.Errorf("after stop, %s is %s", service, s)
+		}
+	}
+	if _, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/", app.HostPort)); err == nil {
+		t.Error("the app still answers after stop")
+	}
+
+	if status := e.call(http.MethodPost, "/api/apps/"+slug+"/start", nil, &state); status != http.StatusOK || state.DesiredState != "running" {
+		t.Fatalf("start: status %d, state %q", status, state.DesiredState)
+	}
+	if got := page(t, app.HostPort); got["version"] != "v1" || got["boots"] != "2" {
+		t.Errorf("page after start = %v (boots=2: same volume, second boot)", got)
+	}
+	if status := e.call(http.MethodPost, "/api/apps/"+slug+"/restart", nil, nil); status != http.StatusOK {
+		t.Errorf("restart: status %d", status)
+	}
+	if got := page(t, app.HostPort); got["boots"] != "3" {
+		t.Errorf("page after restart = %v", got)
+	}
+
+	// Delete without volumes: containers and images go, data stays.
+	if status := e.call(http.MethodDelete, "/api/apps/"+slug, nil, nil); status != http.StatusNoContent {
+		t.Fatalf("delete: status %d", status)
+	}
+	if states := containerStates(t, project); len(states) != 0 {
+		t.Errorf("containers left after delete: %v", states)
+	}
+	if volumes := projectVolumes(t, project); len(volumes) != 1 {
+		t.Errorf("volumes after delete without volumes=true: %v, want the data volume kept", volumes)
+	}
+	if out, _ := exec.Command("docker", "images", "--quiet", "--filter", "reference="+project+"-*").Output(); strings.TrimSpace(string(out)) != "" {
+		t.Errorf("release images left after delete: %s", out)
+	}
+	if status := e.call(http.MethodGet, "/api/apps/"+slug, nil, nil); status != http.StatusNotFound {
+		t.Errorf("deleted app: status %d", status)
+	}
+
+	// The same slug can be created again and picks the kept volume up;
+	// deleting it with volumes=true removes the data too.
+	app = e.createApp(slug, source.url())
+	if d := e.deploy(slug, map[string]string{"sha": sha}); d.Status != "succeeded" {
+		t.Fatalf("redeploy after delete %s: %s\n%s", d.Status, d.Error, e.logText(d.ID))
+	}
+	if got := page(t, app.HostPort); got["boots"] != "4" {
+		t.Errorf("page after recreating the app = %v (boots=4: the kept volume was reused)", got)
+	}
+	if status := e.call(http.MethodDelete, "/api/apps/"+slug+"?volumes=true", nil, nil); status != http.StatusNoContent {
+		t.Fatalf("delete with volumes: status %d", status)
+	}
+	if volumes := projectVolumes(t, project); len(volumes) != 0 {
+		t.Errorf("volumes left after delete with volumes=true: %v", volumes)
 	}
 }
 

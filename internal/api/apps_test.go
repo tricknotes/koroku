@@ -31,6 +31,9 @@ type fakeDeployer struct {
 	enqueueErr error
 	cancelErr  error
 	canceled   []int64
+	opErr      error
+	ops        []string
+	services   []deploy.ServiceStatus
 }
 
 func (f *fakeDeployer) Enqueue(ctx context.Context, app store.App, ref, sha, message string) (store.Deployment, error) {
@@ -52,6 +55,54 @@ func (f *fakeDeployer) Cancel(_ context.Context, id int64) error {
 	}
 	f.canceled = append(f.canceled, id)
 	return nil
+}
+
+// The fake also plays the AppOperator.
+
+func (f *fakeDeployer) record(op string, app store.App) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ops = append(f.ops, op+":"+app.Slug)
+	return f.opErr
+}
+
+func (f *fakeDeployer) Start(ctx context.Context, app store.App) error {
+	if err := f.record("start", app); err != nil {
+		return err
+	}
+	return f.store.SetAppDesiredState(ctx, app.ID, store.DesiredRunning, time.Now())
+}
+
+func (f *fakeDeployer) Stop(ctx context.Context, app store.App) error {
+	if err := f.record("stop", app); err != nil {
+		return err
+	}
+	return f.store.SetAppDesiredState(ctx, app.ID, store.DesiredStopped, time.Now())
+}
+
+func (f *fakeDeployer) Restart(_ context.Context, app store.App) error {
+	return f.record("restart", app)
+}
+
+func (f *fakeDeployer) Delete(ctx context.Context, app store.App, removeVolumes bool) error {
+	if err := f.record(fmt.Sprintf("delete(volumes=%v)", removeVolumes), app); err != nil {
+		return err
+	}
+	return f.store.DeleteApp(ctx, app.ID)
+}
+
+func (f *fakeDeployer) Services(_ context.Context, app store.App) ([]deploy.ServiceStatus, error) {
+	if err := f.record("services", app); err != nil {
+		return nil, err
+	}
+	return f.services, nil
+}
+
+func (f *fakeDeployer) Prune(_ context.Context, images, builder bool) (deploy.PruneResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ops = append(f.ops, fmt.Sprintf("prune(images=%v,builder=%v)", images, builder))
+	return deploy.PruneResult{Output: "Total reclaimed space: 12MB"}, f.opErr
 }
 
 func (f *fakeDeployer) LogPath(slug string, id int64) string {

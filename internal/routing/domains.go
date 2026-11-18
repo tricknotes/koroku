@@ -82,7 +82,8 @@ func (c *DomainChecker) CheckPending(ctx context.Context) {
 }
 
 // Run re-verifies pending domains every interval until ctx is canceled. Each
-// round also syncs the proxy, which repairs it after Caddy was unreachable.
+// round also reloads the proxy configuration, which repairs it after Caddy
+// was unreachable or restarted.
 func (c *DomainChecker) Run(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = RecheckInterval
@@ -95,8 +96,24 @@ func (c *DomainChecker) Run(ctx context.Context, interval time.Duration) {
 			return
 		case <-ticker.C:
 			c.CheckPending(ctx)
-			c.sync(ctx)
+			c.resync(ctx)
 		}
+	}
+}
+
+// resync loads the configuration even when paasd believes it is current.
+// Caddy forgets what was loaded when it restarts on its own; an identical
+// load is a no-op on Caddy's side, so repeating it is free and repairs that.
+func (c *DomainChecker) resync(ctx context.Context) {
+	forcer, ok := c.Router.(interface {
+		ForceSync(ctx context.Context) error
+	})
+	if !ok {
+		c.sync(ctx)
+		return
+	}
+	if err := forcer.ForceSync(ctx); err != nil {
+		c.logger().Error("reloading routes failed", "error", err)
 	}
 }
 

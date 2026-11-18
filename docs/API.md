@@ -52,7 +52,7 @@
 
 `disk`、`memory` は取得できなければ `null`、`docker_version` は空文字。
 
-`POST /api/system/prune`（M5）: ボディ `{"images": true, "builder": true}`（省略時は両方）。200 で `{"output": "..."}`（コマンド出力の要約）。
+`POST /api/system/prune`（M5）: ボディ `{"images": true, "builder": true}`（省略時は両方）。200 で `{"output": "..."}`（コマンド出力の要約）。 コマンドが失敗したら `500 prune_failed`（`details.output` にそこまでの出力）。
 
 ## アプリ（M1、起動制御と削除は M5）
 
@@ -86,7 +86,7 @@
 - `current_deployment` は稼働中の（最後に成功した）デプロイ、`latest_deployment` は最新のデプロイ。どちらも「デプロイ」の形か `null`。
 - `compose_path` が空なら自動検出（`compose.yaml`、`compose.yml`、`docker-compose.yml`、`docker-compose.yaml` の順）。
 - `memory_limit` が空なら基盤の既定値。書式は数字 + 単位 `b` `k` `m` `g`（例 `512m`）。
-- M5 で次のフィールドが加わる: `backup_exclude_volumes`（文字列の配列）、`dump_hook_service`、`dump_hook_command`、`backup_before_deploy`（真偽値）。
+- バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。
 
 | メソッドとパス | 内容 |
 | --- | --- |
@@ -95,7 +95,7 @@
 | `GET /api/apps/{slug}` | アプリ |
 | `PATCH /api/apps/{slug}` | 送ったフィールドだけ更新。200 でアプリ |
 | `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204 |
-| `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed` |
+| `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ） |
 | `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字 |
 
 ## 環境変数（M1）

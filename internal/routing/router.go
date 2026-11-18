@@ -112,8 +112,10 @@ func (r *Router) sync(ctx context.Context, force bool) error {
 		r.loaded = false
 		return fmt.Errorf("load caddy config: %w", err)
 	}
+	changed := !r.loaded || sum != r.last
 	r.loaded, r.last = true, sum
-	if r.Logger != nil {
+	if r.Logger != nil && changed {
+		// Periodic reloads of an unchanged configuration stay quiet.
 		r.Logger.Info("caddy configuration loaded", "bytes", len(config))
 	}
 	return nil
