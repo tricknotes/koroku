@@ -3,42 +3,41 @@ import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { eq, fn } from '@ember/helper';
-import { registerDestructor } from '@ember/destroyable';
 import type Owner from '@ember/owner';
-import Badge from 'paas-console/components/badge';
 import AsyncView from 'paas-console/components/async-view';
+import Badge from 'paas-console/components/badge';
+import Banner from 'paas-console/components/banner';
+import Button from 'paas-console/components/button';
 import ConfirmDialog from 'paas-console/components/confirm-dialog';
+import DeploymentDetail from 'paas-console/components/deployment-detail';
 import ErrorMessage from 'paas-console/components/error-message';
-import LogView from 'paas-console/components/log-view';
+import FormField from 'paas-console/components/form-field';
+import Icon from 'paas-console/components/icon';
 import RelativeTime from 'paas-console/components/relative-time';
+import RowList from 'paas-console/components/row-list';
+import StatusIndicator from 'paas-console/components/status-indicator';
 import type ApiService from 'paas-console/services/api';
-import type EventSourceService from 'paas-console/services/event-source';
-import type { Stream } from 'paas-console/services/event-source';
 import type PollerService from 'paas-console/services/poller';
 import type AppContext from 'paas-console/utils/app-context';
 import { inputValue, preventDefault, setValue } from 'paas-console/utils/dom';
 import {
   firstLine,
   formatDuration,
+  hostOf,
   isFullSha,
   shortSha,
 } from 'paas-console/utils/format';
-import LineBuffer from 'paas-console/utils/line-buffer';
 import Loadable from 'paas-console/utils/loadable';
 import {
+  DEPLOYMENT_STATUS_KINDS,
   DEPLOYMENT_STATUS_LABELS,
-  DEPLOYMENT_STATUS_TONES,
   isActiveDeployment,
 } from 'paas-console/utils/status';
-import type {
-  App,
-  Branch,
-  Commit,
-  Deployment,
-  DeploymentStatus,
-} from 'paas-console/utils/types';
+import type { App, Branch, Commit, Deployment } from 'paas-console/utils/types';
 
 const POLL_INTERVAL = 3000;
+
+const SKELETON_ROWS = [1, 2, 3];
 
 interface DeployTarget {
   ref?: string;
@@ -47,18 +46,38 @@ interface DeployTarget {
   label: string;
 }
 
-type StreamState = 'idle' | 'streaming' | 'ended' | 'failed';
-
-function statusLabel(status: DeploymentStatus): string {
-  return DEPLOYMENT_STATUS_LABELS[status] ?? status;
+function statusKind(deployment: Deployment) {
+  return DEPLOYMENT_STATUS_KINDS[deployment.status] ?? 'stopped';
 }
 
-function statusTone(status: DeploymentStatus) {
-  return DEPLOYMENT_STATUS_TONES[status] ?? 'muted';
+function statusLabel(deployment: Deployment): string {
+  return DEPLOYMENT_STATUS_LABELS[deployment.status] ?? deployment.status;
+}
+
+/** A successful deployment is the normal case and stays in the background. */
+function isUneventful(deployment: Deployment): boolean {
+  return deployment.status === 'succeeded';
 }
 
 function commitLabel(commit: Commit): string {
   return `${shortSha(commit.sha)} ${firstLine(commit.message)}（${commit.author}）`;
+}
+
+/** What a history row is called: its commit message, or its number. */
+function rowTitle(deployment: Deployment): string {
+  return firstLine(deployment.commit_message) || `デプロイ #${deployment.id}`;
+}
+
+function startedAt(deployment: Deployment): string | null {
+  return deployment.started_at ?? deployment.queued_at;
+}
+
+function duration(deployment: Deployment): string {
+  return formatDuration(deployment.started_at, deployment.finished_at);
+}
+
+function detailId(deployment: Deployment): string {
+  return `deployment-${deployment.id}-detail`;
 }
 
 interface Signature {
@@ -67,7 +86,6 @@ interface Signature {
 
 export default class AppDeployTemplate extends Component<Signature> {
   @service declare api: ApiService;
-  @service('event-source') declare eventSource: EventSourceService;
   @service declare poller: PollerService;
 
   branches = new Loadable<Branch[]>(() =>
@@ -79,7 +97,6 @@ export default class AppDeployTemplate extends Component<Signature> {
   history = new Loadable<Deployment[]>(() =>
     this.api.listDeployments(this.app.slug),
   );
-  log = new LineBuffer(20000);
 
   @tracked branch: string;
   /** Empty means "the head of the branch". */
@@ -91,10 +108,8 @@ export default class AppDeployTemplate extends Component<Signature> {
   @tracked canceling: number | null = null;
   @tracked error: unknown = null;
 
+  /** The deployment whose steps are open below its row. */
   @tracked selectedId: number | null = null;
-  @tracked streamState: StreamState = 'idle';
-
-  private stream: Stream | null = null;
 
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
@@ -107,11 +122,7 @@ export default class AppDeployTemplate extends Component<Signature> {
       void this.commits.load();
     }
 
-    this.poller.every(this, POLL_INTERVAL, () => this.refreshWhileActive());
-    registerDestructor(this, () => {
-      this.closeStream();
-      this.log.stop();
-    });
+    this.poller.every(this, POLL_INTERVAL, () => this.poll());
   }
 
   get app(): App {
@@ -132,55 +143,80 @@ export default class AppDeployTemplate extends Component<Signature> {
     return names.includes(this.branch) ? names : [this.branch, ...names];
   }
 
+  /** The commit the form would deploy, once the list for the branch is in. */
+  get targetCommit(): Commit | null {
+    if (this.manual || this.commits.loading) return null;
+    const commits = this.commits.value ?? [];
+    if (!this.sha) return commits[0] ?? null;
+    return commits.find((commit) => commit.sha === this.sha) ?? null;
+  }
+
+  get targetIsRunning(): boolean {
+    const current = this.app.current_deployment;
+    return current !== null && current.commit_sha === this.targetCommit?.sha;
+  }
+
   get deployments(): Deployment[] {
     return this.history.value ?? [];
   }
 
-  get selected(): Deployment | null {
-    return this.deployments.find((d) => d.id === this.selectedId) ?? null;
+  /** Loaded, and nothing was ever deployed: the form is the one next step. */
+  get isEmpty(): boolean {
+    return this.history.loaded && this.deployments.length === 0;
   }
 
   get hasActive(): boolean {
     return this.deployments.some((d) => isActiveDeployment(d));
   }
 
-  get streamStatus(): string {
-    switch (this.streamState) {
-      case 'streaming':
-        return 'ログを受信中…';
-      case 'ended':
-        return 'ログの終わりです。';
-      case 'failed':
-        return 'ログに接続できませんでした。';
-      default:
-        return '';
-    }
+  /**
+   * The header noticed a deployment this list has not seen yet (started in
+   * another window, or finished since the last look).
+   */
+  get behindApp(): boolean {
+    const latest = this.app.latest_deployment;
+    const head = this.deployments[0];
+    if (!latest || !this.history.loaded) return false;
+    return head?.id !== latest.id || head.status !== latest.status;
   }
 
-  get logTextUrl(): string {
-    return this.selectedId === null
-      ? ''
-      : `${this.api.deploymentLogsUrl(this.selectedId)}?format=text`;
+  get appHost(): string {
+    return hostOf(this.app.primary_url || this.app.url);
   }
+
+  /** The release that is serving right now. */
+  isLive = (deployment: Deployment): boolean =>
+    this.app.desired_state === 'running' &&
+    this.app.current_deployment?.id === deployment.id;
+
+  isSelected = (deployment: Deployment): boolean =>
+    this.selectedId === deployment.id;
 
   private async loadHistory(): Promise<void> {
     await this.history.load();
-    // Follow a deployment that is already in progress.
-    const active = this.deployments.find((d) => isActiveDeployment(d));
-    if (active && this.selectedId === null) this.select(active.id);
+    // Open what most likely brought the reader here: a deployment that is
+    // in progress, or the latest one when it failed.
+    const head = this.deployments[0];
+    if (
+      this.selectedId === null &&
+      head &&
+      (isActiveDeployment(head) || head.status === 'failed')
+    ) {
+      this.selectedId = head.id;
+    }
   }
 
-  /** Refreshes the history while something is queued or running. */
-  async refreshWhileActive(): Promise<void> {
-    if (!this.hasActive) return;
+  /** Keeps the history current while something is queued or running. */
+  async poll(): Promise<void> {
+    if (!this.hasActive && !this.behindApp) return;
     await this.refresh();
   }
 
-  private async refresh(): Promise<void> {
+  refresh = async (): Promise<void> => {
     const wasActive = this.hasActive;
     await this.history.load({ quiet: true });
     if (wasActive && !this.hasActive) await this.args.model.reload();
-  }
+  };
 
   selectBranch = (event: Event) => {
     this.branch = inputValue(event);
@@ -246,7 +282,7 @@ export default class AppDeployTemplate extends Component<Signature> {
       if (target.sha) body.sha = target.sha;
       const deployment = await this.api.createDeployment(this.app.slug, body);
       await this.history.load({ quiet: true });
-      this.select(deployment.id);
+      this.selectedId = deployment.id;
       await this.args.model.reload();
     } catch (error) {
       this.error = error;
@@ -268,227 +304,290 @@ export default class AppDeployTemplate extends Component<Signature> {
     await this.refresh();
   };
 
-  /** Shows the log of one deployment and follows it until it ends. */
-  select = (id: number) => {
-    this.closeStream();
-    this.log.clear();
-    this.selectedId = id;
-    this.streamState = 'streaming';
-    this.stream = this.eventSource.open(this.api.deploymentLogsUrl(id), {
-      message: (line) => this.log.push(line),
-      end: () => {
-        // The server is done; without close() EventSource would reconnect.
-        this.closeStream();
-        this.log.flush();
-        this.streamState = 'ended';
-        void this.refresh();
-      },
-      error: (closed) => {
-        if (!closed) return;
-        this.closeStream();
-        this.streamState = 'failed';
-      },
-    });
+  /** Opens the steps of a deployment, or closes them again. */
+  toggle = (deployment: Deployment) => {
+    this.selectedId = this.isSelected(deployment) ? null : deployment.id;
   };
 
-  private closeStream(): void {
-    this.stream?.close();
-    this.stream = null;
-  }
-
   <template>
-    <section class="card" aria-labelledby="deploy-title">
-      <h3 id="deploy-title">デプロイする</h3>
+    <section
+      class="deploy-form-section"
+      aria-labelledby="deploy-title"
+      data-test-deploy-panel
+    >
+      {{#if this.isEmpty}}
+        <div class="deploy-intro" data-test-no-deployments>
+          <h2 id="deploy-title">まだデプロイしていません</h2>
+          <p>
+            ブランチを選んでデプロイすると、<span
+              class="deploy-host"
+            >{{this.appHost}}</span>
+            で公開されます。
+          </p>
+        </div>
+      {{else}}
+        <h2 id="deploy-title" class="visually-hidden">デプロイする</h2>
+      {{/if}}
 
       <form
-        class="form"
+        class="deploy-form"
         data-test-deploy-form
         {{on "submit" (preventDefault this.submit)}}
       >
         {{#if this.manual}}
-          <label class="field" for="deploy-ref">
-            <span class="field-label">ブランチ / タグ / コミット SHA</span>
+          <FormField
+            class="deploy-field-ref"
+            @label="ブランチ / タグ / コミット SHA"
+            @hint="ブランチとコミットの一覧を取得できないため、直接入力します。40 桁の SHA はそのコミットをデプロイします。"
+            as |field|
+          >
             <input
-              id="deploy-ref"
+              id={{field.id}}
               type="text"
+              class="mono"
               spellcheck="false"
+              autocomplete="off"
+              aria-describedby={{field.describedBy}}
               value={{this.manualRef}}
+              data-deploy-focus
               data-test-deploy-ref
               {{on "input" (setValue this "manualRef")}}
             />
-            <span
-              class="field-hint"
-            >ブランチとコミットの一覧を取得できないため、直接入力します。40 桁の
-              SHA はそのコミットをデプロイします。</span>
-          </label>
+          </FormField>
         {{else}}
-          <div class="field-row">
-            <label class="field" for="deploy-branch">
-              <span class="field-label">ブランチ</span>
-              <select
-                id="deploy-branch"
-                data-test-deploy-branch
-                {{on "change" this.selectBranch}}
-              >
-                {{#each this.branchNames as |name|}}
-                  <option value={{name}} selected={{eq name this.branch}}>
-                    {{name}}
-                  </option>
-                {{/each}}
-              </select>
-            </label>
-
-            <label class="field field-grow" for="deploy-commit">
-              <span class="field-label">コミット</span>
-              <select
-                id="deploy-commit"
-                data-test-deploy-commit
-                {{on "change" (setValue this "sha")}}
-              >
-                <option value="" selected={{eq this.sha ""}}>
-                  ブランチの先頭
+          <FormField class="deploy-field-branch" @label="ブランチ" as |field|>
+            <select
+              id={{field.id}}
+              data-deploy-focus
+              data-test-deploy-branch
+              {{on "change" this.selectBranch}}
+            >
+              {{#each this.branchNames as |name|}}
+                <option value={{name}} selected={{eq name this.branch}}>
+                  {{name}}
                 </option>
-                {{#each this.commits.value key="sha" as |commit|}}
-                  <option
-                    value={{commit.sha}}
-                    selected={{eq commit.sha this.sha}}
-                  >{{commitLabel commit}}</option>
-                {{/each}}
-              </select>
-              {{#if this.commits.error}}
-                <span
-                  class="field-hint"
-                >コミット一覧を取得できませんでした。{{this.commits.errorMessage}}</span>
-              {{/if}}
-            </label>
-          </div>
+              {{/each}}
+            </select>
+          </FormField>
+
+          <FormField class="deploy-field-commit" @label="コミット" as |field|>
+            <select
+              id={{field.id}}
+              data-test-deploy-commit
+              {{on "change" (setValue this "sha")}}
+            >
+              <option value="" selected={{eq this.sha ""}}>
+                ブランチの先頭
+              </option>
+              {{#each this.commits.value key="sha" as |commit|}}
+                <option
+                  value={{commit.sha}}
+                  selected={{eq commit.sha this.sha}}
+                >
+                  {{commitLabel commit}}
+                </option>
+              {{/each}}
+            </select>
+          </FormField>
         {{/if}}
 
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="button button-primary"
-            disabled={{this.deploying}}
-            data-test-deploy-submit
-          >{{if this.deploying "開始中…" "デプロイ"}}</button>
+        <Button
+          @type="submit"
+          @variant="primary"
+          @busy={{this.deploying}}
+          @busyLabel="開始中…"
+          class="deploy-submit"
+          data-test-deploy-submit
+        >デプロイ</Button>
+
+        <div class="deploy-form-notes">
+          {{#if this.commits.error}}
+            <p data-test-commits-error>
+              コミット一覧を取得できませんでした。{{this.commits.errorMessage}}
+            </p>
+          {{else if this.targetCommit}}
+            <p class="deploy-target" data-test-deploy-target>
+              <span class="deploy-target-label">デプロイ対象</span>
+              <span class="deploy-sha" title={{this.targetCommit.sha}}>
+                {{shortSha this.targetCommit.sha}}
+              </span>
+              <span class="deploy-target-message">
+                {{firstLine this.targetCommit.message}}
+              </span>
+              <span class="deploy-target-meta">
+                {{this.targetCommit.author}}
+                <span class="deploy-target-dot" aria-hidden="true">·</span>
+                <RelativeTime @time={{this.targetCommit.date}} />
+              </span>
+              {{#if this.targetIsRunning}}
+                <span
+                  class="deploy-target-meta"
+                  data-test-target-running
+                >（稼働中のコミットと同じです）</span>
+              {{/if}}
+            </p>
+          {{/if}}
           {{#if @model.isProduction}}
-            <span class="muted">本番アプリのため、開始前に確認します。</span>
+            <p data-test-production-hint>
+              本番アプリのため、開始前に確認します。
+            </p>
           {{/if}}
         </div>
       </form>
 
-      <div aria-live="polite">
+      <div class="deploy-form-error" aria-live="polite">
         <ErrorMessage @error={{this.error}} @showDetails={{true}} />
       </div>
     </section>
 
-    {{#if this.selectedId}}
-      <section class="card" aria-labelledby="deploy-log-title" data-test-log>
-        <div class="card-header">
-          <h3 id="deploy-log-title">デプロイ #{{this.selectedId}} のログ</h3>
-          {{#if this.selected}}
-            <Badge
-              @tone={{statusTone this.selected.status}}
-              data-test-log-status
-            >{{statusLabel this.selected.status}}</Badge>
-          {{/if}}
-          <span class="muted" aria-live="polite" data-test-stream-state>
-            {{this.streamStatus}}
-          </span>
-          <a
-            class="card-header-end"
-            href={{this.logTextUrl}}
-            target="_blank"
-            rel="noopener noreferrer"
-          >全文を開く</a>
-        </div>
-        {{#if this.selected.error}}
-          <p class="alert alert-danger" data-test-deployment-error>
-            {{this.selected.error}}
-          </p>
-        {{/if}}
-        <LogView
-          @text={{this.log.text}}
-          @label="デプロイログ"
-          data-test-log-text
-        />
-      </section>
-    {{/if}}
+    {{#unless this.isEmpty}}
+      <section class="deploy-history" aria-labelledby="history-title">
+        <h2 id="history-title">履歴</h2>
 
-    <section class="card" aria-labelledby="history-title">
-      <h3 id="history-title">履歴</h3>
-      <AsyncView @data={{this.history}} as |deployments|>
-        {{#if deployments.length}}
-          <ul class="deploy-list">
-            {{#each deployments key="id" as |deployment|}}
-              <li
-                class="deploy-row
-                  {{if (eq deployment.id this.selectedId) 'is-selected'}}"
-                data-test-deployment={{deployment.id}}
-              >
-                <div class="deploy-row-main">
-                  <Badge
-                    @tone={{statusTone deployment.status}}
-                    data-test-deployment-status
-                  >{{statusLabel deployment.status}}</Badge>
-                  <span class="muted">#{{deployment.id}}</span>
-                  <code title={{deployment.commit_sha}}>
-                    {{shortSha deployment.commit_sha}}
-                  </code>
-                  <span class="deployment-message">
-                    {{firstLine deployment.commit_message}}
-                  </span>
-                </div>
-                <div class="deploy-row-meta muted">
-                  {{#if deployment.ref}}<span>{{deployment.ref}}</span>{{/if}}
-                  <RelativeTime @time={{deployment.queued_at}} />
-                  {{#if deployment.finished_at}}
-                    <span>所要
-                      {{formatDuration
-                        deployment.started_at
-                        deployment.finished_at
-                      }}</span>
-                  {{/if}}
-                </div>
-                {{#if deployment.error}}
-                  <p class="deploy-row-error">{{deployment.error}}</p>
-                {{/if}}
-                <div class="button-row">
-                  <button
-                    type="button"
-                    class="button button-small"
-                    data-test-show-log
-                    {{on "click" (fn this.select deployment.id)}}
-                  >ログ</button>
-                  {{#if (isActiveDeployment deployment)}}
-                    <button
-                      type="button"
-                      class="button button-small button-danger"
-                      disabled={{eq this.canceling deployment.id}}
-                      data-test-cancel
-                      {{on "click" (fn this.cancel deployment)}}
-                    >キャンセル</button>
-                  {{else if deployment.commit_sha}}
-                    <button
-                      type="button"
-                      class="button button-small"
-                      disabled={{this.deploying}}
-                      data-test-redeploy
-                      {{on "click" (fn this.redeploy deployment)}}
-                    >このコミットを再デプロイ</button>
-                  {{/if}}
-                </div>
-              </li>
-            {{/each}}
-          </ul>
-        {{else}}
-          <p
-            class="muted"
-            data-test-no-deployments
-          >まだデプロイしていません。</p>
+        {{#if this.history.stale}}
+          <Banner @tone="warning" data-test-stale>
+            最新の状態を取得できていません。表示は最後に取得できた内容です。
+          </Banner>
         {{/if}}
-      </AsyncView>
-    </section>
+
+        <AsyncView
+          @data={{this.history}}
+          @errorTitle="デプロイの履歴を取得できませんでした"
+        >
+          <:loading>
+            <div
+              class="row-list deploy-rows"
+              role="status"
+              aria-label="読み込み中"
+              data-test-loading
+            >
+              {{#each SKELETON_ROWS as |n|}}
+                <div class="row" aria-hidden="true" data-skeleton={{n}}>
+                  <div><span class="skeleton skeleton-fixed"></span></div>
+                  <div><span class="skeleton skeleton-wide"></span></div>
+                  <div><span class="skeleton skeleton-fixed"></span></div>
+                  <div><span class="skeleton skeleton-fixed"></span></div>
+                </div>
+              {{/each}}
+            </div>
+          </:loading>
+
+          <:default as |deployments|>
+            <RowList class="deploy-rows" @label="デプロイの履歴">
+              <:header>
+                <span>状態</span>
+                <span>コミット</span>
+                <span>所要時間</span>
+                <span>開始</span>
+              </:header>
+              <:rows>
+                {{#each deployments key="id" as |deployment|}}
+                  <li
+                    class="deploy-item
+                      {{if (this.isSelected deployment) 'is-open'}}"
+                    data-test-deployment={{deployment.id}}
+                  >
+                    <div class="row deploy-row">
+                      <div class="deploy-cell-state">
+                        <StatusIndicator
+                          @kind={{statusKind deployment}}
+                          @label={{statusLabel deployment}}
+                          @quiet={{isUneventful deployment}}
+                          data-test-deployment-status
+                        />
+                        {{#if (this.isLive deployment)}}
+                          <Badge
+                            @tone="ok"
+                            title="いま応答しているリリースです"
+                            data-test-live
+                          >Live</Badge>
+                        {{/if}}
+                      </div>
+
+                      <div class="deploy-cell-commit">
+                        <button
+                          type="button"
+                          class="row-link deploy-toggle"
+                          aria-expanded={{if
+                            (this.isSelected deployment)
+                            "true"
+                            "false"
+                          }}
+                          aria-controls={{detailId deployment}}
+                          data-test-show-log
+                          {{on "click" (fn this.toggle deployment)}}
+                        >{{rowTitle deployment}}</button>
+                        <span class="deploy-meta">
+                          <span
+                            class="deploy-sha"
+                            title={{deployment.commit_sha}}
+                          >{{shortSha deployment.commit_sha}}</span>
+                          {{#if deployment.ref}}
+                            <span>{{deployment.ref}}</span>
+                          {{/if}}
+                        </span>
+                        {{#if deployment.error}}
+                          <span class="deploy-row-error" data-test-row-error>
+                            {{deployment.error}}
+                          </span>
+                        {{/if}}
+                      </div>
+
+                      <div class="deploy-cell-duration">
+                        {{#if (duration deployment)}}
+                          <span class="deploy-cell-label">所要</span>
+                          <span data-test-duration>
+                            {{duration deployment}}
+                          </span>
+                        {{/if}}
+                      </div>
+
+                      <div class="deploy-cell-started">
+                        <span class="visually-hidden">開始</span>
+                        <RelativeTime
+                          @time={{startedAt deployment}}
+                          data-test-started
+                        />
+                      </div>
+
+                      <div class="deploy-cell-actions">
+                        {{#if (isActiveDeployment deployment)}}
+                          <Button
+                            @size="small"
+                            @disabled={{eq this.canceling deployment.id}}
+                            class="row-action"
+                            data-test-cancel
+                            {{on "click" (fn this.cancel deployment)}}
+                          >キャンセル</Button>
+                        {{else if deployment.commit_sha}}
+                          <Button
+                            @size="small"
+                            @variant="ghost"
+                            @disabled={{this.deploying}}
+                            class="row-action"
+                            data-test-redeploy
+                            {{on "click" (fn this.redeploy deployment)}}
+                          >このコミットを再デプロイ</Button>
+                        {{/if}}
+                        <Icon @name="chevron-down" class="deploy-chevron" />
+                      </div>
+                    </div>
+
+                    {{#if (this.isSelected deployment)}}
+                      <DeploymentDetail
+                        id={{detailId deployment}}
+                        @deployment={{deployment}}
+                        @onLogEnd={{this.refresh}}
+                      />
+                    {{/if}}
+                  </li>
+                {{/each}}
+              </:rows>
+            </RowList>
+          </:default>
+        </AsyncView>
+      </section>
+    {{/unless}}
 
     {{#if this.pending}}
       <ConfirmDialog
@@ -504,7 +603,6 @@ export default class AppDeployTemplate extends Component<Signature> {
           <strong data-test-dialog-target>{{this.pending.label}}</strong>
           をデプロイします。</p>
         <p
-          class="muted"
         >コンテナの入れ替えで数秒の断があります。起動に失敗した場合は直前の成功リリースに戻ります。</p>
       </ConfirmDialog>
     {{/if}}

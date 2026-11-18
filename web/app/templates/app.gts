@@ -1,110 +1,256 @@
-import type { TOC } from '@ember/component/template-only';
+import Component from '@glimmer/component';
+import { service } from '@ember/service';
 import { array } from '@ember/helper';
+import { on } from '@ember/modifier';
 import { LinkTo } from '@ember/routing';
+import type RouterService from '@ember/routing/router-service';
+import { schedule } from '@ember/runloop';
+import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
-import Badge from 'paas-console/components/badge';
+import Banner from 'paas-console/components/banner';
+import { buttonClass } from 'paas-console/components/button';
+import EnvironmentBadge from 'paas-console/components/environment-badge';
+import Icon from 'paas-console/components/icon';
+import StatusIndicator from 'paas-console/components/status-indicator';
 import Tabs from 'paas-console/components/tabs';
+import scrollActiveIntoView from 'paas-console/modifiers/scroll-active-into-view';
+import type ApiService from 'paas-console/services/api';
+import type PollerService from 'paas-console/services/poller';
 import type AppContext from 'paas-console/utils/app-context';
 import { errorMessage } from 'paas-console/utils/errors';
+import { hostOf } from 'paas-console/utils/format';
 import {
+  APP_STATE_HINTS,
+  APP_STATE_KINDS,
   APP_STATE_LABELS,
-  APP_STATE_TONES,
-  ENVIRONMENT_LABELS,
   deriveAppState,
 } from 'paas-console/utils/status';
 import type { App } from 'paas-console/utils/types';
+
+/** How often the header re-reads the app while a detail page is open. */
+const POLL_INTERVAL = 5000;
+
+/**
+ * Tabs that take the whole window instead of the centred column: the layout
+ * gets the class `app-detail-full` on these routes (see app-detail.css).
+ */
+const FULL_SIZE_ROUTES = new Set(['app.logs']);
+
+const DEPLOY_ROUTE = 'app.deploy';
+
+function stateKind(app: App) {
+  return APP_STATE_KINDS[deriveAppState(app)];
+}
 
 function stateLabel(app: App): string {
   return APP_STATE_LABELS[deriveAppState(app)];
 }
 
-function stateTone(app: App) {
-  return APP_STATE_TONES[deriveAppState(app)];
+function stateHint(app: App): string {
+  return APP_STATE_HINTS[deriveAppState(app)];
 }
 
-function environmentLabel(app: App): string {
-  return ENVIRONMENT_LABELS[app.environment] ?? app.environment;
+/** Where the header link leads: the primary domain, or the assigned one. */
+function openUrl(app: App): string {
+  return app.primary_url || app.url;
 }
 
-const AppTemplate: TOC<{
+interface Signature {
   Args: { model: AppContext };
-}> = <template>
-  {{pageTitle @model.slug}}
+}
 
-  {{#if @model.loaded}}
-    <div class="page-header">
-      <div class="app-title">
-        <h2 data-test-app-title>{{@model.app.slug}}</h2>
-        <Badge
-          class="badge-env-{{@model.app.environment}}"
-          data-test-app-environment
-        >{{environmentLabel @model.app}}</Badge>
-        <Badge @tone={{stateTone @model.app}} data-test-app-state>
-          {{stateLabel @model.app}}
-        </Badge>
+/**
+ * App detail: a header that every tab shares (name, environment, state,
+ * primary URL and the way to the deploy form) above the tabs. The state is
+ * re-read while the page is open, so it never needs a reload.
+ */
+export default class AppTemplate extends Component<Signature> {
+  @service declare api: ApiService;
+  @service declare poller: PollerService;
+  @service declare router: RouterService;
+
+  constructor(owner: Owner, args: Signature['Args']) {
+    super(owner, args);
+    this.poller.every(this, POLL_INTERVAL, () => this.refresh());
+  }
+
+  get isFullSize(): boolean {
+    return FULL_SIZE_ROUTES.has(this.router.currentRouteName ?? '');
+  }
+
+  get onDeployTab(): boolean {
+    return this.router.currentRouteName === DEPLOY_ROUTE;
+  }
+
+  get deployUrl(): string {
+    return this.router.urlFor(DEPLOY_ROUTE, this.args.model.slug);
+  }
+
+  /** The deploy tab has the form's own button as its main action. */
+  get deployButtonClass(): string {
+    return buttonClass(this.onDeployTab ? 'default' : 'primary');
+  }
+
+  /**
+   * Picks up changes made elsewhere (a deployment finishing, a domain being
+   * verified). The context is only replaced when something differs, so the
+   * tabs are not re-rendered every few seconds for nothing.
+   */
+  async refresh(): Promise<void> {
+    const context = this.args.model;
+    if (!context.loaded) return;
+    let app: App;
+    try {
+      app = await this.api.getApp(context.slug);
+    } catch {
+      // What is on screen stays; the next tick tries again.
+      return;
+    }
+    if (this.args.model !== context) return;
+    if (JSON.stringify(app) !== JSON.stringify(context.app)) context.set(app);
+  }
+
+  /** Opens the deploy tab and puts the focus on what to deploy. */
+  openDeploy = (event: MouseEvent) => {
+    // Leave "open in a new tab" and the like to the browser.
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    void this.focusDeployForm();
+  };
+
+  private async focusDeployForm(): Promise<void> {
+    await this.router.transitionTo(DEPLOY_ROUTE, this.args.model.slug);
+    // After the tab has rendered. A run loop queue, so tests wait for it.
+    // eslint-disable-next-line ember/no-runloop
+    schedule('afterRender', () => {
+      const control = document.querySelector<HTMLElement>(
+        '[data-deploy-focus]',
+      );
+      control?.focus();
+      control?.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  <template>
+    {{pageTitle @model.slug}}
+
+    {{#if @model.loaded}}
+      <div
+        class="app-detail {{if this.isFullSize 'app-detail-full'}}"
+        data-test-app-detail
+      >
+        <header class="app-header">
+          <div class="app-header-main">
+            <div class="app-header-title">
+              <h1 data-test-app-title>{{@model.app.slug}}</h1>
+              <EnvironmentBadge
+                @environment={{@model.app.environment}}
+                data-test-app-environment
+              />
+            </div>
+            <div class="app-header-meta">
+              <StatusIndicator
+                @kind={{stateKind @model.app}}
+                @label={{stateLabel @model.app}}
+                title={{stateHint @model.app}}
+                data-test-app-state
+              />
+              {{#if (openUrl @model.app)}}
+                <a
+                  class="app-header-url"
+                  href={{openUrl @model.app}}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="{{hostOf
+                    (openUrl @model.app)
+                  }} を新しいタブで開く"
+                  data-test-app-url
+                ><span>{{hostOf (openUrl @model.app)}}</span><Icon
+                    @name="external"
+                  /></a>
+              {{/if}}
+            </div>
+          </div>
+          <a
+            class={{this.deployButtonClass}}
+            href={{this.deployUrl}}
+            data-test-header-deploy
+            {{on "click" this.openDeploy}}
+          >デプロイ</a>
+        </header>
+
+        <Tabs
+          @label="アプリのメニュー"
+          class="app-tabs"
+          {{scrollActiveIntoView this.router.currentRouteName}}
+          as |tabs|
+        >
+          <tabs.Tab
+            @route="app.index"
+            @model={{@model.slug}}
+            data-test-tab="index"
+          >概要</tabs.Tab>
+          <tabs.Tab
+            @route="app.deploy"
+            @model={{@model.slug}}
+            data-test-tab="deploy"
+          >デプロイ</tabs.Tab>
+          <tabs.Tab
+            @route="app.logs"
+            @model={{@model.slug}}
+            data-test-tab="logs"
+          >ログ</tabs.Tab>
+          <tabs.Tab
+            @route="app.env"
+            @model={{@model.slug}}
+            data-test-tab="env"
+          >環境変数</tabs.Tab>
+          <tabs.Tab
+            @route="app.domains"
+            @model={{@model.slug}}
+            data-test-tab="domains"
+          >ドメイン</tabs.Tab>
+          <tabs.Tab
+            @route="app.backups"
+            @model={{@model.slug}}
+            data-test-tab="backups"
+          >バックアップ</tabs.Tab>
+          <tabs.Tab
+            @route="app.settings"
+            @model={{@model.slug}}
+            data-test-tab="settings"
+          >設定</tabs.Tab>
+        </Tabs>
+
+        <div class="app-detail-body">
+          {{! Going straight from one app to another keeps the same routes,
+              and Ember would keep the tab's component (and what it loaded
+              for the previous app). Keying on the context gives each app a
+              fresh tab. }}
+          {{#each (array @model) key="@identity"}}
+            {{outlet}}
+          {{/each}}
+        </div>
       </div>
-      {{#if @model.app.url}}
-        <a
-          href={{@model.app.url}}
-          target="_blank"
-          rel="noopener noreferrer"
-        >{{@model.app.url}}</a>
-      {{/if}}
-    </div>
-
-    <Tabs @label="アプリのメニュー" as |tabs|>
-      <tabs.Tab
-        @route="app.index"
-        @model={{@model.slug}}
-        data-test-tab="index"
-      >概要</tabs.Tab>
-      <tabs.Tab
-        @route="app.deploy"
-        @model={{@model.slug}}
-        data-test-tab="deploy"
-      >デプロイ</tabs.Tab>
-      <tabs.Tab
-        @route="app.logs"
-        @model={{@model.slug}}
-        data-test-tab="logs"
-      >ログ</tabs.Tab>
-      <tabs.Tab
-        @route="app.env"
-        @model={{@model.slug}}
-        data-test-tab="env"
-      >環境変数</tabs.Tab>
-      <tabs.Tab
-        @route="app.domains"
-        @model={{@model.slug}}
-        data-test-tab="domains"
-      >ドメイン</tabs.Tab>
-      <tabs.Tab
-        @route="app.backups"
-        @model={{@model.slug}}
-        data-test-tab="backups"
-      >バックアップ</tabs.Tab>
-      <tabs.Tab
-        @route="app.settings"
-        @model={{@model.slug}}
-        data-test-tab="settings"
-      >設定</tabs.Tab>
-    </Tabs>
-
-    {{! Going straight from one app to another keeps the same routes, and
-        Ember would keep the tab's component (and what it loaded for the
-        previous app). Keying on the context gives each app a fresh tab. }}
-    {{#each (array @model) key="@identity"}}
-      {{outlet}}
-    {{/each}}
-  {{else}}
-    <section class="card" data-test-app-error>
-      <h2>{{@model.slug}}</h2>
-      <p class="alert alert-danger" role="alert">
-        {{errorMessage @model.error}}
-      </p>
-      <p><LinkTo @route="index">アプリ一覧に戻る</LinkTo></p>
-    </section>
-  {{/if}}
-</template>;
-
-export default AppTemplate;
+    {{else}}
+      <div class="app-missing" data-test-app-error>
+        <h1>{{@model.slug}}</h1>
+        <Banner @tone="error" @title="アプリを表示できません">
+          {{errorMessage @model.error}}
+        </Banner>
+        <LinkTo
+          @route="index"
+          class={{buttonClass "default"}}
+          data-test-back
+        >アプリ一覧に戻る</LinkTo>
+      </div>
+    {{/if}}
+  </template>
+}
