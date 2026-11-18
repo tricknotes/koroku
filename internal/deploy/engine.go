@@ -107,6 +107,9 @@ type Engine struct {
 
 	mu      sync.Mutex
 	cancels map[int64]context.CancelCauseFunc
+
+	// locks serializes deployments and manual operations per app.
+	locks appLocks
 }
 
 // New builds an Engine. Call Run to start the worker.
@@ -354,6 +357,11 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 		return
 	}
 	defer log.Close()
+
+	// A manual operation (stop, restart, ...) on this app finishes first.
+	appLock := e.locks.get(app.ID)
+	appLock.Lock()
+	defer appLock.Unlock()
 
 	logger.Info("deployment started", "commit", d.CommitSHA)
 	touched, runErr := e.execute(jobCtx, d, app, log)
