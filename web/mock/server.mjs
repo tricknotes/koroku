@@ -23,8 +23,6 @@ import {
   buildScenario,
   commits,
   dockerUsage,
-  logArchives,
-  logLines,
   newApp,
   newDomain,
   services,
@@ -35,6 +33,7 @@ import {
   startDeployment,
 } from './fixtures.mjs';
 import { deploymentLog } from './deploy-log.mjs';
+import { LOG_SCENARIOS, registerLogRoutes } from './logs.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.MOCK_PORT ?? 4300);
@@ -326,34 +325,8 @@ route('DELETE', '/api/apps/:slug/domains/:id', (context) => {
   return { status: 204 };
 });
 
-route('GET', '/api/apps/:slug/logs', (context) => {
-  appOf(context);
-  const service = context.query.get('service') ?? '';
-  return {
-    sse: logLines(30, service).map((line) => JSON.stringify(line)),
-    live: () => JSON.stringify(logLines(1, service)[0] ?? logLines(1)[0]),
-  };
-});
-route('GET', '/api/apps/:slug/logs/history', (context) => {
-  appOf(context);
-  const q = context.query.get('q') ?? '';
-  const lines = logLines(200, context.query.get('service') ?? '');
-  return {
-    lines: lines.filter((entry) => entry.line.includes(q)),
-    truncated: false,
-  };
-});
-route('GET', '/api/apps/:slug/logs/archives', (context) => {
-  const service = context.query.get('service');
-  const archives = logArchives(appOf(context).slug);
-  return {
-    archives: archives.filter((entry) => !service || entry.service === service),
-  };
-});
-route('GET', '/api/apps/:slug/logs/archives/url', (context) => {
-  appOf(context);
-  return { url: `/__mock/download?name=${context.query.get('key') ?? ''}` };
-});
+// Runtime logs: the live tail, the search and the archives (logs.mjs).
+registerLogRoutes(route, { appOf, HttpError });
 
 route('GET', '/api/backups', ({ state }) => {
   if (state.backupsDown) throw new HttpError(500, 'internal');
@@ -434,6 +407,8 @@ function sendEvents(request, response, { sse, end, live, next }) {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-store',
   });
+  // The stream is open even before there is a first line to send.
+  response.flushHeaders();
   let offset = 0;
   const write = (line) => {
     offset += Buffer.byteLength(line) + 1;
@@ -457,10 +432,11 @@ function sendEvents(request, response, { sse, end, live, next }) {
     return;
   }
   // Still running (or a live tail): keep the stream open and trickle lines.
-  const timer = setInterval(
-    () => write(live ? live() : `#${offset} still working...`),
-    2000,
-  );
+  // A live feed may have nothing to say (`undefined`) on a tick.
+  const timer = setInterval(() => {
+    const line = live ? live() : `#${offset} still working...`;
+    if (line !== undefined) write(line);
+  }, 2000);
   request.on('close', () => clearInterval(timer));
 }
 
@@ -500,6 +476,7 @@ async function handleApi(request, response, url, scenario) {
     const body = method === 'GET' ? {} : await readBody(request);
     const result = await handler({
       state: stateOf(scenario),
+      scenario,
       params,
       query: url.searchParams,
       body,
@@ -554,7 +531,7 @@ function handleMock(response, url) {
     return response.end('mock file\n');
   }
   return sendJson(response, 200, {
-    scenarios: SCENARIOS,
+    scenarios: { ...SCENARIOS, ...LOG_SCENARIOS },
     usage: '/?scenario=<name>&theme=<system|light|dark>',
   });
 }
@@ -629,5 +606,7 @@ server.listen(PORT, HOST, () => {
   console.log(
     `mock paasd: http://${HOST}:${PORT}/  (scenario: ${DEFAULT_SCENARIO})`,
   );
-  console.log(`scenarios: ${Object.keys(SCENARIOS).join(', ')}`);
+  console.log(
+    `scenarios: ${Object.keys({ ...SCENARIOS, ...LOG_SCENARIOS }).join(', ')}`,
+  );
 });
