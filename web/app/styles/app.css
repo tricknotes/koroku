@@ -1,6 +1,6 @@
 /*
  * Intentionally empty. The stylesheets are imported from app/app.ts in
- * cascade order (tokens, base, components, shell, screens, legacy) so that
+ * cascade order (tokens, base, components, shell, screens) so that
  * Vite bundles them; this file only remains as the classic entry point that
  * index.html links.
  */

@@ -1,9 +1,5 @@
 import { module, test } from 'qunit';
-import {
-  deriveAppState,
-  isActiveDeployment,
-  serviceTone,
-} from 'paas-console/utils/status';
+import { deriveAppState, isActiveDeployment } from 'paas-console/utils/status';
 import { makeApp, makeDeployment } from 'paas-console/tests/helpers/fakes';
 
 module('Unit | Utility | status', function () {
@@ -92,14 +88,5 @@ module('Unit | Utility | status', function () {
     assert.false(isActiveDeployment({ status: 'failed' }));
     assert.false(isActiveDeployment({ status: 'canceled' }));
     assert.false(isActiveDeployment(null));
-  });
-
-  test('serviceTone', function (assert) {
-    assert.strictEqual(serviceTone('running', 'healthy'), 'ok');
-    assert.strictEqual(serviceTone('running', ''), 'ok');
-    assert.strictEqual(serviceTone('running', 'starting'), 'info');
-    assert.strictEqual(serviceTone('running', 'unhealthy'), 'danger');
-    assert.strictEqual(serviceTone('restarting', ''), 'info');
-    assert.strictEqual(serviceTone('exited', ''), 'warn');
   });
 });

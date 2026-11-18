@@ -206,7 +206,9 @@ for (const [action, desired] of [
   });
 }
 route('GET', '/api/apps/:slug/services', (context) => ({
-  services: services(appOf(context)),
+  services:
+    context.state.services?.get(context.params.slug) ??
+    services(appOf(context)),
 }));
 
 route('GET', '/api/apps/:slug/env', (context) => {
@@ -466,6 +468,12 @@ async function handleApi(request, response, url, scenario) {
     await new Promise((done) => setTimeout(done, SLOW));
   }
   if (scenario === 'error') throw new HttpError(500, 'internal');
+  // The app itself loads; whatever one of its tabs asks for does not.
+  const forTab = !/^\/api\/apps(\/[^/]+)?$/.test(url.pathname);
+  if (scenario === 'tab-loading' && forTab) {
+    await new Promise((done) => setTimeout(done, SLOW));
+  }
+  if (scenario === 'tab-error' && forTab) throw new HttpError(500, 'internal');
 
   for (const { method, regexp, names, handler } of routes) {
     const match = request.method === method && regexp.exec(url.pathname);

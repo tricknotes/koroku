@@ -1,0 +1,315 @@
+/*
+ * Domains tab: one block per hostname. A pending one opens up to show the
+ * DNS records to set and what the last check found.
+ */
+
+.domain-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.domain-item {
+  padding: var(--space-3) var(--space-4);
+}
+
+.domain-item + .domain-item {
+  border-top: 1px solid var(--color-border);
+}
+
+.domain-item-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6rem 17rem;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  min-height: var(--control-height);
+}
+
+.domain-item-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.domain-item-status {
+  display: flex;
+  align-items: center;
+}
+
+.domain-hostname {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.domain-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Deleting is set apart from the ordinary actions of the row. */
+.domain-delete {
+  margin-left: var(--space-4);
+}
+
+.domain-none {
+  color: var(--color-text-secondary);
+}
+
+.domain-skeleton {
+  width: 45%;
+}
+
+/* What an action did */
+
+.domain-feedback > .banner {
+  margin: 0 0 var(--space-3);
+}
+
+.domain-notice {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.domain-notice > .icon {
+  color: var(--color-text-secondary);
+}
+
+/* Detail of a pending domain */
+
+.domain-detail {
+  margin: var(--space-3) 0 var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--color-pending-border);
+  border-radius: var(--radius-md);
+  background: var(--color-pending-bg);
+}
+
+.domain-detail > :first-child {
+  margin-top: 0;
+}
+
+.domain-detail > :last-child {
+  margin-bottom: 0;
+}
+
+.domain-detail-lead {
+  margin: 0 0 var(--space-3);
+  font-weight: var(--weight-medium);
+}
+
+.domain-detail-note {
+  margin: var(--space-2) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* The offer to skip the check is an aside, not part of the warning. */
+.domain-force {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  border-color: var(--color-border);
+  background: transparent;
+}
+
+.domain-force > .domain-detail-note {
+  margin: 0;
+}
+
+.domain-records {
+  overflow: hidden;
+  border: 1px solid var(--color-pending-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.domain-record-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.domain-record {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  align-items: center;
+  padding: var(--space-1) var(--space-3);
+}
+
+.domain-record + .domain-record,
+.domain-record-list > .domain-record:first-child {
+  border-top: 1px solid var(--color-border);
+}
+
+.domain-record-header {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.domain-record-field {
+  min-width: 0;
+}
+
+/* Column names: read out in every layout, visible only when stacked. */
+.domain-record-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.domain-record-type,
+.domain-record-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.domain-record-type {
+  font-weight: var(--weight-medium);
+}
+
+.domain-record-value {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  min-width: 0;
+}
+
+.domain-record-value > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.domain-check {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+}
+
+.domain-check > .icon {
+  align-self: flex-start;
+  margin-top: 0.2em;
+  color: var(--color-pending);
+}
+
+.domain-check-label {
+  margin-right: var(--space-2);
+  font-weight: var(--weight-medium);
+}
+
+.domain-check-reason {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.domain-check-time {
+  margin-left: var(--space-2);
+  color: var(--color-text-secondary);
+}
+
+/* Add form */
+
+.domain-form {
+  max-width: 36rem;
+}
+
+.domain-form .field {
+  margin-bottom: 0;
+}
+
+.domain-form-line {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.domain-form-line > input {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (width <= 48rem) {
+  .domain-item-head {
+    grid-template:
+      "name status" auto
+      "actions actions" auto / minmax(0, 1fr) auto;
+  }
+
+  .domain-item-name {
+    grid-area: name;
+  }
+
+  .domain-item-status {
+    grid-area: status;
+    align-self: start;
+    padding-top: var(--space-1);
+  }
+
+  .domain-item-actions {
+    grid-area: actions;
+    justify-content: flex-start;
+  }
+
+  /* A frameless first button lines its text up with the hostname. */
+  .domain-item-actions > .button-ghost:first-child {
+    margin-left: calc(var(--space-2) * -1);
+  }
+
+  .domain-delete {
+    margin-left: auto;
+  }
+
+  .domain-detail {
+    padding: var(--space-3);
+  }
+
+  .domain-record-header {
+    display: none;
+  }
+
+  .domain-record {
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .domain-record-list > .domain-record:first-child {
+    border-top: 0;
+  }
+
+  .domain-record-field {
+    display: grid;
+    grid-template-columns: 3.5rem minmax(0, 1fr);
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  .domain-record-label {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+  }
+}

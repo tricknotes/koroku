@@ -79,14 +79,6 @@ export const APP_STATE_HINTS: Record<AppState, string> = {
   running: '稼働中です。',
 };
 
-export const APP_STATE_TONES: Record<AppState, Tone> = {
-  deploying: 'info',
-  failed: 'danger',
-  undeployed: 'muted',
-  stopped: 'muted',
-  running: 'ok',
-};
-
 export const DEPLOYMENT_STATUS_LABELS: Record<DeploymentStatus, string> = {
   queued: '待機中',
   running: '実行中',
@@ -101,14 +93,6 @@ export const DEPLOYMENT_STATUS_KINDS: Record<DeploymentStatus, StatusKind> = {
   succeeded: 'running',
   failed: 'failed',
   canceled: 'stopped',
-};
-
-export const DEPLOYMENT_STATUS_TONES: Record<DeploymentStatus, Tone> = {
-  queued: 'info',
-  running: 'info',
-  succeeded: 'ok',
-  failed: 'danger',
-  canceled: 'muted',
 };
 
 export const ENVIRONMENT_LABELS: Record<Environment, string> = {
@@ -126,11 +110,6 @@ export const DOMAIN_STATUS_KINDS: Record<Domain['status'], StatusKind> = {
   active: 'running',
 };
 
-export const DOMAIN_STATUS_TONES: Record<Domain['status'], Tone> = {
-  pending: 'warn',
-  active: 'ok',
-};
-
 export const BACKUP_TRIGGER_LABELS: Record<BackupRun['trigger'], string> = {
   scheduled: '定期',
   manual: '手動',
@@ -142,17 +121,3 @@ export const BACKUP_STATUS_LABELS: Record<BackupRun['status'], string> = {
   succeeded: '成功',
   failed: '失敗',
 };
-
-export const BACKUP_STATUS_TONES: Record<BackupRun['status'], Tone> = {
-  running: 'info',
-  succeeded: 'ok',
-  failed: 'danger',
-};
-
-/** Tone of one Compose service row from `docker compose ps` style fields. */
-export function serviceTone(state: string, health: string): Tone {
-  if (health === 'unhealthy') return 'danger';
-  if (state === 'running') return health === 'starting' ? 'info' : 'ok';
-  if (state === 'restarting' || state === 'created') return 'info';
-  return 'warn';
-}
