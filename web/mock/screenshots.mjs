@@ -25,6 +25,7 @@ const CHROMIUM = process.env.CHROMIUM ?? 'chromium';
 const DESKTOP = { width: 1280, height: 900 };
 const PHONE = { width: 390, height: 844, scale: 2, fullPage: true };
 const LIST = '[data-test-app]';
+const DEPLOYMENT = '[data-test-deployment]';
 
 /**
  * name, path, what to wait for, and optionally: viewport, `dark`, `keys`
@@ -93,6 +94,89 @@ const SHOTS = [
     fullPage: false,
     themes: ['dark'],
   },
+  // App detail header and the deploy tab.
+  {
+    name: 'deploy-history',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+  },
+  {
+    name: 'deploy-history-open',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    click: '[data-test-show-log]',
+    fullPage: true,
+  },
+  {
+    name: 'deploy-running',
+    path: '/apps/blog-staging/deploy?scenario=warnings',
+    wait: '[data-test-step="build"]',
+    fullPage: true,
+  },
+  {
+    name: 'deploy-failed',
+    path: '/apps/shop-staging/deploy?scenario=warnings',
+    wait: '[data-test-rollback-notice]',
+    fullPage: true,
+  },
+  {
+    name: 'deploy-empty',
+    path: '/apps/notes/deploy?scenario=undeployed',
+    wait: '[data-test-no-deployments]',
+  },
+  {
+    name: 'deploy-confirm',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    click: '[data-test-deploy-submit]',
+  },
+  {
+    name: 'deploy-history-phone',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    ...PHONE,
+  },
+  {
+    name: 'deploy-running-phone',
+    path: '/apps/blog-staging/deploy?scenario=warnings',
+    wait: '[data-test-step="build"]',
+    ...PHONE,
+  },
+  {
+    name: 'deploy-failed-phone',
+    path: '/apps/shop-staging/deploy?scenario=warnings',
+    wait: '[data-test-rollback-notice]',
+    ...PHONE,
+  },
+  {
+    name: 'deploy-empty-phone',
+    path: '/apps/notes/deploy?scenario=undeployed',
+    wait: '[data-test-no-deployments]',
+    ...PHONE,
+    themes: ['light'],
+  },
+  {
+    name: 'deploy-confirm-phone',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    click: '[data-test-deploy-submit]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['dark'],
+  },
+  // Keyboard: Tab from the top of the page to the first history row.
+  {
+    name: 'deploy-focus-row',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    keys: tabs(18),
+  },
+  {
+    name: 'detail-error',
+    path: '/apps/blog/deploy?scenario=error',
+    wait: '[data-test-app-error]',
+    themes: ['light'],
+  },
   // Screens that are not redesigned yet, to check they sit well in the shell.
   {
     name: 'other-login',
@@ -105,12 +189,6 @@ const SHOTS = [
     path: '/apps/blog?scenario=healthy',
     wait: '[data-test-services]',
     themes: ['light'],
-  },
-  {
-    name: 'other-deploy',
-    path: '/apps/shop-staging/deploy?scenario=warnings',
-    wait: '.deploy-row',
-    themes: ['dark'],
   },
   {
     name: 'other-system',
