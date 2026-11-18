@@ -1007,3 +1007,106 @@ func TestDeploySetsDesiredStateRunning(t *testing.T) {
 		t.Errorf("DesiredState = %q", got.DesiredState)
 	}
 }
+
+type fakeBackup struct {
+	mu    sync.Mutex
+	apps  []string
+	err   error
+	calls int
+}
+
+func (f *fakeBackup) BackupApp(_ context.Context, app store.App) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.apps = append(f.apps, app.Slug)
+	return f.err
+}
+
+func TestBackupBeforeDeploy(t *testing.T) {
+	backup := &fakeBackup{}
+	h := newHarness(t, func(o *Options) { o.Backup = backup })
+	app := h.createApp("blog")
+	app.BackupBeforeDeploy = true
+	if err := h.store.UpdateApp(context.Background(), app, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h.createApp("plain") // has not opted in
+	h.start()
+
+	// Nothing to back up before the first deploy.
+	if d := h.deploy("blog", shaA); d.Status != store.StatusSucceeded {
+		t.Fatalf("first deployment = %+v", d)
+	}
+	if backup.calls != 0 {
+		t.Errorf("backup ran before the first deploy: %d", backup.calls)
+	}
+
+	// From the second deploy on the backup runs after build and before start.
+	h.runner.Reset()
+	var order []string
+	h.mu.Lock()
+	h.onCompose = func(_ context.Context, sub string, _ runner.Cmd) error {
+		backup.mu.Lock()
+		order = append(order, fmt.Sprintf("%s(backups=%d)", sub, backup.calls))
+		backup.mu.Unlock()
+		return nil
+	}
+	h.mu.Unlock()
+	second := h.deploy("blog", shaB)
+	if second.Status != store.StatusSucceeded {
+		t.Fatalf("second deployment = %+v", second)
+	}
+	want := []string{"config(backups=0)", "config(backups=0)", "build(backups=0)", "pull(backups=0)", "up(backups=1)"}
+	if !slices.Equal(order, want) {
+		t.Errorf("order = %v", order)
+	}
+	if !strings.Contains(h.log("blog", second.ID), "==> Backing up before deploy") {
+		t.Errorf("log:\n%s", h.log("blog", second.ID))
+	}
+
+	// Apps that did not opt in are not backed up.
+	h.deploy("plain", shaA)
+	h.deploy("plain", shaB)
+	if backup.calls != 1 || backup.apps[0] != "blog" {
+		t.Errorf("backup calls = %d (%v)", backup.calls, backup.apps)
+	}
+
+	// A failed backup stops the deploy before the running containers are touched.
+	backup.mu.Lock()
+	backup.err = errors.New("restic: repository unreachable")
+	backup.mu.Unlock()
+	h.runner.Reset()
+	h.mu.Lock()
+	h.onCompose = nil
+	h.mu.Unlock()
+	third := h.deploy("blog", shaC)
+	if third.Status != store.StatusFailed || !strings.Contains(third.Error, "backup before deploy") {
+		t.Fatalf("third deployment = %+v", third)
+	}
+	if slices.Contains(h.dockerCalls(), "up") {
+		t.Errorf("containers were touched after a failed backup: %v", h.dockerCalls())
+	}
+	current, _ := h.store.GetApp(context.Background(), "blog")
+	if *current.CurrentDeploymentID != second.ID {
+		t.Errorf("current deployment = %d", *current.CurrentDeploymentID)
+	}
+}
+
+func TestBackupBeforeDeployWithoutBackupConfigured(t *testing.T) {
+	h := newHarness(t, nil)
+	app := h.createApp("blog")
+	app.BackupBeforeDeploy = true
+	if err := h.store.UpdateApp(context.Background(), app, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+	h.deploy("blog", shaA)
+	d := h.deploy("blog", shaB)
+	if d.Status != store.StatusSucceeded {
+		t.Fatalf("deployment = %+v", d)
+	}
+	if !strings.Contains(h.log("blog", d.ID), "backups are not configured; skipping") {
+		t.Errorf("log:\n%s", h.log("blog", d.ID))
+	}
+}

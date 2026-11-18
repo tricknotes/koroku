@@ -44,6 +44,10 @@ type Options struct {
 	Auth AuthOptions
 	// Ops runs start/stop/restart/delete and host cleanup.
 	Ops AppOperator
+	// Logs serves collected runtime logs. Optional.
+	Logs AppLogs
+	// Backups runs backups and restores. Optional.
+	Backups Backups
 }
 
 // Server routes HTTP requests.
@@ -63,6 +67,8 @@ type Server struct {
 	domains  DomainChecker
 	auth     AuthOptions
 	ops      AppOperator
+	logs     AppLogs
+	backups  Backups
 }
 
 // New builds a Server.
@@ -90,6 +96,8 @@ func New(opts Options) *Server {
 		domains:  opts.Domains,
 		auth:     opts.Auth,
 		ops:      opts.Ops,
+		logs:     opts.Logs,
+		backups:  opts.Backups,
 	}
 }
 
@@ -131,6 +139,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/apps/{slug}/domains/{id}/verify", s.handleVerifyDomain)
 	mux.HandleFunc("PATCH /api/apps/{slug}/domains/{id}", s.handleUpdateDomain)
 	mux.HandleFunc("DELETE /api/apps/{slug}/domains/{id}", s.handleDeleteDomain)
+
+	mux.HandleFunc("GET /api/apps/{slug}/logs", s.handleLiveLogs)
+	mux.HandleFunc("GET /api/apps/{slug}/logs/history", s.handleLogHistory)
+	mux.HandleFunc("GET /api/apps/{slug}/logs/archives", s.handleLogArchives)
+	mux.HandleFunc("GET /api/apps/{slug}/logs/archives/url", s.handleLogArchiveURL)
+
+	mux.HandleFunc("GET /api/backups", s.handleBackupStatus)
+	mux.HandleFunc("POST /api/backups", s.handleStartBackup)
+	mux.HandleFunc("GET /api/apps/{slug}/backups", s.handleListSnapshots)
+	mux.HandleFunc("POST /api/apps/{slug}/backups/restore", s.handleRestoreVolume)
+	mux.HandleFunc("GET /api/apps/{slug}/backups/{snapshot}/download", s.handleDownloadDump)
 
 	mux.HandleFunc("GET /api/deployments/{id}", s.handleGetDeployment)
 	mux.HandleFunc("GET /api/deployments/{id}/logs", s.handleDeploymentLogs)
