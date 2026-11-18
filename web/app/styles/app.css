@@ -1,0 +1,28 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Hiragino Sans",
+    "Noto Sans JP",
+    sans-serif;
+  line-height: 1.6;
+}
+
+body {
+  margin: 0;
+}
+
+.app-header {
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid color-mix(in srgb, currentcolor 20%, transparent);
+}
+
+.app-header-title {
+  margin: 0;
+  font-size: 1.125rem;
+}
+
+.app-main {
+  padding: 1.5rem;
+}

@@ -1,0 +1,23 @@
+# compiled output
+/dist/
+/tmp/
+
+# dependencies
+/node_modules/
+
+# misc
+*.local
+/.pnp*
+/.eslintcache
+/coverage/
+/npm-debug.log*
+/testem.log
+/yarn-error.log
+
+# broccoli-debug
+/DEBUG/
+
+# The Go binary embeds dist/, so a placeholder keeps the directory in git.
+!/dist/
+/dist/*
+!/dist/.keep
