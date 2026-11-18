@@ -52,6 +52,9 @@ type AppLogs interface {
 	ListArchives(ctx context.Context, slug, service string) ([]LogArchive, error)
 	// ArchiveURL returns a short-lived download URL for an archive key.
 	ArchiveURL(ctx context.Context, slug, key string) (string, error)
+	// ArchiveStatus reports whether archiving is configured and how the
+	// last run went.
+	ArchiveStatus() LogArchiveStatus
 }
 
 const (

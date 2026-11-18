@@ -28,6 +28,7 @@ type fakeLogs struct {
 	archives  []LogArchive
 	archErr   error
 	truncated bool
+	status    LogArchiveStatus
 }
 
 func (f *fakeLogs) Subscribe(slug string) (<-chan LogLine, func()) {
@@ -93,6 +94,8 @@ func (f *fakeLogs) ListArchives(_ context.Context, _, service string) ([]LogArch
 	}
 	return out, nil
 }
+
+func (f *fakeLogs) ArchiveStatus() LogArchiveStatus { return f.status }
 
 func (f *fakeLogs) ArchiveURL(_ context.Context, slug, key string) (string, error) {
 	if f.archErr != nil {
@@ -299,6 +302,7 @@ type fakeBackups struct {
 	restoreErr error
 	dump       string
 	dumpErr    error
+	nextRun    time.Time
 }
 
 func (f *fakeBackups) Running() bool {
@@ -306,6 +310,8 @@ func (f *fakeBackups) Running() bool {
 	defer f.mu.Unlock()
 	return f.running
 }
+
+func (f *fakeBackups) NextRun() time.Time { return f.nextRun }
 
 func (f *fakeBackups) StartManual(ctx context.Context) (store.BackupRun, error) {
 	f.mu.Lock()
@@ -361,6 +367,7 @@ func TestBackupStatus(t *testing.T) {
 	now := srv.clock.Now()
 
 	type status struct {
+		NextRunAt     *time.Time      `json:"next_run_at"`
 		Configured    bool            `json:"configured"`
 		Running       bool            `json:"running"`
 		LastSuccessAt *time.Time      `json:"last_success_at"`
@@ -368,7 +375,11 @@ func TestBackupStatus(t *testing.T) {
 		Runs          []backupRunJSON `json:"runs"`
 	}
 	// Never backed up: warn.
+	backups.nextRun = time.Date(2026, 11, 18, 18, 0, 0, 0, time.UTC)
 	got := decode[status](t, request(t, h, http.MethodGet, "/api/backups", ""))
+	if got.NextRunAt == nil || !got.NextRunAt.Equal(backups.nextRun) {
+		t.Errorf("next_run_at = %v", got.NextRunAt)
+	}
 	if !got.Configured || got.Running || got.LastSuccessAt != nil || !got.Warning || got.Runs == nil || len(got.Runs) != 0 {
 		t.Errorf("initial status = %+v", got)
 	}
@@ -411,6 +422,9 @@ func TestBackupsNotConfigured(t *testing.T) {
 	h := srv.Handler()
 	// The status endpoint still answers, without a warning.
 	status := request(t, h, http.MethodGet, "/api/backups", "")
+	if !strings.Contains(status.Body.String(), `"next_run_at":null`) {
+		t.Errorf("status without backups = %s", status.Body)
+	}
 	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"configured":false`) ||
 		!strings.Contains(status.Body.String(), `"warning":false`) {
 		t.Errorf("status: %d %s", status.Code, status.Body)
@@ -431,12 +445,13 @@ func TestBackupsNotConfigured(t *testing.T) {
 func TestSnapshotsRestoreAndDownload(t *testing.T) {
 	srv, backups := newBackupServer(t, true)
 	h := srv.Handler()
+	size := int64(1 << 20)
 	backups.snapshots = []BackupSnapshot{
-		{ID: "4bba301e", Time: at(0), Kind: "volume", Target: "pgdata"},
+		{ID: "4bba301e", Time: at(0), Kind: "volume", Target: "pgdata", SizeBytes: &size},
 		{ID: "9c0ffee1", Time: at(1), Kind: "dump", Target: "db"},
 	}
 	list := request(t, h, http.MethodGet, "/api/apps/blog/backups", "")
-	want := `{"snapshots":[{"id":"4bba301e","time":"2026-11-18T03:00:00Z","kind":"volume","target":"pgdata"},{"id":"9c0ffee1","time":"2026-11-18T03:00:01Z","kind":"dump","target":"db"}]}`
+	want := `{"snapshots":[{"id":"4bba301e","time":"2026-11-18T03:00:00Z","kind":"volume","target":"pgdata","size_bytes":1048576},{"id":"9c0ffee1","time":"2026-11-18T03:00:01Z","kind":"dump","target":"db","size_bytes":null}]}`
 	if strings.TrimSpace(list.Body.String()) != want {
 		t.Errorf("snapshots = %s", list.Body)
 	}

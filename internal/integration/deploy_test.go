@@ -464,7 +464,7 @@ func TestImageOnlyApp(t *testing.T) {
 		t.Errorf("page = %q", got)
 	}
 	log := e.logText(d.ID)
-	if strings.Contains(log, "==> Building images") || !strings.Contains(log, "==> Pulling images") {
+	if strings.Contains(log, " build Building images") || !strings.Contains(log, " pull Pulling images") {
 		t.Errorf("an image-only app must pull and not build:\n%s", log)
 	}
 }
@@ -516,12 +516,33 @@ func TestStopStartDelete(t *testing.T) {
 	}
 
 	var listing struct {
-		Services []struct{ Name, State string } `json:"services"`
+		Services []struct {
+			Name, State      string
+			MemoryBytes      *int64 `json:"memory_bytes"`
+			MemoryLimitBytes *int64 `json:"memory_limit_bytes"`
+		} `json:"services"`
 	}
 	e.call(http.MethodGet, "/api/apps/"+slug+"/services", nil, &listing)
 	if len(listing.Services) != 2 || listing.Services[0].Name != "sidecar" || listing.Services[1].Name != "web" ||
 		listing.Services[1].State != "running" {
-		t.Errorf("services = %+v", listing.Services)
+		t.Fatalf("services = %+v", listing.Services)
+	}
+	// Memory figures come from docker stats; the limit is the platform
+	// default (512m) that the override applied.
+	web := listing.Services[1]
+	if web.MemoryBytes == nil || *web.MemoryBytes <= 0 || web.MemoryLimitBytes == nil || *web.MemoryLimitBytes != 512<<20 {
+		t.Errorf("web memory = %v / %v, want usage > 0 and a 512MiB limit", web.MemoryBytes, web.MemoryLimitBytes)
+	}
+
+	var usage struct {
+		Items []struct {
+			Type       string `json:"type"`
+			TotalBytes int64  `json:"total_bytes"`
+		} `json:"items"`
+	}
+	e.call(http.MethodGet, "/api/system/docker", nil, &usage)
+	if len(usage.Items) != 4 || usage.Items[0].Type != "images" || usage.Items[0].TotalBytes <= 0 {
+		t.Errorf("docker usage = %+v", usage.Items)
 	}
 
 	var state struct {

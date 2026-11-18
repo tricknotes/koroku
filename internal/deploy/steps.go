@@ -27,7 +27,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	releaseDir := e.ReleaseDir(app.Slug, d.ID)
 
 	// 2. Fetch.
-	log.Step("Fetching %s", d.CommitSHA)
+	log.Step(StepFetch, "Fetching %s", d.CommitSHA)
 	auth, err := e.repoAuth(ctx, app, log.masker)
 	if err != nil {
 		return false, err
@@ -46,7 +46,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	log.Printf("Checked out %s %s", shortSHA(commit.SHA), commit.Message)
 
 	// 3. Generate the env file and the override.
-	log.Step("Preparing environment and Compose override")
+	log.Step(StepPrepare, "Preparing environment and Compose override")
 	composeFile, err := compose.DetectFile(releaseDir, app.ComposePath)
 	if err != nil {
 		return false, err
@@ -108,7 +108,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 
 	// 4. Validate the merged project. The override points every service at
 	// the live env file, which may not exist before the first deploy.
-	log.Step("Validating the Compose project")
+	log.Step(StepValidate, "Validating the Compose project")
 	if err := ensureFile(e.EnvFile(app.Slug)); err != nil {
 		return false, fmt.Errorf("prepare env file: %w", err)
 	}
@@ -138,13 +138,13 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 
 	// 5. Build and pull.
 	if project.NeedsBuild() {
-		log.Step("Building images")
+		log.Step(StepBuild, "Building images")
 		if err := e.compose(ctx, merged, releaseDir, log, "build"); err != nil {
 			return false, fmt.Errorf("build: %w", err)
 		}
 	}
 	if project.NeedsPull() {
-		log.Step("Pulling images")
+		log.Step(StepPull, "Pulling images")
 		if err := e.compose(ctx, merged, releaseDir, log, "pull", "--ignore-buildable"); err != nil {
 			return false, fmt.Errorf("pull: %w", err)
 		}
@@ -156,7 +156,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		if e.opts.Backup == nil {
 			log.Printf("Backup before deploy is enabled for this app, but backups are not configured; skipping.")
 		} else {
-			log.Step("Backing up before deploy")
+			log.Step(StepBackup, "Backing up before deploy")
 			if err := e.opts.Backup.BackupApp(ctx, app); err != nil {
 				return false, fmt.Errorf("backup before deploy: %w", err)
 			}
@@ -165,7 +165,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	}
 
 	// 6. Start. From here on a failure rolls back to the previous release.
-	log.Step("Starting containers")
+	log.Step(StepStart, "Starting containers")
 	if err := writeFileAtomic(e.EnvFile(app.Slug), []byte(envContent), 0o600); err != nil {
 		return false, fmt.Errorf("write env file: %w", err)
 	}
@@ -176,7 +176,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 
 	// 7. Route.
 	if e.opts.Router != nil {
-		log.Step("Updating routes")
+		log.Step(StepRoute, "Updating routes")
 		if err := e.opts.Router.Sync(ctx); err != nil {
 			return true, fmt.Errorf("update routes: %w", err)
 		}
@@ -184,7 +184,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 
 	// 8. Confirm over HTTP.
 	url := fmt.Sprintf("http://127.0.0.1:%d%s", app.HostPort, app.HealthcheckPath)
-	log.Step("Checking %s", url)
+	log.Step(StepCheck, "Checking %s", url)
 	if err := e.opts.Health.Wait(ctx, url, e.opts.HealthTimeout); err != nil {
 		return true, err
 	}
@@ -268,7 +268,7 @@ func (e *Engine) rollback(app store.App, log *deployLog) {
 	defer cancel()
 
 	if app.CurrentDeploymentID == nil {
-		log.Step("No previous release; removing the failed containers")
+		log.Step(StepRollback, "No previous release; removing the failed containers")
 		inv := compose.Invocation{ProjectName: app.ProjectName()}
 		if err := e.compose(ctx, inv, "", log, "down", "--remove-orphans"); err != nil {
 			log.Printf("Removing the containers failed: %v", err)
@@ -277,7 +277,7 @@ func (e *Engine) rollback(app store.App, log *deployLog) {
 	}
 
 	prev := *app.CurrentDeploymentID
-	log.Step("Rolling back to deployment #%d", prev)
+	log.Step(StepRollback, "Rolling back to deployment #%d", prev)
 	meta, err := e.readMeta(app.Slug, prev)
 	if err != nil {
 		log.Printf("Rollback is not possible: the previous release is no longer on disk.")

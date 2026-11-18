@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/tricknotes/koroku/internal/secrets"
 )
@@ -15,9 +16,28 @@ type deployLog struct {
 	file   *os.File
 	lines  *secrets.LineWriter
 	masker *secrets.Masker
+	now    func() time.Time
 }
 
-func openDeployLog(path string, masker *secrets.Masker) (*deployLog, error) {
+// Step keys written to the deploy log. The console splits the log into
+// steps on these headlines (see docs/API.md).
+const (
+	StepFetch    = "fetch"
+	StepPrepare  = "prepare"
+	StepValidate = "validate"
+	StepBuild    = "build"
+	StepPull     = "pull"
+	StepBackup   = "backup"
+	StepStart    = "start"
+	StepRoute    = "route"
+	StepCheck    = "check"
+	StepDone     = "done"
+	StepFailed   = "failed"
+	StepRollback = "rollback"
+	StepCleanup  = "cleanup"
+)
+
+func openDeployLog(path string, masker *secrets.Masker, now func() time.Time) (*deployLog, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create deploy log directory: %w", err)
 	}
@@ -25,16 +45,25 @@ func openDeployLog(path string, masker *secrets.Masker) (*deployLog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open deploy log: %w", err)
 	}
-	return &deployLog{file: f, lines: secrets.NewLineWriter(f, masker), masker: masker}, nil
+	if now == nil {
+		now = time.Now
+	}
+	return &deployLog{file: f, lines: secrets.NewLineWriter(f, masker), masker: masker, now: now}, nil
 }
 
 // Writer returns the destination for command output.
 func (l *deployLog) Writer() io.Writer { return l.lines }
 
-// Step writes a headline that marks the start of a deploy step.
-func (l *deployLog) Step(format string, args ...any) {
+// Step writes a headline that marks the start of a deploy step:
+//
+//	==> <RFC 3339 time> <key> <title>
+//
+// The time lets a reader derive how long each step took without a separate
+// record of steps: the log file is the only record there is.
+func (l *deployLog) Step(key, format string, args ...any) {
 	_ = l.lines.Flush()
-	_, _ = fmt.Fprintf(l.lines, "==> "+format+"\n", args...)
+	title := fmt.Sprintf(format, args...)
+	_, _ = fmt.Fprintf(l.lines, "==> %s %s %s\n", l.now().UTC().Format(time.RFC3339), key, title)
 }
 
 // Printf writes one informational line.
@@ -51,7 +80,7 @@ func (l *deployLog) Close() {
 // appendLogLine adds a single line to a deployment log outside of a running
 // job, for example when a queued deployment is canceled.
 func appendLogLine(path, line string) {
-	l, err := openDeployLog(path, nil)
+	l, err := openDeployLog(path, nil, nil)
 	if err != nil {
 		return
 	}

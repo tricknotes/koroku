@@ -18,6 +18,8 @@ type BackupSnapshot struct {
 	Time   time.Time `json:"time"`
 	Kind   string    `json:"kind"`   // volume | dump
 	Target string    `json:"target"` // volume name or dump hook service
+	// SizeBytes is the amount of data restic processed, when it recorded it.
+	SizeBytes *int64 `json:"size_bytes"`
 }
 
 var (
@@ -32,6 +34,8 @@ var (
 type Backups interface {
 	// Running reports whether a run is in progress.
 	Running() bool
+	// NextRun is when the next scheduled backup starts.
+	NextRun() time.Time
 	// StartManual begins a full backup in the background and returns its record.
 	StartManual(ctx context.Context) (store.BackupRun, error)
 	Snapshots(ctx context.Context, app store.App) ([]BackupSnapshot, error)
@@ -82,7 +86,14 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 		out = append(out, backupRunToJSON(run))
 	}
 	configured := s.backups != nil
+	var nextRun *time.Time
+	if configured {
+		if t := s.backups.NextRun(); !t.IsZero() {
+			nextRun = &t
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"next_run_at":     nextRun,
 		"configured":      configured,
 		"running":         configured && s.backups.Running(),
 		"last_success_at": last,

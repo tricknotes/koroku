@@ -275,6 +275,12 @@ type ServiceStatus struct {
 	State  string `json:"state"`
 	Status string `json:"status"`
 	Health string `json:"health"`
+	// MemoryBytes and MemoryLimitBytes are nil when unknown (the container
+	// is not running, or docker stats failed).
+	MemoryBytes      *int64 `json:"memory_bytes"`
+	MemoryLimitBytes *int64 `json:"memory_limit_bytes"`
+
+	container string
 }
 
 // Services lists the app's containers (`docker compose ps --all`).
@@ -287,10 +293,28 @@ func (e *Engine) Services(ctx context.Context, app store.App) ([]ServiceStatus, 
 	if err != nil {
 		return nil, fmt.Errorf("docker compose ps: %w", err)
 	}
-	return parseComposePS(out)
+	services, err := parseComposePS(out)
+	if err != nil {
+		return nil, err
+	}
+	var running []string
+	for _, svc := range services {
+		if svc.State == "running" && svc.container != "" {
+			running = append(running, svc.container)
+		}
+	}
+	usage := e.memoryUsage(ctx, running)
+	for i := range services {
+		if u, ok := usage[services[i].container]; ok {
+			used, limit := u[0], u[1]
+			services[i].MemoryBytes, services[i].MemoryLimitBytes = &used, &limit
+		}
+	}
+	return services, nil
 }
 
 type composePSEntry struct {
+	Name    string `json:"Name"`
 	Service string `json:"Service"`
 	State   string `json:"State"`
 	Status  string `json:"Status"`
@@ -325,6 +349,7 @@ func parseComposePS(out []byte) ([]ServiceStatus, error) {
 	for _, entry := range entries {
 		services = append(services, ServiceStatus{
 			Name: entry.Service, State: entry.State, Status: entry.Status, Health: entry.Health,
+			container: entry.Name,
 		})
 	}
 	sort.SliceStable(services, func(i, j int) bool { return services[i].Name < services[j].Name })
@@ -381,4 +406,114 @@ func (e *Engine) RunMaintenance(ctx context.Context) {
 		}
 		timer.Reset(24 * time.Hour)
 	}
+}
+
+// DiskUsageItem is one row of `docker system df`.
+type DiskUsageItem struct {
+	Type             string `json:"type"` // images | containers | volumes | build_cache
+	TotalBytes       int64  `json:"total_bytes"`
+	ReclaimableBytes int64  `json:"reclaimable_bytes"`
+	Count            int    `json:"count"`
+}
+
+// DockerDiskUsage reports how much disk Docker uses (`docker system df`).
+// The command walks every image and volume, so it can take seconds.
+func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	out, err := runner.Output(ctx, e.opts.Runner, runner.Cmd{
+		Name: "docker", Args: []string{"system", "df", "--format", "json"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("docker system df: %w", err)
+	}
+	return parseSystemDF(out)
+}
+
+var diskUsageTypes = map[string]string{
+	"Images":        "images",
+	"Containers":    "containers",
+	"Local Volumes": "volumes",
+	"Build Cache":   "build_cache",
+}
+
+func parseSystemDF(out []byte) ([]DiskUsageItem, error) {
+	items := []DiskUsageItem{}
+	for _, line := range bytes.Split(bytes.TrimSpace(out), []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var row struct {
+			Type, Size, Reclaimable, TotalCount string
+		}
+		if err := json.Unmarshal(line, &row); err != nil {
+			return nil, errors.New("parse docker system df output")
+		}
+		kind, ok := diskUsageTypes[row.Type]
+		if !ok {
+			continue
+		}
+		count, _ := strconv.Atoi(row.TotalCount)
+		// Reclaimable looks like "28.32GB (69%)".
+		reclaimable, _, _ := strings.Cut(row.Reclaimable, " ")
+		items = append(items, DiskUsageItem{
+			Type:             kind,
+			TotalBytes:       parseDockerSize(row.Size),
+			ReclaimableBytes: parseDockerSize(reclaimable),
+			Count:            count,
+		})
+	}
+	return items, nil
+}
+
+// parseDockerSize converts sizes as the Docker CLI prints them ("8.998MB",
+// "26.02MiB", "0B") to bytes. Unparseable input yields 0.
+func parseDockerSize(s string) int64 {
+	s = strings.TrimSpace(s)
+	units := []struct {
+		suffix string
+		factor float64
+	}{
+		{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"TiB", 1 << 40},
+		{"kB", 1e3}, {"KB", 1e3}, {"MB", 1e6}, {"GB", 1e9}, {"TB", 1e12},
+		{"B", 1},
+	}
+	for _, u := range units {
+		if number, ok := strings.CutSuffix(s, u.suffix); ok {
+			value, err := strconv.ParseFloat(strings.TrimSpace(number), 64)
+			if err != nil || value < 0 {
+				return 0
+			}
+			return int64(value * u.factor)
+		}
+	}
+	return 0
+}
+
+// memoryUsage reads the current memory use and limit of containers with
+// `docker stats`. Containers that are not running are absent from the result.
+func (e *Engine) memoryUsage(ctx context.Context, containers []string) map[string][2]int64 {
+	usage := map[string][2]int64{}
+	if len(containers) == 0 {
+		return usage
+	}
+	args := append([]string{"stats", "--no-stream", "--format", "json"}, containers...)
+	out, err := runner.Output(ctx, e.opts.Runner, runner.Cmd{Name: "docker", Args: args})
+	if err != nil {
+		// Memory figures are a nicety; the listing works without them.
+		return usage
+	}
+	for _, line := range bytes.Split(bytes.TrimSpace(out), []byte("\n")) {
+		var row struct{ Name, MemUsage string }
+		if json.Unmarshal(bytes.TrimSpace(line), &row) != nil || row.Name == "" {
+			continue
+		}
+		used, limit, ok := strings.Cut(row.MemUsage, " / ")
+		if !ok {
+			continue
+		}
+		usage[row.Name] = [2]int64{parseDockerSize(used), parseDockerSize(limit)}
+	}
+	return usage
 }

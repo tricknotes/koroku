@@ -215,6 +215,30 @@ func TestSyncLoadsOnlyWhenChanged(t *testing.T) {
 	}
 }
 
+func TestRouterStatus(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	loader := &fakeLoader{err: errors.New("connection refused")}
+	router := newRouter(st, loader)
+
+	if status := router.Status(); status.LastLoadedAt != nil || status.LastError != "" {
+		t.Errorf("initial status = %+v", status)
+	}
+	_ = router.Sync(ctx)
+	if status := router.Status(); status.LastLoadedAt != nil || !strings.Contains(status.LastError, "connection refused") {
+		t.Errorf("status after a failed load = %+v", status)
+	}
+	loader.mu.Lock()
+	loader.err = nil
+	loader.mu.Unlock()
+	before := time.Now().Add(-time.Second)
+	_ = router.Sync(ctx)
+	status := router.Status()
+	if status.LastLoadedAt == nil || status.LastLoadedAt.Before(before) || status.LastError != "" {
+		t.Errorf("status after a successful load = %+v", status)
+	}
+}
+
 func TestSyncRetriesAfterFailure(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()

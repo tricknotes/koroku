@@ -426,7 +426,7 @@ func TestDeploySucceeds(t *testing.T) {
 	if strings.Contains(log, "s3cr3t-password") {
 		t.Errorf("the deploy log leaks a secret:\n%s", log)
 	}
-	for _, want := range []string{"==> Fetching " + shaA, "ARG DATABASE_URL=[MASKED]", "==> Building images", "==> Deployment succeeded"} {
+	for _, want := range []string{"==> 2026-11-18T03:00:00Z fetch Fetching " + shaA, "ARG DATABASE_URL=[MASKED]", "==> 2026-11-18T03:00:00Z build Building images", "==> 2026-11-18T03:00:00Z done Deployment succeeded"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("log lacks %q:\n%s", want, log)
 		}
@@ -552,7 +552,7 @@ func TestFailedStartRollsBackToPreviousRelease(t *testing.T) {
 		t.Errorf("current deployment must stay #%d, got %v", first.ID, got.CurrentDeploymentID)
 	}
 	log := h.log("blog", second.ID)
-	for _, want := range []string{"container blog-web-1 exited (1)", fmt.Sprintf("==> Rolling back to deployment #%d", first.ID), "is running again"} {
+	for _, want := range []string{"container blog-web-1 exited (1)", fmt.Sprintf(" rollback Rolling back to deployment #%d", first.ID), "is running again"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("log lacks %q:\n%s", want, log)
 		}
@@ -1061,7 +1061,7 @@ func TestBackupBeforeDeploy(t *testing.T) {
 	if !slices.Equal(order, want) {
 		t.Errorf("order = %v", order)
 	}
-	if !strings.Contains(h.log("blog", second.ID), "==> Backing up before deploy") {
+	if !strings.Contains(h.log("blog", second.ID), " backup Backing up before deploy") {
 		t.Errorf("log:\n%s", h.log("blog", second.ID))
 	}
 
@@ -1147,5 +1147,50 @@ func TestLongDeploymentIsStillRecorded(t *testing.T) {
 	h.mu.Unlock()
 	if failed := h.deploy("blog", shaB); failed.Status != store.StatusFailed {
 		t.Fatalf("deployment = %+v", failed)
+	}
+}
+
+// TestDeployLogStepHeadlines pins the headline format the console parses:
+// "==> <RFC 3339 time> <key> <title>", one per step, in order.
+func TestDeployLogStepHeadlines(t *testing.T) {
+	h := newHarness(t, func(o *Options) { o.PruneImages = true })
+	h.createApp("blog")
+	h.start()
+	first := h.deploy("blog", shaA)
+
+	stepKeys := func(log string) []string {
+		var keys []string
+		for _, line := range strings.Split(log, "\n") {
+			if !strings.HasPrefix(line, "==> ") {
+				continue
+			}
+			fields := strings.SplitN(line, " ", 4)
+			if len(fields) < 4 {
+				t.Errorf("malformed headline %q", line)
+				continue
+			}
+			if _, err := time.Parse(time.RFC3339, fields[1]); err != nil {
+				t.Errorf("headline %q: bad time: %v", line, err)
+			}
+			keys = append(keys, fields[2])
+		}
+		return keys
+	}
+	want := []string{StepFetch, StepPrepare, StepValidate, StepBuild, StepPull, StepStart, StepRoute, StepCheck, StepDone, StepCleanup}
+	if got := stepKeys(h.log("blog", first.ID)); !slices.Equal(got, want) {
+		t.Errorf("steps of a successful deployment = %v, want %v", got, want)
+	}
+
+	// A failed start: the failure and the rollback are steps of their own.
+	h.health.mu.Lock()
+	h.health.err = errors.New("health check did not pass")
+	h.health.mu.Unlock()
+	second := h.deploy("blog", shaB)
+	want = []string{StepFetch, StepPrepare, StepValidate, StepBuild, StepPull, StepStart, StepRoute, StepCheck, StepFailed, StepRollback}
+	if got := stepKeys(h.log("blog", second.ID)); !slices.Equal(got, want) {
+		t.Errorf("steps of a failed deployment = %v, want %v", got, want)
+	}
+	if !strings.Contains(h.log("blog", second.ID), " failed Deployment failed: health check did not pass") {
+		t.Errorf("log:\n%s", h.log("blog", second.ID))
 	}
 }
