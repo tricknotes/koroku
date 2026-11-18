@@ -1108,6 +1108,8 @@ func TestBackupBeforeDeployWithoutBackupConfigured(t *testing.T) {
 	}
 	if !strings.Contains(h.log("blog", d.ID), "backups are not configured; skipping") {
 		t.Errorf("log:\n%s", h.log("blog", d.ID))
+	}
+}
 
 // TestLongDeploymentIsStillRecorded guards against starting the "record the
 // result" timeout when the job starts: a deployment that outlives that
