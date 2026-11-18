@@ -134,6 +134,10 @@ func (p Project) NeedsPull() bool {
 // defaultFiles are tried in order when the app does not configure a path.
 var defaultFiles = []string{"compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml"}
 
+// DefaultFiles returns the Compose file names tried when an app does not
+// configure a path, in order of preference.
+func DefaultFiles() []string { return append([]string(nil), defaultFiles...) }
+
 // DetectFile returns the Compose file to use, relative to the release
 // directory. A configured path must stay inside the release directory.
 func DetectFile(releaseDir, configured string) (string, error) {
