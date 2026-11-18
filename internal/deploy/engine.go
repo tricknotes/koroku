@@ -367,7 +367,7 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 	logger = logger.With("app", app.Slug)
 
 	masker := secrets.NewMasker()
-	log, err := openDeployLog(e.LogPath(app.Slug, d.ID), masker)
+	log, err := openDeployLog(e.LogPath(app.Slug, d.ID), masker, e.opts.Clock.Now)
 	if err != nil {
 		logger.Error("opening the deploy log failed", "error", err)
 		_ = finish(store.StatusFailed, "the deploy log could not be opened")
@@ -387,7 +387,7 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 	if runErr != nil {
 		status, message = e.classify(ctx, jobCtx, runErr, masker)
 		log.Printf("%s", "")
-		log.Step("Deployment %s: %s", status, message)
+		log.Step(StepFailed, "Deployment %s: %s", status, message)
 		if touched {
 			if ctx.Err() != nil {
 				log.Printf("paasd is shutting down; the previous release is not restored automatically.")
@@ -404,7 +404,7 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 	logger.Info("deployment finished", "status", status)
 
 	if status == store.StatusSucceeded {
-		log.Step("Deployment succeeded")
+		log.Step(StepDone, "Deployment succeeded")
 		if app.DesiredState != store.DesiredRunning {
 			stateCtx, cancelState := context.WithTimeout(context.WithoutCancel(ctx), e.finishTimeout)
 			_ = e.opts.Store.SetAppDesiredState(stateCtx, app.ID, store.DesiredRunning, e.opts.Clock.Now())
@@ -478,7 +478,7 @@ func (e *Engine) cleanupAfterSuccess(ctx context.Context, app store.App, log *de
 		e.removeRelease(ctx, app.Slug, id)
 	}
 	if e.opts.PruneImages {
-		log.Step("Pruning dangling images")
+		log.Step(StepCleanup, "Pruning dangling images")
 		pruneCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 		if err := e.opts.Runner.Run(pruneCtx, runner.Cmd{
