@@ -1,0 +1,16 @@
+# Security fixes for transitive build-time dependencies whose parents pin a
+# vulnerable range (the Ember toolchain: ember-cli, broccoli, testem). Each
+# entry only replaces the vulnerable versions; drop it once no package in the
+# lockfile asks for that range any more.
+overrides:
+  # GHSA-52f5-9888-hmc6, GHSA-ph9p-34f9-6g65
+  "tmp@<0.2.6": "^0.2.6"
+  # GHSA-g3hv-75wg-m249
+  "minimatch@>=7.0.0 <11.0.1": "^11.0.1"
+  # GHSA-3g3m-2fjr-6pw4
+  "glob@>=10.0.0 <=14.0.1": "^14.0.2"
+  # Not fixable: babel-plugin-module-resolver (latest: 5.0.3) needs glob 9 for
+  # its default export, and glob 9 finds nothing when given minimatch 11. This
+  # pair is kept as published; ember-cli-babel never passes the `root` option
+  # that would reach it.
+  "glob@9>minimatch": "^8.0.2"
