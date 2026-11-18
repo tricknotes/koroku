@@ -30,6 +30,7 @@ export const SCENARIOS = {
   fresh: 'one app deployed a moment ago; no backup has run yet',
   'backups-down':
     'everything fine, but the backup status and the Docker disk usage cannot be read',
+  'volumes-down': 'everything fine, but the volumes of an app cannot be listed',
 };
 
 function ago(ms) {
@@ -353,6 +354,8 @@ export function buildScenario(name) {
     }
     case 'backups-down':
       return scenario(healthyApps(), { backupsDown: true });
+    case 'volumes-down':
+      return scenario(healthyApps(), { volumesDown: true });
     case 'unconfigured':
       return scenario(healthyApps(), {
         system: system({
@@ -397,6 +400,7 @@ export function buildScenario(name) {
         {
           backups: backups({ last_success_at: null, warning: true, runs: [] }),
           snapshots: new Map([['notes', []]]),
+          volumes: new Map([['notes', ['uploads']]]),
         },
       );
       state.deployments.set('notes', [first]);
@@ -585,6 +589,31 @@ export function snapshots() {
       size_bytes: null,
     },
   ]);
+}
+
+/**
+ * The named volumes Docker has for a deployed app, unless the scenario says
+ * otherwise (`state.volumes`, by slug): the database (excluded from backups
+ * in these fixtures), the uploads (backed up every night) and a cache that
+ * a recent deployment added, which no backup has seen yet.
+ */
+const VOLUMES = ['cache', 'pgdata', 'uploads'];
+
+/**
+ * An app's volumes as `GET /api/apps/{slug}/volumes` lists them: what
+ * exists, plus the names in the exclude list that match nothing. An app
+ * that was never deployed has no volumes yet.
+ */
+export function appVolumes(state, app) {
+  const existing = app.current_deployment
+    ? (state.volumes?.get(app.slug) ?? VOLUMES)
+    : [];
+  const excluded = app.backup_exclude_volumes ?? [];
+  return [...new Set([...existing, ...excluded])].sort().map((name) => ({
+    name,
+    excluded: excluded.includes(name),
+    exists: existing.includes(name),
+  }));
 }
 
 export const DOCKER_USAGE = {

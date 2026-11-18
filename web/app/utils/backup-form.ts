@@ -1,5 +1,65 @@
 import { tracked } from '@glimmer/tracking';
-import type { App, AppPatch } from 'paas-console/utils/types';
+import type {
+  App,
+  AppPatch,
+  AppVolume,
+  Snapshot,
+} from 'paas-console/utils/types';
+
+/** One named volume of the app and whether it is backed up. */
+export interface VolumeChoice {
+  name: string;
+  included: boolean;
+  /** Time of its newest snapshot, if it has one. */
+  latest: string | null;
+  /**
+   * No volume of this name exists in Docker: it was excluded by name ahead
+   * of time, or it is gone. Only known with the volume list.
+   */
+  missing: boolean;
+}
+
+/**
+ * The volumes to choose from for the backup, sorted by name.
+ *
+ * `listed` is the app's volume list from the API, or `null` when it is not
+ * available. The volumes that have a snapshot then stand in for it, which
+ * leaves out those that were never backed up. Names that are excluded, in
+ * the form or (`also`) saved or typed in, are always there, so that they
+ * can be put back in.
+ */
+export function volumeChoices(options: {
+  listed: AppVolume[] | null;
+  snapshots: Snapshot[];
+  /** Names that are not backed up, as the form stands. */
+  excluded: string[];
+  /** More names to keep on the list. */
+  also?: string[];
+}): VolumeChoice[] {
+  const { listed, snapshots, excluded, also = [] } = options;
+  const latest = new Map<string, string>();
+  for (const snapshot of snapshots) {
+    if (snapshot.kind !== 'volume') continue;
+    const seen = latest.get(snapshot.target);
+    if (!seen || snapshot.time > seen) {
+      latest.set(snapshot.target, snapshot.time);
+    }
+  }
+  const existing = new Set(
+    (listed ?? []).filter((volume) => volume.exists).map(({ name }) => name),
+  );
+  const names = new Set([
+    ...(listed ? listed.map(({ name }) => name) : latest.keys()),
+    ...excluded,
+    ...also,
+  ]);
+  return [...names].sort().map((name) => ({
+    name,
+    included: !excluded.includes(name),
+    latest: latest.get(name) ?? null,
+    missing: listed !== null && !existing.has(name),
+  }));
+}
 
 /** `a, b` or one per line → `['a', 'b']`. */
 export function parseList(text: string): string[] {
