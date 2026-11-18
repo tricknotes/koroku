@@ -271,14 +271,11 @@ module('Acceptance | domains', function (hooks) {
     domains = [makeDomain({ last_error: NO_HOST })];
 
     await visit('/apps/blog/domains');
-    const appReads = () => fakes.api.callsTo('GET', '/api/apps/blog').length;
     const listReads = () => fakes.api.callsTo('GET', DOMAINS).length;
-    const readsBefore = appReads();
 
     await fakes.poller.tick();
 
     assert.strictEqual(listReads(), 2, 'the list is read again');
-    assert.strictEqual(appReads(), readsBefore, 'nothing changed yet');
     assert.dom('[data-test-domain-status]').hasText('確認待ち');
 
     // The server's own check succeeded in the meantime.
@@ -287,11 +284,6 @@ module('Acceptance | domains', function (hooks) {
 
     assert.dom('[data-test-domain-status]').hasText('有効');
     assert.dom('[data-test-domain-pending]').doesNotExist();
-    assert.strictEqual(
-      appReads(),
-      readsBefore + 1,
-      'the app is refreshed for the header',
-    );
 
     const settledReads = listReads();
     await fakes.poller.tick();

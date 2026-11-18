@@ -118,10 +118,7 @@ export default class AppDomainsTemplate extends Component<Signature> {
   /** Picks up a pending domain turning active (or the reason it did not). */
   async refreshPending(): Promise<void> {
     if (this.pendingCount === 0 || this.busy) return;
-    const before = this.pendingCount;
     await this.list.load({ quiet: true });
-    // The header shows the primary URL and counts pending domains.
-    if (this.pendingCount !== before) await this.args.model.reload();
   }
 
   add = async () => {

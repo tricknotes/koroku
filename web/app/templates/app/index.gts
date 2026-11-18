@@ -48,9 +48,14 @@ import type {
   Snapshot,
 } from 'paas-console/utils/types';
 
-/** The app itself: cheap, and it is what tells that something changed. */
-const APP_INTERVAL = 5000;
-/** Everything else, which also changes without the app changing. */
+/**
+ * How often the tab looks at the app it was given. The header keeps that
+ * app fresh, so this is a comparison, not a request.
+ */
+const STATE_INTERVAL = 1000;
+/** Services and deployments, while a deployment is in progress. */
+const DEPLOYING_INTERVAL = 5000;
+/** Everything, which also changes without the app changing. */
 const DETAILS_INTERVAL = 30000;
 
 const RECENT_DEPLOYMENTS = 5;
@@ -136,7 +141,10 @@ export default class AppOverviewTemplate extends Component<Signature> {
     void this.snapshots.load();
     // A deployment finishing, a container turning unhealthy, a domain
     // getting verified: none of it needs a reload of the page.
-    this.poller.every(this, APP_INTERVAL, () => this.refreshApp());
+    this.poller.every(this, STATE_INTERVAL, () => this.followApp());
+    this.poller.every(this, DEPLOYING_INTERVAL, () =>
+      this.refreshWhileDeploying(),
+    );
     this.poller.every(this, DETAILS_INTERVAL, () => this.refreshDetails());
   }
 
@@ -264,16 +272,25 @@ export default class AppOverviewTemplate extends Component<Signature> {
     return formatDateTimeJst(this.backups.value?.next_run_at);
   }
 
-  isCurrent = (deployment: Deployment): boolean =>
-    deployment.id === this.app.current_deployment?.id;
+  /** The release that answers requests right now (as on the deploy tab). */
+  isLive = (deployment: Deployment): boolean =>
+    !this.isStopped && deployment.id === this.app.current_deployment?.id;
 
-  /** Follows the app; a change of state refreshes what hangs off it. */
-  async refreshApp(): Promise<void> {
-    await this.args.model.reload();
+  /**
+   * The header re-reads the app every few seconds. When that moves it to
+   * another state (a deployment started or ended, the app was stopped),
+   * what hangs off the state is read again.
+   */
+  async followApp(): Promise<void> {
     const state = stateKey(this.app);
-    const changed = state !== this.lastState;
+    if (state === this.lastState) return;
     this.lastState = state;
-    if (changed || this.state === 'deploying') await this.refreshRelease();
+    await this.refreshRelease();
+  }
+
+  /** Containers come and go while a deployment runs. */
+  async refreshWhileDeploying(): Promise<void> {
+    if (this.state === 'deploying') await this.refreshRelease();
   }
 
   async refreshDetails(): Promise<void> {
@@ -395,15 +412,9 @@ export default class AppOverviewTemplate extends Component<Signature> {
           >
             <:default>
               <div class="overview-panel" data-test-current-deployment>
-                <div class="overview-release-head">
-                  <p class="overview-release-message">
-                    {{firstLine this.app.current_deployment.commit_message}}
-                  </p>
-                  <StatusIndicator
-                    @kind={{if this.isStopped "stopped" "running"}}
-                    data-test-overview-state
-                  />
-                </div>
+                <p class="overview-release-message">
+                  {{firstLine this.app.current_deployment.commit_message}}
+                </p>
                 <dl class="overview-facts">
                   <div>
                     <dt>コミット</dt>
@@ -449,7 +460,6 @@ export default class AppOverviewTemplate extends Component<Signature> {
                       {{this.stoppedHint}}
                     </p>
                     <Button
-                      @variant="primary"
                       @busy={{this.starting}}
                       @busyLabel="起動中…"
                       data-test-control="start"
@@ -635,8 +645,12 @@ export default class AppOverviewTemplate extends Component<Signature> {
                                 @model={{this.slug}}
                                 class="row-link overview-deployment-message"
                               >{{firstLine deployment.commit_message}}</LinkTo>
-                              {{#if (this.isCurrent deployment)}}
-                                <Badge @tone="ok" data-test-live>Live</Badge>
+                              {{#if (this.isLive deployment)}}
+                                <Badge
+                                  @tone="ok"
+                                  title="いま応答しているリリースです"
+                                  data-test-live
+                                >Live</Badge>
                               {{/if}}
                             </span>
                             <span class="overview-meta">
@@ -670,7 +684,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
                 <LinkTo
                   @route="app.deploy"
                   @model={{this.slug}}
-                  class={{buttonClass "primary"}}
+                  class={{buttonClass "default"}}
                   data-test-overview-deploy
                 >{{this.emptyState.action}}</LinkTo>
               </:action>

@@ -93,10 +93,10 @@ module('Acceptance | overview', function (hooks) {
       .hasAttribute('datetime', '2026-11-18T03:01:10Z')
       .hasAttribute('title', '2026/11/18 12:01 JST');
     assert.dom('[data-test-current-deployment]').includesText('1 分 9 秒');
+    assert.dom('[data-test-release]').includesText('稼働中のリリース');
     assert
-      .dom('[data-test-overview-state]')
-      .hasText('稼働中')
-      .hasAttribute('data-status', 'running');
+      .dom('[data-test-current-deployment] [data-status]')
+      .doesNotExist('the state is in the header and not repeated here');
 
     await click('[data-test-current-deployment] [data-test-copy]');
     assert.deepEqual(fakes.browser.copied, [SHA_A], 'the full SHA is copied');
@@ -353,7 +353,7 @@ module('Acceptance | overview', function (hooks) {
     assert
       .dom('[data-test-current-deployment]')
       .includesText('Fix login', 'the release that serves is still described');
-    assert.dom('[data-test-overview-state]').hasText('稼働中');
+    assert.dom('[data-test-release]').includesText('稼働中のリリース');
 
     await click('[data-test-latest-deployment] a');
     assert.strictEqual(currentURL(), '/apps/blog/deploy');
@@ -405,14 +405,18 @@ module('Acceptance | overview', function (hooks) {
 
     await visit('/apps/blog');
 
-    assert
-      .dom('[data-test-overview-state]')
-      .hasText('停止')
-      .hasAttribute('data-status', 'stopped');
+    assert.dom('[data-test-app-state]').hasText('停止');
     assert.dom('[data-test-release]').includesText('停止中のリリース');
     assert.dom('[data-test-stopped-hint]').includesText('503');
     assert.dom('[data-test-no-services]').exists();
-    assert.dom('[data-test-control]').exists({ count: 1 }).hasText('起動');
+    assert
+      .dom('[data-test-live]')
+      .doesNotExist('nothing answers while the app is stopped');
+    assert
+      .dom('[data-test-control]')
+      .exists({ count: 1 })
+      .hasText('起動')
+      .doesNotHaveClass('button-primary', 'the header holds the main button');
 
     await click('[data-test-control="start"]');
 
@@ -420,7 +424,9 @@ module('Acceptance | overview', function (hooks) {
       fakes.api.callsTo('POST', '/api/apps/blog/start').length,
       1,
     );
-    assert.dom('[data-test-overview-state]').hasText('稼働中');
+    assert.dom('[data-test-app-state]').hasText('稼働中');
+    assert.dom('[data-test-release]').includesText('稼働中のリリース');
+    assert.dom('[data-test-live]').exists();
     assert.dom('[data-test-notice]').hasText('起動しました。');
     assert.dom('[data-test-service="web"]').exists();
     assert.dom('[data-test-control]').doesNotExist();
@@ -435,7 +441,8 @@ module('Acceptance | overview', function (hooks) {
     await click('[data-test-control="start"]');
 
     assert.dom('[data-test-error]').includesText('ほかの処理が実行中です');
-    assert.dom('[data-test-overview-state]').hasText('停止');
+    assert.dom('[data-test-app-state]').hasText('停止');
+    assert.dom('[data-test-stopped-hint]').exists();
     assert.dom('[data-test-control="start"]').isNotDisabled();
   });
 
@@ -450,7 +457,9 @@ module('Acceptance | overview', function (hooks) {
     assert
       .dom('[data-test-overview-empty] a, [data-test-overview-empty] button')
       .exists({ count: 1 })
-      .hasText('デプロイする');
+      .hasText('デプロイする')
+      .hasClass('button')
+      .doesNotHaveClass('button-primary', 'the header holds the main button');
     assert.dom('[data-test-release]').doesNotExist();
     assert.dom('[data-test-control]').doesNotExist();
     assert.deepEqual(
