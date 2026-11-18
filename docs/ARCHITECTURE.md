@@ -507,6 +507,8 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - 稼働中のアプリの volume を取るとき、読めないファイルがあっても（restic の終了コード 3）スナップショットは残し、警告として記録する。
 - restic の認証情報は環境変数で渡し、引数・エラー・ログには出さない。キャッシュは `/var/lib/koroku/restic-cache` に置く（systemd のサービスには HOME の下のキャッシュがないため）。
 - `koroku restore-system` は、基盤のスナップショットを取り出し、`koroku.db` と設定ディレクトリのファイルを置く。既にあるファイルは上書きせず、バックアップにあった版を隣に `<名前>.restored-<時刻>` として置く。`koroku.db` が既にあるホストでは `--force` なしでは実行しない。
+- 基盤のバックアップで設定ディレクトリをコピーするとき、その下にあるデータディレクトリ（`data_dir`）と、コピー先の作業ディレクトリ自身は除外する。ローカル環境では両方を `data/dev` の下に置くため、除外しないと作業ディレクトリを何重にもコピーし続けて失敗した（2026-11-19、ローカル環境で検出）。本番は `/etc/koroku` と `/var/lib/koroku` が別なので影響しない。
+- volume のリストアで中身を退避する移動は `rename` で行い、`EXDEV`（マウントをまたぐ移動）で失敗したときだけ、所有者・パーミッション・時刻を保ったコピーと元の削除に切り替える。事前に「同じファイルシステムか」は確かめているが、同じファイルシステムでも別の bind mount を経由すると Linux は `rename` を拒む（ローカル環境は、`koroku` のコンテナにデータディレクトリと Docker の volume ディレクトリを別々にマウントしている）。コピーではハードリンクと拡張属性は保たれないが、退避は手作業での救出用なので許容する。ソケット・デバイス・名前付きパイプはコピーせず、リストアを失敗させて元に戻す。本番は同じマウントなので従来どおり `rename` になる。
 
 実装は M5。受け入れシナリオに「バックアップ取得 → volume を空にする → リストアでデータが戻る」と「4 時間以上前のログが R2 にあり UI からダウンロードできる」を加える。
 
@@ -608,6 +610,10 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
   - 内容が変わる投入（アプリを 1 つ追加）と強制再読込では、サーバーが作り直されるが、SSE は 24 秒間の観測で 1 行も欠けなかった（平文、および TLS + HTTP/2 のどちらでも）。新しいルートは投入の 1 秒後には応答した。
   - アップグレード済み接続は、`stream_close_delay` なし（Caddy の既定）だと再読込の瞬間に切れた。`stream_close_delay: 10s` では再読込の 10.0 秒後に切れた。つまりこの指定は切断をなくすのではなく先送りする。生成する設定では 5 分にしているので、アプリの作成・ドメインやポートの変更・起動や停止のたびに、他アプリの WebSocket は最長 5 分後に 1 回切れる（クライアントの再接続に任せる）。5 分ちょうどで切れるところまでは待って確認していない。
   - 実際の ACME 発行（Let's Encrypt staging を含む）は VPS と DNS が要るので未確認。
+
+- ローカル環境のバックアップ（2026-11-19、Versity S3 Gateway v1.11.0、restic 同梱の開発用イメージ、WSL2 の snap 版 Docker）: 受け入れシナリオ 7 を手元で実施した。Rails + PostgreSQL のアプリに確認用の行を入れてバックアップ → アプリ停止 → volume を空にして起動（DB は空で初期化される）→ UI と同じ API でリストア → 行が戻り、アプリも応答した。退避した中身は所有者（postgres の UID 70）を保っていた。
+  - S3 互換サーバーは、MinIO のリポジトリがアーカイブされたため、Versity S3 Gateway、RustFS、Garage、SeaweedFS、MinIO のコミュニティフォークを比較した。koroku の `TestIntegrationS3`（13 項目）と restic（init・backup・`--stdin`・`forget --prune`・`check --read-data`・restore）を各サーバーで実行し、Garage 以外は全項目通過した（Garage は期限切れの presigned URL に 400、署名の誤りに `AccessDenied` を返す。`koroku` 本体はこのエラーコードに依存しない）。ローカルには、イメージ 82MB・待機時のメモリ約 29MiB と最も軽く、環境変数だけで設定でき、中身が volume にファイルとして並ぶ Versity S3 Gateway を選んだ。本番は R2 のまま。
+  - `koroku` のコンテナは利用者の UID で動くため、volume のファイル（root や postgres の所有）を読み書きできるよう、`chown`・`dac_override`・`fowner`・`fsetid` の 4 つだけを ambient capability で持たせた（`DEV_FILE_CAPS=1`。どれも Docker が既定でコンテナに与える範囲）。Docker の volume ディレクトリはホストと同じパスでマウントする。Docker Desktop は volume が VM の中にあるので、この方法では届かない。
 
 - ローカル環境の Caddy（2026-11-19、Caddy 2.11.9 の公式 Docker イメージ、WSL2）: `listen` を `127.0.0.1:80` / `127.0.0.1:443` にしても、HTTP から HTTPS への自動リダイレクトは挿入された（`http://<slug>.dev.localhost/` が 308）。内蔵 CA で `*.dev.localhost` の証明書が発行され、ルート証明書を信頼すれば検証も通る。WSL2 の localhost 転送で、Windows 側の `curl.exe` からも `https://<slug>.dev.localhost/` に届いた。
 

@@ -4,6 +4,8 @@
 # Local configuration and data (never commit real config or keys)
 /config.toml
 /data/
+# Compose variables of the local environment (KOROKU_DOCKER_ROOT, ...)
+/.env
 *.pem
 *.key
 

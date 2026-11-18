@@ -16,6 +16,12 @@
 #           local CA; import its root certificate into the browser's trust
 #           store (see README.md).
 #
+#   storage S3-compatible object storage (Versity S3 Gateway) on
+#           127.0.0.1:9000, standing in for Cloudflare R2: log archives and
+#           restic backups go there, as plain files in a volume. Its WebUI is
+#           on http://127.0.0.1:9001 (access key koroku-dev, secret
+#           koroku-dev-secret). storage-setup creates the bucket.
+#
 # After changing Go code: docker compose restart koroku
 #
 # Both services run in the image of dev/Dockerfile (the same one bin/dev
@@ -45,9 +51,25 @@ services:
   koroku:
     <<: *dev
     command: ["dev/serve.sh"]
+    # Backups read the named volumes of apps where Docker keeps them, at
+    # the same path as on the host, like koroku does as root in production.
+    # Set KOROKU_DOCKER_ROOT (for example in .env) when `docker info -f
+    # '{{.DockerRootDir}}'` is not /var/lib/docker. Docker Desktop keeps
+    # volumes inside its VM, out of reach; volume backups fail there.
+    volumes:
+      - ${PWD}:${PWD}
+      - /var/run/docker.sock:/var/run/docker.sock
+      - go:/cache/go
+      - go-build:/cache/go-build
+      - pnpm:/cache/pnpm-store
+      - ${KOROKU_DOCKER_ROOT:-/var/lib/docker}/volumes:${KOROKU_DOCKER_ROOT:-/var/lib/docker}/volumes
+    environment:
+      DEV_FILE_CAPS: "1"
     depends_on:
       caddy:
         condition: service_healthy
+      storage-setup:
+        condition: service_completed_successfully
 
   caddy:
     image: caddy:2.11.9
@@ -64,6 +86,34 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  storage:
+    image: versity/versitygw:v1.11.0
+    network_mode: host
+    # Fixed credentials: the gateway listens on loopback only and holds
+    # nothing but local test data. They match dev/serve.sh. The posix backend
+    # keeps every bucket as a directory under /data.
+    command:
+      - --port=127.0.0.1:9000
+      - --webui=127.0.0.1:9001
+      - --cors-allow-origin=http://127.0.0.1:9001
+      - --quiet
+      - posix
+      - /data
+    environment:
+      ROOT_ACCESS_KEY: koroku-dev
+      ROOT_SECRET_KEY: koroku-dev-secret
+    volumes:
+      - storage-data:/data
+
+  # Creates the bucket (koroku expects it to exist, like the R2 bucket made
+  # by hand in production), then exits.
+  storage-setup:
+    <<: *dev
+    restart: "no"
+    depends_on:
+      - storage
+    command: ["dev/storage-setup.sh"]
 
   web:
     <<: *dev
@@ -94,3 +144,6 @@ volumes:
     name: koroku-dev-caddy-data
   caddy-config:
     name: koroku-dev-caddy-config
+  # Objects of the local storage: log archives and the restic repository.
+  storage-data:
+    name: koroku-dev-s3-data
