@@ -128,6 +128,14 @@ module('Acceptance | overview', function (hooks) {
       .includesText('256.0 MB / 512.0 MB')
       .doesNotIncludeText('上限の');
     assert
+      .dom('[data-test-service="web"] [role="meter"]')
+      .hasAria('valuenow', '50')
+      .hasAria('label', 'web のメモリ使用率')
+      .doesNotHaveClass('is-warn');
+    assert
+      .dom('[data-test-service="db"] [role="meter"]')
+      .doesNotExist('nothing to measure against without a limit');
+    assert
       .dom('[data-test-service="db"] [data-test-service-memory]')
       .includesText('256.0 MB / 上限なし');
     assert
@@ -178,6 +186,7 @@ module('Acceptance | overview', function (hooks) {
       .dom('[data-test-service="web"] [data-test-service-memory]')
       .hasClass('is-high')
       .includesText('上限の 96%');
+    assert.dom('[data-test-service="web"] [role="meter"]').hasClass('is-warn');
     assert
       .dom('[data-test-service="web"] [data-test-service-memory] svg')
       .hasAttribute('data-icon', 'warning', 'not colour alone');
@@ -297,8 +306,9 @@ module('Acceptance | overview', function (hooks) {
       .dom('[data-test-backup-state] time')
       .hasAttribute('datetime', '2026-11-17T18:00:12Z');
     assert
-      .dom('[data-test-overview-backup]')
-      .includesText('2026/11/19 03:00 JST');
+      .dom('[data-test-next-backup]')
+      .hasAttribute('datetime', '2026-11-18T18:00:00Z')
+      .hasAttribute('title', '2026/11/19 03:00 JST');
     assert.dom('[data-test-backup-warning]').doesNotExist();
   });
 
@@ -312,7 +322,8 @@ module('Acceptance | overview', function (hooks) {
     assert.dom('[data-test-backup-state]').includesText('まだありません');
     assert
       .dom('[data-test-backup-warning]')
-      .includesText('24 時間以上成功していません');
+      .includesText('このホストのバックアップ')
+      .includesText('24 時間以上成功なし');
     assert.dom('[data-test-backup-warning] svg').exists('not colour alone');
 
     fakes.api

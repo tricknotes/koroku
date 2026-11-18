@@ -231,7 +231,7 @@ export default class AppDomainsTemplate extends Component<Signature> {
 
   <template>
     <TabSection @title="ドメイン" data-test-domains>
-      <p class="tab-section-hint">
+      <p class="pane-description">
         このアプリに届くホスト名です。プライマリを決めると、ほかのホスト名へのアクセスはプライマリへリダイレクトされます。
       </p>
 
@@ -352,7 +352,7 @@ export default class AppDomainsTemplate extends Component<Signature> {
                     <button
                       type="button"
                       class="{{buttonClass 'default' 'small'}}
-                        button-quiet-danger domain-delete"
+                        button-danger-outline domain-delete"
                       disabled={{this.busy}}
                       aria-label="{{domain.hostname}} を削除"
                       data-test-domain-delete

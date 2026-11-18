@@ -12,24 +12,23 @@ import CopyButton from 'paas-console/components/copy-button';
 import EmptyState from 'paas-console/components/empty-state';
 import ErrorMessage from 'paas-console/components/error-message';
 import Icon from 'paas-console/components/icon';
+import Meter from 'paas-console/components/meter';
 import RelativeTime from 'paas-console/components/relative-time';
 import RowList from 'paas-console/components/row-list';
 import StatusIndicator from 'paas-console/components/status-indicator';
 import TabSection from 'paas-console/components/tab-section';
+import TimeUntil from 'paas-console/components/time-until';
 import type ApiService from 'paas-console/services/api';
 import type PollerService from 'paas-console/services/poller';
 import type AppContext from 'paas-console/utils/app-context';
-import {
-  firstLine,
-  formatDateTimeJst,
-  formatDuration,
-  shortSha,
-} from 'paas-console/utils/format';
+import { backupHealth } from 'paas-console/utils/backup-status';
+import { firstLine, formatDuration, shortSha } from 'paas-console/utils/format';
 import Loadable from 'paas-console/utils/loadable';
 import {
   healthLabel,
   memoryUsage,
   serviceState,
+  type MemoryUsage,
 } from 'paas-console/utils/services';
 import {
   APP_STATE_HINTS,
@@ -89,6 +88,14 @@ function when(deployment: Deployment): string | null {
 
 function duration(deployment: Deployment): string {
   return formatDuration(deployment.started_at, deployment.finished_at);
+}
+
+function hasLimit(memory: MemoryUsage): boolean {
+  return memory.percent !== null;
+}
+
+function percentOf(memory: MemoryUsage): number {
+  return memory.percent ?? 0;
 }
 
 function isUnhealthy(service: ServiceStatus): boolean {
@@ -264,12 +271,17 @@ export default class AppOverviewTemplate extends Component<Signature> {
     return times.sort().at(-1) ?? null;
   }
 
-  get backupWarning(): boolean {
-    return this.backups.value?.warning === true;
-  }
-
-  get nextBackup(): string {
-    return formatDateTimeJst(this.backups.value?.next_run_at);
+  /**
+   * What is wrong with the backups of the whole host, in the words the
+   * backups tab uses; empty while they are fine (or just running).
+   */
+  get backupTrouble(): string {
+    const overview = this.backups.value;
+    if (!overview) return '';
+    const health = backupHealth(overview);
+    return health.kind === 'failed' || health.kind === 'pending'
+      ? health.label
+      : '';
   }
 
   /** The release that answers requests right now (as on the deploy tab). */
@@ -411,12 +423,12 @@ export default class AppOverviewTemplate extends Component<Signature> {
             data-test-release
           >
             <:default>
-              <div class="overview-panel" data-test-current-deployment>
+              <div class="box overview-panel" data-test-current-deployment>
                 <p class="overview-release-message">
                   {{firstLine this.app.current_deployment.commit_message}}
                 </p>
-                <dl class="overview-facts">
-                  <div>
+                <dl class="facts overview-release-facts">
+                  <div class="fact">
                     <dt>コミット</dt>
                     <dd>
                       <span
@@ -432,14 +444,14 @@ export default class AppOverviewTemplate extends Component<Signature> {
                     </dd>
                   </div>
                   {{#if this.app.current_deployment.ref}}
-                    <div>
+                    <div class="fact">
                       <dt>ブランチ</dt>
                       <dd data-test-release-ref>
                         {{this.app.current_deployment.ref}}
                       </dd>
                     </div>
                   {{/if}}
-                  <div>
+                  <div class="fact">
                     <dt>デプロイ</dt>
                     <dd>
                       <RelativeTime
@@ -448,7 +460,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
                     </dd>
                   </div>
                   {{#if (duration this.app.current_deployment)}}
-                    <div>
+                    <div class="fact">
                       <dt>所要時間</dt>
                       <dd>{{duration this.app.current_deployment}}</dd>
                     </div>
@@ -565,6 +577,14 @@ export default class AppOverviewTemplate extends Component<Signature> {
                                   {{/if}}
                                   {{memory.text}}
                                 </span>
+                                {{#if (hasLimit memory)}}
+                                  <Meter
+                                    class="overview-memory-meter"
+                                    @label="{{svc.name}} のメモリ使用率"
+                                    @percent={{percentOf memory}}
+                                    @tone={{if memory.high "warn" "ok"}}
+                                  />
+                                {{/if}}
                                 {{#if memory.high}}
                                   <span class="overview-memory-note">
                                     上限の
@@ -585,7 +605,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
                   </RowList>
                 {{else}}
                   <p
-                    class="overview-panel overview-quiet"
+                    class="box overview-panel overview-quiet"
                     data-test-no-services
                   >
                     動いているサービスはありません。
@@ -675,7 +695,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
             </:default>
           </TabSection>
         {{else}}
-          <div class="row-list" data-test-overview-empty>
+          <div class="box" data-test-overview-empty>
             <EmptyState
               @title={{this.emptyState.title}}
               @description={{this.emptyState.description}}
@@ -704,7 +724,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
           </:actions>
           <:default>
             {{#if this.domains.loaded}}
-              <ul class="overview-panel overview-hostnames">
+              <ul class="box overview-panel overview-hostnames">
                 {{#each this.hostnames key="name" as |hostname|}}
                   <li data-test-overview-domain={{hostname.name}}>
                     <span class="overview-hostname">{{hostname.name}}</span>
@@ -721,7 +741,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
                 {{/each}}
               </ul>
             {{else if this.domains.error}}
-              <p class="overview-panel overview-quiet" data-test-side-error>
+              <p class="box overview-panel overview-quiet" data-test-side-error>
                 取得できませんでした。
                 <Button
                   @variant="ghost"
@@ -730,7 +750,11 @@ export default class AppOverviewTemplate extends Component<Signature> {
                 >再読み込み</Button>
               </p>
             {{else}}
-              <div class="overview-panel" role="status" aria-label="読み込み中">
+              <div
+                class="box overview-panel"
+                role="status"
+                aria-label="読み込み中"
+              >
                 <span class="skeleton overview-skeleton"></span>
               </div>
             {{/if}}
@@ -747,15 +771,22 @@ export default class AppOverviewTemplate extends Component<Signature> {
           </:actions>
           <:default>
             {{#if this.backupsLoading}}
-              <div class="overview-panel" role="status" aria-label="読み込み中">
+              <div
+                class="box overview-panel"
+                role="status"
+                aria-label="読み込み中"
+              >
                 <span class="skeleton overview-skeleton"></span>
               </div>
             {{else if this.backupsUnconfigured}}
-              <p class="overview-panel overview-quiet" data-test-backup-state>
+              <p
+                class="box overview-panel overview-quiet"
+                data-test-backup-state
+              >
                 バックアップは設定されていません。
               </p>
             {{else if this.snapshots.error}}
-              <p class="overview-panel overview-quiet" data-test-side-error>
+              <p class="box overview-panel overview-quiet" data-test-side-error>
                 取得できませんでした。
                 <Button
                   @variant="ghost"
@@ -764,30 +795,35 @@ export default class AppOverviewTemplate extends Component<Signature> {
                 >再読み込み</Button>
               </p>
             {{else}}
-              <div class="overview-panel">
-                <dl class="overview-facts overview-facts-stacked">
-                  <div data-test-backup-state>
+              <div class="box overview-panel">
+                <dl class="facts">
+                  <div class="fact" data-test-backup-state>
                     <dt>最終バックアップ</dt>
                     <dd>
                       {{#if this.lastSnapshotAt}}
                         <RelativeTime @time={{this.lastSnapshotAt}} />
                       {{else}}
-                        まだありません
+                        <span class="fact-none">まだありません</span>
                       {{/if}}
                     </dd>
                   </div>
-                  {{#if this.nextBackup}}
-                    <div>
+                  {{#if this.backups.value.next_run_at}}
+                    <div class="fact">
                       <dt>次回の予定</dt>
-                      <dd>{{this.nextBackup}}</dd>
+                      <dd>
+                        <TimeUntil
+                          @time={{this.backups.value.next_run_at}}
+                          data-test-next-backup
+                        />
+                      </dd>
                     </div>
                   {{/if}}
                 </dl>
-                {{#if this.backupWarning}}
+                {{#if this.backupTrouble}}
                   <p class="overview-warning" data-test-backup-warning>
                     <Icon @name="warning" />
-                    <span>このホストのバックアップが 24
-                      時間以上成功していません。</span>
+                    <span>このホストのバックアップ:
+                      {{this.backupTrouble}}</span>
                   </p>
                 {{/if}}
               </div>

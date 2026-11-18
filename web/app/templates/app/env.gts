@@ -444,7 +444,7 @@ export default class AppEnvTemplate extends Component<Signature> {
       </:actions>
 
       <:default>
-        <p class="tab-section-hint" data-test-env-notice>
+        <p class="pane-description" data-test-env-notice>
           コンテナに渡す環境変数です。変更は保存しただけでは反映されず、<strong
           >次のデプロイで反映されます</strong>。
         </p>
@@ -670,42 +670,44 @@ export default class AppEnvTemplate extends Component<Signature> {
             {{/if}}
 
             {{#if this.showFooter}}
-              <div class="env-footer">
-                <p class="env-state" aria-live="polite">
+              {{! The same footer as the settings form: the ways to save,
+                  then what there is to save. }}
+              <div class="form-footer env-footer">
+                <Button
+                  @type="submit"
+                  @variant="primary"
+                  @disabled={{this.cannotSave}}
+                  @busy={{this.isWorking "save"}}
+                  @busyLabel="保存中…"
+                  data-test-env-save
+                >保存</Button>
+                {{#if this.canRedeploy}}
+                  <Button
+                    @disabled={{this.cannotSave}}
+                    @busy={{this.isWorking "redeploy"}}
+                    @busyLabel="実行中…"
+                    data-test-env-save-deploy
+                    {{on "click" this.requestSaveAndRedeploy}}
+                  >保存して再デプロイ</Button>
+                {{/if}}
+                {{#if this.dirty}}
+                  <Button
+                    @variant="ghost"
+                    @disabled={{this.busy}}
+                    data-test-env-discard
+                    {{on "click" this.discard}}
+                  >変更を破棄</Button>
+                {{/if}}
+                <p class="form-status" aria-live="polite">
                   {{#if this.dirty}}
                     <span class="env-dirty" data-test-env-dirty>
                       <span class="env-dirty-mark" aria-hidden="true"></span>
                       未保存の変更があります（{{this.changeSummary}}）
                     </span>
+                  {{else}}
+                    <span data-test-env-unchanged>変更はありません。</span>
                   {{/if}}
                 </p>
-                <div class="env-footer-actions">
-                  {{#if this.dirty}}
-                    <Button
-                      @variant="ghost"
-                      @disabled={{this.busy}}
-                      data-test-env-discard
-                      {{on "click" this.discard}}
-                    >変更を破棄</Button>
-                  {{/if}}
-                  {{#if this.canRedeploy}}
-                    <Button
-                      @disabled={{this.cannotSave}}
-                      @busy={{this.isWorking "redeploy"}}
-                      @busyLabel="実行中…"
-                      data-test-env-save-deploy
-                      {{on "click" this.requestSaveAndRedeploy}}
-                    >保存して再デプロイ</Button>
-                  {{/if}}
-                  <Button
-                    @type="submit"
-                    @variant="primary"
-                    @disabled={{this.cannotSave}}
-                    @busy={{this.isWorking "save"}}
-                    @busyLabel="保存中…"
-                    data-test-env-save
-                  >保存</Button>
-                </div>
               </div>
             {{/if}}
 
@@ -754,7 +756,10 @@ export default class AppEnvTemplate extends Component<Signature> {
               {{/if}}
               <ErrorMessage @error={{this.error}} />
               {{#if this.serverErrorLines.length}}
-                <ul class="env-server-errors" data-test-env-server-errors>
+                <ul
+                  class="form-problems env-problems"
+                  data-test-env-server-errors
+                >
                   {{#each this.serverErrorLines as |line|}}
                     <li>{{line}}</li>
                   {{/each}}

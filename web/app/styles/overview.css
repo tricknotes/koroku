@@ -27,11 +27,10 @@
   margin: 0;
 }
 
+/* A `.box` (panes.css) with room inside. */
 .overview-panel {
   margin: 0;
   padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
 }
 
 .overview-quiet,
@@ -108,46 +107,13 @@
   color: var(--color-text-secondary);
 }
 
-/* Label and value pairs: in a line, or one pair per line at the side. */
-
-.overview-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-8);
-  margin: var(--space-3) 0 0;
-  font-size: var(--text-sm);
+.overview-release-facts {
+  margin-top: var(--space-3);
 }
 
-.overview-facts > div {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  min-width: 0;
+/* One of the values has a copy button next to it: all share its height. */
+.overview-release-facts .fact > dd {
   min-height: var(--control-height-sm);
-}
-
-.overview-facts dt {
-  color: var(--color-text-secondary);
-}
-
-.overview-facts dd {
-  display: inline-flex;
-  gap: var(--space-1);
-  align-items: center;
-  min-width: 0;
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--weight-medium);
-}
-
-.overview-facts-stacked {
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-}
-
-.overview-facts-stacked > div {
-  justify-content: space-between;
 }
 
 .overview-warning {
@@ -240,6 +206,11 @@
   font-weight: var(--weight-medium);
 }
 
+.overview-memory-meter {
+  max-width: 10rem;
+  margin: 2px 0;
+}
+
 .overview-memory-note {
   color: var(--color-text-secondary);
   font-size: var(--text-xs);
@@ -312,8 +283,8 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .overview-facts {
-    gap: var(--space-1) var(--space-6);
+  .overview-side {
+    margin-top: var(--space-8);
   }
 
   .overview-services > .row-list-header {

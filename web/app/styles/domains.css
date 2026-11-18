@@ -249,11 +249,6 @@
   min-width: 0;
 }
 
-/* The shared rule for invalid controls loses to `input[type="text"]`. */
-.domain-form-line > input[aria-invalid="true"] {
-  border-color: var(--color-failed);
-}
-
 @media (width <= 48rem) {
   .domain-item-head {
     grid-template:
