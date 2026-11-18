@@ -1,4 +1,4 @@
-# paasd — Claude Code 作業ガイド
+# koroku — Claude Code 作業ガイド
 
 個人用の Heroku ライクなホスティング基盤を実装するリポジトリ。VPS 1 台の上で、GitHub リポジトリの Docker Compose アプリ（3〜5 個）を UI からデプロイする。
 
@@ -15,11 +15,11 @@
 | --- | --- |
 | 実行基盤 | さくらの VPS 1 台、Ubuntu 24.04、x86_64 |
 | ベースドメイン | `dev.tricknotes.io`（アプリは `<slug>.dev.tricknotes.io`、管理 UI は `console.dev.tricknotes.io`） |
-| コントロールプレーン | Go 製シングルバイナリ `paasd`（systemd、ホスト直置き）+ SQLite |
-| フロントエンド | Ember + TypeScript の SPA。ビルド成果物を `paasd` に embed |
+| コントロールプレーン | Go 製シングルバイナリ `koroku`（systemd、ホスト直置き）+ SQLite |
+| フロントエンド | Ember + TypeScript の SPA。ビルド成果物を `koroku` に embed |
 | リバースプロキシ | Caddy（ホスト直置き）。設定は DB から全体を生成して admin API の `POST /load` |
 | GitHub 連携 | GitHub App（ログイン + installation token で clone） |
-| デプロイ単位 | 1 アプリ = 1 Compose プロジェクト（`-p paas-<slug>`）。staging と本番は別アプリ |
+| デプロイ単位 | 1 アプリ = 1 Compose プロジェクト（`-p koroku-<slug>`）。staging と本番は別アプリ |
 | 外部ストレージ | Cloudflare R2（S3 互換 API のみ使用。S3 に差し替え可能にする） |
 | バックアップ | restic → R2。日次 03:00 JST |
 | ログ退避 | 4 時間ごとに R2 へ |
@@ -27,7 +27,7 @@
 ## リポジトリ構成
 
 ```text
-cmd/paasd/            エントリポイント（serve、restore-system などのサブコマンド）
+cmd/koroku/           エントリポイント（serve、restore-system などのサブコマンド）
 internal/api/         HTTP ハンドラ、セッション、SSE
 internal/deploy/      デプロイの状態機械とワーカー
 internal/compose/     override 生成、config 正規化、ポリシー検査
@@ -94,7 +94,7 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 - [x] リポジトリ構成、`config.toml` 読込、SQLite マイグレーション（埋め込み SQL を起動時に適用）
 - [x] Ember の空アプリを embed して配信
 - [x] CI（vet、ユニットテスト、フロントの lint とテスト）
-- 完了条件: `paasd serve` が起動し、`GET /api/system` が応答する
+- 完了条件: `koroku serve` が起動し、`GET /api/system` が応答する
 
 ### M1 デプロイエンジン
 
@@ -111,7 +111,7 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 ### M2 ルーティングとドメイン
 
 - [x] ホストポート割当（20000 番台、DB で一意）
-- [x] Caddy JSON 設定の生成と `POST /load`。`paasd` 起動時にも実行
+- [x] Caddy JSON 設定の生成と `POST /load`。`koroku` 起動時にも実行
 - [ ] 自動割当ドメインの TLS（開発中は Let's Encrypt staging）
 - [x] `app_domains` テーブル、独自ドメインの追加・DNS 検証（`public_ip` と照合、5 分間隔で再試行）・強制有効化
 - [x] プライマリドメインへの 308 リダイレクト
@@ -140,11 +140,11 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 
 - [x] ログコレクタ（`docker compose logs --follow` を追記保存、再起動時は `--since` で再開、ローカル 14 日保持）
 - [x] 4 時間ごとの R2 退避（`logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz`）、過去ログの絞り込み表示、presigned URL でのダウンロード
-- [x] バックアップ: 基盤（`paas.db` は `VACUUM INTO` 後）、named volume、ダンプフック（`docker compose exec -T` の出力を `restic backup --stdin`）
+- [x] バックアップ: 基盤（`koroku.db` は `VACUUM INTO` 後）、named volume、ダンプフック（`docker compose exec -T` の出力を `restic backup --stdin`）
 - [x] バックアップのスケジュール（日次 03:00 JST）、手動実行、`forget --prune`、週次 `check`、最終成功時刻と警告の表示
-- [x] リストア: volume は UI から、DB ダンプはダウンロードまで。`paasd restore-system` でホスト全損から復旧
+- [x] リストア: volume は UI から、DB ダンプはダウンロードまで。`koroku restore-system` でホスト全損から復旧
 - [x] start / stop / restart、アプリ削除（volume も消すか選択）、image / builder prune、システム画面
-- [x] プロビジョニングスクリプト（Docker、Caddy、restic、`paasd` の unit、swap 2GB、Docker のログローテーション設定、カーネル更新）
+- [x] プロビジョニングスクリプト（Docker、Caddy、restic、`koroku` の unit、swap 2GB、Docker のログローテーション設定、カーネル更新）
 - 完了条件: 新規 VPS がスクリプト 1 本で立ち上がり、下の受け入れシナリオがすべて通る
 
 ## 受け入れシナリオ
