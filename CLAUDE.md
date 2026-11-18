@@ -58,12 +58,13 @@ testdata/             サンプル Compose、golden file
 ## テストと確認コマンド
 
 ```sh
-go vet ./...
-go test ./...                       # ユニット（Docker 不要）
-go test -tags integration ./...     # 実 Docker を使う結合テスト
-cd web && pnpm lint && pnpm test    # フロントエンド
+bin/dev go vet ./...
+bin/dev go test ./...                       # ユニット
+bin/dev go test -tags integration ./...     # 実 Docker・restic を使う結合テスト
+bin/dev sh -c 'cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm test'    # フロントエンド
 ```
 
+- 開発の道具（Go、Node.js、pnpm、Chromium、restic など）は `dev/Dockerfile` のイメージに入っている。ホストには何も入れず、コマンドは `bin/dev` 経由で実行する。
 - override 生成、Caddy 設定生成、ポリシー検査は golden file で固定する。
 - マイルストーンを終えるときは、下の完了条件を実際に実行して確かめ、結果（コマンドと出力の要点）を報告する。確認していないものを完了と書かない。
 
@@ -112,21 +113,21 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 
 ### M4 UI
 
-- [ ] アプリ一覧（状態、URL、最終デプロイ、`environment` ラベル）
-- [ ] アプリ作成（リポジトリ選択 → Compose ファイル検出 → 公開サービスとポート）。同じリポジトリを複数アプリに紐づけられる
-- [ ] アプリ詳細のタブ: 概要 / デプロイ（ブランチ・コミット選択、履歴、SSE ライブログ）/ ログ / 環境変数 / ドメイン / 設定
-- [ ] 本番アプリ（`environment = production`）のデプロイと削除に確認ダイアログ
+- [x] アプリ一覧（状態、URL、最終デプロイ、`environment` ラベル）
+- [x] アプリ作成（リポジトリ選択 → Compose ファイル検出 → 公開サービスとポート）。同じリポジトリを複数アプリに紐づけられる
+- [x] アプリ詳細のタブ: 概要 / デプロイ（ブランチ・コミット選択、履歴、SSE ライブログ）/ ログ / 環境変数 / ドメイン / 設定
+- [x] 本番アプリ（`environment = production`）のデプロイと削除に確認ダイアログ
 - 完了条件: ブラウザ操作だけで新規アプリを作成・デプロイし、独自ドメインを設定できる
 
 ### M5 運用
 
-- [ ] ログコレクタ（`docker compose logs --follow` を追記保存、再起動時は `--since` で再開、ローカル 14 日保持）
-- [ ] 4 時間ごとの R2 退避（`logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz`）、過去ログの絞り込み表示、presigned URL でのダウンロード
-- [ ] バックアップ: 基盤（`paas.db` は `VACUUM INTO` 後）、named volume、ダンプフック（`docker compose exec -T` の出力を `restic backup --stdin`）
-- [ ] バックアップのスケジュール（日次 03:00 JST）、手動実行、`forget --prune`、週次 `check`、最終成功時刻と警告の表示
-- [ ] リストア: volume は UI から、DB ダンプはダウンロードまで。`paasd restore-system` でホスト全損から復旧
-- [ ] start / stop / restart、アプリ削除（volume も消すか選択）、image / builder prune、システム画面
-- [ ] プロビジョニングスクリプト（Docker、Caddy、restic、`paasd` の unit、swap 2GB、Docker のログローテーション設定、カーネル更新）
+- [x] ログコレクタ（`docker compose logs --follow` を追記保存、再起動時は `--since` で再開、ローカル 14 日保持）
+- [x] 4 時間ごとの R2 退避（`logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz`）、過去ログの絞り込み表示、presigned URL でのダウンロード
+- [x] バックアップ: 基盤（`paas.db` は `VACUUM INTO` 後）、named volume、ダンプフック（`docker compose exec -T` の出力を `restic backup --stdin`）
+- [x] バックアップのスケジュール（日次 03:00 JST）、手動実行、`forget --prune`、週次 `check`、最終成功時刻と警告の表示
+- [x] リストア: volume は UI から、DB ダンプはダウンロードまで。`paasd restore-system` でホスト全損から復旧
+- [x] start / stop / restart、アプリ削除（volume も消すか選択）、image / builder prune、システム画面
+- [x] プロビジョニングスクリプト（Docker、Caddy、restic、`paasd` の unit、swap 2GB、Docker のログローテーション設定、カーネル更新）
 - 完了条件: 新規 VPS がスクリプト 1 本で立ち上がり、下の受け入れシナリオがすべて通る
 
 ## 受け入れシナリオ
