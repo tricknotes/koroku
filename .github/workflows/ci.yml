@@ -67,8 +67,10 @@ jobs:
         run: bin/dev sh -c 'go version && docker version --format "{{.Server.Version}}" && docker compose version && restic version'
       - name: go vet (integration tag)
         run: bin/dev go vet -tags integration ./...
+      # -count=1: the restored build cache also holds test results, and an
+      # integration test must not pass from cache when only Docker changed.
       - name: go test (integration tag)
-        run: bin/dev go test -tags integration ./...
+        run: bin/dev go test -count=1 -tags integration ./...
 
   web-lint:
     name: Web (lint)
