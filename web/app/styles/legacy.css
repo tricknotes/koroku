@@ -135,18 +135,6 @@
   flex: 3 1 16rem;
 }
 
-.field-inline {
-  flex-direction: row;
-  gap: var(--space-2);
-  align-items: center;
-  margin-bottom: 0;
-  white-space: nowrap;
-}
-
-.field-inline select {
-  width: auto;
-}
-
 ul.field-error {
   padding-left: var(--space-5);
 }
