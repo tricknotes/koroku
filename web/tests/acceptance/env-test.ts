@@ -32,6 +32,17 @@ function pageHtml(): string {
   return document.querySelector('#ember-testing')?.innerHTML ?? '';
 }
 
+/** What the form controls hold: their values are not part of the HTML. */
+function controlValues(): string {
+  return [
+    ...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      '#ember-testing input, #ember-testing textarea',
+    ),
+  ]
+    .map((control) => control.value)
+    .join('\n');
+}
+
 module('Acceptance | environment variables', function (hooks) {
   setupApplicationTest(hooks);
 
@@ -133,6 +144,90 @@ module('Acceptance | environment variables', function (hooks) {
       'values only travel in request bodies',
     );
     assert.dom('[data-test-env-saved]').doesNotIncludeText('hunter2');
+  });
+
+  test('editing one variable does not bring the others into the page', async function (assert) {
+    await visit('/apps/blog/env');
+
+    await click(row(2, '[data-test-env-edit]'));
+
+    assert.dom(row(2, '[data-test-env-value-input]')).hasValue('production');
+    assert.dom(row(1, '[data-test-env-masked]')).exists();
+    assert.false(pageHtml().includes('hunter2'));
+    assert.false(
+      controlValues().includes('hunter2'),
+      'no hidden control holds the other value either',
+    );
+
+    await click(row(1, '[data-test-env-edit]'));
+    assert.true(controlValues().includes('hunter2'), 'editing shows the value');
+
+    await click(row(1, '[data-test-env-edit]'));
+    assert.dom(row(1, '[data-test-env-masked]')).exists();
+    assert.false(controlValues().includes('hunter2'), 'done: hidden again');
+    assert.false(pageHtml().includes('hunter2'));
+    assert
+      .dom('[data-test-env-dirty]')
+      .doesNotExist('opening and closing the editor changes nothing');
+  });
+
+  test('a revealed value does not stay revealed after leaving the tab', async function (assert) {
+    await visit('/apps/blog/env');
+    await click('[data-test-env-toggle-all]');
+    assert.dom('[data-test-env-value]').exists({ count: 2 });
+
+    await click('[data-test-tab="settings"]');
+    assert.false(pageHtml().includes('hunter2'), 'gone with the tab');
+
+    await click('[data-test-tab="env"]');
+
+    assert.dom('[data-test-env-masked]').exists({ count: 2 });
+    assert.dom('[data-test-env-value]').doesNotExist();
+    assert.false(pageHtml().includes('hunter2'));
+  });
+
+  test('a value does not show up in an error either', async function (assert) {
+    fakes.api.fail('PUT', ENV, 0, 'network_error');
+
+    await visit('/apps/blog/env');
+    await click(row(2, '[data-test-env-remove]'));
+    await click('[data-test-env-save-deploy]');
+
+    assert.dom('[data-test-error]').hasText('サーバーに接続できませんでした。');
+    assert.false(pageHtml().includes('hunter2'));
+    assert.dom(row(1, '[data-test-env-masked]')).exists('still masked');
+    assert.dom('[data-test-env-dirty]').exists('and the edit is not lost');
+    assert.deepEqual(
+      fakes.api.callsTo('POST', DEPLOYMENTS),
+      [],
+      'nothing is deployed with the old values',
+    );
+  });
+
+  test('the saved list comes back in the order of the server', async function (assert) {
+    // The API answers a PUT with the variables sorted by key.
+    fakes.api.on('PUT', ENV, (call: FakeCall) => {
+      const { vars } = call.body as { vars: { key: string; value: string }[] };
+      return {
+        vars: [...vars].sort((a, b) => (a.key < b.key ? -1 : 1)),
+      };
+    });
+
+    await visit('/apps/blog/env');
+    await click('[data-test-env-add]');
+    await fillIn(row(3, '[data-test-env-key-input]'), 'APP_HOST');
+    await fillIn(row(3, '[data-test-env-value-input]'), 'blog.example.org');
+    await click('[data-test-env-save]');
+
+    assert.deepEqual(
+      findAll('[data-test-env-key]').map((key) => key.textContent.trim()),
+      ['APP_HOST', 'DATABASE_URL', 'RAILS_ENV'],
+    );
+    assert
+      .dom('[data-test-env-dirty]')
+      .doesNotExist('a different order is not an unsaved change');
+    assert.dom('[data-test-env-status]').doesNotExist();
+    assert.dom('[data-test-env-save]').isDisabled();
   });
 
   test('edits, additions and removals are saved with one PUT', async function (assert) {
