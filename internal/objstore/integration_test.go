@@ -126,11 +126,21 @@ func TestIntegrationS3(t *testing.T) {
 
 	// The package has no bucket management, so create the bucket with a raw
 	// signed request.
-	resp, err := store.do(ctx, http.MethodPut, store.bucketURL(), nil, nil)
-	if err != nil {
-		t.Fatalf("create bucket: %v", err)
+	// The liveness endpoint answers before the storage layer accepts
+	// requests ("XMinioServerNotInitialized", HTTP 503), so retry for a while.
+	ready := time.Now().Add(60 * time.Second)
+	for {
+		resp, err := store.do(ctx, http.MethodPut, store.bucketURL(), nil, nil)
+		if err == nil {
+			drainAndClose(resp.Body)
+			break
+		}
+		var respErr *ResponseError
+		if !errors.As(err, &respErr) || respErr.StatusCode != http.StatusServiceUnavailable || time.Now().After(ready) {
+			t.Fatalf("create bucket: %v", err)
+		}
+		time.Sleep(250 * time.Millisecond)
 	}
-	drainAndClose(resp.Body)
 
 	objects := map[string][]byte{
 		"logs/blog/web/2026/01/02/00.log.gz": bytes.Repeat([]byte("gzip-ish payload\n"), 4096),
