@@ -76,7 +76,7 @@ func newTestServer(t *testing.T, mutate func(*Options)) *Server {
 func do(t *testing.T, h http.Handler, method, target string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
+	h.ServeHTTP(rec, localRequest(method, target, nil))
 	return rec
 }
 

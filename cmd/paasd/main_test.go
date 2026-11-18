@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -182,7 +183,7 @@ func TestGitHubPrivateKeyMustBePrivate(t *testing.T) {
 }
 
 // TestServeStartsWhileCaddyIsUnreachable: Caddy may come up after paasd (or
-// be restarting). paasd must start anyway and report the failed load.
+// be restarting). paasd must start anyway and log the failed load.
 func TestServeStartsWhileCaddyIsUnreachable(t *testing.T) {
 	// A port nothing listens on.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -202,9 +203,8 @@ func TestServeStartsWhileCaddyIsUnreachable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan string, 1)
 	done := make(chan error, 1)
-	go func() {
-		done <- serve(ctx, []string{"--config", configPath, "--insecure-no-auth"}, io.Discard, ready)
-	}()
+	var logs syncBuffer
+	go func() { done <- serve(ctx, []string{"--config", configPath}, &logs, ready) }()
 	var addr string
 	select {
 	case addr = <-ready:
@@ -213,28 +213,55 @@ func TestServeStartsWhileCaddyIsUnreachable(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("serve did not become ready")
 	}
-	resp, err := http.Get("http://" + addr + "/api/system")
+	resp, err := http.Get("http://" + addr + "/api/session")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var body struct {
-		Caddy struct {
-			Enabled      bool    `json:"enabled"`
-			LastLoadedAt *string `json:"last_loaded_at"`
-			LastError    string  `json:"last_error"`
-		} `json:"caddy"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatal(err)
-	}
 	_ = resp.Body.Close()
-	if !body.Caddy.Enabled || body.Caddy.LastLoadedAt != nil || body.Caddy.LastError == "" {
-		t.Errorf("caddy status = %+v, want an error and no successful load", body.Caddy)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("GET /api/session = %d", resp.StatusCode)
+	}
+	if !strings.Contains(logs.String(), "loading the Caddy configuration failed") {
+		t.Errorf("the failed load was not logged:\n%s", logs.String())
 	}
 	cancel()
 	select {
 	case <-done:
 	case <-time.After(60 * time.Second):
 		t.Fatal("serve did not shut down")
+	}
+}
+
+// syncBuffer is a bytes.Buffer safe for the concurrent writes of a logger.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestInsecureNoAuthIsRefusedBehindCaddy: the development flag must not be
+// usable in the configuration that is reachable from the internet.
+func TestInsecureNoAuthIsRefusedBehindCaddy(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	configText := fmt.Sprintf("base_domain = \"dev.example.com\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\nmaster_key_file = %q\n",
+		filepath.Join(dir, "data"), filepath.Join(dir, "master.key"))
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := serve(context.Background(), []string{"--config", configPath, "--insecure-no-auth"}, io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "--insecure-no-auth is refused") {
+		t.Fatalf("err = %v", err)
 	}
 }

@@ -36,7 +36,7 @@ bin/dev go run ./cmd/paasd serve --config config.toml --insecure-no-auth
 curl http://127.0.0.1:8080/api/system
 ```
 
-`--insecure-no-auth` はログインと Origin 検証を外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。
+`--insecure-no-auth` はログインを外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。`[caddy] enabled = true` のままでは起動を拒否します。`curl` で変更系の API を叩くときは `-H 'Content-Type: application/json'` を付けます。
 
 フロントエンドだけを開発するときは `bin/dev sh -c 'cd web && pnpm start'` で Vite の開発サーバーを起動します。`/api` と `/auth` は `127.0.0.1:8080` の `paasd` に転送されます。
 

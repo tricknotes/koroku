@@ -17,12 +17,19 @@ import (
 
 const consoleURL = "https://console.dev.example.com"
 
+// Cookie names as sent for an HTTPS console.
+const (
+	secureSessionCookie = "__Host-" + sessionCookie
+	secureStateCookie   = "__Host-" + stateCookie
+)
+
 // fakeGitHub plays GitHub for login and repository listing.
 type fakeGitHub struct {
 	users       map[string]github.User // by user token
 	codes       map[string]string      // code -> user token
 	exchangeErr error
 	redirectURI string
+	exchanges   int
 
 	repos    []github.Repo
 	branches []github.Branch
@@ -38,6 +45,7 @@ func (f *fakeGitHub) AuthorizeURL(state, redirectURI string) string {
 }
 
 func (f *fakeGitHub) ExchangeCode(_ context.Context, code, redirectURI string) (string, error) {
+	f.exchanges++
 	f.redirectURI = redirectURI
 	if f.exchangeErr != nil {
 		return "", f.exchangeErr
@@ -127,12 +135,15 @@ func (b *browser) do(method, target, body string, headers map[string]string) *ht
 	b.t.Helper()
 	var req *http.Request
 	if body != "" {
-		req = httptest.NewRequest(method, target, strings.NewReader(body))
+		req = localRequest(method, target, strings.NewReader(body))
 	} else {
-		req = httptest.NewRequest(method, target, nil)
+		req = localRequest(method, target, nil)
 	}
 	for _, c := range b.cookies {
 		req.AddCookie(c)
+	}
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -187,7 +198,7 @@ func TestAPIRequiresLogin(t *testing.T) {
 	}
 	// A made-up cookie is not a session.
 	b := newBrowser(t, h)
-	b.cookies[sessionCookie] = &http.Cookie{Name: sessionCookie, Value: "forged"}
+	b.cookies[secureSessionCookie] = &http.Cookie{Name: secureSessionCookie, Value: "forged"}
 	if rec := b.do(http.MethodGet, "/api/apps", "", nil); rec.Code != http.StatusUnauthorized {
 		t.Errorf("forged cookie status = %d", rec.Code)
 	}
@@ -205,14 +216,14 @@ func TestLoginAsAllowedUser(t *testing.T) {
 	if gh.redirectURI != consoleURL+"/auth/github/callback" {
 		t.Errorf("redirect URI = %q", gh.redirectURI)
 	}
-	cookie := b.cookies[sessionCookie]
+	cookie := b.cookies[secureSessionCookie]
 	if cookie == nil {
 		t.Fatal("no session cookie")
 	}
 	if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" {
 		t.Errorf("cookie attributes = %+v", cookie)
 	}
-	if _, ok := b.cookies[stateCookie]; ok {
+	if _, ok := b.cookies[secureStateCookie]; ok {
 		t.Error("the state cookie must be cleared after the callback")
 	}
 
@@ -248,7 +259,7 @@ func TestLoginRejectsOtherUsers(t *testing.T) {
 	if final.Header().Get("Location") != "/?login_error=not_allowed" {
 		t.Fatalf("Location = %q", final.Header().Get("Location"))
 	}
-	if _, ok := b.cookies[sessionCookie]; ok {
+	if _, ok := b.cookies[secureSessionCookie]; ok {
 		t.Error("a rejected user got a session cookie")
 	}
 	if rec := b.do(http.MethodGet, "/api/apps", "", nil); rec.Code != http.StatusUnauthorized {
@@ -296,11 +307,11 @@ func TestCallbackStateAndErrors(t *testing.T) {
 		}, "state_mismatch"},
 		"user declined": {func(b *browser) string {
 			b.do(http.MethodGet, "/auth/github/login", "", nil)
-			return "/auth/github/callback?error=access_denied&state=" + url.QueryEscape(b.cookies[stateCookie].Value)
+			return "/auth/github/callback?error=access_denied&state=" + url.QueryEscape(b.cookies[secureStateCookie].Value)
 		}, "github_error"},
 		"bad code": {func(b *browser) string {
 			b.do(http.MethodGet, "/auth/github/login", "", nil)
-			return "/auth/github/callback?code=expired&state=" + url.QueryEscape(b.cookies[stateCookie].Value)
+			return "/auth/github/callback?code=expired&state=" + url.QueryEscape(b.cookies[secureStateCookie].Value)
 		}, "github_error"},
 	}
 	for name, tc := range cases {
@@ -310,7 +321,7 @@ func TestCallbackStateAndErrors(t *testing.T) {
 			if got := rec.Header().Get("Location"); got != "/?login_error="+tc.want {
 				t.Errorf("Location = %q, want login_error=%s", got, tc.want)
 			}
-			if _, ok := b.cookies[sessionCookie]; ok {
+			if _, ok := b.cookies[secureSessionCookie]; ok {
 				t.Error("a session was created")
 			}
 		})
@@ -319,7 +330,7 @@ func TestCallbackStateAndErrors(t *testing.T) {
 	// A state value is single use.
 	b := newBrowser(t, h)
 	b.do(http.MethodGet, "/auth/github/login", "", nil)
-	state := b.cookies[stateCookie].Value
+	state := b.cookies[secureStateCookie].Value
 	b.do(http.MethodGet, "/auth/github/callback?code=code-owner&state="+url.QueryEscape(state), "", nil)
 	replay := b.do(http.MethodGet, "/auth/github/callback?code=code-owner&state="+url.QueryEscape(state), "", nil)
 	if replay.Header().Get("Location") != "/?login_error=state_mismatch" {
@@ -357,16 +368,16 @@ func TestSessionExpiresAndLogout(t *testing.T) {
 	}
 
 	b.login("code-owner")
-	token := b.cookies[sessionCookie].Value
+	token := b.cookies[secureSessionCookie].Value
 	logout := b.do(http.MethodPost, "/auth/logout", "", map[string]string{"Origin": consoleURL})
 	if logout.Code != http.StatusNoContent {
 		t.Fatalf("logout status = %d, body = %s", logout.Code, logout.Body)
 	}
-	if _, ok := b.cookies[sessionCookie]; ok {
+	if _, ok := b.cookies[secureSessionCookie]; ok {
 		t.Error("the session cookie was not cleared")
 	}
 	// The old cookie value is dead on the server too.
-	b.cookies[sessionCookie] = &http.Cookie{Name: sessionCookie, Value: token}
+	b.cookies[secureSessionCookie] = &http.Cookie{Name: secureSessionCookie, Value: token}
 	if rec := b.do(http.MethodGet, "/api/apps", "", nil); rec.Code != http.StatusUnauthorized {
 		t.Errorf("a logged-out session still works: %d", rec.Code)
 	}
@@ -453,10 +464,23 @@ func TestSecurityHeadersAndCookieOverHTTP(t *testing.T) {
 			t.Errorf("%s = %q", header, got)
 		}
 	}
-	// A console served over plain HTTP (local development) cannot use Secure cookies.
+	// A console served over plain HTTP (local development) cannot use Secure
+	// cookies, and therefore not the __Host- prefix either.
 	b.login("code-owner")
 	if cookie := b.cookies[sessionCookie]; cookie == nil || cookie.Secure {
-		t.Errorf("cookie = %+v", cookie)
+		t.Errorf("cookie = %+v (all cookies: %v)", cookie, b.cookies)
+	}
+	if rec.Header().Get("Strict-Transport-Security") != "" {
+		t.Error("HSTS must not be sent for a plain HTTP console")
+	}
+	csp := rec.Header().Get("Content-Security-Policy")
+	for _, want := range []string{"default-src 'self'", "script-src 'self'", "frame-ancestors 'none'", "object-src 'none'"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("Content-Security-Policy lacks %q: %q", want, csp)
+		}
+	}
+	if strings.Contains(csp, "script-src 'self' 'unsafe") {
+		t.Errorf("scripts must not allow inline or eval: %q", csp)
 	}
 }
 
@@ -555,5 +579,39 @@ func TestRepoEndpointsWithoutGitHub(t *testing.T) {
 		if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "not_configured") {
 			t.Errorf("%s: %d %s", target, rec.Code, rec.Body)
 		}
+	}
+}
+
+// TestSessionCookieCannotBePlantedByASiblingApp: hosted apps live on sibling
+// subdomains and can set cookies for the parent domain. Only the __Host-
+// cookie counts as a session, so a planted "paas_session" is ignored even
+// when its value is a valid token.
+func TestSessionCookieCannotBePlantedByASiblingApp(t *testing.T) {
+	srv, _ := newAuthServer(t, defaultGitHub())
+	b := newBrowser(t, srv.Handler())
+	b.login("code-owner")
+	valid := b.cookies[secureSessionCookie]
+	if valid == nil || !strings.HasPrefix(valid.Name, "__Host-") || valid.Domain != "" || valid.Path != "/" || !valid.Secure {
+		t.Fatalf("session cookie = %+v", valid)
+	}
+
+	attacker := newBrowser(t, srv.Handler())
+	attacker.cookies[sessionCookie] = &http.Cookie{Name: sessionCookie, Value: valid.Value}
+	if rec := attacker.do(http.MethodGet, "/api/apps", "", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("an unprefixed cookie was accepted as a session: %d", rec.Code)
+	}
+
+	// The same holds for the OAuth state: a planted unprefixed state cookie
+	// does not let a forged callback through.
+	forged := newBrowser(t, srv.Handler())
+	forged.cookies[stateCookie] = &http.Cookie{Name: stateCookie, Value: "attacker-state"}
+	rec := forged.do(http.MethodGet, "/auth/github/callback?code=code-owner&state=attacker-state", "", nil)
+	if rec.Header().Get("Location") != "/?login_error=state_mismatch" {
+		t.Errorf("forged state: Location = %q", rec.Header().Get("Location"))
+	}
+
+	// HTTPS consoles announce HSTS.
+	if got := b.do(http.MethodGet, "/", "", nil).Header().Get("Strict-Transport-Security"); !strings.HasPrefix(got, "max-age=") {
+		t.Errorf("Strict-Transport-Security = %q", got)
 	}
 }

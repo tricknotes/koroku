@@ -9,6 +9,9 @@
 - JSON は `Content-Type: application/json`。時刻は RFC 3339（UTC）。未設定の時刻は `null`。
 - 変更系（`POST` / `PUT` / `PATCH` / `DELETE`）のリクエストボディは JSON オブジェクト 1 つ。未知のフィールドは `400 invalid_json`。
 - 変更系のリクエストには、管理 UI のオリジンと一致する `Origin` ヘッダーが要る（ブラウザーの `fetch` は自動で付ける）。なければ `403 forbidden_origin`。
+- ボディのある変更系リクエストは `Content-Type: application/json` でなければ `415 unsupported_media_type`。
+- ブラウザーが `Sec-Fetch-Site` で同一オリジン以外（`same-site`、`cross-site`）と申告した API リクエストは、参照系も含めて `403 forbidden_origin`。
+- `--insecure-no-auth`（開発用）のときは、Host がループバック名（`localhost`、`127.0.0.1` など）でなければ `403 forbidden_host`。
 - エラーは次の形。`code` は安定した識別子で、UI はこれを日本語の文言に対応づける。`message` は英語の補足。
 
 ```json
@@ -125,7 +128,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `GET /api/apps/{slug}` | アプリ |
 | `PATCH /api/apps/{slug}` | 送ったフィールドだけ更新。200 でアプリ |
 | `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204 |
-| `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ） |
+| `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る） |
 | `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）と `memory_limit_bytes`（上限。無制限なら 0）も付く。取得できなければどちらも `null` |
 
 ## 環境変数（M1）

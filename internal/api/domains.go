@@ -79,6 +79,10 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, fieldErrors{"hostname": message})
 		return
 	}
+	if hostname == s.cfg.ConsoleHost {
+		writeValidationError(w, fieldErrors{"hostname": "is the hostname of the console"})
+		return
+	}
 	d, err := s.store.AddDomain(r.Context(), app.ID, hostname, s.clock.Now())
 	if errors.Is(err, store.ErrConflict) {
 		writeError(w, http.StatusConflict, "hostname_taken", "this hostname is already registered")
