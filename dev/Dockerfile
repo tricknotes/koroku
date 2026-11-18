@@ -10,11 +10,11 @@
 # (integration tests start real containers) and shares the host network so
 # that ports published on 127.0.0.1 are reachable from the tests.
 
-FROM node:24-slim AS node
+FROM node:26-slim AS node
 
 FROM golang:1.27
 
-ARG PNPM_VERSION=12.16.1
+ARG PNPM_VERSION=12.21.0
 ARG RESTIC_VERSION=0.19.1
 
 RUN apt-get update \
