@@ -1,0 +1,139 @@
+// Pure formatting helpers. They are plain functions so templates can call
+// them directly and unit tests need no container.
+
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function parse(iso: string | null | undefined): Date | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDate(date: Date): string {
+  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())}`;
+}
+
+/** `2026/11/18 12:34` in the browser's time zone; empty for a missing time. */
+export function formatDateTime(iso: string | null | undefined): string {
+  const date = parse(iso);
+  if (!date) return '';
+  return `${formatDate(date)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** `12:34:56` in the browser's time zone, for log lines. */
+export function formatClock(iso: string | null | undefined): string {
+  const date = parse(iso);
+  if (!date) return '';
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** `3 分前` style distance from `now`; falls back to the date after 30 days. */
+export function relativeTime(
+  iso: string | null | undefined,
+  now: number = Date.now(),
+): string {
+  const date = parse(iso);
+  if (!date) return '';
+  const diff = now - date.getTime();
+  if (diff < MINUTE) return 'たった今';
+  if (diff < HOUR) return `${Math.floor(diff / MINUTE)} 分前`;
+  if (diff < DAY) return `${Math.floor(diff / HOUR)} 時間前`;
+  if (diff < 30 * DAY) return `${Math.floor(diff / DAY)} 日前`;
+  return formatDate(date);
+}
+
+/** `1 分 9 秒` between two times; empty when either end is missing. */
+export function formatDuration(
+  from: string | null | undefined,
+  to: string | null | undefined,
+): string {
+  const start = parse(from);
+  const end = parse(to);
+  if (!start || !end) return '';
+  const seconds = Math.max(
+    0,
+    Math.round((end.getTime() - start.getTime()) / 1000),
+  );
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分 ${seconds % 60} 秒`;
+  return `${Math.floor(minutes / 60)} 時間 ${minutes % 60} 分`;
+}
+
+const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
+
+/** `8.0 GB` with 1024-based units. */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) {
+    return '';
+  }
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < UNITS.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return unit === 0
+    ? `${value} ${UNITS[unit]}`
+    : `${value.toFixed(1)} ${UNITS[unit]}`;
+}
+
+export function formatPercent(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '';
+  return `${Math.round(value * 10) / 10}%`;
+}
+
+export function shortSha(sha: string | null | undefined): string {
+  return (sha ?? '').slice(0, 7);
+}
+
+/** First line of a commit message. */
+export function firstLine(text: string | null | undefined): string {
+  return (text ?? '').split('\n', 1)[0] ?? '';
+}
+
+const SHA_PATTERN = /^[0-9a-f]{40}$/;
+
+export function isFullSha(value: string): boolean {
+  return SHA_PATTERN.test(value);
+}
+
+/**
+ * Slug suggestion from a repository name: lower-case letters, digits and
+ * hyphens, starting with a letter, at most 40 characters (the API's rule).
+ */
+export function suggestSlug(repoFullName: string): string {
+  const name = repoFullName.replace(/\/+$/, '').split('/').pop() ?? '';
+  return name
+    .toLowerCase()
+    .replace(/\.git$/, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^[^a-z]+/, '')
+    .slice(0, 40)
+    .replace(/-+$/, '');
+}
+
+const SLUG_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
+
+export function isValidSlug(slug: string): boolean {
+  return SLUG_PATTERN.test(slug);
+}
+
+const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export function isValidEnvKey(key: string): boolean {
+  return ENV_KEY_PATTERN.test(key);
+}
+
+/** `datetime-local` input value → RFC 3339 (UTC); empty stays empty. */
+export function localInputToIso(value: string): string {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
