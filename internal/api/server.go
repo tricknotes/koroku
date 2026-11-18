@@ -48,6 +48,8 @@ type Options struct {
 	Logs AppLogs
 	// Backups runs backups and restores. Optional.
 	Backups Backups
+	// Volumes lists the named volumes of an app. Optional.
+	Volumes AppVolumes
 	// RouteStatus reports the last proxy configuration load. Optional.
 	RouteStatus func() RouteStatus
 }
@@ -71,6 +73,7 @@ type Server struct {
 	ops      AppOperator
 	logs     AppLogs
 	backups  Backups
+	volumes  AppVolumes
 
 	routeStatus func() RouteStatus
 
@@ -105,6 +108,7 @@ func New(opts Options) *Server {
 		ops:      opts.Ops,
 		logs:     opts.Logs,
 		backups:  opts.Backups,
+		volumes:  opts.Volumes,
 
 		routeStatus: opts.RouteStatus,
 
@@ -163,6 +167,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/apps/{slug}/backups", s.handleListSnapshots)
 	mux.HandleFunc("POST /api/apps/{slug}/backups/restore", s.handleRestoreVolume)
 	mux.HandleFunc("GET /api/apps/{slug}/backups/{snapshot}/download", s.handleDownloadDump)
+	mux.HandleFunc("GET /api/apps/{slug}/volumes", s.handleListVolumes)
 
 	mux.HandleFunc("GET /api/deployments/{id}", s.handleGetDeployment)
 	mux.HandleFunc("GET /api/deployments/{id}/logs", s.handleDeploymentLogs)

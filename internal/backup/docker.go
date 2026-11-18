@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tricknotes/koroku/internal/runner"
 	"github.com/tricknotes/koroku/internal/secrets"
@@ -44,11 +45,57 @@ func (m *Manager) docker(ctx context.Context, args ...string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// dockerFunc runs one docker command and returns its standard output.
+type dockerFunc func(ctx context.Context, args ...string) ([]byte, error)
+
 // volumes lists the named volumes Compose created for the project, sorted by
-// their short name. External volumes do not carry the project label and are
-// therefore not listed: they belong to someone else.
+// their short name.
 func (m *Manager) volumes(ctx context.Context, project string) ([]volume, error) {
-	out, err := m.docker(ctx, "volume", "ls", "--filter", "label="+labelComposeProject+"="+project, "--format", "{{.Name}}")
+	return listVolumes(ctx, m.docker, project)
+}
+
+// volumeNamesTimeout bounds VolumeNames: two short docker queries on behalf
+// of an HTTP request.
+const volumeNamesTimeout = 30 * time.Second
+
+// VolumeNames lists the named volumes of a Compose project that exist in
+// Docker, by the name written in the Compose file (pgdata, not
+// paas-blog_pgdata), sorted. These are the volumes a backup run walks before
+// it applies App.ExcludeVolumes, and the names snapshots are tagged with.
+//
+// It needs no Manager: listing volumes takes Docker only, so it also works
+// on a host without a backup repository. A project that was never started
+// has no volumes; that is an empty list, not an error.
+func VolumeNames(ctx context.Context, r runner.Runner, project string) ([]string, error) {
+	if !nameRE.MatchString(project) {
+		return nil, fmt.Errorf("backup: invalid Compose project name %q", project)
+	}
+	ctx, cancel := context.WithTimeout(ctx, volumeNamesTimeout)
+	defer cancel()
+	docker := func(ctx context.Context, args ...string) ([]byte, error) {
+		out, err := runner.Output(ctx, r, runner.Cmd{Name: "docker", Args: args})
+		if err != nil {
+			return nil, fmt.Errorf("docker %s: %w", strings.Join(args[:min(2, len(args))], " "), err)
+		}
+		return out, nil
+	}
+	vols, err := listVolumes(ctx, docker, project)
+	if err != nil {
+		return nil, fmt.Errorf("list the volumes of %s: %w", project, err)
+	}
+	names := make([]string, 0, len(vols))
+	for _, v := range vols {
+		names = append(names, v.Short)
+	}
+	return names, nil
+}
+
+// listVolumes is the one definition of "the volumes of a project": the
+// volumes that carry the project's Compose label, sorted by their short
+// name. External volumes do not carry the label and are therefore not
+// listed: they belong to someone else.
+func listVolumes(ctx context.Context, docker dockerFunc, project string) ([]volume, error) {
+	out, err := docker(ctx, "volume", "ls", "--filter", "label="+labelComposeProject+"="+project, "--format", "{{.Name}}")
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +105,7 @@ func (m *Manager) volumes(ctx context.Context, project string) ([]volume, error)
 	}
 	sort.Strings(names)
 	// "--" keeps a volume name from ever being read as an option.
-	out, err = m.docker(ctx, append([]string{"volume", "inspect", "--"}, names...)...)
+	out, err = docker(ctx, append([]string{"volume", "inspect", "--"}, names...)...)
 	if err != nil {
 		return nil, err
 	}

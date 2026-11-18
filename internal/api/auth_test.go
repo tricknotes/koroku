@@ -182,7 +182,7 @@ func TestAPIRequiresLogin(t *testing.T) {
 	srv, _ := newAuthServer(t, defaultGitHub())
 	h := srv.Handler()
 
-	for _, target := range []string{"/api/apps", "/api/system", "/api/repos", "/api/apps/blog/env", "/api/deployments/1/logs", "/api/nope"} {
+	for _, target := range []string{"/api/apps", "/api/system", "/api/repos", "/api/apps/blog/env", "/api/apps/blog/volumes", "/api/deployments/1/logs", "/api/nope"} {
 		rec := request(t, h, http.MethodGet, target, "")
 		if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "unauthenticated") {
 			t.Errorf("GET %s without a session: %d %s", target, rec.Code, rec.Body)
