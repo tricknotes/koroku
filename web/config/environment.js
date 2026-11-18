@@ -2,7 +2,7 @@
 
 module.exports = function (environment) {
   const ENV = {
-    modulePrefix: 'paas-console',
+    modulePrefix: 'koroku-console',
     environment,
     rootURL: '/',
     locationType: 'history',

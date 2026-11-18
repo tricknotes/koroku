@@ -1,5 +1,5 @@
 {
-  "name": "paas-risky",
+  "name": "koroku-risky",
   "services": {
     "web": {
       "image": "example/app:1",
@@ -10,8 +10,8 @@
       "privileged": true,
       "volumes": [
         {"type": "bind", "source": "/var/run/docker.sock", "target": "/var/run/docker.sock"},
-        {"type": "bind", "source": "/var/lib/paas/apps/risky/releases/7/config", "target": "/config"},
-        {"type": "bind", "source": "/var/lib/paas/apps/risky/releases/7/../../../other/env", "target": "/stolen"},
+        {"type": "bind", "source": "/var/lib/koroku/apps/risky/releases/7/config", "target": "/config"},
+        {"type": "bind", "source": "/var/lib/koroku/apps/risky/releases/7/../../../other/env", "target": "/stolen"},
         {"type": "volume", "source": "data", "target": "/data"},
         {"type": "tmpfs", "target": "/tmp"}
       ]
@@ -31,5 +31,5 @@
       "ports": [{"mode": "ingress", "target": 8080, "protocol": "udp"}]
     }
   },
-  "volumes": {"data": {"name": "paas-risky_data"}}
+  "volumes": {"data": {"name": "koroku-risky_data"}}
 }

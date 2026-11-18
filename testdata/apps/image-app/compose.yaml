@@ -4,7 +4,7 @@ services:
     image: busybox:1.37
     stop_signal: SIGKILL
     # $$ defers expansion to the container, where GREETING comes from the
-    # env file that paasd injects into every service.
+    # env file that koroku injects into every service.
     command:
       - sh
       - -c

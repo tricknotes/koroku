@@ -3,7 +3,7 @@ import {
   errorMessage,
   unavailability,
   type Unavailability,
-} from 'paas-console/utils/errors';
+} from 'koroku-console/utils/errors';
 
 /**
  * Tracked state of one asynchronous read: the value, whether it is loading

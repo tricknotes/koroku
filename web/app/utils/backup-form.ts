@@ -4,7 +4,7 @@ import type {
   AppPatch,
   AppVolume,
   Snapshot,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 /** One named volume of the app and whether it is backed up. */
 export interface VolumeChoice {

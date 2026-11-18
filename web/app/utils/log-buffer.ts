@@ -1,7 +1,7 @@
 import { tracked } from '@glimmer/tracking';
 import { cancel, later } from '@ember/runloop';
-import { formatLogStamp } from 'paas-console/utils/logs';
-import type { LogLine } from 'paas-console/utils/types';
+import { formatLogStamp } from 'koroku-console/utils/logs';
+import type { LogLine } from 'koroku-console/utils/types';
 
 type Timer = ReturnType<typeof later>;
 

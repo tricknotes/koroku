@@ -3,13 +3,13 @@ import {
   attentionItems,
   diskLimitPercent,
   diskOverLimit,
-} from 'paas-console/utils/attention';
+} from 'koroku-console/utils/attention';
 import {
   makeApp,
   makeBackups,
   makeDeployment,
   makeSystem,
-} from 'paas-console/tests/helpers/fakes';
+} from 'koroku-console/tests/helpers/fakes';
 
 function disk(usedPercent: number) {
   return {

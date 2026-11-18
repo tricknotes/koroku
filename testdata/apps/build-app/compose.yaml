@@ -4,7 +4,7 @@ services:
     build: .
     environment:
       # Interpolated by Compose. The repository's own .env defines this
-      # variable, but paasd passes --env-file, so .env is not consulted.
+      # variable, but koroku passes --env-file, so .env is not consulted.
       FROM_REPO_DOTENV: "${FROM_REPO_DOTENV:-unset}"
     ports:
       - "8080:8080"

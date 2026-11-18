@@ -54,7 +54,7 @@ func TestStopAndStart(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 	stop := h.lastCall("stop")
-	if !slices.Equal(stop.Args, []string{"compose", "-p", "paas-blog", "stop"}) {
+	if !slices.Equal(stop.Args, []string{"compose", "-p", "koroku-blog", "stop"}) {
 		t.Errorf("stop args = %v", stop.Args)
 	}
 	app = h.reload("blog")
@@ -71,7 +71,7 @@ func TestStopAndStart(t *testing.T) {
 	// Start uses the files of the current release, like a deploy would.
 	up := h.lastCall("up")
 	release := h.engine.ReleaseDir("blog", *app.CurrentDeploymentID)
-	want := []string{"compose", "-p", "paas-blog",
+	want := []string{"compose", "-p", "koroku-blog",
 		"-f", filepath.Join(release, "compose.yaml"), "-f", filepath.Join(release, compose.OverrideFileName),
 		"--env-file", h.engine.EnvFile("blog"), "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "300"}
 	if !slices.Equal(up.Args, want) {
@@ -94,7 +94,7 @@ func TestStartFallsBackWhenReleaseFilesAreGone(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	start := h.lastCall("start")
-	if !slices.Equal(start.Args, []string{"compose", "-p", "paas-blog", "start"}) {
+	if !slices.Equal(start.Args, []string{"compose", "-p", "koroku-blog", "start"}) {
 		t.Errorf("start args = %v", start.Args)
 	}
 }
@@ -249,7 +249,7 @@ func TestDelete(t *testing.T) {
 			handle := h.runner.Handler
 			h.runner.Handler = func(ctx context.Context, cmd runner.Cmd) (string, error) {
 				if cmd.Name == "docker" && len(cmd.Args) > 1 && cmd.Args[0] == "volume" && cmd.Args[1] == "ls" {
-					return "paas-blog_pgdata\npaas-blog_storage\n", nil
+					return "koroku-blog_pgdata\nkoroku-blog_storage\n", nil
 				}
 				return handle(ctx, cmd)
 			}
@@ -259,7 +259,7 @@ func TestDelete(t *testing.T) {
 				t.Fatalf("Delete: %v", err)
 			}
 			down := h.lastCall("down")
-			wantDown := []string{"compose", "-p", "paas-blog",
+			wantDown := []string{"compose", "-p", "koroku-blog",
 				"-f", filepath.Join(release, "compose.yaml"), "-f", filepath.Join(release, compose.OverrideFileName),
 				"--env-file", h.engine.EnvFile("blog"), "down", "--remove-orphans"}
 			if removeVolumes {
@@ -269,11 +269,11 @@ func TestDelete(t *testing.T) {
 				t.Errorf("down args = %v", down.Args)
 			}
 			calls := h.dockerCalls()
-			removedVolumes := slices.Contains(calls, "volume rm paas-blog_pgdata paas-blog_storage")
+			removedVolumes := slices.Contains(calls, "volume rm koroku-blog_pgdata koroku-blog_storage")
 			if removedVolumes != removeVolumes {
 				t.Errorf("volume removal = %v, want %v (calls: %v)", removedVolumes, removeVolumes, calls)
 			}
-			if !slices.Contains(calls, "image rm paas-blog-web:r1") {
+			if !slices.Contains(calls, "image rm koroku-blog-web:r1") {
 				t.Errorf("release images were not removed: %v", calls)
 			}
 			if _, err := h.store.GetApp(ctx, "blog"); !errors.Is(err, store.ErrNotFound) {
@@ -296,7 +296,7 @@ func TestDeleteNeverDeployedApp(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 	down := h.lastCall("down")
-	if !slices.Equal(down.Args, []string{"compose", "-p", "paas-blog", "down", "--remove-orphans", "--volumes"}) {
+	if !slices.Equal(down.Args, []string{"compose", "-p", "koroku-blog", "down", "--remove-orphans", "--volumes"}) {
 		t.Errorf("down args = %v", down.Args)
 	}
 	if _, err := h.store.GetApp(context.Background(), "blog"); !errors.Is(err, store.ErrNotFound) {
@@ -323,18 +323,18 @@ func TestDeleteKeepsAppWhenDockerFails(t *testing.T) {
 }
 
 func TestParseComposePS(t *testing.T) {
-	lines := `{"Service":"web","State":"running","Status":"Up 2 hours (healthy)","Health":"healthy","Name":"paas-blog-web-1"}
+	lines := `{"Service":"web","State":"running","Status":"Up 2 hours (healthy)","Health":"healthy","Name":"koroku-blog-web-1"}
 {"Service":"db","State":"exited","Status":"Exited (1) 3 minutes ago","Health":""}
 `
 	want := []ServiceStatus{
 		{Name: "db", State: "exited", Status: "Exited (1) 3 minutes ago"},
-		{Name: "web", State: "running", Status: "Up 2 hours (healthy)", Health: "healthy", container: "paas-blog-web-1"},
+		{Name: "web", State: "running", Status: "Up 2 hours (healthy)", Health: "healthy", container: "koroku-blog-web-1"},
 	}
 	got, err := parseComposePS([]byte(lines))
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("JSON lines: %+v, %v", got, err)
 	}
-	array := `[{"Name":"paas-blog-web-1","Service":"web","State":"running","Status":"Up 2 hours (healthy)","Health":"healthy"},{"Service":"db","State":"exited","Status":"Exited (1) 3 minutes ago","Health":""}]`
+	array := `[{"Name":"koroku-blog-web-1","Service":"web","State":"running","Status":"Up 2 hours (healthy)","Health":"healthy"},{"Service":"db","State":"exited","Status":"Exited (1) 3 minutes ago","Health":""}]`
 	got, err = parseComposePS([]byte(array))
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("JSON array: %+v, %v", got, err)
@@ -357,10 +357,10 @@ func TestServicesAndPrune(t *testing.T) {
 		joined := strings.Join(cmd.Args, " ")
 		switch {
 		case strings.HasSuffix(joined, "ps --all --format json"):
-			return `{"Name":"paas-blog-web-1","Service":"web","State":"running","Status":"Up 5 seconds","Health":""}` + "\n" +
-				`{"Name":"paas-blog-job-1","Service":"job","State":"exited","Status":"Exited (0)","Health":""}` + "\n", nil
-		case joined == "stats --no-stream --format json paas-blog-web-1":
-			return `{"Name":"paas-blog-web-1","MemUsage":"26.02MiB / 512MiB","CPUPerc":"0.00%"}` + "\n", nil
+			return `{"Name":"koroku-blog-web-1","Service":"web","State":"running","Status":"Up 5 seconds","Health":""}` + "\n" +
+				`{"Name":"koroku-blog-job-1","Service":"job","State":"exited","Status":"Exited (0)","Health":""}` + "\n", nil
+		case joined == "stats --no-stream --format json koroku-blog-web-1":
+			return `{"Name":"koroku-blog-web-1","MemUsage":"26.02MiB / 512MiB","CPUPerc":"0.00%"}` + "\n", nil
 		case joined == "system df --format json":
 			return `{"Active":"8","Reclaimable":"28.32GB (69%)","Size":"40.97GB","TotalCount":"68","Type":"Images"}
 {"Active":"3","Reclaimable":"8.998MB (99%)","Size":"8.998MB","TotalCount":"8","Type":"Containers"}

@@ -57,7 +57,7 @@ const stoppedPage = `<!doctype html>
 type Input struct {
 	// ConsoleHost is the hostname of the management UI, e.g. console.dev.example.com.
 	ConsoleHost string
-	// ConsoleUpstream is the address paasd listens on, e.g. 127.0.0.1:8080.
+	// ConsoleUpstream is the address koroku listens on, e.g. 127.0.0.1:8080.
 	ConsoleUpstream string
 	// AdminListen is the Caddy admin API address. It is always written to the
 	// generated configuration so the admin API survives a load. It must be a

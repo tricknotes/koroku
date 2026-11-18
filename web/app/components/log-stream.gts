@@ -1,9 +1,9 @@
 import Component from '@glimmer/component';
 import { on } from '@ember/modifier';
 import { modifier } from 'ember-modifier';
-import followTail from 'paas-console/modifiers/follow-tail';
-import type { LogRow } from 'paas-console/utils/log-buffer';
-import { formatCount, splitMatches } from 'paas-console/utils/logs';
+import followTail from 'koroku-console/modifiers/follow-tail';
+import type { LogRow } from 'koroku-console/utils/log-buffer';
+import { formatCount, splitMatches } from 'koroku-console/utils/logs';
 
 interface LogStreamSignature {
   Element: HTMLDivElement;

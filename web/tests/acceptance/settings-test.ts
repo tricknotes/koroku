@@ -1,6 +1,6 @@
 import { module, test } from 'qunit';
 import { click, currentURL, fillIn, visit } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   apiError,
   installFakes,
@@ -8,8 +8,8 @@ import {
   makeDeployment,
   type FakeCall,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
-import type { App } from 'paas-console/utils/types';
+} from 'koroku-console/tests/helpers/fakes';
+import type { App } from 'koroku-console/utils/types';
 
 function fieldError(name: string): string {
   return `[data-test-field-group="${name}"] [data-test-field-error]`;

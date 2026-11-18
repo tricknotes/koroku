@@ -349,7 +349,7 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 		return
 	}
 
-	// Recording the result must work even while paasd is shutting down, so
+	// Recording the result must work even while koroku is shutting down, so
 	// it gets its own context. The context is created when it is needed: a
 	// timeout started here would already have expired after a long deploy.
 	finish := func(status, message string) error {
@@ -390,7 +390,7 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 		log.Step(StepFailed, "Deployment %s: %s", status, message)
 		if touched {
 			if ctx.Err() != nil {
-				log.Printf("paasd is shutting down; the previous release is not restored automatically.")
+				log.Printf("koroku is shutting down; the previous release is not restored automatically.")
 			} else {
 				e.rollback(app, log)
 			}

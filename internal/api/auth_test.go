@@ -584,7 +584,7 @@ func TestRepoEndpointsWithoutGitHub(t *testing.T) {
 
 // TestSessionCookieCannotBePlantedByASiblingApp: hosted apps live on sibling
 // subdomains and can set cookies for the parent domain. Only the __Host-
-// cookie counts as a session, so a planted "paas_session" is ignored even
+// cookie counts as a session, so a planted "koroku_session" is ignored even
 // when its value is a valid token.
 func TestSessionCookieCannotBePlantedByASiblingApp(t *testing.T) {
 	srv, _ := newAuthServer(t, defaultGitHub())

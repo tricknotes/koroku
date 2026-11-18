@@ -7,7 +7,7 @@ import {
   triggerEvent,
   visit,
 } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   SHA_A,
   SHA_B,
@@ -16,10 +16,10 @@ import {
   makeDeployment,
   type FakeStream,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
-import type { App, Deployment } from 'paas-console/utils/types';
+} from 'koroku-console/tests/helpers/fakes';
+import type { App, Deployment } from 'koroku-console/utils/types';
 
-/** A step headline `seconds` after 03:00:00, as paasd writes it. */
+/** A step headline `seconds` after 03:00:00, as koroku writes it. */
 function head(seconds: number, key: string, title: string): string {
   const time = new Date(Date.UTC(2026, 10, 18, 3, 0, seconds))
     .toISOString()
@@ -39,7 +39,7 @@ const UNTIL_CHECK = [
   '#1 [web 1/6] FROM ruby:3.4-slim',
   '#9 exporting to image',
   head(50, 'start', 'Starting containers'),
-  ' Container paas-blog-web-1  Started',
+  ' Container koroku-blog-web-1  Started',
   head(59, 'check', 'Checking http://127.0.0.1:20000/'),
 ];
 
@@ -58,7 +58,7 @@ const ROLLED_BACK_LOG = [
   '',
   head(63, 'failed', 'Deployment failed: web did not become healthy'),
   head(63, 'rollback', 'Rolling back to deployment #42'),
-  ' Container paas-blog-web-1  Started',
+  ' Container koroku-blog-web-1  Started',
   'Rolled back: deployment #42 is running again.',
 ];
 
@@ -498,7 +498,7 @@ module('Acceptance | deploy', function (hooks) {
       assert
         .dom('[data-test-step="build"]')
         .includesText('ビルド')
-        .includesText('Building images', "paasd's own title");
+        .includesText('Building images', "koroku's own title");
       assert
         .dom('[data-test-step="build"] [data-test-step-duration]')
         .hasText('44 秒');
@@ -595,7 +595,7 @@ module('Acceptance | deploy', function (hooks) {
         .doesNotExist('the finished step folds away');
       assert
         .dom('[data-test-step="start"] [data-test-step-log]')
-        .includesText('Container paas-blog-web-1 Started');
+        .includesText('Container koroku-blog-web-1 Started');
 
       deployments = [
         makeDeployment({ id: 43, status: 'succeeded' }),

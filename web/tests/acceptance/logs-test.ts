@@ -11,7 +11,7 @@ import {
   visit,
   waitFor,
 } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   installFakes,
   makeApp,
@@ -20,8 +20,8 @@ import {
   type FakeCall,
   type FakeStream,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
-import type { App, LogLine } from 'paas-console/utils/types';
+} from 'koroku-console/tests/helpers/fakes';
+import type { App, LogLine } from 'koroku-console/utils/types';
 
 const LOGS = '/api/apps/blog/logs';
 const HISTORY = '/api/apps/blog/logs/history';
@@ -342,15 +342,15 @@ module('Acceptance | logs', function (hooks) {
 
       assert.dom('[data-test-log-stream]').doesNotHaveClass('is-wrapped');
       assert.dom('[data-test-log-wrap]').hasAria('checked', 'false');
-      assert.strictEqual(fakes.storage.get('paasd.logs.wrap'), '0');
+      assert.strictEqual(fakes.storage.get('koroku.logs.wrap'), '0');
 
       await click('[data-test-log-wrap]');
       assert.dom('[data-test-log-stream]').hasClass('is-wrapped');
-      assert.strictEqual(fakes.storage.get('paasd.logs.wrap'), '1');
+      assert.strictEqual(fakes.storage.get('koroku.logs.wrap'), '1');
     });
 
     test('a remembered "no wrap" is applied on arrival', async function (assert) {
-      fakes.storage.set('paasd.logs.wrap', '0');
+      fakes.storage.set('koroku.logs.wrap', '0');
 
       await visit('/apps/blog/logs');
       emit(fakes.eventSource.last, logLine('boot'));

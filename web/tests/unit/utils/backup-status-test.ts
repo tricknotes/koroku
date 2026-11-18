@@ -2,10 +2,10 @@ import { module, test } from 'qunit';
 import {
   backupHealth,
   latestFinishedRun,
-} from 'paas-console/utils/backup-status';
-import { timeUntil } from 'paas-console/utils/schedule';
-import { makeBackups } from 'paas-console/tests/helpers/fakes';
-import type { BackupRun } from 'paas-console/utils/types';
+} from 'koroku-console/utils/backup-status';
+import { timeUntil } from 'koroku-console/utils/schedule';
+import { makeBackups } from 'koroku-console/tests/helpers/fakes';
+import type { BackupRun } from 'koroku-console/utils/types';
 
 function run(id: number, status: BackupRun['status']): BackupRun {
   return {

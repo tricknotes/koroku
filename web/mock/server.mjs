@@ -1,4 +1,4 @@
-// Mock of the paasd HTTP API for design work on the console. It serves the
+// Mock of the koroku HTTP API for design work on the console. It serves the
 // built app (web/dist) and answers the API from fixtures, so every state of
 // a screen can be looked at without a host, Docker or GitHub.
 //
@@ -42,7 +42,7 @@ const DEFAULT_SCENARIO = process.env.MOCK_SCENARIO ?? 'healthy';
 const DIST = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 const SLOW = 60 * 1000;
 
-// The policy paasd serves the console with (internal/api/auth.go), so that
+// The policy koroku serves the console with (internal/api/auth.go), so that
 // a violation shows up here first: no inline scripts, same-origin API.
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -523,7 +523,7 @@ function handleAuth(request, response, url) {
   throw notFound();
 }
 
-/** Helpers of the mock itself, outside the paths paasd serves. */
+/** Helpers of the mock itself, outside the paths koroku serves. */
 function handleMock(response, url) {
   if (url.pathname === '/__mock/theme.js') {
     // Presets the theme the way the theme switch would store it. An
@@ -533,8 +533,8 @@ function handleMock(response, url) {
     response.writeHead(200, { 'Content-Type': MIME['.js'] });
     return response.end(
       pinned
-        ? `localStorage.setItem('paasd.theme', '${theme}');`
-        : `localStorage.removeItem('paasd.theme');`,
+        ? `localStorage.setItem('koroku.theme', '${theme}');`
+        : `localStorage.removeItem('koroku.theme');`,
     );
   }
   if (url.pathname === '/__mock/reset') {
@@ -619,7 +619,7 @@ const server = createServer((request, response) => {
 
 server.listen(PORT, HOST, () => {
   console.log(
-    `mock paasd: http://${HOST}:${PORT}/  (scenario: ${DEFAULT_SCENARIO})`,
+    `mock koroku: http://${HOST}:${PORT}/  (scenario: ${DEFAULT_SCENARIO})`,
   );
   console.log(
     `scenarios: ${Object.keys({ ...SCENARIOS, ...LOG_SCENARIOS }).join(', ')}`,

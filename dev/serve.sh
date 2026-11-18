@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs paasd for local development (the paasd service of compose.yaml).
+# Runs koroku for local development (the koroku service of compose.yaml).
 #
 # Writes a development configuration on first use, builds the binary from
 # the checkout and runs it with login disabled. Run it from the repository
@@ -12,7 +12,7 @@ config="$state/config.toml"
 
 if [ ! -f "$config" ]; then
     mkdir -p "$state"
-    # The configuration may hold credentials later; paasd insists on 0600.
+    # The configuration may hold credentials later; koroku insists on 0600.
     (
         umask 077
         cat >"$config" <<EOF
@@ -42,7 +42,7 @@ mkdir -p web/dist
 [ -n "$(ls -A web/dist)" ] || touch web/dist/.keep
 
 # A linked worktree's VCS metadata is not always reachable from here.
-bin=/tmp/paasd-dev
-go build -buildvcs=false -o "$bin" ./cmd/paasd
+bin=/tmp/koroku-dev
+go build -buildvcs=false -o "$bin" ./cmd/koroku
 
 exec "$bin" serve --config "$config" --insecure-no-auth

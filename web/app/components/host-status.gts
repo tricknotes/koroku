@@ -1,8 +1,11 @@
 import Component from '@glimmer/component';
-import { diskLimitPercent, diskOverLimit } from 'paas-console/utils/attention';
-import { formatBytes, formatPercent } from 'paas-console/utils/format';
-import type Loadable from 'paas-console/utils/loadable';
-import type { BackupOverview, SystemInfo } from 'paas-console/utils/types';
+import {
+  diskLimitPercent,
+  diskOverLimit,
+} from 'koroku-console/utils/attention';
+import { formatBytes, formatPercent } from 'koroku-console/utils/format';
+import type Loadable from 'koroku-console/utils/loadable';
+import type { BackupOverview, SystemInfo } from 'koroku-console/utils/types';
 import Icon from './icon';
 import RelativeTime from './relative-time';
 

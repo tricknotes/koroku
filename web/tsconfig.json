@@ -4,8 +4,8 @@
   "compilerOptions": {
     "allowJs": true,
     "paths": {
-      "paas-console/tests/*": ["./tests/*"],
-      "paas-console/*": ["./app/*"],
+      "koroku-console/tests/*": ["./tests/*"],
+      "koroku-console/*": ["./app/*"],
       "*": ["./types/*"]
     },
     "types": [

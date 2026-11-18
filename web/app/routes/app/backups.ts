@@ -1,1 +1,1 @@
-export { default } from 'paas-console/utils/app-tab-route';
+export { default } from 'koroku-console/utils/app-tab-route';

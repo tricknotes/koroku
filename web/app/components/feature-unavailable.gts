@@ -2,7 +2,7 @@ import type { TOC } from '@ember/component/template-only';
 import {
   UNAVAILABLE_MESSAGES,
   type Unavailability,
-} from 'paas-console/utils/errors';
+} from 'koroku-console/utils/errors';
 
 const HINTS: Record<Unavailability, string> = {
   not_configured:

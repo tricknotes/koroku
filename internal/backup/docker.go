@@ -21,7 +21,7 @@ const (
 
 // volume is one named volume of a Compose project.
 type volume struct {
-	// Name is Docker's name (paas-blog_pgdata).
+	// Name is Docker's name (koroku-blog_pgdata).
 	Name string
 	// Short is the name in the Compose file (pgdata).
 	Short string
@@ -60,7 +60,7 @@ const volumeNamesTimeout = 30 * time.Second
 
 // VolumeNames lists the named volumes of a Compose project that exist in
 // Docker, by the name written in the Compose file (pgdata, not
-// paas-blog_pgdata), sorted. These are the volumes a backup run walks before
+// koroku-blog_pgdata), sorted. These are the volumes a backup run walks before
 // it applies App.ExcludeVolumes, and the names snapshots are tagged with.
 //
 // It needs no Manager: listing volumes takes Docker only, so it also works

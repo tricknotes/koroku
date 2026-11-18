@@ -248,7 +248,7 @@ func oneApp(app App) func(context.Context) ([]App, error) {
 	return func(context.Context) ([]App, error) { return []App{app}, nil }
 }
 
-var blog = App{Slug: "blog", Project: "paas-blog"}
+var blog = App{Slug: "blog", Project: "koroku-blog"}
 
 // dayContent returns the raw lines of one day of a service, gzip part first.
 func dayContent(t *testing.T, dir, slug, service, date string) []string {

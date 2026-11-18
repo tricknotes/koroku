@@ -1,5 +1,5 @@
 import type { TOC } from '@ember/component/template-only';
-import { STATUS_LABELS, type StatusKind } from 'paas-console/utils/status';
+import { STATUS_LABELS, type StatusKind } from 'koroku-console/utils/status';
 import Icon, { type IconName } from './icon';
 
 const ICONS: Record<StatusKind, IconName> = {

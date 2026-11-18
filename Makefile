@@ -13,9 +13,9 @@ web:
 	cd web && pnpm install --frozen-lockfile && pnpm build
 	touch web/dist/.keep
 
-# Build bin/paasd for the target host (linux/amd64) with the frontend embedded.
+# Build bin/koroku for the target host (linux/amd64) with the frontend embedded.
 build: web
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o bin/paasd ./cmd/paasd
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o bin/koroku ./cmd/koroku
 
 # Unit tests. Docker is not needed.
 test:
@@ -32,4 +32,4 @@ lint:
 	go vet ./...
 
 clean:
-	rm -f bin/paasd
+	rm -f bin/koroku

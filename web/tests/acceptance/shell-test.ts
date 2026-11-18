@@ -1,11 +1,11 @@
 import { module, test } from 'qunit';
 import { click, currentURL, triggerKeyEvent, visit } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   installFakes,
   makeApp,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
+} from 'koroku-console/tests/helpers/fakes';
 
 function pinnedTheme(): string | null {
   return document.documentElement.getAttribute('data-theme');
@@ -24,7 +24,7 @@ module('Acceptance | shell', function (hooks) {
   test('the top bar has the wordmark, the two sections, the theme switch and the user', async function (assert) {
     await visit('/');
 
-    assert.dom('.topbar [data-test-wordmark]').hasText('paasd');
+    assert.dom('.topbar [data-test-wordmark]').hasText('koroku');
     assert.dom('.topbar [data-test-nav]').exists({ count: 2 });
     assert.dom('[data-test-nav="apps"]').hasText('アプリ').hasClass('active');
     assert
@@ -53,26 +53,26 @@ module('Acceptance | shell', function (hooks) {
     await click('[data-test-theme="dark"]');
 
     assert.strictEqual(pinnedTheme(), 'dark');
-    assert.strictEqual(fakes.storage.get('paasd.theme'), 'dark');
+    assert.strictEqual(fakes.storage.get('koroku.theme'), 'dark');
     assert.dom('[data-test-theme="dark"]').isChecked();
 
     await click('[data-test-theme="light"]');
 
     assert.strictEqual(pinnedTheme(), 'light');
-    assert.strictEqual(fakes.storage.get('paasd.theme'), 'light');
+    assert.strictEqual(fakes.storage.get('koroku.theme'), 'light');
 
     await click('[data-test-theme="system"]');
 
     assert.strictEqual(pinnedTheme(), null);
     assert.strictEqual(
-      fakes.storage.get('paasd.theme'),
+      fakes.storage.get('koroku.theme'),
       null,
       'following the OS stores nothing',
     );
   });
 
   test('a remembered theme is applied on load', async function (assert) {
-    fakes.storage.set('paasd.theme', 'dark');
+    fakes.storage.set('koroku.theme', 'dark');
 
     await visit('/');
 
@@ -81,7 +81,7 @@ module('Acceptance | shell', function (hooks) {
   });
 
   test('an unknown stored value falls back to the OS setting', async function (assert) {
-    fakes.storage.set('paasd.theme', 'sepia');
+    fakes.storage.set('koroku.theme', 'sepia');
 
     await visit('/');
 

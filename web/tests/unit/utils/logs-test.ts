@@ -1,5 +1,5 @@
 import { module, test } from 'qunit';
-import LogBuffer from 'paas-console/utils/log-buffer';
+import LogBuffer from 'koroku-console/utils/log-buffer';
 import {
   formatLogStamp,
   formatLogTime,
@@ -11,8 +11,8 @@ import {
   serviceLabel,
   splitMatches,
   toJstInput,
-} from 'paas-console/utils/logs';
-import type { LogLine } from 'paas-console/utils/types';
+} from 'koroku-console/utils/logs';
+import type { LogLine } from 'koroku-console/utils/types';
 
 function line(text: string, service = 'web', time = ''): LogLine {
   return { service, time, line: text };

@@ -1,4 +1,4 @@
-// Shapes of the paasd HTTP API (docs/API.md).
+// Shapes of the koroku HTTP API (docs/API.md).
 
 export interface SessionUser {
   id: number;

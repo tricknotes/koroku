@@ -63,7 +63,7 @@ func (s *Store) FinishBackupRun(ctx context.Context, id int64, succeeded bool, e
 func (s *Store) FailInterruptedBackupRuns(ctx context.Context, now time.Time) error {
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE backup_runs SET status = ?, error = ?, finished_at = ? WHERE status = ?`,
-		BackupFailed, "interrupted: paasd restarted during the backup", toMillis(now), BackupRunning)
+		BackupFailed, "interrupted: koroku restarted during the backup", toMillis(now), BackupRunning)
 	if err != nil {
 		return fmt.Errorf("fail interrupted backup runs: %w", err)
 	}

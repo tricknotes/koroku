@@ -1,6 +1,6 @@
-# paasd HTTP API
+# koroku HTTP API
 
-管理 UI（`web/`）と `paasd` の間の取り決め。ARCHITECTURE 9 章の一覧を、リクエストとレスポンスの形まで具体化したもの。食い違いがあれば実装（`internal/api`）とこのファイルを同時に直す。
+管理 UI（`web/`）と `koroku` の間の取り決め。ARCHITECTURE 9 章の一覧を、リクエストとレスポンスの形まで具体化したもの。食い違いがあれば実装（`internal/api`）とこのファイルを同時に直す。
 
 各節の見出しにある **M1** などは、その API を実装するマイルストーン。
 
@@ -193,9 +193,9 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | `Rolled back: deployment #<id> is running again.` | 戻し終えた |
 | `Rollback failed: ...` / `Rollback is not possible: ...` | 戻せなかった |
 | `==> <時刻> rollback No previous release; removing the failed containers` | 初回デプロイで戻す先がなく、起動しかけたコンテナを消した（失敗すると `Removing the containers failed: ...`） |
-| `paasd is shutting down; the previous release is not restored automatically.` | `paasd` の停止と重なり、ロールバックを実行しなかった |
+| `koroku is shutting down; the previous release is not restored automatically.` | `koroku` の停止と重なり、ロールバックを実行しなかった |
 
-最初の見出しより前の行（`Queued deployment of <sha>.` など）は受付の記録。`paasd` の再起動で中断されたデプロイには `failed` の見出しがなく、末尾に `Failed: ...` の行だけが付く。
+最初の見出しより前の行（`Queued deployment of <sha>.` など）は受付の記録。`koroku` の再起動で中断されたデプロイには `failed` の見出しがなく、末尾に `Failed: ...` の行だけが付く。
 
 **デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。
 
@@ -276,7 +276,7 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
 }
 ```
 
-- `name` は Compose ファイルに書いた volume 名（`paas-blog_pgdata` ではなく `pgdata`）。`backup_exclude_volumes` とスナップショットの `target` と同じ文字列。名前順。
+- `name` は Compose ファイルに書いた volume 名（`koroku-blog_pgdata` ではなく `pgdata`）。`backup_exclude_volumes` とスナップショットの `target` と同じ文字列。名前順。
 - 一覧は、アプリの Compose プロジェクトの named volume のうち Docker に実在するもの（バックアップが取る volume と同じ列挙。`external` の volume は含まない）。`excluded` は `backup_exclude_volumes` に入っていれば true。
 - `backup_exclude_volumes` にあるが実在しない名前も `exists: false`、`excluded: true` で含める（UI から対象へ戻せるように）。
 - 一度もデプロイしていないアプリは volume がないので `{"volumes": []}`（除外リストに名前があれば、それだけが `exists: false` で並ぶ）。

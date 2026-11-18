@@ -147,7 +147,7 @@ func TestSchedulerRunsDailyAndChecksWeekly(t *testing.T) {
 	assertLines(t, "Saturday's commands", e.host.calls(), []string{
 		"restic cat config",
 		"restic unlock",
-		"docker volume ls --filter label=com.docker.compose.project=paas-blog --format {{.Name}}",
+		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
 		"restic unlock",
 		"restic forget --group-by tags --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
 	})
@@ -166,7 +166,7 @@ func TestSchedulerRunsDailyAndChecksWeekly(t *testing.T) {
 	waitFor(t, "the second run", func() bool { return len(e.rec.finishedRuns()) == 2 })
 	assertLines(t, "Sunday's commands", e.host.calls(), []string{
 		"restic unlock",
-		"docker volume ls --filter label=com.docker.compose.project=paas-blog --format {{.Name}}",
+		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
 		"restic unlock",
 		"restic forget --group-by tags --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
 		"restic unlock",

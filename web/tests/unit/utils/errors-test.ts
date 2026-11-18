@@ -6,7 +6,7 @@ import {
   loginErrorMessage,
   policyViolations,
   unavailability,
-} from 'paas-console/utils/errors';
+} from 'koroku-console/utils/errors';
 
 module('Unit | Utility | errors', function () {
   test('errorMessage maps known codes to Japanese', function (assert) {

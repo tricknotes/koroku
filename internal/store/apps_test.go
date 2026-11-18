@@ -57,7 +57,7 @@ func TestCreateAndGetApp(t *testing.T) {
 	if got.ServiceMemoryLimits["db"] != "1g" || got.RepoFullName != "octo/blog" {
 		t.Errorf("GetApp = %+v", got)
 	}
-	if got.CloneURL() != "https://github.com/octo/blog.git" || got.ProjectName() != "paas-blog" {
+	if got.CloneURL() != "https://github.com/octo/blog.git" || got.ProjectName() != "koroku-blog" {
 		t.Errorf("CloneURL = %q, ProjectName = %q", got.CloneURL(), got.ProjectName())
 	}
 	byID, err := s.GetAppByID(ctx, created.ID)

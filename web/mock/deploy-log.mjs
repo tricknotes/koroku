@@ -1,4 +1,4 @@
-// Deployment logs of the mock API (see server.mjs), in the shape paasd
+// Deployment logs of the mock API (see server.mjs), in the shape koroku
 // writes them: step headlines `==> <time> <key> <title>` with the output of
 // each step below, the failure and the automatic rollback included
 // (internal/deploy/steps.go). Nothing here is real output.
@@ -12,7 +12,7 @@ const SECOND = 1000;
  * backs up before deploying).
  */
 function projectOf(context) {
-  return `paas-${context.slug}`;
+  return `koroku-${context.slug}`;
 }
 
 function buildLines() {
@@ -144,7 +144,7 @@ function plan(entry, context) {
     step(
       'check',
       `Checking ${url}`,
-      // What paasd really writes here: nothing while it polls, then the
+      // What koroku really writes here: nothing while it polls, then the
       // last output of the containers (docker compose logs --tail 30).
       [
         'Last output of the containers:',

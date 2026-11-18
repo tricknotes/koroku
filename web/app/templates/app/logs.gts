@@ -9,24 +9,24 @@ import { isDestroying, registerDestructor } from '@ember/destroyable';
 import type Owner from '@ember/owner';
 import { modifier } from 'ember-modifier';
 import { pageTitle } from 'ember-page-title';
-import Banner from 'paas-console/components/banner';
-import Button, { buttonClass } from 'paas-console/components/button';
-import EmptyState from 'paas-console/components/empty-state';
-import Icon from 'paas-console/components/icon';
-import LogArchives from 'paas-console/components/log-archives';
-import LogDetail from 'paas-console/components/log-detail';
-import LogStream from 'paas-console/components/log-stream';
-import ToggleSwitch from 'paas-console/components/toggle-switch';
-import type AppLogsController from 'paas-console/controllers/app/logs';
-import type ApiService from 'paas-console/services/api';
-import type EventSourceService from 'paas-console/services/event-source';
-import type { Stream } from 'paas-console/services/event-source';
-import type StorageService from 'paas-console/services/storage';
-import type AppContext from 'paas-console/utils/app-context';
-import { inputValue, preventDefault } from 'paas-console/utils/dom';
-import { errorMessage } from 'paas-console/utils/errors';
-import Loadable from 'paas-console/utils/loadable';
-import LogBuffer, { type LogRow } from 'paas-console/utils/log-buffer';
+import Banner from 'koroku-console/components/banner';
+import Button, { buttonClass } from 'koroku-console/components/button';
+import EmptyState from 'koroku-console/components/empty-state';
+import Icon from 'koroku-console/components/icon';
+import LogArchives from 'koroku-console/components/log-archives';
+import LogDetail from 'koroku-console/components/log-detail';
+import LogStream from 'koroku-console/components/log-stream';
+import ToggleSwitch from 'koroku-console/components/toggle-switch';
+import type AppLogsController from 'koroku-console/controllers/app/logs';
+import type ApiService from 'koroku-console/services/api';
+import type EventSourceService from 'koroku-console/services/event-source';
+import type { Stream } from 'koroku-console/services/event-source';
+import type StorageService from 'koroku-console/services/storage';
+import type AppContext from 'koroku-console/utils/app-context';
+import { inputValue, preventDefault } from 'koroku-console/utils/dom';
+import { errorMessage } from 'koroku-console/utils/errors';
+import Loadable from 'koroku-console/utils/loadable';
+import LogBuffer, { type LogRow } from 'koroku-console/utils/log-buffer';
 import {
   ACCESS_SERVICE,
   LOCAL_RETENTION_DAYS,
@@ -40,12 +40,12 @@ import {
   serviceLabel,
   toJstInput,
   type Period,
-} from 'paas-console/utils/logs';
+} from 'koroku-console/utils/logs';
 import type {
   LogArchive,
   LogLine,
   ServiceStatus,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 /** Lines the live tail starts with. */
 const TAIL = 1000;
@@ -61,7 +61,7 @@ const SEARCH_DELAY = 400;
 /** How long a connected tail may stay silent before it counts as empty. */
 const QUIET_DELAY = 500;
 
-const WRAP_KEY = 'paasd.logs.wrap';
+const WRAP_KEY = 'koroku.logs.wrap';
 const HOUR = 60 * 60 * 1000;
 
 type Timer = ReturnType<typeof later>;

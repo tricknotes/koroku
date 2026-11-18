@@ -3,7 +3,7 @@
 #
 # Stand-ins on PATH replace what a container does not have:
 #   systemctl  logs the call; "start/restart caddy" runs the ExecStart line of
-#              the installed drop-in as the caddy user, "start/restart paasd"
+#              the installed drop-in as the caddy user, "start/restart koroku"
 #              runs the ExecStart line of the installed unit, so both are
 #              exercised for real
 #   docker     answers "docker info"; everything else is the real CLI
@@ -42,15 +42,15 @@ start() {
   fi
   case $1 in
     caddy.service)
-      exec_start=$(sed -n 's/^ExecStart=\(\/.*\)$/\1/p' /etc/systemd/system/caddy.service.d/paasd.conf)
+      exec_start=$(sed -n 's/^ExecStart=\(\/.*\)$/\1/p' /etc/systemd/system/caddy.service.d/koroku.conf)
       # shellcheck disable=SC2086  # the unit's command line, split on spaces
       HOME=/var/lib/caddy setsid runuser -u caddy -- $exec_start >>/var/log/caddy-run.log 2>&1 &
       echo $! >"$STATE/$1.pid"
       ;;
-    paasd.service)
-      exec_start=$(sed -n 's/^ExecStart=\(\/.*\)$/\1/p' /etc/systemd/system/paasd.service)
+    koroku.service)
+      exec_start=$(sed -n 's/^ExecStart=\(\/.*\)$/\1/p' /etc/systemd/system/koroku.service)
       # shellcheck disable=SC2086
-      HOME=/root setsid $exec_start >>/var/log/paasd-run.log 2>&1 &
+      HOME=/root setsid $exec_start >>/var/log/koroku-run.log 2>&1 &
       echo $! >"$STATE/$1.pid"
       ;;
   esac
@@ -126,14 +126,14 @@ check() {
 }
 not() { ! "$@"; }
 called() { grep -qxF -- "$1" "$CALLS"; }
-paasd_start_requested() { grep -qE '^systemctl (re)?start paasd\.service$' "$CALLS"; }
+koroku_start_requested() { grep -qE '^systemctl (re)?start koroku\.service$' "$CALLS"; }
 mode_is() { [[ $(stat -c '%U:%G %a' "$1") == "$2" ]]; }
 caddy_config() { curl -fsS http://127.0.0.1:2019/config/ | jq -c .; }
 caddy_has_initial_config_only() { [[ $(caddy_config) == '{"admin":{"listen":"127.0.0.1:2019"}}' ]]; }
-caddy_has_console_route() { [[ $(caddy_config) == *console.paas.test* ]]; }
+caddy_has_console_route() { [[ $(caddy_config) == *console.koroku.test* ]]; }
 apt_candidate() { apt-cache policy "$1" | awk '/Candidate:/ { print $2 }'; }
 apt_restic_is_older_than_pinned() { dpkg --compare-versions "$(apt_candidate restic)" lt 0.17; }
-only_config_in_etc_paas() { [[ $(find /etc/paas -type f) == /etc/paas/config.toml ]]; }
+only_config_in_etc_koroku() { [[ $(find /etc/koroku -type f) == /etc/koroku/config.toml ]]; }
 swap_file_ok() {
   [[ $(stat -c '%s %a' /swapfile) == '2147483648 600' ]] && grep -qx '/swapfile none swap sw 0 0' /etc/fstab
 }
@@ -146,7 +146,7 @@ refuses_invalid_daemon_json() {
   local refused=0 kept
   cp /etc/docker/daemon.json /tmp/daemon.json.good
   echo 'not json' >/etc/docker/daemon.json
-  if ! provision --skip-upgrade /src/paasd; then
+  if ! provision --skip-upgrade /src/koroku; then
     refused=1
   fi
   kept=$(cat /etc/docker/daemon.json)
@@ -155,14 +155,14 @@ refuses_invalid_daemon_json() {
 }
 
 snapshot() {
-  sha256sum /etc/docker/daemon.json /etc/paas/* /etc/fstab \
-    /etc/systemd/system/paasd.service /etc/systemd/system/caddy.service.d/paasd.conf \
-    /etc/caddy/paasd-initial.json /etc/apt/sources.list.d/docker.list \
+  sha256sum /etc/docker/daemon.json /etc/koroku/* /etc/fstab \
+    /etc/systemd/system/koroku.service /etc/systemd/system/caddy.service.d/koroku.conf \
+    /etc/caddy/koroku-initial.json /etc/apt/sources.list.d/docker.list \
     /etc/apt/sources.list.d/caddy-stable.list /etc/apt/keyrings/docker.asc \
     /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
-    /usr/local/bin/paasd /usr/local/bin/restic
-  stat -c '%n %a %U:%G' /etc/paas /etc/paas/* /var/lib/paas /var/log/caddy/apps /swapfile \
-    /etc/docker/daemon.json /usr/local/bin/paasd /usr/local/bin/restic
+    /usr/local/bin/koroku /usr/local/bin/restic
+  stat -c '%n %a %U:%G' /etc/koroku /etc/koroku/* /var/lib/koroku /var/log/caddy/apps /swapfile \
+    /etc/docker/daemon.json /usr/local/bin/koroku /usr/local/bin/restic
 }
 
 # An existing daemon.json with unrelated settings must survive the merge.
@@ -170,20 +170,20 @@ mkdir -p /etc/docker
 echo '{"dns": ["192.0.2.53"], "log-opts": {"labels": "app"}}' >/etc/docker/daemon.json
 
 echo "######## run 1: fresh system ########"
-provision /src/paasd
+provision /src/koroku
 echo
 echo "######## checks after run 1 ########"
 check "apt's restic is older than 0.17 (reason for the release binary)" apt_restic_is_older_than_pinned
 check "daemon.json keeps dns" jq -e '.dns == ["192.0.2.53"]' /etc/docker/daemon.json
 check "daemon.json sets json-file with rotation and keeps other log options" \
   jq -e '.["log-driver"] == "json-file" and .["log-opts"] == {"labels": "app", "max-file": "3", "max-size": "10m"}' /etc/docker/daemon.json
-check "previous daemon.json kept as backup" test -f /etc/docker/daemon.json.before-paasd
+check "previous daemon.json kept as backup" test -f /etc/docker/daemon.json.before-koroku
 check "docker was started, not restarted (first install)" not called "systemctl restart docker.service"
-check "/etc/paas is root-only" mode_is /etc/paas "root:root 700"
-check "/var/lib/paas is root-only" mode_is /var/lib/paas "root:root 700"
-check "config.toml created as 0600" mode_is /etc/paas/config.toml "root:root 600"
-check "config.toml equals the example" cmp /etc/paas/config.toml /src/deploy/config.example.toml
-check "no key was created by the script" only_config_in_etc_paas
+check "/etc/koroku is root-only" mode_is /etc/koroku "root:root 700"
+check "/var/lib/koroku is root-only" mode_is /var/lib/koroku "root:root 700"
+check "config.toml created as 0600" mode_is /etc/koroku/config.toml "root:root 600"
+check "config.toml equals the example" cmp /etc/koroku/config.toml /src/deploy/config.example.toml
+check "no key was created by the script" only_config_in_etc_koroku
 check "access log directory belongs to caddy" mode_is /var/log/caddy/apps "caddy:caddy 750"
 check "caddy user can write an access log" runuser -u caddy -- touch /var/log/caddy/apps/probe.log
 check "swap file is 2 GiB, 0600, in fstab" swap_file_ok
@@ -191,25 +191,25 @@ check "Caddy runs the initial configuration: admin API only" caddy_has_initial_c
 check "Caddy serves nothing on port 80" not curl -s --max-time 2 -o /dev/null http://127.0.0.1:80/
 check "ufw: ssh ports 22, 2222 (sshd), 2200 (session), then 80 and 443, before enable" ufw_order_ok
 check "ufw: 443/udp stays closed by default" not called "ufw allow 443/udp"
-check "paasd enabled" called "systemctl enable paasd.service"
-check "paasd not started while the config holds example values" not paasd_start_requested
+check "koroku enabled" called "systemctl enable koroku.service"
+check "koroku not started while the config holds example values" not koroku_start_requested
 
 # What the human does next: real values and keys.
-sed -i -e 's/dev\.example\.com/paas.test/' -e 's/203\.0\.113\.10/192.0.2.10/' \
-  -e 's#^acme_ca = .*#acme_ca = "https://127.0.0.1:9/directory"#' /etc/paas/config.toml
+sed -i -e 's/dev\.example\.com/koroku.test/' -e 's/203\.0\.113\.10/192.0.2.10/' \
+  -e 's#^acme_ca = .*#acme_ca = "https://127.0.0.1:9/directory"#' /etc/koroku/config.toml
 (
   umask 077
-  head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >/etc/paas/master.key
-  echo >>/etc/paas/master.key
-  echo "restic-password-stand-in" >/etc/paas/restic.key
-  echo "pem-stand-in" >/etc/paas/github-app.pem
+  head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' >/etc/koroku/master.key
+  echo >>/etc/koroku/master.key
+  echo "restic-password-stand-in" >/etc/koroku/restic.key
+  echo "pem-stand-in" >/etc/koroku/github-app.pem
 )
 snapshot >/tmp/before
 : >"$CALLS"
 
 echo
 echo "######## run 2: same command again, config filled in ########"
-provision /src/paasd
+provision /src/koroku
 echo
 echo "######## checks after run 2 ########"
 snapshot >/tmp/after2
@@ -218,33 +218,33 @@ check "docker not restarted" not called "systemctl restart docker.service"
 check "caddy not restarted (already runs with --resume)" not called "systemctl restart caddy.service"
 check "swap file not enabled twice" not called "swapon /swapfile"
 check "ufw not enabled twice" not called "ufw --force enable"
-check "paasd started now that the config has no example values" called "systemctl start paasd.service"
+check "koroku started now that the config has no example values" called "systemctl start koroku.service"
 sleep 2
 # Any HTTP answer will do: without a [github] section the API returns 401.
-check "paasd answers on its loopback port" curl -sS -o /dev/null http://127.0.0.1:8080/api/system
-check "paasd loaded its configuration into Caddy" caddy_has_console_route
+check "koroku answers on its loopback port" curl -sS -o /dev/null http://127.0.0.1:8080/api/system
+check "koroku loaded its configuration into Caddy" caddy_has_console_route
 check "Caddy saved it for --resume" test -s /var/lib/caddy/.config/caddy/autosave.json
 
 echo
-echo "######## Caddy restart while paasd is down ########"
-kill "$(cat "$STATE/paasd.service.pid")"
+echo "######## Caddy restart while koroku is down ########"
+kill "$(cat "$STATE/koroku.service.pid")"
 sleep 1
 systemctl restart caddy.service
 sleep 2
-check "paasd is down" not systemctl is-active paasd.service
-check "after a restart Caddy resumes the configuration paasd loaded" caddy_has_console_route
-systemctl start paasd.service
+check "koroku is down" not systemctl is-active koroku.service
+check "after a restart Caddy resumes the configuration koroku loaded" caddy_has_console_route
+systemctl start koroku.service
 sleep 2
 : >"$CALLS"
 
 echo
 echo "######## run 3: everything already running, --skip-upgrade --http3 ########"
-provision --skip-upgrade --http3 /src/paasd
+provision --skip-upgrade --http3 /src/koroku
 echo
 echo "######## checks after run 3 ########"
 snapshot >/tmp/after3
 check "no managed file, key or permission changed" diff /tmp/before /tmp/after3
-check "paasd neither started nor restarted" not paasd_start_requested
+check "koroku neither started nor restarted" not koroku_start_requested
 check "caddy not restarted" not called "systemctl restart caddy.service"
 check "--http3 opens 443/udp" called "ufw allow 443/udp"
 

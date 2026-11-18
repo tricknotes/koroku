@@ -2,9 +2,9 @@ import { module, test } from 'qunit';
 import BackupForm, {
   parseList,
   volumeChoices,
-} from 'paas-console/utils/backup-form';
-import { makeApp, makeVolume } from 'paas-console/tests/helpers/fakes';
-import type { Snapshot } from 'paas-console/utils/types';
+} from 'koroku-console/utils/backup-form';
+import { makeApp, makeVolume } from 'koroku-console/tests/helpers/fakes';
+import type { Snapshot } from 'koroku-console/utils/types';
 
 function snapshot(target: string, time: string, kind = 'volume'): Snapshot {
   return {

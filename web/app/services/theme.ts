@@ -5,7 +5,7 @@ import type StorageService from './storage';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
-export const THEME_STORAGE_KEY = 'paasd.theme';
+export const THEME_STORAGE_KEY = 'koroku.theme';
 
 function parse(value: string | null): ThemePreference {
   return value === 'light' || value === 'dark' ? value : 'system';

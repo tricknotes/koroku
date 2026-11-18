@@ -1,6 +1,6 @@
 import Service, { service } from '@ember/service';
 import { waitForPromise } from '@ember/test-waiters';
-import { ApiError } from 'paas-console/utils/errors';
+import { ApiError } from 'koroku-console/utils/errors';
 import type SessionService from './session';
 import type {
   App,
@@ -24,7 +24,7 @@ import type {
   SessionResponse,
   Snapshot,
   SystemInfo,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 export type Query = Record<
   string,
@@ -89,7 +89,7 @@ export function parseErrorBody(status: number, text: string): ApiError {
 }
 
 /**
- * The only place that talks to the paasd HTTP API. Every call goes through
+ * The only place that talks to the koroku HTTP API. Every call goes through
  * `transport`, so tests register a subclass that overrides just that method.
  */
 export default class ApiService extends Service {

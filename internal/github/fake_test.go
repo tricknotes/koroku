@@ -70,8 +70,8 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 		f.lastBearer = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		f.mu.Unlock()
 
-		if got := r.Header.Get("User-Agent"); got != "paasd" {
-			t.Errorf("%s %s: User-Agent = %q, want paasd", r.Method, r.URL.Path, got)
+		if got := r.Header.Get("User-Agent"); got != "koroku" {
+			t.Errorf("%s %s: User-Agent = %q, want koroku", r.Method, r.URL.Path, got)
 		}
 		if r.URL.Path == "/login/oauth/access_token" {
 			if got := r.Header.Get("Accept"); got != "application/json" {

@@ -194,7 +194,7 @@ func fromNullMillis(v sql.NullInt64) *time.Time {
 }
 
 // VacuumInto writes a consistent copy of the database to destPath, which
-// must not exist yet. It is how the database is backed up while paasd runs.
+// must not exist yet. It is how the database is backed up while koroku runs.
 func (s *Store) VacuumInto(ctx context.Context, destPath string) error {
 	if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, destPath); err != nil {
 		return fmt.Errorf("vacuum into %s: %w", destPath, err)

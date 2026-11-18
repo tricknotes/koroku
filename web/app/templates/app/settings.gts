@@ -5,30 +5,30 @@ import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import type Owner from '@ember/owner';
 import type RouterService from '@ember/routing/router-service';
-import Banner from 'paas-console/components/banner';
-import Button from 'paas-console/components/button';
-import ConfirmDialog from 'paas-console/components/confirm-dialog';
-import ErrorMessage from 'paas-console/components/error-message';
-import FormField from 'paas-console/components/form-field';
-import Icon from 'paas-console/components/icon';
-import StatusIndicator from 'paas-console/components/status-indicator';
-import type ApiService from 'paas-console/services/api';
-import type AppContext from 'paas-console/utils/app-context';
+import Banner from 'koroku-console/components/banner';
+import Button from 'koroku-console/components/button';
+import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import ErrorMessage from 'koroku-console/components/error-message';
+import FormField from 'koroku-console/components/form-field';
+import Icon from 'koroku-console/components/icon';
+import StatusIndicator from 'koroku-console/components/status-indicator';
+import type ApiService from 'koroku-console/services/api';
+import type AppContext from 'koroku-console/utils/app-context';
 import {
   inputValue,
   preventDefault,
   setChecked,
   setValue,
-} from 'paas-console/utils/dom';
-import { fieldErrors, policyViolations } from 'paas-console/utils/errors';
-import SettingsForm, { LimitRow } from 'paas-console/utils/settings-form';
+} from 'koroku-console/utils/dom';
+import { fieldErrors, policyViolations } from 'koroku-console/utils/errors';
+import SettingsForm, { LimitRow } from 'koroku-console/utils/settings-form';
 import {
   APP_STATE_HINTS,
   APP_STATE_KINDS,
   APP_STATE_LABELS,
   deriveAppState,
-} from 'paas-console/utils/status';
-import type { App, Environment } from 'paas-console/utils/types';
+} from 'koroku-console/utils/status';
+import type { App, Environment } from 'koroku-console/utils/types';
 
 const KNOWN_FIELDS = new Set([
   'default_branch',

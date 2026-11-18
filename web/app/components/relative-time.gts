@@ -1,7 +1,7 @@
 import Component from '@glimmer/component';
 import { service } from '@ember/service';
-import type ClockService from 'paas-console/services/clock';
-import { formatDateTimeJst, relativeTime } from 'paas-console/utils/format';
+import type ClockService from 'koroku-console/services/clock';
+import { formatDateTimeJst, relativeTime } from 'koroku-console/utils/format';
 
 interface RelativeTimeSignature {
   Element: HTMLTimeElement;

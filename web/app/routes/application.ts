@@ -2,9 +2,9 @@ import Route from '@ember/routing/route';
 import { service } from '@ember/service';
 import type RouterService from '@ember/routing/router-service';
 import type Transition from '@ember/routing/transition';
-import type BrowserService from 'paas-console/services/browser';
-import type SessionService from 'paas-console/services/session';
-import type ThemeService from 'paas-console/services/theme';
+import type BrowserService from 'koroku-console/services/browser';
+import type SessionService from 'koroku-console/services/session';
+import type ThemeService from 'koroku-console/services/theme';
 
 export default class ApplicationRoute extends Route {
   @service declare session: SessionService;

@@ -2,7 +2,7 @@
 // keyword matching. Plain functions, so templates call them directly and
 // unit tests need no container.
 
-import type { LogLine } from 'paas-console/utils/types';
+import type { LogLine } from 'koroku-console/utils/types';
 
 /** The pseudo-service that holds the reverse proxy's access log of an app. */
 export const ACCESS_SERVICE = '_access';

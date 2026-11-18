@@ -2,8 +2,8 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { on } from '@ember/modifier';
 import { uniqueId } from '@ember/helper';
-import showModal from 'paas-console/modifiers/show-modal';
-import { inputValue } from 'paas-console/utils/dom';
+import showModal from 'koroku-console/modifiers/show-modal';
+import { inputValue } from 'koroku-console/utils/dom';
 import Button from './button';
 import FormField from './form-field';
 

@@ -71,7 +71,7 @@ func (a App) CloneURL() string {
 
 // ProjectName is the Compose project name, which isolates the app's
 // containers, networks and volumes.
-func (a App) ProjectName() string { return "paas-" + a.Slug }
+func (a App) ProjectName() string { return "koroku-" + a.Slug }
 
 const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 	web_service, web_port, host_port, healthcheck_path, desired_state, environment,

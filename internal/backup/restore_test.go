@@ -57,8 +57,8 @@ func TestRestoreVolume(t *testing.T) {
 	assertLines(t, "commands", e.host.calls(), []string{
 		"restic cat config",
 		"restic snapshots --json --tag app:blog --retry-lock 1m0s",
-		"docker volume ls --filter label=com.docker.compose.project=paas-blog --format {{.Name}}",
-		"docker volume inspect -- paas-blog_uploads",
+		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
+		"docker volume inspect -- koroku-blog_uploads",
 		"restic restore --retry-lock 1m0s --target " + mount + " " + snap.ID,
 	})
 	e.assertCleanCommands()
@@ -282,12 +282,12 @@ func TestCleanTrashRemovesOnlyExpiredRestores(t *testing.T) {
 
 func TestRestoreSystem(t *testing.T) {
 	e := newEnv(t)
-	old := e.host.addRecord(testNow.Add(-48*time.Hour), "/var/lib/paas/backup-work/system", "system", "kind:system")
-	latest := e.host.addRecord(testNow.Add(-time.Hour), "/var/lib/paas/backup-work/system", "system", "kind:system")
+	old := e.host.addRecord(testNow.Add(-48*time.Hour), "/var/lib/koroku/backup-work/system", "system", "kind:system")
+	latest := e.host.addRecord(testNow.Add(-time.Hour), "/var/lib/koroku/backup-work/system", "system", "kind:system")
 	// Tagged kind:system by someone else, but not ours.
 	e.host.addRecord(testNow, "/x", "kind:system", "app:blog")
 	e.host.set("restic restore", func(_ context.Context, cmd runner.Cmd) (string, error) {
-		writeFiles(t, restoreTarget(cmd), map[string]string{"paas.db": "sqlite", "config/config.toml": "x", "config/restic.key": "k"})
+		writeFiles(t, restoreTarget(cmd), map[string]string{"koroku.db": "sqlite", "config/config.toml": "x", "config/restic.key": "k"})
 		return "", nil
 	})
 
@@ -300,7 +300,7 @@ func TestRestoreSystem(t *testing.T) {
 		SnapshotID:   latest.ShortID,
 		Time:         latest.Time,
 		Dir:          dest,
-		DatabasePath: filepath.Join(dest, "paas.db"),
+		DatabasePath: filepath.Join(dest, "koroku.db"),
 		ConfigDir:    filepath.Join(dest, "config"),
 	}
 	if got != want {

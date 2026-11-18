@@ -18,8 +18,8 @@ const (
 	StatusCanceled  = "canceled"
 )
 
-// InterruptedError is recorded on deployments that were running when paasd stopped.
-const InterruptedError = "interrupted: paasd restarted while the deployment was running"
+// InterruptedError is recorded on deployments that were running when koroku stopped.
+const InterruptedError = "interrupted: koroku restarted while the deployment was running"
 
 // SupersededError is recorded on queued deployments replaced by a newer one.
 const SupersededError = "superseded by a newer deployment"

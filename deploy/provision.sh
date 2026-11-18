@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Provision a fresh host for paasd: Ubuntu 24.04, amd64, run as root.
+# Provision a fresh host for koroku: Ubuntu 24.04, amd64, run as root.
 #
-#   sudo ./provision.sh [options] /path/to/paasd
+#   sudo ./provision.sh [options] /path/to/koroku
 #
-# The paasd binary is built elsewhere with `make build` (bin/paasd). The files
-# next to this script (paasd.service, caddy-initial.json, caddy-paasd.conf,
+# The koroku binary is built elsewhere with `make build` (bin/koroku). The files
+# next to this script (koroku.service, caddy-initial.json, caddy-koroku.conf,
 # config.example.toml) are installed as they are, so copy the whole deploy/
 # directory to the host.
 #
 # The script is safe to run again: it only changes what differs, and it never
-# overwrites /etc/paas/config.toml or any key under /etc/paas. It never
+# overwrites /etc/koroku/config.toml or any key under /etc/koroku. It never
 # reboots; it says at the end when a reboot is needed.
 #
 # See docs/OPERATIONS.md for the full procedure.
@@ -32,9 +32,9 @@ readonly RESTIC_SHA256=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25
 readonly SWAP_FILE=/swapfile
 readonly SWAP_SIZE_MIB=2048
 
-readonly CONFIG_DIR=/etc/paas
+readonly CONFIG_DIR=/etc/koroku
 readonly CONFIG_FILE=$CONFIG_DIR/config.toml
-readonly DATA_DIR=/var/lib/paas
+readonly DATA_DIR=/var/lib/koroku
 readonly CADDY_LOG_DIR=/var/log/caddy
 readonly CADDY_ADMIN_URL=http://127.0.0.1:2019
 
@@ -56,9 +56,9 @@ die() {
 
 usage() {
   cat <<'EOF'
-Usage: provision.sh [options] /path/to/paasd
+Usage: provision.sh [options] /path/to/koroku
 
-Sets up Docker, Caddy, restic, swap, the firewall and the paasd service on a
+Sets up Docker, Caddy, restic, swap, the firewall and the koroku service on a
 fresh Ubuntu 24.04 (amd64) host. Run it as root. It can be run again safely.
 
 Options:
@@ -170,33 +170,33 @@ check_host() {
   OS_ARCH=$arch
 
   local file
-  for file in paasd.service caddy-initial.json caddy-paasd.conf config.example.toml; do
+  for file in koroku.service caddy-initial.json caddy-koroku.conf config.example.toml; do
     if [[ ! -f $SCRIPT_DIR/$file ]]; then
       die "$SCRIPT_DIR/$file is missing; copy the whole deploy/ directory to the host"
     fi
   done
 
-  if [[ ! -f $PAASD_BINARY ]]; then
-    die "$PAASD_BINARY: no such file (build it with 'make build' and copy bin/paasd here)"
+  if [[ ! -f $KOROKU_BINARY ]]; then
+    die "$KOROKU_BINARY: no such file (build it with 'make build' and copy bin/koroku here)"
   fi
-  if [[ ! -x $PAASD_BINARY ]]; then
-    die "$PAASD_BINARY is not executable (chmod +x it)"
+  if [[ ! -x $KOROKU_BINARY ]]; then
+    die "$KOROKU_BINARY is not executable (chmod +x it)"
   fi
   # Running it proves that it is a binary for this machine before anything
   # on the host is changed.
   local version_output
-  if ! version_output=$("$PAASD_BINARY" version 2>&1); then
-    die "$PAASD_BINARY does not run on this machine: $version_output"
+  if ! version_output=$("$KOROKU_BINARY" version 2>&1); then
+    die "$KOROKU_BINARY does not run on this machine: $version_output"
   fi
-  PAASD_VERSION=$version_output
-  info "paasd binary: $PAASD_BINARY (version $PAASD_VERSION)"
+  KOROKU_VERSION=$version_output
+  info "koroku binary: $KOROKU_BINARY (version $KOROKU_VERSION)"
 }
 
 install_base_packages() {
   step "Installing base packages"
   apt_update
   # curl, gnupg, ca-certificates: package repositories and downloads.
-  # git: paasd fetches repositories with it. jq: merges Docker's daemon.json.
+  # git: koroku fetches repositories with it. jq: merges Docker's daemon.json.
   # bzip2: unpacks the restic release. tzdata: the backup schedule is in JST.
   apt_install ca-certificates curl gnupg git jq bzip2 tzdata ufw
 }
@@ -224,9 +224,9 @@ configure_docker_daemon() {
     info "already set"
     return 0
   fi
-  if [[ -s $file && ! -e $file.before-paasd ]]; then
-    cp -p -- "$file" "$file.before-paasd"
-    info "kept the previous file as $file.before-paasd"
+  if [[ -s $file && ! -e $file.before-koroku ]]; then
+    cp -p -- "$file" "$file.before-koroku"
+    info "kept the previous file as $file.before-koroku"
   fi
   printf '%s\n' "$merged" >"$WORK_DIR/daemon.json"
   install_file "$WORK_DIR/daemon.json" "$file" 0644
@@ -237,12 +237,12 @@ configure_docker_daemon() {
 # Caddy's first start must already use the drop-in: the package's default
 # configuration serves a welcome page on port 80.
 configure_caddy_unit() {
-  step "Configuring Caddy for paasd"
+  step "Configuring Caddy for koroku"
   mkdir -p /etc/caddy /etc/systemd/system/caddy.service.d
-  install_file "$SCRIPT_DIR/caddy-initial.json" /etc/caddy/paasd-initial.json 0644
-  info "/etc/caddy/paasd-initial.json: $(changed_word "$FILE_CHANGED")"
-  install_file "$SCRIPT_DIR/caddy-paasd.conf" /etc/systemd/system/caddy.service.d/paasd.conf 0644
-  info "/etc/systemd/system/caddy.service.d/paasd.conf: $(changed_word "$FILE_CHANGED")"
+  install_file "$SCRIPT_DIR/caddy-initial.json" /etc/caddy/koroku-initial.json 0644
+  info "/etc/caddy/koroku-initial.json: $(changed_word "$FILE_CHANGED")"
+  install_file "$SCRIPT_DIR/caddy-koroku.conf" /etc/systemd/system/caddy.service.d/koroku.conf 0644
+  info "/etc/systemd/system/caddy.service.d/koroku.conf: $(changed_word "$FILE_CHANGED")"
 }
 
 changed_word() {
@@ -314,7 +314,7 @@ install_docker() {
   COMPOSE_VERSION=${COMPOSE_VERSION#v}
   info "Docker $DOCKER_VERSION, Compose $COMPOSE_VERSION"
   if ! version_ge "$COMPOSE_VERSION" "$MIN_COMPOSE_VERSION"; then
-    die "Docker Compose $COMPOSE_VERSION is older than $MIN_COMPOSE_VERSION, which paasd needs for !override and !reset"
+    die "Docker Compose $COMPOSE_VERSION is older than $MIN_COMPOSE_VERSION, which koroku needs for !override and !reset"
   fi
 }
 
@@ -336,10 +336,10 @@ install_caddy() {
   CADDY_VERSION=${CADDY_VERSION#v}
   info "Caddy $CADDY_VERSION"
   if ! version_ge "$CADDY_VERSION" "$MIN_CADDY_VERSION"; then
-    die "Caddy $CADDY_VERSION is older than $MIN_CADDY_VERSION, which paasd needs for stream_close_delay"
+    die "Caddy $CADDY_VERSION is older than $MIN_CADDY_VERSION, which koroku needs for stream_close_delay"
   fi
 
-  # One access log per app is written here by Caddy and read by paasd (root).
+  # One access log per app is written here by Caddy and read by koroku (root).
   if [[ ! -d $CADDY_LOG_DIR ]]; then
     install -d -m 0755 -o caddy -g caddy "$CADDY_LOG_DIR"
   fi
@@ -351,7 +351,7 @@ install_caddy() {
     info "Caddy already runs with --resume"
   else
     # Either not running yet, or started before the drop-in existed. With
-    # --resume a restart comes back with the configuration paasd loaded last.
+    # --resume a restart comes back with the configuration koroku loaded last.
     systemctl restart caddy.service
   fi
 
@@ -423,7 +423,7 @@ setup_swap() {
     if [[ ! -e $SWAP_FILE ]]; then
       # Built under another name, so that an interrupted run never leaves a
       # half-made file at SWAP_FILE.
-      local tmp=$SWAP_FILE.paasd-tmp
+      local tmp=$SWAP_FILE.koroku-tmp
       rm -f -- "$tmp"
       (
         umask 077
@@ -462,8 +462,8 @@ config_has_placeholders() {
   ' "$CONFIG_FILE"
 }
 
-install_paasd() {
-  step "Installing paasd"
+install_koroku() {
+  step "Installing koroku"
   install -d -m 0700 -o root -g root "$CONFIG_DIR" "$DATA_DIR"
 
   CONFIG_CREATED=0
@@ -476,7 +476,7 @@ install_paasd() {
   fi
 
   # Keys are never created, replaced or modified here; only report loose
-  # permissions, which paasd refuses for the master key.
+  # permissions, which koroku refuses for the master key.
   local name file mode
   for name in config.toml master.key restic.key github-app.pem; do
     file=$CONFIG_DIR/$name
@@ -488,13 +488,13 @@ install_paasd() {
     fi
   done
 
-  install_file "$PAASD_BINARY" /usr/local/bin/paasd 0755
-  PAASD_BINARY_CHANGED=$FILE_CHANGED
-  info "/usr/local/bin/paasd (version $PAASD_VERSION): $(changed_word "$FILE_CHANGED")"
+  install_file "$KOROKU_BINARY" /usr/local/bin/koroku 0755
+  KOROKU_BINARY_CHANGED=$FILE_CHANGED
+  info "/usr/local/bin/koroku (version $KOROKU_VERSION): $(changed_word "$FILE_CHANGED")"
 
-  install_file "$SCRIPT_DIR/paasd.service" /etc/systemd/system/paasd.service 0644
-  PAASD_UNIT_CHANGED=$FILE_CHANGED
-  info "/etc/systemd/system/paasd.service: $(changed_word "$FILE_CHANGED")"
+  install_file "$SCRIPT_DIR/koroku.service" /etc/systemd/system/koroku.service 0644
+  KOROKU_UNIT_CHANGED=$FILE_CHANGED
+  info "/etc/systemd/system/koroku.service: $(changed_word "$FILE_CHANGED")"
   systemctl daemon-reload
 }
 
@@ -540,36 +540,36 @@ setup_firewall() {
     ufw --force enable
   fi
   SSH_PORTS=${seen# }
-  # Ports that Docker publishes bypass ufw. paasd binds every app port to
+  # Ports that Docker publishes bypass ufw. koroku binds every app port to
   # 127.0.0.1, which is what actually keeps them private.
 }
 
-start_paasd() {
-  step "Starting paasd"
-  systemctl enable paasd.service
-  PAASD_STATE=''
+start_koroku() {
+  step "Starting koroku"
+  systemctl enable koroku.service
+  KOROKU_STATE=''
   if config_has_placeholders; then
-    PAASD_STATE='not started: /etc/paas/config.toml still contains example values'
-    info "$PAASD_STATE"
+    KOROKU_STATE='not started: /etc/koroku/config.toml still contains example values'
+    info "$KOROKU_STATE"
     return 0
   fi
-  if systemctl is-active --quiet paasd.service; then
-    if [[ $PAASD_BINARY_CHANGED == 1 || $PAASD_UNIT_CHANGED == 1 ]]; then
-      systemctl restart paasd.service
-      PAASD_STATE='restarted with the new binary or unit'
+  if systemctl is-active --quiet koroku.service; then
+    if [[ $KOROKU_BINARY_CHANGED == 1 || $KOROKU_UNIT_CHANGED == 1 ]]; then
+      systemctl restart koroku.service
+      KOROKU_STATE='restarted with the new binary or unit'
     else
-      PAASD_STATE='already running, left alone'
+      KOROKU_STATE='already running, left alone'
     fi
   else
-    systemctl start paasd.service
-    PAASD_STATE='started'
+    systemctl start koroku.service
+    KOROKU_STATE='started'
   fi
   sleep 3
-  if ! systemctl is-active --quiet paasd.service; then
-    PAASD_STATE="FAILED to stay up; see 'journalctl -u paasd -n 50'"
-    PAASD_FAILED=1
+  if ! systemctl is-active --quiet koroku.service; then
+    KOROKU_STATE="FAILED to stay up; see 'journalctl -u koroku -n 50'"
+    KOROKU_FAILED=1
   fi
-  info "$PAASD_STATE"
+  info "$KOROKU_STATE"
 }
 
 reboot_needed() {
@@ -586,7 +586,7 @@ reboot_needed() {
 summary() {
   step "Summary"
   info "Docker $DOCKER_VERSION, Compose $COMPOSE_VERSION, Caddy $CADDY_VERSION, restic $RESTIC_INSTALLED_VERSION"
-  info "paasd $PAASD_VERSION: $PAASD_STATE"
+  info "koroku $KOROKU_VERSION: $KOROKU_STATE"
   if [[ $HTTP3 == 1 ]]; then
     info "firewall: tcp ${SSH_PORTS% } (ssh), 80, 443 and udp 443 (HTTP/3)"
   else
@@ -609,9 +609,9 @@ summary() {
          private key in $CONFIG_DIR/github-app.pem (mode 0600).
       3. Put the restic repository password in $CONFIG_DIR/restic.key
          (mode 0600) and keep a copy outside this host, together with
-         $CONFIG_DIR/master.key (created at the first start of paasd)
+         $CONFIG_DIR/master.key (created at the first start of koroku)
          and the R2 credentials.
-      4. Start paasd: systemctl restart paasd && journalctl -u paasd -f
+      4. Start koroku: systemctl restart koroku && journalctl -u koroku -f
 EOF
   if [[ $CONFIG_CREATED == 1 ]]; then
     info "(this run created $CONFIG_FILE; it holds example values only)"
@@ -623,7 +623,7 @@ EOF
     *** REBOOT REQUIRED ***
     The upgrade installed a new kernel or core libraries (running kernel:
     $(uname -r)). Reboot when convenient:  systemctl reboot
-    Docker, Caddy and paasd start again on boot.
+    Docker, Caddy and koroku start again on boot.
 EOF
     if [[ -r /var/run/reboot-required.pkgs ]]; then
       info "packages asking for the reboot: $(sort -u /var/run/reboot-required.pkgs | tr '\n' ' ')"
@@ -632,8 +632,8 @@ EOF
     printf '\n    No reboot is required.\n'
   fi
 
-  if [[ $PAASD_FAILED == 1 ]]; then
-    die "paasd did not stay up; see 'journalctl -u paasd -n 50'"
+  if [[ $KOROKU_FAILED == 1 ]]; then
+    die "koroku did not stay up; see 'journalctl -u koroku -n 50'"
   fi
 }
 
@@ -642,7 +642,7 @@ EOF
 FORCE=0
 SKIP_UPGRADE=0
 HTTP3=0
-PAASD_BINARY=''
+KOROKU_BINARY=''
 while (($# > 0)); do
   case $1 in
     --force) FORCE=1 ;;
@@ -657,27 +657,27 @@ while (($# > 0)); do
       die "unknown option: $1"
       ;;
     *)
-      if [[ -n $PAASD_BINARY ]]; then
+      if [[ -n $KOROKU_BINARY ]]; then
         usage >&2
-        die "only one paasd binary can be given"
+        die "only one koroku binary can be given"
       fi
-      PAASD_BINARY=$1
+      KOROKU_BINARY=$1
       ;;
   esac
   shift
 done
-if [[ -z $PAASD_BINARY ]]; then
+if [[ -z $KOROKU_BINARY ]]; then
   usage >&2
-  die "the path of the paasd binary is required"
+  die "the path of the koroku binary is required"
 fi
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 readonly SCRIPT_DIR
 
 # Values filled in by the steps and read by the summary.
-OS_CODENAME='' OS_ARCH='' PAASD_VERSION='' PAASD_STATE='' PAASD_FAILED=0
+OS_CODENAME='' OS_ARCH='' KOROKU_VERSION='' KOROKU_STATE='' KOROKU_FAILED=0
 DOCKER_VERSION='' COMPOSE_VERSION='' CADDY_VERSION='' RESTIC_INSTALLED_VERSION=''
-DOCKER_DAEMON_CHANGED=0 PAASD_BINARY_CHANGED=0 PAASD_UNIT_CHANGED=0 CONFIG_CREATED=0
+DOCKER_DAEMON_CHANGED=0 KOROKU_BINARY_CHANGED=0 KOROKU_UNIT_CHANGED=0 CONFIG_CREATED=0
 SSH_PORTS=''
 
 export DEBIAN_FRONTEND=noninteractive
@@ -707,7 +707,7 @@ install_docker
 install_caddy
 install_restic
 setup_swap
-install_paasd
+install_koroku
 setup_firewall
-start_paasd
+start_koroku
 summary

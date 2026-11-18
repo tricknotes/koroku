@@ -1,6 +1,6 @@
 import { module, test } from 'qunit';
 import { click, currentURL, visit, waitFor } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   SHA_A,
   SHA_B,
@@ -9,8 +9,8 @@ import {
   makeBackups,
   makeDeployment,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
-import type { App, ServiceStatus } from 'paas-console/utils/types';
+} from 'koroku-console/tests/helpers/fakes';
+import type { App, ServiceStatus } from 'koroku-console/utils/types';
 
 const MB = 1024 ** 2;
 

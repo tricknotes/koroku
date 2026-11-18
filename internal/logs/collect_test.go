@@ -52,7 +52,7 @@ func TestCollectWritesOneFilePerServiceAndDay(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("follow command ran %d times, want 1", len(calls))
 	}
-	wantArgs := []string{"compose", "-p", "paas-blog", "logs", "--follow", "--timestamps", "--no-color"}
+	wantArgs := []string{"compose", "-p", "koroku-blog", "logs", "--follow", "--timestamps", "--no-color"}
 	if calls[0].Name != "docker" || !reflect.DeepEqual(calls[0].Args, wantArgs) {
 		t.Errorf("command = %s %q, want docker %q", calls[0].Name, calls[0].Args, wantArgs)
 	}
@@ -289,31 +289,31 @@ func TestCollectFollowsTheSetOfApps(t *testing.T) {
 	})
 	stop := f.startRun()
 
-	waitFor(t, "blog to be followed", func() bool { n, _ := state("paas-blog"); return n == 1 })
+	waitFor(t, "blog to be followed", func() bool { n, _ := state("koroku-blog"); return n == 1 })
 
-	shop := App{Slug: "shop", Project: "paas-shop"}
-	setApps(blog, shop, App{Slug: "../etc", Project: "paas-bad"}, App{Slug: "noproject"})
-	waitFor(t, "shop to be followed", func() bool { n, _ := state("paas-shop"); return n == 1 })
+	shop := App{Slug: "shop", Project: "koroku-shop"}
+	setApps(blog, shop, App{Slug: "../etc", Project: "koroku-bad"}, App{Slug: "noproject"})
+	waitFor(t, "shop to be followed", func() bool { n, _ := state("koroku-shop"); return n == 1 })
 
 	setApps(shop)
-	waitFor(t, "blog to be released", func() bool { n, _ := state("paas-blog"); return n == 0 })
+	waitFor(t, "blog to be released", func() bool { n, _ := state("koroku-blog"); return n == 0 })
 
 	// A changed project restarts the follower with the new name.
-	setApps(App{Slug: "shop", Project: "paas-shop-v2"})
+	setApps(App{Slug: "shop", Project: "koroku-shop-v2"})
 	waitFor(t, "shop to move to the new project", func() bool {
-		oldRunning, _ := state("paas-shop")
-		newRunning, _ := state("paas-shop-v2")
+		oldRunning, _ := state("koroku-shop")
+		newRunning, _ := state("koroku-shop-v2")
 		return oldRunning == 0 && newRunning == 1
 	})
 
-	if _, n := state("paas-blog"); n != 1 {
+	if _, n := state("koroku-blog"); n != 1 {
 		t.Errorf("blog was started %d times, want 1", n)
 	}
-	if _, n := state("paas-bad"); n != 0 {
+	if _, n := state("koroku-bad"); n != 0 {
 		t.Errorf("an app with an invalid slug was followed")
 	}
 	stop()
-	for _, project := range []string{"paas-blog", "paas-shop", "paas-shop-v2"} {
+	for _, project := range []string{"koroku-blog", "koroku-shop", "koroku-shop-v2"} {
 		if n, _ := state(project); n != 0 {
 			t.Errorf("%s still has %d follow commands after Run returned", project, n)
 		}
@@ -363,7 +363,7 @@ func TestCollectBacksOffQuietlyWhileFollowFails(t *testing.T) {
 		t.Errorf("failure was logged %d times, want once:\n%s", n, logged)
 	}
 	if strings.Contains(logged, secret) {
-		t.Errorf("line content leaked into paasd's log:\n%s", logged)
+		t.Errorf("line content leaked into koroku's log:\n%s", logged)
 	}
 }
 
@@ -455,7 +455,7 @@ func TestCollectStartsOverAfterWriteError(t *testing.T) {
 	})
 	wantStrings(t, "stored lines", texts(serviceContent(t, f.dir, "blog", "web")), []string{"lost on a broken disk", "after"})
 	if strings.Contains(f.logs.String(), "lost on a broken disk") {
-		t.Error("line content leaked into paasd's log")
+		t.Error("line content leaked into koroku's log")
 	}
 }
 

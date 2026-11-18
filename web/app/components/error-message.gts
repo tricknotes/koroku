@@ -1,5 +1,5 @@
 import type { TOC } from '@ember/component/template-only';
-import { errorMessage, fieldErrors } from 'paas-console/utils/errors';
+import { errorMessage, fieldErrors } from 'koroku-console/utils/errors';
 import Banner from './banner';
 
 function detailLines(error: unknown): string[] {

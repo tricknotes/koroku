@@ -7,25 +7,25 @@ import type RouterService from '@ember/routing/router-service';
 import { schedule } from '@ember/runloop';
 import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
-import Banner from 'paas-console/components/banner';
-import { buttonClass } from 'paas-console/components/button';
-import EnvironmentBadge from 'paas-console/components/environment-badge';
-import Icon from 'paas-console/components/icon';
-import StatusIndicator from 'paas-console/components/status-indicator';
-import Tabs from 'paas-console/components/tabs';
-import scrollActiveIntoView from 'paas-console/modifiers/scroll-active-into-view';
-import type ApiService from 'paas-console/services/api';
-import type PollerService from 'paas-console/services/poller';
-import type AppContext from 'paas-console/utils/app-context';
-import { errorMessage } from 'paas-console/utils/errors';
-import { hostOf } from 'paas-console/utils/format';
+import Banner from 'koroku-console/components/banner';
+import { buttonClass } from 'koroku-console/components/button';
+import EnvironmentBadge from 'koroku-console/components/environment-badge';
+import Icon from 'koroku-console/components/icon';
+import StatusIndicator from 'koroku-console/components/status-indicator';
+import Tabs from 'koroku-console/components/tabs';
+import scrollActiveIntoView from 'koroku-console/modifiers/scroll-active-into-view';
+import type ApiService from 'koroku-console/services/api';
+import type PollerService from 'koroku-console/services/poller';
+import type AppContext from 'koroku-console/utils/app-context';
+import { errorMessage } from 'koroku-console/utils/errors';
+import { hostOf } from 'koroku-console/utils/format';
 import {
   APP_STATE_HINTS,
   APP_STATE_KINDS,
   APP_STATE_LABELS,
   deriveAppState,
-} from 'paas-console/utils/status';
-import type { App } from 'paas-console/utils/types';
+} from 'koroku-console/utils/status';
+import type { App } from 'koroku-console/utils/types';
 
 /** How often the header re-reads the app while a detail page is open. */
 const POLL_INTERVAL = 5000;

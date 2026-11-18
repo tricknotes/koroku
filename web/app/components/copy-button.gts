@@ -4,7 +4,7 @@ import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { registerDestructor } from '@ember/destroyable';
 import type Owner from '@ember/owner';
-import type BrowserService from 'paas-console/services/browser';
+import type BrowserService from 'koroku-console/services/browser';
 import Icon from './icon';
 
 const FEEDBACK = 2000;

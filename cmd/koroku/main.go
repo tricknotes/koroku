@@ -1,4 +1,4 @@
-// Command paasd is the control plane of the personal PaaS.
+// Command koroku is the control plane of the personal PaaS.
 package main
 
 import (
@@ -41,19 +41,19 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "paasd:", err)
+		fmt.Fprintln(os.Stderr, "koroku:", err)
 		os.Exit(1)
 	}
 }
 
-const usage = `Usage: paasd <command> [flags]
+const usage = `Usage: koroku <command> [flags]
 
 Commands:
   serve            Run the API server and deploy worker
   restore-system   Restore the database and configuration from a backup (new host)
   version          Print the version
 
-Run "paasd <command> -h" for the flags of a command.
+Run "koroku <command> -h" for the flags of a command.
 `
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -359,7 +359,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		MaxHeaderBytes:    64 << 10,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
-	logger.Info("paasd listening", "addr", listener.Addr().String(), "version", version)
+	logger.Info("koroku listening", "addr", listener.Addr().String(), "version", version)
 	if ready != nil {
 		ready <- listener.Addr().String()
 	}
@@ -376,7 +376,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		}
 	case <-ctx.Done():
 	}
-	logger.Info("paasd shutting down")
+	logger.Info("koroku shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	// Log streams stay open for as long as a client listens; do not wait

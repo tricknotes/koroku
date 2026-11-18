@@ -1,4 +1,4 @@
-// Package objstore stores objects in an S3-compatible bucket. paasd uses it to
+// Package objstore stores objects in an S3-compatible bucket. koroku uses it to
 // archive logs and to hand out presigned download URLs.
 //
 // Only the S3-compatible API is used, so the backend can be switched between

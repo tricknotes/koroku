@@ -1,5 +1,5 @@
 import Route from '@ember/routing/route';
-import type AppContext from 'paas-console/utils/app-context';
+import type AppContext from 'koroku-console/utils/app-context';
 
 /** Base of the app detail tabs: they all share the parent's context. */
 export default class AppTabRoute extends Route {

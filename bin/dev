@@ -21,7 +21,7 @@ common=$(git -C "$here" rev-parse --path-format=absolute --git-common-dir 2>/dev
 root=$(dirname "$common")
 
 tag=$(sha256sum "$here/dev/Dockerfile" | cut -c1-12)
-image="paasd-dev:$tag"
+image="koroku-dev:$tag"
 if ! docker image inspect "$image" >/dev/null 2>&1; then
     echo "bin/dev: building $image (first use or dev/Dockerfile changed)..." >&2
     docker build --tag "$image" "$here/dev" >&2
@@ -51,7 +51,7 @@ exec docker run --rm --interactive --init $flags \
     --volume "$socket:/var/run/docker.sock" \
     --volume "$root:$root" \
     --workdir "$PWD" \
-    --volume paasd-dev-go:/cache/go \
-    --volume paasd-dev-go-build:/cache/go-build \
-    --volume paasd-dev-pnpm:/cache/pnpm-store \
+    --volume koroku-dev-go:/cache/go \
+    --volume koroku-dev-go-build:/cache/go-build \
+    --volume koroku-dev-pnpm:/cache/pnpm-store \
     "$image" "$@"

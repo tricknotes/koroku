@@ -1,5 +1,5 @@
-import Application from 'paas-console/app';
-import config from 'paas-console/config/environment';
+import Application from 'koroku-console/app';
+import config from 'koroku-console/config/environment';
 import * as QUnit from 'qunit';
 import { setApplication } from '@ember/test-helpers';
 import { setup } from 'qunit-dom';

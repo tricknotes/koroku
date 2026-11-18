@@ -4,36 +4,41 @@ import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { eq, fn } from '@ember/helper';
 import type Owner from '@ember/owner';
-import AsyncView from 'paas-console/components/async-view';
-import Badge from 'paas-console/components/badge';
-import Banner from 'paas-console/components/banner';
-import Button from 'paas-console/components/button';
-import ConfirmDialog from 'paas-console/components/confirm-dialog';
-import DeploymentDetail from 'paas-console/components/deployment-detail';
-import ErrorMessage from 'paas-console/components/error-message';
-import FormField from 'paas-console/components/form-field';
-import Icon from 'paas-console/components/icon';
-import RelativeTime from 'paas-console/components/relative-time';
-import RowList from 'paas-console/components/row-list';
-import StatusIndicator from 'paas-console/components/status-indicator';
-import type ApiService from 'paas-console/services/api';
-import type PollerService from 'paas-console/services/poller';
-import type AppContext from 'paas-console/utils/app-context';
-import { inputValue, preventDefault, setValue } from 'paas-console/utils/dom';
+import AsyncView from 'koroku-console/components/async-view';
+import Badge from 'koroku-console/components/badge';
+import Banner from 'koroku-console/components/banner';
+import Button from 'koroku-console/components/button';
+import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import DeploymentDetail from 'koroku-console/components/deployment-detail';
+import ErrorMessage from 'koroku-console/components/error-message';
+import FormField from 'koroku-console/components/form-field';
+import Icon from 'koroku-console/components/icon';
+import RelativeTime from 'koroku-console/components/relative-time';
+import RowList from 'koroku-console/components/row-list';
+import StatusIndicator from 'koroku-console/components/status-indicator';
+import type ApiService from 'koroku-console/services/api';
+import type PollerService from 'koroku-console/services/poller';
+import type AppContext from 'koroku-console/utils/app-context';
+import { inputValue, preventDefault, setValue } from 'koroku-console/utils/dom';
 import {
   firstLine,
   formatDuration,
   hostOf,
   isFullSha,
   shortSha,
-} from 'paas-console/utils/format';
-import Loadable from 'paas-console/utils/loadable';
+} from 'koroku-console/utils/format';
+import Loadable from 'koroku-console/utils/loadable';
 import {
   DEPLOYMENT_STATUS_KINDS,
   DEPLOYMENT_STATUS_LABELS,
   isActiveDeployment,
-} from 'paas-console/utils/status';
-import type { App, Branch, Commit, Deployment } from 'paas-console/utils/types';
+} from 'koroku-console/utils/status';
+import type {
+  App,
+  Branch,
+  Commit,
+  Deployment,
+} from 'koroku-console/utils/types';
 
 const POLL_INTERVAL = 3000;
 

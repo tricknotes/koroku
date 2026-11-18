@@ -23,10 +23,10 @@ func (h *host) dockerVolumes(project string, shorts ...string) {
 
 func TestVolumeNamesListsTheComposeNamesOfOneProject(t *testing.T) {
 	h := newHost(t)
-	h.dockerVolumes("paas-blog", "uploads", "pgdata", "cache")
-	h.dockerVolumes("paas-shop", "data")
+	h.dockerVolumes("koroku-blog", "uploads", "pgdata", "cache")
+	h.dockerVolumes("koroku-shop", "data")
 
-	names, err := VolumeNames(context.Background(), h.run, "paas-blog")
+	names, err := VolumeNames(context.Background(), h.run, "koroku-blog")
 	if err != nil {
 		t.Fatalf("VolumeNames: %v", err)
 	}
@@ -35,8 +35,8 @@ func TestVolumeNamesListsTheComposeNamesOfOneProject(t *testing.T) {
 	}
 	// Docker only, with the arguments as separate words.
 	assertLines(t, "commands", h.calls(), []string{
-		"docker volume ls --filter label=com.docker.compose.project=paas-blog --format {{.Name}}",
-		"docker volume inspect -- paas-blog_cache paas-blog_pgdata paas-blog_uploads",
+		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
+		"docker volume inspect -- koroku-blog_cache koroku-blog_pgdata koroku-blog_uploads",
 	})
 }
 
@@ -68,9 +68,9 @@ func TestVolumeNamesMatchWhatARunBacksUp(t *testing.T) {
 
 func TestVolumeNamesOfAProjectThatNeverStartedIsEmpty(t *testing.T) {
 	h := newHost(t)
-	h.dockerVolumes("paas-shop", "data")
+	h.dockerVolumes("koroku-shop", "data")
 
-	names, err := VolumeNames(context.Background(), h.run, "paas-blog")
+	names, err := VolumeNames(context.Background(), h.run, "koroku-blog")
 	if err != nil || len(names) != 0 {
 		t.Errorf("VolumeNames = %v, %v; want no volumes and no error", names, err)
 	}
@@ -82,20 +82,20 @@ func TestVolumeNamesOfAProjectThatNeverStartedIsEmpty(t *testing.T) {
 func TestVolumeNamesReadsTheNameFromTheLabels(t *testing.T) {
 	h := newHost(t)
 	h.set("docker volume ls", func(context.Context, runner.Cmd) (string, error) {
-		return "paas-blog_uploads\npaas-blog_legacy\nother_data\n", nil
+		return "koroku-blog_uploads\nkoroku-blog_legacy\nother_data\n", nil
 	})
 	h.set("docker volume inspect", func(context.Context, runner.Cmd) (string, error) {
 		return `[
-			{"Name": "paas-blog_uploads", "Mountpoint": "/var/lib/docker/volumes/paas-blog_uploads/_data",
-			 "Labels": {"com.docker.compose.project": "paas-blog", "com.docker.compose.volume": "files"}},
-			{"Name": "paas-blog_legacy", "Mountpoint": "/var/lib/docker/volumes/paas-blog_legacy/_data",
-			 "Labels": {"com.docker.compose.project": "paas-blog"}},
+			{"Name": "koroku-blog_uploads", "Mountpoint": "/var/lib/docker/volumes/koroku-blog_uploads/_data",
+			 "Labels": {"com.docker.compose.project": "koroku-blog", "com.docker.compose.volume": "files"}},
+			{"Name": "koroku-blog_legacy", "Mountpoint": "/var/lib/docker/volumes/koroku-blog_legacy/_data",
+			 "Labels": {"com.docker.compose.project": "koroku-blog"}},
 			{"Name": "other_data", "Mountpoint": "/var/lib/docker/volumes/other_data/_data",
 			 "Labels": {"com.docker.compose.project": "other", "com.docker.compose.volume": "data"}}
 		]`, nil
 	})
 
-	names, err := VolumeNames(context.Background(), h.run, "paas-blog")
+	names, err := VolumeNames(context.Background(), h.run, "koroku-blog")
 	if err != nil {
 		t.Fatalf("VolumeNames: %v", err)
 	}
@@ -113,11 +113,11 @@ func TestVolumeNamesReportsADockerFailure(t *testing.T) {
 		return "", exit("docker", 1)
 	})
 
-	_, err := VolumeNames(context.Background(), h.run, "paas-blog")
+	_, err := VolumeNames(context.Background(), h.run, "koroku-blog")
 	if err == nil {
 		t.Fatal("a failing docker command must be an error")
 	}
-	for _, want := range []string{"list the volumes of paas-blog", "docker volume ls", "exit status 1", "Cannot connect to the Docker daemon"} {
+	for _, want := range []string{"list the volumes of koroku-blog", "docker volume ls", "exit status 1", "Cannot connect to the Docker daemon"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
@@ -132,20 +132,20 @@ func TestVolumeNamesBoundsTheCommands(t *testing.T) {
 		}
 		return "", nil
 	})
-	if _, err := VolumeNames(context.Background(), h.run, "paas-blog"); err != nil {
+	if _, err := VolumeNames(context.Background(), h.run, "koroku-blog"); err != nil {
 		t.Fatalf("VolumeNames: %v", err)
 	}
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := VolumeNames(canceled, h.run, "paas-blog"); err == nil {
+	if _, err := VolumeNames(canceled, h.run, "koroku-blog"); err == nil {
 		t.Error("a canceled request must not report an empty list")
 	}
 }
 
 func TestVolumeNamesRejectsAnInvalidProjectName(t *testing.T) {
 	h := newHost(t)
-	for _, project := range []string{"", "-p", "paas blog", "paas-blog,other"} {
+	for _, project := range []string{"", "-p", "koroku blog", "koroku-blog,other"} {
 		if _, err := VolumeNames(context.Background(), h.run, project); err == nil {
 			t.Errorf("project %q was accepted", project)
 		}

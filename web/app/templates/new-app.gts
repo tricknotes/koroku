@@ -7,23 +7,23 @@ import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import type RouterService from '@ember/routing/router-service';
 import { pageTitle } from 'ember-page-title';
-import Banner from 'paas-console/components/banner';
-import Button, { buttonClass } from 'paas-console/components/button';
-import ErrorMessage from 'paas-console/components/error-message';
-import FormField from 'paas-console/components/form-field';
-import Icon from 'paas-console/components/icon';
-import type ApiService from 'paas-console/services/api';
-import { inputValue, preventDefault, setValue } from 'paas-console/utils/dom';
-import { errorMessage, fieldErrors } from 'paas-console/utils/errors';
-import { isValidSlug, suggestSlug } from 'paas-console/utils/format';
-import Loadable from 'paas-console/utils/loadable';
+import Banner from 'koroku-console/components/banner';
+import Button, { buttonClass } from 'koroku-console/components/button';
+import ErrorMessage from 'koroku-console/components/error-message';
+import FormField from 'koroku-console/components/form-field';
+import Icon from 'koroku-console/components/icon';
+import type ApiService from 'koroku-console/services/api';
+import { inputValue, preventDefault, setValue } from 'koroku-console/utils/dom';
+import { errorMessage, fieldErrors } from 'koroku-console/utils/errors';
+import { isValidSlug, suggestSlug } from 'koroku-console/utils/format';
+import Loadable from 'koroku-console/utils/loadable';
 import type {
   ComposeDetection,
   ComposeService,
   Environment,
   NewApp,
   Repo,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 const KNOWN_FIELDS = new Set([
   'slug',

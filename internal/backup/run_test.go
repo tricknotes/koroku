@@ -20,7 +20,7 @@ import (
 // directory live in the test's temporary directory.
 func withSystem(t *testing.T, dir string) func(*Options) {
 	t.Helper()
-	config := filepath.Join(dir, "etc-paas")
+	config := filepath.Join(dir, "etc-koroku")
 	writeFiles(t, config, map[string]string{"config.toml": "base_domain = \"example.com\"\n", "keys/app.pem": "pem"})
 	return func(o *Options) {
 		o.WorkDir = filepath.Join(dir, "work")
@@ -47,8 +47,8 @@ func orderDump(calls []string) []string {
 func TestRunAllBacksUpSystemVolumesAndDump(t *testing.T) {
 	dir := t.TempDir()
 	e := newEnv(t, withSystem(t, dir))
-	app := App{Slug: "blog", Project: "paas-blog", ExcludeVolumes: []string{"pgdata"}, DumpService: "db", DumpCommand: "pg_dump -U postgres app"}
-	e.apps = []App{app, {Slug: "shop", Project: "paas-shop"}}
+	app := App{Slug: "blog", Project: "koroku-blog", ExcludeVolumes: []string{"pgdata"}, DumpService: "db", DumpCommand: "pg_dump -U postgres app"}
+	e.apps = []App{app, {Slug: "shop", Project: "koroku-shop"}}
 	e.volume(app, "pgdata", nil)
 	uploads := e.volume(app, "uploads", map[string]string{"a.txt": "a"})
 
@@ -76,19 +76,19 @@ func TestRunAllBacksUpSystemVolumesAndDump(t *testing.T) {
 	assertLines(t, "commands", orderDump(e.host.calls()), []string{
 		"restic cat config",
 		"restic unlock",
-		"restic backup --json --quiet --host paasd --tag system --tag kind:system --retry-lock 1m0s .",
-		"docker volume ls --filter label=com.docker.compose.project=paas-blog --format {{.Name}}",
-		"docker volume inspect -- paas-blog_pgdata paas-blog_uploads",
-		"restic backup --json --quiet --host paasd --tag app:blog --tag kind:volume --tag target:uploads --retry-lock 1m0s .",
-		"docker compose -p paas-blog exec -T db sh -c pg_dump -U postgres app",
-		"restic backup --json --quiet --host paasd --tag app:blog --tag kind:dump --tag target:db --retry-lock 1m0s --stdin --stdin-filename blog-db.dump",
-		"docker volume ls --filter label=com.docker.compose.project=paas-shop --format {{.Name}}",
+		"restic backup --json --quiet --host koroku --tag system --tag kind:system --retry-lock 1m0s .",
+		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
+		"docker volume inspect -- koroku-blog_pgdata koroku-blog_uploads",
+		"restic backup --json --quiet --host koroku --tag app:blog --tag kind:volume --tag target:uploads --retry-lock 1m0s .",
+		"docker compose -p koroku-blog exec -T db sh -c pg_dump -U postgres app",
+		"restic backup --json --quiet --host koroku --tag app:blog --tag kind:dump --tag target:db --retry-lock 1m0s --stdin --stdin-filename blog-db.dump",
+		"docker volume ls --filter label=com.docker.compose.project=koroku-shop --format {{.Name}}",
 	})
 	e.assertCleanCommands()
 
 	// The hook's command line is a single argument of `sh -c`.
 	for _, c := range e.host.run.Calls() {
-		if commandKey(c) == "docker compose" && !slices.Equal(c.Args, []string{"compose", "-p", "paas-blog", "exec", "-T", "db", "sh", "-c", "pg_dump -U postgres app"}) {
+		if commandKey(c) == "docker compose" && !slices.Equal(c.Args, []string{"compose", "-p", "koroku-blog", "exec", "-T", "db", "sh", "-c", "pg_dump -U postgres app"}) {
 			t.Errorf("dump hook argv = %q", c.Args)
 		}
 	}
@@ -107,7 +107,7 @@ func TestRunAllBacksUpSystemVolumesAndDump(t *testing.T) {
 	if dumped != "-- dump\nCREATE TABLE posts;\n" {
 		t.Errorf("restic read %q from the dump hook", dumped)
 	}
-	wantStaged := map[string]string{"paas.db": "sqlite", "config/config.toml": "base_domain = \"example.com\"\n", "config/keys/app.pem": "pem"}
+	wantStaged := map[string]string{"koroku.db": "sqlite", "config/config.toml": "base_domain = \"example.com\"\n", "config/keys/app.pem": "pem"}
 	if fmt.Sprint(staged) != fmt.Sprint(wantStaged) {
 		t.Errorf("staged system files = %v, want %v", staged, wantStaged)
 	}
@@ -173,7 +173,7 @@ func TestRepositoryErrorFailsTheRunWithoutInit(t *testing.T) {
 
 func TestRunContinuesPastAFailingApp(t *testing.T) {
 	e := newEnv(t)
-	shop := App{Slug: "shop", Project: "paas-shop"}
+	shop := App{Slug: "shop", Project: "koroku-shop"}
 	e.apps = []App{blog, shop}
 	e.volume(blog, "uploads", nil)
 	e.volume(shop, "files", nil)
@@ -231,7 +231,7 @@ func TestVolumeWithUnreadableFilesIsStoredWithAWarning(t *testing.T) {
 
 func TestVolumeListingFailureIsReported(t *testing.T) {
 	e := newEnv(t)
-	e.apps = []App{{Slug: "blog", Project: "paas-blog", DumpService: "db", DumpCommand: "pg_dumpall"}}
+	e.apps = []App{{Slug: "blog", Project: "koroku-blog", DumpService: "db", DumpCommand: "pg_dumpall"}}
 	e.host.set("docker volume ls", func(_ context.Context, cmd runner.Cmd) (string, error) {
 		io.WriteString(cmd.Stderr, "Cannot connect to the Docker daemon\n")
 		return "", exit("docker", 1)
@@ -318,7 +318,7 @@ func TestOnlyOneOperationAtATime(t *testing.T) {
 func TestBackupAppIsRecordedAsPreDeploy(t *testing.T) {
 	dir := t.TempDir()
 	e := newEnv(t, withSystem(t, dir))
-	e.apps = []App{{Slug: "other", Project: "paas-other"}}
+	e.apps = []App{{Slug: "other", Project: "koroku-other"}}
 	e.volume(blog, "uploads", nil)
 
 	res, err := e.m.BackupApp(context.Background(), blog)
@@ -329,9 +329,9 @@ func TestBackupAppIsRecordedAsPreDeploy(t *testing.T) {
 	assertLines(t, "commands", e.host.calls(), []string{
 		"restic cat config",
 		"restic unlock",
-		"docker volume ls --filter label=com.docker.compose.project=paas-blog --format {{.Name}}",
-		"docker volume inspect -- paas-blog_uploads",
-		"restic backup --json --quiet --host paasd --tag app:blog --tag kind:volume --tag target:uploads --retry-lock 1m0s .",
+		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
+		"docker volume inspect -- koroku-blog_uploads",
+		"restic backup --json --quiet --host koroku --tag app:blog --tag kind:volume --tag target:uploads --retry-lock 1m0s .",
 	})
 	if res.Trigger != TriggerPreDeploy || len(res.Targets) != 1 {
 		t.Errorf("result = %+v", res)
@@ -355,7 +355,7 @@ func TestScheduledRunAppliesRetention(t *testing.T) {
 	assertLines(t, "commands", e.host.calls(), []string{
 		"restic cat config",
 		"restic unlock",
-		"docker volume ls --filter label=com.docker.compose.project=paas-blog --format {{.Name}}",
+		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
 		"restic unlock",
 		"restic forget --group-by tags --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
 	})
@@ -432,7 +432,7 @@ func TestCanceledRunIsStillRecorded(t *testing.T) {
 
 func TestLocalRepositoryEnvironment(t *testing.T) {
 	e := newEnv(t, func(o *Options) {
-		o.Repository = Repository{Path: "/srv/restic-repo", PasswordFile: "/etc/paas/restic.key"}
+		o.Repository = Repository{Path: "/srv/restic-repo", PasswordFile: "/etc/koroku/restic.key"}
 		o.Timeouts.LockWait = 5 * time.Minute
 		o.Keep = Retention{Daily: 1, Weekly: 2, Monthly: 3}
 		o.Host = "testhost"
@@ -442,7 +442,7 @@ func TestLocalRepositoryEnvironment(t *testing.T) {
 	if _, err := e.m.RunAll(context.Background(), TriggerScheduled); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"RESTIC_REPOSITORY=/srv/restic-repo", "RESTIC_PASSWORD_FILE=/etc/paas/restic.key"}
+	want := []string{"RESTIC_REPOSITORY=/srv/restic-repo", "RESTIC_PASSWORD_FILE=/etc/koroku/restic.key"}
 	for _, c := range e.host.run.Calls() {
 		if c.Name == "restic" && !slices.Equal(c.Env, want) {
 			t.Errorf("%s: environment = %q, want %q", c, c.Env, want)
@@ -455,7 +455,7 @@ func TestLocalRepositoryEnvironment(t *testing.T) {
 }
 
 func TestNewValidatesOptions(t *testing.T) {
-	valid := Options{Runner: &runner.Fake{}, Repository: Repository{Path: "/srv/repo", PasswordFile: "/etc/paas/restic.key"}}
+	valid := Options{Runner: &runner.Fake{}, Repository: Repository{Path: "/srv/repo", PasswordFile: "/etc/koroku/restic.key"}}
 	if _, err := New(valid); err != nil {
 		t.Fatalf("valid options: %v", err)
 	}
@@ -484,11 +484,11 @@ func TestNewValidatesOptions(t *testing.T) {
 func TestAppNamesAreValidated(t *testing.T) {
 	e := newEnv(t)
 	for _, app := range []App{
-		{Slug: "", Project: "paas-x"},
-		{Slug: "a,b", Project: "paas-x"},
+		{Slug: "", Project: "koroku-x"},
+		{Slug: "a,b", Project: "koroku-x"},
 		{Slug: "blog", Project: ""},
-		{Slug: "blog", Project: "paas-blog", DumpService: "db"},
-		{Slug: "blog", Project: "paas-blog", DumpService: "--help", DumpCommand: "x"},
+		{Slug: "blog", Project: "koroku-blog", DumpService: "db"},
+		{Slug: "blog", Project: "koroku-blog", DumpService: "--help", DumpCommand: "x"},
 	} {
 		if _, err := e.m.BackupApp(context.Background(), app); err == nil || errors.Is(err, ErrRunFailed) {
 			t.Errorf("BackupApp(%+v) = %v, want a validation error", app, err)

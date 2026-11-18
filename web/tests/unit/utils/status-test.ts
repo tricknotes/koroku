@@ -1,6 +1,9 @@
 import { module, test } from 'qunit';
-import { deriveAppState, isActiveDeployment } from 'paas-console/utils/status';
-import { makeApp, makeDeployment } from 'paas-console/tests/helpers/fakes';
+import {
+  deriveAppState,
+  isActiveDeployment,
+} from 'koroku-console/utils/status';
+import { makeApp, makeDeployment } from 'koroku-console/tests/helpers/fakes';
 
 module('Unit | Utility | status', function () {
   test('deriveAppState', function (assert) {

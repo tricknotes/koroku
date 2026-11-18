@@ -22,7 +22,7 @@ type systemRestorer interface {
 	RestoreSystem(ctx context.Context, snapshotID, destDir string) (backup.SystemRestore, error)
 }
 
-// restoreSystem implements `paasd restore-system`: on a freshly provisioned
+// restoreSystem implements `koroku restore-system`: on a freshly provisioned
 // host it fetches the newest system snapshot (the database and the
 // configuration directory) and puts the files in place (ARCHITECTURE 10.2).
 //
@@ -100,7 +100,7 @@ func runSystemRestore(ctx context.Context, restorer systemRestorer, cfg config.C
 	fmt.Fprint(stdout, `
 Next steps:
   1. Compare any kept file with its .restored-<time> copy (config.toml usually needs the
-     [github] section and other settings from the old host), then start paasd: systemctl start paasd
+     [github] section and other settings from the old host), then start koroku: systemctl start koroku
   2. Deploy each app again from the console, then restore its volumes from the app's backup tab.
   3. Point the DNS records at this host's address.
 `)

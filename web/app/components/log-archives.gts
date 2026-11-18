@@ -4,16 +4,16 @@ import { service } from '@ember/service';
 import { fn } from '@ember/helper';
 import { on } from '@ember/modifier';
 import type Owner from '@ember/owner';
-import type ApiService from 'paas-console/services/api';
-import type BrowserService from 'paas-console/services/browser';
-import { formatBytes, formatDateTimeJst } from 'paas-console/utils/format';
-import Loadable from 'paas-console/utils/loadable';
+import type ApiService from 'koroku-console/services/api';
+import type BrowserService from 'koroku-console/services/browser';
+import { formatBytes, formatDateTimeJst } from 'koroku-console/utils/format';
+import Loadable from 'koroku-console/utils/loadable';
 import {
   LOCAL_RETENTION_DAYS,
   formatCount,
   serviceLabel,
-} from 'paas-console/utils/logs';
-import type { LogArchive, SystemInfo } from 'paas-console/utils/types';
+} from 'koroku-console/utils/logs';
+import type { LogArchive, SystemInfo } from 'koroku-console/utils/types';
 import Banner from './banner';
 import Button from './button';
 import EmptyState from './empty-state';

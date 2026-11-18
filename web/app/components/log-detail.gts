@@ -1,7 +1,7 @@
 import type { TOC } from '@ember/component/template-only';
 import { on } from '@ember/modifier';
-import type { LogRow } from 'paas-console/utils/log-buffer';
-import { formatLogTime, serviceLabel } from 'paas-console/utils/logs';
+import type { LogRow } from 'koroku-console/utils/log-buffer';
+import { formatLogTime, serviceLabel } from 'koroku-console/utils/logs';
 import CopyButton from './copy-button';
 
 /**

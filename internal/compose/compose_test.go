@@ -46,7 +46,7 @@ func checkGolden(t *testing.T, file string, got []byte) {
 
 func TestParseProject(t *testing.T) {
 	p := loadProject(t, "rails-postgres")
-	if p.Name != "paas-blog" {
+	if p.Name != "koroku-blog" {
 		t.Errorf("Name = %q", p.Name)
 	}
 	if got := p.ServiceNames(); !reflect.DeepEqual(got, []string{"db", "migrate", "web", "worker"}) {
@@ -58,7 +58,7 @@ func TestParseProject(t *testing.T) {
 	if p.Services["db"].DeployMemoryLimit() != "1073741824" || p.Services["web"].DeployMemoryLimit() != "" {
 		t.Error("DeployMemoryLimit mismatch")
 	}
-	if p.Volumes["pgdata"].Name != "paas-blog_pgdata" {
+	if p.Volumes["pgdata"].Name != "koroku-blog_pgdata" {
 		t.Errorf("Volumes = %+v", p.Volumes)
 	}
 
@@ -92,9 +92,9 @@ func TestOverrideGolden(t *testing.T) {
 			golden: "rails-postgres.override.yaml",
 			params: OverrideParams{
 				WebService: "web", WebPort: 3000, HostPort: 20001,
-				EnvFile:       "/var/lib/paas/apps/blog/env",
+				EnvFile:       "/var/lib/koroku/apps/blog/env",
 				DefaultMemory: "512m",
-				ProjectName:   "paas-blog",
+				ProjectName:   "koroku-blog",
 				ReleaseTag:    "r42",
 			},
 		},
@@ -103,7 +103,7 @@ func TestOverrideGolden(t *testing.T) {
 			golden: "image-only.override.yaml",
 			params: OverrideParams{
 				WebService: "web", WebPort: 80, HostPort: 20002,
-				EnvFile:       "/var/lib/paas/apps/static/env",
+				EnvFile:       "/var/lib/koroku/apps/static/env",
 				DefaultMemory: "512m",
 			},
 		},
@@ -114,7 +114,7 @@ func TestOverrideGolden(t *testing.T) {
 			golden: "image-only.memory.override.yaml",
 			params: OverrideParams{
 				WebService: "web", WebPort: 80, HostPort: 20002,
-				EnvFile:       "/var/lib/paas/apps/static/env",
+				EnvFile:       "/var/lib/koroku/apps/static/env",
 				DefaultMemory: "512m",
 				AppMemory:     "256m",
 				ServiceMemory: map[string]string{"cache": "96m"},
@@ -125,7 +125,7 @@ func TestOverrideGolden(t *testing.T) {
 			golden: "rails-postgres.memory.override.yaml",
 			params: OverrideParams{
 				WebService: "web", WebPort: 3000, HostPort: 20001,
-				EnvFile:       "/var/lib/paas/apps/blog/env",
+				EnvFile:       "/var/lib/koroku/apps/blog/env",
 				DefaultMemory: "512m",
 				ServiceMemory: map[string]string{"db": "2g", "web": "1g"},
 			},
@@ -148,8 +148,8 @@ func TestOverrideGolden(t *testing.T) {
 }
 
 func TestReleaseImages(t *testing.T) {
-	params := OverrideParams{Project: loadProject(t, "rails-postgres"), ProjectName: "paas-blog", ReleaseTag: "r42"}
-	want := []string{"paas-blog-migrate:r42", "paas-blog-web:r42", "paas-blog-worker:r42"}
+	params := OverrideParams{Project: loadProject(t, "rails-postgres"), ProjectName: "koroku-blog", ReleaseTag: "r42"}
+	want := []string{"koroku-blog-migrate:r42", "koroku-blog-web:r42", "koroku-blog-worker:r42"}
 	if got := params.ReleaseImages(); !reflect.DeepEqual(got, want) {
 		t.Errorf("ReleaseImages = %v, want %v", got, want)
 	}
@@ -157,7 +157,7 @@ func TestReleaseImages(t *testing.T) {
 	if got := params.ReleaseImages(); got != nil {
 		t.Errorf("without a tag no images are assigned, got %v", got)
 	}
-	if got := ReleaseImage("paas-Blog", "Web_App", "r1"); got != "paas-blog-web_app:r1" {
+	if got := ReleaseImage("koroku-Blog", "Web_App", "r1"); got != "koroku-blog-web_app:r1" {
 		t.Errorf("ReleaseImage = %q (image names must be lowercase)", got)
 	}
 }
@@ -195,12 +195,12 @@ func TestOverrideQuotesUnusualNames(t *testing.T) {
 	}}
 	got, err := Override(OverrideParams{
 		Project: p, WebService: "web", WebPort: 80, HostPort: 20000,
-		EnvFile: `/var/lib/paas/apps/a b/env`, DefaultMemory: "512m",
+		EnvFile: `/var/lib/koroku/apps/a b/env`, DefaultMemory: "512m",
 	})
 	if err != nil {
 		t.Fatalf("Override: %v", err)
 	}
-	for _, want := range []string{`  "yes":`, `  "we\"ird: #name":`, `  "123":`, `  "null":`, `      - "/var/lib/paas/apps/a b/env"`} {
+	for _, want := range []string{`  "yes":`, `  "we\"ird: #name":`, `  "123":`, `  "null":`, `      - "/var/lib/koroku/apps/a b/env"`} {
 		if !strings.Contains(string(got), want+"\n") {
 			t.Errorf("output lacks %q:\n%s", want, got)
 		}
@@ -210,7 +210,7 @@ func TestOverrideQuotesUnusualNames(t *testing.T) {
 func TestPolicyGolden(t *testing.T) {
 	p := loadProject(t, "violations")
 	params := PolicyParams{
-		ReleaseDir: "/var/lib/paas/apps/risky/releases/7",
+		ReleaseDir: "/var/lib/koroku/apps/risky/releases/7",
 		WebService: "web", WebPort: 3000, HostPort: 20001,
 	}
 
@@ -257,9 +257,9 @@ func TestPolicyGolden(t *testing.T) {
 func TestPolicyHostileProject(t *testing.T) {
 	p := loadProject(t, "hostile")
 	params := PolicyParams{
-		ReleaseDir:  "/var/lib/paas/apps/evil/releases/9",
-		ProjectName: "paas-evil",
-		EnvFile:     "/var/lib/paas/apps/evil/env",
+		ReleaseDir:  "/var/lib/koroku/apps/evil/releases/9",
+		ProjectName: "koroku-evil",
+		EnvFile:     "/var/lib/koroku/apps/evil/env",
 		WebService:  "web", WebPort: 3000, HostPort: 20001,
 	}
 	render := func(r PolicyResult) []byte {
@@ -348,7 +348,7 @@ func TestPolicyAcceptsGeneratedOverride(t *testing.T) {
 	p.Services["db"] = db
 
 	result := CheckPolicy(p, PolicyParams{
-		ReleaseDir: "/var/lib/paas/apps/blog/releases/42",
+		ReleaseDir: "/var/lib/koroku/apps/blog/releases/42",
 		WebService: "web", WebPort: 3000, HostPort: 20001,
 	})
 	if !result.OK() || len(result.Waived) != 0 {
@@ -490,18 +490,18 @@ func TestDetectFile(t *testing.T) {
 
 func TestInvocationArgs(t *testing.T) {
 	inv := Invocation{
-		ProjectName: "paas-blog",
-		Files:       []string{"/r/compose.yaml", "/r/paas.override.yaml"},
+		ProjectName: "koroku-blog",
+		Files:       []string{"/r/compose.yaml", "/r/koroku.override.yaml"},
 		EnvFile:     "/apps/blog/env",
 	}
 	got := inv.Args("up", "-d", "--wait")
-	want := []string{"compose", "-p", "paas-blog", "-f", "/r/compose.yaml", "-f", "/r/paas.override.yaml",
+	want := []string{"compose", "-p", "koroku-blog", "-f", "/r/compose.yaml", "-f", "/r/koroku.override.yaml",
 		"--env-file", "/apps/blog/env", "up", "-d", "--wait"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Args = %v", got)
 	}
-	bare := Invocation{ProjectName: "paas-blog"}.Args("ps")
-	if !reflect.DeepEqual(bare, []string{"compose", "-p", "paas-blog", "ps"}) {
+	bare := Invocation{ProjectName: "koroku-blog"}.Args("ps")
+	if !reflect.DeepEqual(bare, []string{"compose", "-p", "koroku-blog", "ps"}) {
 		t.Errorf("Args = %v", bare)
 	}
 }

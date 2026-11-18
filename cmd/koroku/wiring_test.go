@@ -50,7 +50,7 @@ func TestToBackupApp(t *testing.T) {
 		BackupExcludeVolumes: []string{"pgdata"}, DumpHookService: "db", DumpHookCommand: "pg_dump -U postgres app",
 	}
 	got := toBackupApp(app)
-	if got.Slug != "blog" || got.Project != "paas-blog" || got.DumpService != "db" || got.DumpCommand != "pg_dump -U postgres app" ||
+	if got.Slug != "blog" || got.Project != "koroku-blog" || got.DumpService != "db" || got.DumpCommand != "pg_dump -U postgres app" ||
 		len(got.ExcludeVolumes) != 1 {
 		t.Errorf("running app = %+v", got)
 	}
@@ -71,13 +71,13 @@ func TestAppVolumesAdapter(t *testing.T) {
 	fake := &runner.Fake{Handler: func(_ context.Context, cmd runner.Cmd) (string, error) {
 		switch strings.Join(cmd.Args[:2], " ") {
 		case "volume ls":
-			return "paas-blog_uploads\npaas-blog_pgdata\n", nil
+			return "koroku-blog_uploads\nkoroku-blog_pgdata\n", nil
 		case "volume inspect":
 			return `[
-				{"Name": "paas-blog_pgdata", "Mountpoint": "/var/lib/docker/volumes/paas-blog_pgdata/_data",
-				 "Labels": {"com.docker.compose.project": "paas-blog", "com.docker.compose.volume": "pgdata"}},
-				{"Name": "paas-blog_uploads", "Mountpoint": "/var/lib/docker/volumes/paas-blog_uploads/_data",
-				 "Labels": {"com.docker.compose.project": "paas-blog", "com.docker.compose.volume": "uploads"}}
+				{"Name": "koroku-blog_pgdata", "Mountpoint": "/var/lib/docker/volumes/koroku-blog_pgdata/_data",
+				 "Labels": {"com.docker.compose.project": "koroku-blog", "com.docker.compose.volume": "pgdata"}},
+				{"Name": "koroku-blog_uploads", "Mountpoint": "/var/lib/docker/volumes/koroku-blog_uploads/_data",
+				 "Labels": {"com.docker.compose.project": "koroku-blog", "com.docker.compose.volume": "uploads"}}
 			]`, nil
 		}
 		return "", errors.New("unexpected command: " + cmd.String())
@@ -93,8 +93,8 @@ func TestAppVolumesAdapter(t *testing.T) {
 		commands = append(commands, cmd.String())
 	}
 	want := []string{
-		"docker volume ls --filter label=com.docker.compose.project=paas-blog --format {{.Name}}",
-		"docker volume inspect -- paas-blog_pgdata paas-blog_uploads",
+		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
+		"docker volume inspect -- koroku-blog_pgdata koroku-blog_uploads",
 	}
 	if strings.Join(commands, "\n") != strings.Join(want, "\n") {
 		t.Errorf("commands = %q, want %q", commands, want)
@@ -156,7 +156,7 @@ func TestBackupsConfigured(t *testing.T) {
 	if ok, reason := backupsConfigured(cfg); ok || !strings.Contains(reason, "[storage]") {
 		t.Errorf("without storage: %v %q", ok, reason)
 	}
-	cfg.Storage = config.Storage{Endpoint: "https://s3.example.com", Region: "auto", Bucket: "paas", AccessKeyID: "a", SecretAccessKey: "b"}
+	cfg.Storage = config.Storage{Endpoint: "https://s3.example.com", Region: "auto", Bucket: "koroku", AccessKeyID: "a", SecretAccessKey: "b"}
 	if ok, reason := backupsConfigured(cfg); ok || !strings.Contains(reason, "missing") {
 		t.Errorf("without the password file: %v %q", ok, reason)
 	}
@@ -174,7 +174,7 @@ func TestBackupsConfigured(t *testing.T) {
 		t.Errorf("configured: %q", reason)
 	}
 	repo := backupRepository(cfg)
-	if repo.Endpoint != "https://s3.example.com" || repo.Bucket != "paas" || repo.Prefix != "restic" ||
+	if repo.Endpoint != "https://s3.example.com" || repo.Bucket != "koroku" || repo.Prefix != "restic" ||
 		repo.PasswordFile != cfg.Backup.ResticPasswordFile || !strings.HasSuffix(repo.CacheDir, "restic-cache") {
 		t.Errorf("repository = %+v", repo)
 	}
@@ -189,7 +189,7 @@ func TestCollectedApps(t *testing.T) {
 	if err != nil || len(apps) != 2 {
 		t.Fatalf("apps = %+v, %v", apps, err)
 	}
-	if apps[0] != (logs.App{Slug: "blog", Project: "paas-blog", AccessLogPath: "/var/log/caddy/apps/blog.log"}) {
+	if apps[0] != (logs.App{Slug: "blog", Project: "koroku-blog", AccessLogPath: "/var/log/caddy/apps/blog.log"}) {
 		t.Errorf("app = %+v", apps[0])
 	}
 	// Without Caddy there is no access log to follow.
@@ -287,7 +287,7 @@ func (f *fakeRestorer) RestoreSystem(_ context.Context, snapshotID, destDir stri
 			return backup.SystemRestore{}, err
 		}
 	}
-	dbPath := filepath.Join(destDir, "paas.db")
+	dbPath := filepath.Join(destDir, "koroku.db")
 	if err := os.WriteFile(dbPath, []byte(f.db), 0o600); err != nil {
 		return backup.SystemRestore{}, err
 	}
@@ -543,7 +543,7 @@ func TestBackupBeforeDeployOutcome(t *testing.T) {
 	if err := svc.BackupApp(ctx, app); err != nil {
 		t.Errorf("successful backup: %v", err)
 	}
-	if len(manager.apps) != 1 || manager.apps[0].Project != "paas-blog" || manager.apps[0].DumpService != "db" ||
+	if len(manager.apps) != 1 || manager.apps[0].Project != "koroku-blog" || manager.apps[0].DumpService != "db" ||
 		len(manager.apps[0].ExcludeVolumes) != 1 {
 		t.Errorf("app passed to the manager = %+v", manager.apps)
 	}
@@ -583,7 +583,7 @@ func TestAppControllerKeepsStoppedAppsStopped(t *testing.T) {
 	fake := &runner.Fake{}
 	engine := deploy.New(deploy.Options{Store: st, Runner: fake, AppsDir: t.TempDir()})
 	controller := &appController{store: st, engine: engine}
-	target := backup.App{Slug: "blog", Project: "paas-blog"}
+	target := backup.App{Slug: "blog", Project: "koroku-blog"}
 	composeCalls := func() []string {
 		var subs []string
 		for _, c := range fake.Calls() {

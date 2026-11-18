@@ -3,7 +3,7 @@ import {
   healthLabel,
   memoryUsage,
   serviceState,
-} from 'paas-console/utils/services';
+} from 'koroku-console/utils/services';
 
 const MB = 1024 ** 2;
 

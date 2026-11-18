@@ -1,5 +1,5 @@
 {
-  "name": "paas-static",
+  "name": "koroku-static",
   "services": {
     "web": {
       "image": "nginx:1.29-alpine",

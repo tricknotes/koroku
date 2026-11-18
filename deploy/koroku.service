@@ -1,16 +1,16 @@
-# systemd unit for paasd, installed by deploy/provision.sh to
-# /etc/systemd/system/paasd.service. docs/OPERATIONS.md explains the choices.
+# systemd unit for koroku, installed by deploy/provision.sh to
+# /etc/systemd/system/koroku.service. docs/OPERATIONS.md explains the choices.
 
 [Unit]
-Description=paasd, the control plane of the personal PaaS
-# Wants, not Requires: paasd retries Docker and Caddy on its own, and a
+Description=koroku, the control plane of the personal PaaS
+# Wants, not Requires: koroku retries Docker and Caddy on its own, and a
 # restart of either must not take the control plane down with it.
 Wants=network-online.target docker.service caddy.service
 After=network-online.target docker.service caddy.service
 
 [Service]
 Type=simple
-# paasd drives the Docker daemon, which makes it equivalent to root whatever
+# koroku drives the Docker daemon, which makes it equivalent to root whatever
 # user it runs as. It also reads volume data of any owner for backups and
 # keeps its secrets in root-only directories, so it runs as root.
 User=root
@@ -18,34 +18,34 @@ User=root
 # need "docker login" on the host), git reads $HOME/.gitconfig and restic
 # keeps its cache in $HOME/.cache.
 Environment=HOME=/root
-ExecStart=/usr/local/bin/paasd serve --config /etc/paas/config.toml
+ExecStart=/usr/local/bin/koroku serve --config /etc/koroku/config.toml
 Restart=on-failure
 RestartSec=10
 
 # --- Stopping -------------------------------------------------------------
 # App containers belong to the Docker daemon and live in its control groups,
-# so no KillMode can touch them: stopping or restarting paasd never stops an
+# so no KillMode can touch them: stopping or restarting koroku never stops an
 # app. Only helper processes live in this unit's control group: docker
 # compose (up, build, pull, logs, exec), git and restic.
 #
-# mixed: SIGTERM goes to paasd alone. It marks a deployment in flight as
+# mixed: SIGTERM goes to koroku alone. It marks a deployment in flight as
 # failed (interrupted) and ends its helpers itself. Whatever is still alive
-# once paasd has exited gets SIGKILL, so no "docker compose up" can outlive
+# once koroku has exited gets SIGKILL, so no "docker compose up" can outlive
 # the service and race with the worker of the next start. Containers that
 # an interrupted "up" already created or started stay as they are; the next
 # deployment of that app converges them.
 KillMode=mixed
-# paasd waits up to 10 s for HTTP requests and 45 s for the deploy worker.
+# koroku waits up to 10 s for HTTP requests and 45 s for the deploy worker.
 TimeoutStopSec=90
 
 # The kernel killing one helper (a restic or git process that ran out of
-# memory) must not stop the whole unit; paasd records the failed command.
+# memory) must not stop the whole unit; koroku records the failed command.
 OOMPolicy=continue
 
 # --- Hardening ------------------------------------------------------------
 # Deliberately short. Access to the Docker socket already allows anything on
 # this host, so these settings guard against accidents rather than against a
-# compromised paasd. Each one is inherited by docker compose, git and restic,
+# compromised koroku. Each one is inherited by docker compose, git and restic,
 # and none of them sets up a mount namespace or restricts the file system.
 # docs/OPERATIONS.md lists the settings that were left out and why.
 
@@ -56,7 +56,7 @@ NoNewPrivileges=yes
 # admin API, app health checks) and netlink (address lookup in libc).
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 # Containers and their namespaces are created by the Docker daemon, never by
-# paasd or the docker CLI.
+# koroku or the docker CLI.
 RestrictNamespaces=yes
 # Every helper is a native x86-64 binary.
 SystemCallArchitectures=native

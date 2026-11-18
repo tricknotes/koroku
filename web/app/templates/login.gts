@@ -2,12 +2,12 @@ import Component from '@glimmer/component';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { pageTitle } from 'ember-page-title';
-import Banner from 'paas-console/components/banner';
-import Button, { buttonClass } from 'paas-console/components/button';
-import Icon from 'paas-console/components/icon';
-import type BrowserService from 'paas-console/services/browser';
-import type SessionService from 'paas-console/services/session';
-import { errorMessage, loginErrorMessage } from 'paas-console/utils/errors';
+import Banner from 'koroku-console/components/banner';
+import Button, { buttonClass } from 'koroku-console/components/button';
+import Icon from 'koroku-console/components/icon';
+import type BrowserService from 'koroku-console/services/browser';
+import type SessionService from 'koroku-console/services/session';
+import { errorMessage, loginErrorMessage } from 'koroku-console/utils/errors';
 
 export default class LoginTemplate extends Component {
   @service declare session: SessionService;
@@ -33,7 +33,7 @@ export default class LoginTemplate extends Component {
 
     <section class="login" aria-labelledby="login-title">
       <Icon @name="logo" class="login-logo" />
-      <h1 class="login-title" id="login-title">paasd にログイン</h1>
+      <h1 class="login-title" id="login-title">koroku にログイン</h1>
 
       {{#if this.loadError}}
         <Banner

@@ -194,7 +194,7 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 						`"ports": [{"host_ip": "127.0.0.1", "target": 3000, "published": "20000", "protocol": "tcp"}]`)
 				}
 			}
-			return `{"name": "paas-blog", "services": ` + services + `}`, nil
+			return `{"name": "koroku-blog", "services": ` + services + `}`, nil
 		case "build":
 			return buildOutput, nil
 		}
@@ -381,7 +381,7 @@ func TestDeploySucceeds(t *testing.T) {
 	}
 	release := h.engine.ReleaseDir("blog", d.ID)
 	up := h.lastCall("up")
-	wantUp := []string{"compose", "-p", "paas-blog",
+	wantUp := []string{"compose", "-p", "koroku-blog",
 		"-f", filepath.Join(release, "compose.yaml"),
 		"-f", filepath.Join(release, compose.OverrideFileName),
 		"--env-file", h.engine.EnvFile("blog"),
@@ -413,7 +413,7 @@ func TestDeploySucceeds(t *testing.T) {
 		t.Fatalf("override: %v", err)
 	}
 	for _, want := range []string{`- "127.0.0.1:20000:3000"`, "ports: !reset []", envPath, `mem_limit: "512m"`,
-		fmt.Sprintf(`image: "paas-blog-web:r%d"`, d.ID)} {
+		fmt.Sprintf(`image: "koroku-blog-web:r%d"`, d.ID)} {
 		if !strings.Contains(string(override), want) {
 			t.Errorf("override lacks %q:\n%s", want, override)
 		}
@@ -546,7 +546,7 @@ func TestFailedStartRollsBackToPreviousRelease(t *testing.T) {
 	// The output of the failed containers is read, then the previous
 	// release is validated again and started, and the failed release's
 	// image is removed.
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "config", "up", "image rm paas-blog-web:r2"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "config", "up", "image rm koroku-blog-web:r2"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	rollback := h.lastCall("up")
@@ -592,7 +592,7 @@ func TestFailedHealthCheckRollsBack(t *testing.T) {
 	// The output of the failed containers is read, then the previous
 	// release is validated again and started, and the failed release's
 	// image is removed.
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "config", "up", "image rm paas-blog-web:r2"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "config", "up", "image rm koroku-blog-web:r2"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	if !strings.Contains(h.log("blog", second.ID), fmt.Sprintf("Rolling back to deployment #%d", first.ID)) {
@@ -615,11 +615,11 @@ func TestFailedFirstDeployRemovesContainers(t *testing.T) {
 	if d.Status != store.StatusFailed {
 		t.Fatalf("deployment = %+v", d)
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "down", "image rm paas-blog-web:r1"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "down", "image rm koroku-blog-web:r1"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	down := h.lastCall("down")
-	if !slices.Equal(down.Args, []string{"compose", "-p", "paas-blog", "down", "--remove-orphans"}) {
+	if !slices.Equal(down.Args, []string{"compose", "-p", "koroku-blog", "down", "--remove-orphans"}) {
 		t.Errorf("down args = %v (volumes must be kept)", down.Args)
 	}
 }
@@ -646,7 +646,7 @@ func TestBuildFailureDoesNotRollBack(t *testing.T) {
 	if second.Status != store.StatusFailed || !strings.Contains(second.Error, "build") {
 		t.Fatalf("deployment = %+v", second)
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "image rm paas-blog-web:r2"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "image rm koroku-blog-web:r2"}) {
 		t.Errorf("a build failure must not touch running containers: %v", got)
 	}
 	// The running release keeps its environment until a start is attempted.
@@ -827,7 +827,7 @@ func TestInterruptedDeploymentsFailAtStartup(t *testing.T) {
 	app := h.createApp("blog")
 	ctx := context.Background()
 
-	// Simulate a previous paasd process that died mid-deploy.
+	// Simulate a previous koroku process that died mid-deploy.
 	stale, _, err := h.store.EnqueueDeployment(ctx, app.ID, "main", shaA, "", h.clock.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -941,11 +941,11 @@ func TestOldReleasesArePruned(t *testing.T) {
 	}
 	// The pruned release's image goes with it; kept releases keep theirs.
 	calls := h.dockerCalls()
-	if !slices.Contains(calls, fmt.Sprintf("image rm paas-blog-web:r%d", ids[0])) {
+	if !slices.Contains(calls, fmt.Sprintf("image rm koroku-blog-web:r%d", ids[0])) {
 		t.Errorf("the image of the pruned release was not removed: %v", calls)
 	}
 	for _, id := range ids[1:] {
-		if slices.Contains(calls, fmt.Sprintf("image rm paas-blog-web:r%d", id)) {
+		if slices.Contains(calls, fmt.Sprintf("image rm koroku-blog-web:r%d", id)) {
 			t.Errorf("the image of kept release %d was removed", id)
 		}
 	}
@@ -1350,7 +1350,7 @@ func TestRedeployOfTheSameCommitGetsItsOwnRelease(t *testing.T) {
 		t.Error("the redeploy reused the old release directory")
 	}
 	override, err := os.ReadFile(filepath.Join(h.engine.ReleaseDir("blog", again.ID), compose.OverrideFileName))
-	if err != nil || !strings.Contains(string(override), fmt.Sprintf(`image: "paas-blog-web:r%d"`, again.ID)) {
+	if err != nil || !strings.Contains(string(override), fmt.Sprintf(`image: "koroku-blog-web:r%d"`, again.ID)) {
 		t.Errorf("override of the redeploy: %v\n%s", err, override)
 	}
 	app, _ := h.store.GetApp(context.Background(), "blog")
@@ -1360,8 +1360,8 @@ func TestRedeployOfTheSameCommitGetsItsOwnRelease(t *testing.T) {
 }
 
 // TestOverrideIsNotWrittenThroughRepositorySymlink: the checkout is
-// repository content. A repository that ships paas.override.yaml as a
-// symlink must not make paasd (root) overwrite the link's target.
+// repository content. A repository that ships koroku.override.yaml as a
+// symlink must not make koroku (root) overwrite the link's target.
 func TestOverrideIsNotWrittenThroughRepositorySymlink(t *testing.T) {
 	h := newHarness(t, nil)
 	h.createApp("blog")
@@ -1387,7 +1387,7 @@ func TestOverrideIsNotWrittenThroughRepositorySymlink(t *testing.T) {
 		t.Errorf("the override must be a regular file in the release: %v %v", info, err)
 	}
 	content, _ := os.ReadFile(override)
-	if !strings.Contains(string(content), "Generated by paasd") {
+	if !strings.Contains(string(content), "Generated by koroku") {
 		t.Errorf("override content = %q", content)
 	}
 }
