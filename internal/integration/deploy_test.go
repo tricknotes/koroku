@@ -105,6 +105,8 @@ func newEnv(t *testing.T) *env {
 		Box:      box,
 		Deployer: engine,
 		Refs:     deploy.GitRefResolver{Fetcher: fetcher},
+		// Authentication is covered by the API unit tests.
+		Auth: api.AuthOptions{InsecureNoAuth: true},
 	})
 	server := httptest.NewServer(srv.Handler())
 

@@ -55,7 +55,9 @@ func TestServeAnswersSystemEndpoint(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan string, 1)
 	done := make(chan error, 1)
-	go func() { done <- serve(ctx, []string{"--config", configPath}, io.Discard, ready) }()
+	go func() {
+		done <- serve(ctx, []string{"--config", configPath, "--insecure-no-auth"}, io.Discard, ready)
+	}()
 
 	var addr string
 	select {
@@ -96,14 +98,6 @@ func TestServeAnswersSystemEndpoint(t *testing.T) {
 	if info, err := os.Stat(filepath.Join(dir, "etc", "master.key")); err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("master key was not created with mode 0600: %v", err)
 	}
-	appsResp, err := http.Get("http://" + addr + "/api/apps")
-	if err != nil {
-		t.Fatalf("GET /api/apps: %v", err)
-	}
-	_ = appsResp.Body.Close()
-	if appsResp.StatusCode != http.StatusOK {
-		t.Errorf("GET /api/apps status = %d", appsResp.StatusCode)
-	}
 
 	cancel()
 	select {
@@ -113,5 +107,75 @@ func TestServeAnswersSystemEndpoint(t *testing.T) {
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("serve did not shut down")
+	}
+}
+
+// TestServeIsLockedWithoutGitHubApp checks the default posture: with no
+// GitHub App configured and no explicit opt-out, the API refuses requests.
+func TestServeIsLockedWithoutGitHubApp(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	configText := fmt.Sprintf("base_domain = \"dev.example.com\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\nmaster_key_file = %q\n[caddy]\nenabled = false\n",
+		filepath.Join(dir, "data"), filepath.Join(dir, "master.key"))
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, []string{"--config", configPath}, io.Discard, ready) }()
+	var addr string
+	select {
+	case addr = <-ready:
+	case err := <-done:
+		t.Fatalf("serve exited early: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not become ready")
+	}
+	for target, want := range map[string]int{
+		"/api/apps":    http.StatusUnauthorized,
+		"/api/system":  http.StatusUnauthorized,
+		"/api/session": http.StatusOK,
+	} {
+		resp, err := http.Get("http://" + addr + target)
+		if err != nil {
+			t.Fatalf("GET %s: %v", target, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("GET %s = %d, want %d", target, resp.StatusCode, want)
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("serve did not shut down")
+	}
+}
+
+func TestGitHubPrivateKeyMustBePrivate(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "github-app.pem")
+	if err := os.WriteFile(keyPath, []byte("not a key"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "config.toml")
+	configText := fmt.Sprintf("base_domain = \"dev.example.com\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\nmaster_key_file = %q\n[caddy]\nenabled = false\n"+
+		"[github]\napp_id = 1\nclient_id = \"id\"\nclient_secret = \"example-secret\"\nallowed_user_id = 42\nprivate_key_file = %q\n",
+		filepath.Join(dir, "data"), filepath.Join(dir, "master.key"), keyPath)
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := serve(context.Background(), []string{"--config", configPath}, io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "too open") {
+		t.Fatalf("err = %v", err)
+	}
+	if err := os.Chmod(keyPath, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = serve(context.Background(), []string{"--config", configPath}, io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "github private key") || strings.Contains(err.Error(), "not a key") {
+		t.Fatalf("a malformed key must be rejected without echoing it: %v", err)
 	}
 }
