@@ -29,6 +29,8 @@ const MESSAGES: Record<string, string> = {
   app_not_found: 'アプリが見つかりません。',
   deployment_not_found: 'デプロイが見つかりません。',
   domain_not_found: 'ドメインが見つかりません。',
+  snapshot_not_found:
+    'スナップショットが見つからないか、この操作には使えない種類です。',
   slug_taken: 'この slug はすでに使われています。',
   no_free_port: '割り当てられるポートが残っていません。',
   not_cancelable: 'このデプロイはすでに終了しているためキャンセルできません。',
@@ -106,6 +108,7 @@ const SPECIFIC_NOT_FOUND = new Set([
   'deployment_not_found',
   'domain_not_found',
   'repo_not_found',
+  'snapshot_not_found',
 ]);
 
 /**

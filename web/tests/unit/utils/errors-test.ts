@@ -99,6 +99,10 @@ module('Unit | Utility | errors', function () {
       unavailability(new ApiError(404, 'repo_not_found', '')),
       null,
     );
+    assert.strictEqual(
+      unavailability(new ApiError(404, 'snapshot_not_found', '')),
+      null,
+    );
     assert.strictEqual(unavailability(new ApiError(503, 'internal', '')), null);
     assert.strictEqual(unavailability(new Error('boom')), null);
   });
