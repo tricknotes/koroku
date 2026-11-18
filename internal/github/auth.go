@@ -102,6 +102,10 @@ type Token struct {
 	ExpiresAt time.Time
 }
 
+// NewToken wraps a token value. It exists for fakes of this client in other
+// packages' tests; the client itself only returns tokens issued by GitHub.
+func NewToken(value string, expiresAt time.Time) Token { return newToken(value, expiresAt) }
+
 func newToken(value string, expiresAt time.Time) Token {
 	return Token{secret: &value, ExpiresAt: expiresAt}
 }
