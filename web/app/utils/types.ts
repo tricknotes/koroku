@@ -28,12 +28,24 @@ export interface SystemInfo {
     configured: boolean;
     last_success_at: string | null;
     last_error: string;
+    /** Next scheduled archive run; `null` when not configured. */
+    next_run_at?: string | null;
   };
   caddy?: {
     enabled: boolean;
     last_loaded_at: string | null;
     last_error: string;
   };
+  /** Host swap; `null` on a host without swap, absent on older backends. */
+  swap?: { total_bytes: number; used_bytes: number } | null;
+}
+
+/** One line of `docker system df` (`GET /api/system/docker`). */
+export interface DockerUsageItem {
+  type: 'images' | 'containers' | 'volumes' | 'build_cache';
+  total_bytes: number;
+  reclaimable_bytes: number;
+  count: number;
 }
 
 export type DeploymentStatus =
@@ -219,4 +231,6 @@ export interface Snapshot {
   time: string;
   kind: 'volume' | 'dump';
   target: string;
+  /** What restic processed for it; `null` when it did not record a size. */
+  size_bytes?: number | null;
 }
