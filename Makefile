@@ -1,6 +1,9 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GO_BUILD_FLAGS := -trimpath -ldflags "-s -w -X main.version=$(VERSION)"
 
+# These targets expect the toolchain of dev/Dockerfile. From the host, run
+# them through the development container: bin/dev make <target>.
+
 .PHONY: all build web test test-integration lint clean
 
 all: build
@@ -14,7 +17,7 @@ web:
 build: web
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build $(GO_BUILD_FLAGS) -o bin/paasd ./cmd/paasd
 
-# Unit tests. Docker is not needed; the frontend tests need Chrome on PATH.
+# Unit tests. Docker is not needed.
 test:
 	go vet ./...
 	go test ./...

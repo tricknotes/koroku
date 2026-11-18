@@ -8,37 +8,42 @@ VPS 1 台の上で、GitHub リポジトリの Docker Compose アプリを UI �
 
 ## 開発
 
-必要なもの: Go 1.27 以上、Node.js 24 以上、pnpm、（結合テストには）Docker と Compose v2.24.4 以上。
+必要なものは Docker だけです。Go、Node.js、pnpm、Chromium、restic などの道具は開発用イメージ（[dev/Dockerfile](dev/Dockerfile)）に入っていて、ホストには何も入れません。コマンドは `bin/dev` 経由でコンテナの中で実行します。イメージは初回と `dev/Dockerfile` を変えたときに自動でビルドされます。
 
 ```sh
-# ユニットテスト（Docker 不要）
-go vet ./...
-go test ./...
+# ユニットテスト
+bin/dev go vet ./...
+bin/dev go test ./...
 
-# 実 Docker を使う結合テスト
-go test -tags integration ./...
+# 実 Docker を使う結合テスト（ホストの Docker デーモンでコンテナを起動する）
+bin/dev go test -tags integration ./...
 
-# フロントエンド（テストには Chrome か Chromium が必要）
-cd web && pnpm install && pnpm lint && pnpm test
+# フロントエンド
+bin/dev sh -c 'cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm test'
+
+# 対話シェル
+bin/dev
 ```
+
+`bin/dev` はリポジトリをホストと同じパスでマウントし、呼び出したユーザーの UID で動くので、生成物の所有者がずれません。Go と pnpm のキャッシュは Docker の named volume（`paasd-dev-*`）に置きます。コンテナはホストのネットワークを共有し、Docker ソケットをマウントしているので、結合テストが起動したアプリの `127.0.0.1:<port>` にそのまま届きます。
 
 ### ローカルで動かす
 
 ```sh
-cp deploy/config.example.toml config.toml   # listen と data_dir を手元向けに書き換える
-make web                                     # Ember をビルドして web/dist に出力
-go run ./cmd/paasd serve --config config.toml --insecure-no-auth
+cp deploy/config.example.toml config.toml   # listen と data_dir を手元向けに書き換え、[caddy] は enabled = false にする
+bin/dev make web                             # Ember をビルドして web/dist に出力
+bin/dev go run ./cmd/paasd serve --config config.toml --insecure-no-auth
 curl http://127.0.0.1:8080/api/system
 ```
 
-`--insecure-no-auth` はログインと Origin 検証を外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。手元に Caddy がなければ、`config.toml` の `[caddy]` で `enabled = false` にします。
+`--insecure-no-auth` はログインと Origin 検証を外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。
 
-フロントエンドだけを開発するときは `cd web && pnpm start` で Vite の開発サーバーを起動します。`/api` と `/auth` は `127.0.0.1:8080` の `paasd` に転送されます。
+フロントエンドだけを開発するときは `bin/dev sh -c 'cd web && pnpm start'` で Vite の開発サーバーを起動します。`/api` と `/auth` は `127.0.0.1:8080` の `paasd` に転送されます。
 
 ### 配布用バイナリ
 
 ```sh
-make build    # フロントエンド込みの bin/paasd（linux/amd64）
+bin/dev make build    # フロントエンド込みの bin/paasd（linux/amd64）
 ```
 
 ## ディレクトリ構成
@@ -49,5 +54,6 @@ make build    # フロントエンド込みの bin/paasd（linux/amd64）
 | `internal/` | API、デプロイ、Compose、Caddy、GitHub、ストアなどの各パッケージ |
 | `web/` | Ember アプリ（管理 UI） |
 | `deploy/` | 設定例、プロビジョニング |
+| `dev/`、`bin/dev` | 開発用の Docker イメージと、その中でコマンドを実行するラッパー |
 | `docs/` | 設計資料 |
 | `testdata/` | サンプル Compose、golden file |
