@@ -25,12 +25,14 @@ const CHROMIUM = process.env.CHROMIUM ?? 'chromium';
 const DESKTOP = { width: 1280, height: 900 };
 const PHONE = { width: 390, height: 844, scale: 2, fullPage: true };
 const LIST = '[data-test-app]';
+const DEPLOYMENT = '[data-test-deployment]';
 
 /**
  * name, path, what to wait for, and optionally: viewport, `dark`, `keys`
  * (pressed before the capture, to show keyboard focus), `click` / `clicks`
- * (selectors, clicked in order) or `script` (evaluated after the clicks, to
- * type into a field).
+ * (selectors, clicked in order), `script` (evaluated after the clicks, to
+ * type into a field) or `settle` (how long to wait before the capture, in
+ * milliseconds).
  */
 const SHOTS = [
   { name: 'list-healthy', path: '/?scenario=healthy', wait: LIST },
@@ -95,6 +97,89 @@ const SHOTS = [
     fullPage: false,
     themes: ['dark'],
   },
+  // App detail header and the deploy tab.
+  {
+    name: 'deploy-history',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+  },
+  {
+    name: 'deploy-history-open',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    click: '[data-test-show-log]',
+    fullPage: true,
+  },
+  {
+    name: 'deploy-running',
+    path: '/apps/blog-staging/deploy?scenario=warnings',
+    wait: '[data-test-step="build"]',
+    fullPage: true,
+  },
+  {
+    name: 'deploy-failed',
+    path: '/apps/shop-staging/deploy?scenario=warnings',
+    wait: '[data-test-rollback-notice]',
+    fullPage: true,
+  },
+  {
+    name: 'deploy-empty',
+    path: '/apps/notes/deploy?scenario=undeployed',
+    wait: '[data-test-no-deployments]',
+  },
+  {
+    name: 'deploy-confirm',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    click: '[data-test-deploy-submit]',
+  },
+  {
+    name: 'deploy-history-phone',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    ...PHONE,
+  },
+  {
+    name: 'deploy-running-phone',
+    path: '/apps/blog-staging/deploy?scenario=warnings',
+    wait: '[data-test-step="build"]',
+    ...PHONE,
+  },
+  {
+    name: 'deploy-failed-phone',
+    path: '/apps/shop-staging/deploy?scenario=warnings',
+    wait: '[data-test-rollback-notice]',
+    ...PHONE,
+  },
+  {
+    name: 'deploy-empty-phone',
+    path: '/apps/notes/deploy?scenario=undeployed',
+    wait: '[data-test-no-deployments]',
+    ...PHONE,
+    themes: ['light'],
+  },
+  {
+    name: 'deploy-confirm-phone',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    click: '[data-test-deploy-submit]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['dark'],
+  },
+  // Keyboard: Tab from the top of the page to the first history row.
+  {
+    name: 'deploy-focus-row',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    keys: tabs(18),
+  },
+  {
+    name: 'detail-error',
+    path: '/apps/blog/deploy?scenario=error',
+    wait: '[data-test-app-error]',
+    themes: ['light'],
+  },
   // Screens that are not redesigned yet, to check they sit well in the shell.
   {
     name: 'other-login',
@@ -103,18 +188,22 @@ const SHOTS = [
     themes: ['light'],
   },
   {
-    name: 'other-deploy',
-    path: '/apps/shop-staging/deploy?scenario=warnings',
-    wait: '.deploy-row',
-    themes: ['dark'],
-  },
-  {
     name: 'other-system',
     path: '/system?scenario=warnings',
     wait: '.card',
     themes: ['light'],
   },
   ...appTabShots(),
+  // Last, because it changes the scenario: a deployment started in the UI,
+  // a few seconds in, with its log streaming.
+  {
+    name: 'deploy-live',
+    path: '/apps/shop-staging/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    click: '[data-test-deploy-submit]',
+    settle: 6000,
+    themes: ['light'],
+  },
 ];
 
 /** Overview, environment and domains tabs of the app detail. */
@@ -440,7 +529,7 @@ async function capture(browser, shot, theme) {
     await page('Input.dispatchKeyEvent', { type: 'keyDown', ...event });
     await page('Input.dispatchKeyEvent', { type: 'keyUp', ...event });
   }
-  await sleep(300);
+  await sleep(shot.settle ?? 300);
 
   const options = { format: 'png' };
   if (fullPage) {

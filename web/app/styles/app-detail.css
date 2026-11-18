@@ -1,0 +1,147 @@
+/*
+ * App detail: the header every tab shares, the tabs, and the tab's body.
+ *
+ * Layout hook for a tab that needs the whole window (the logs): on the
+ * routes named in FULL_SIZE_ROUTES (templates/app.gts) the root gets
+ * `.app-detail-full`. The page then drops the centred column and its bottom
+ * padding, the header and tabs stay where they are on every other tab, and
+ * `.app-detail-body` becomes a flex column that fills the rest of the
+ * window: give the tab's root `flex: 1; min-height: 0` to use all of it.
+ */
+
+.app-detail {
+  /* What sits above it: the top bar, its border and the page padding. */
+  --app-detail-offset: calc(var(--topbar-height) + 1px + var(--space-6));
+}
+
+.app-header {
+  display: flex;
+  gap: var(--space-3) var(--space-4);
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: var(--space-5);
+}
+
+.app-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.app-header-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  min-height: var(--control-height);
+}
+
+.app-header-title > h1 {
+  font-size: var(--text-xl);
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.app-header-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  align-items: center;
+  min-width: 0;
+}
+
+.app-header-url {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.app-header-url:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+.app-header-url > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-tabs {
+  margin-bottom: var(--space-6);
+}
+
+/* Full size: the tab's body takes the rest of the window. */
+
+.app-main:has(> .app-detail-full) {
+  max-width: none;
+  padding-bottom: 0;
+}
+
+.app-detail-full {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--app-detail-offset));
+  min-height: 30rem;
+}
+
+.app-detail-full > .app-header,
+.app-detail-full > .app-tabs {
+  flex: none;
+  align-self: center;
+  width: 100%;
+  max-width: var(--content-width);
+}
+
+.app-detail-full > .app-tabs {
+  margin-bottom: var(--space-4);
+}
+
+.app-detail-full > .app-detail-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: var(--space-4);
+  overflow: auto;
+}
+
+/* An app that could not be loaded: what went wrong and the way back. */
+
+.app-missing {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: flex-start;
+  max-width: 40rem;
+}
+
+.app-missing > .banner {
+  align-self: stretch;
+  margin: 0;
+}
+
+@media (width <= 40rem) {
+  .app-detail {
+    --app-detail-offset: calc(var(--topbar-height) + 1px + var(--space-4));
+  }
+
+  .app-header {
+    margin-bottom: var(--space-4);
+  }
+
+  .app-header-title > h1 {
+    font-size: var(--text-lg);
+  }
+
+  .app-tabs {
+    margin-bottom: var(--space-5);
+  }
+}

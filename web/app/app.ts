@@ -12,6 +12,8 @@ import './styles/base.css';
 import './styles/components.css';
 import './styles/shell.css';
 import './styles/app-list.css';
+import './styles/app-detail.css';
+import './styles/deploy.css';
 import './styles/tab-section.css';
 import './styles/overview.css';
 import './styles/env.css';
