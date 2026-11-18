@@ -4,7 +4,7 @@ import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { array, eq } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
-import { cancel, debounce, later } from '@ember/runloop';
+import { cancel, debounce, later, schedule } from '@ember/runloop';
 import { isDestroying, registerDestructor } from '@ember/destroyable';
 import type Owner from '@ember/owner';
 import { modifier } from 'ember-modifier';
@@ -248,6 +248,11 @@ export default class AppLogsTemplate extends Component<Signature> {
 
   get isFiltered(): boolean {
     return this.isTail && this.keyword !== '';
+  }
+
+  /** The reader is at the end of the tail (a search is never followed). */
+  get tailFollowing(): boolean {
+    return this.isTail && this.following;
   }
 
   /** New lines flow into the list (and it scrolls with them). */
@@ -647,15 +652,28 @@ export default class AppLogsTemplate extends Component<Signature> {
 
   // --- The list -----------------------------------------------------------
 
+  private get viewport(): HTMLElement | null {
+    return this.body?.querySelector<HTMLElement>('.log-viewport') ?? null;
+  }
+
   select = (row: LogRow | null) => {
+    const closing = row === null && this.selected !== null;
     this.selected = row;
     this.syncHold();
+    if (closing && this.isTail) {
+      // The detail gave its room back to the list, and the newest row may
+      // be in view again: have the follow modifier look, as after a scroll.
+      // eslint-disable-next-line ember/no-runloop
+      schedule('afterRender', () => {
+        this.viewport?.dispatchEvent(new Event('scroll'));
+      });
+    }
   };
 
   closeDetail = () => {
     this.select(null);
     // The button that had focus is gone; hand it back to the list.
-    this.body?.querySelector<HTMLElement>('.log-viewport')?.focus();
+    this.viewport?.focus();
   };
 
   scrolled = (atEnd: boolean) => {
@@ -869,12 +887,12 @@ export default class AppLogsTemplate extends Component<Signature> {
                 @wrap={{this.wrap}}
                 @showService={{this.showService}}
                 @serviceWidth={{this.serviceWidth}}
-                @follow={{this.flowing}}
+                @following={{this.tailFollowing}}
                 @paused={{this.paused}}
                 @waiting={{this.tail.waiting}}
                 @selected={{this.selected}}
                 @onSelect={{this.select}}
-                @onScroll={{this.scrolled}}
+                @onFollowChange={{this.scrolled}}
                 @onResume={{this.resume}}
               />
             {{/each}}

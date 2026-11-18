@@ -23,7 +23,6 @@ import {
   SCENARIOS,
   buildScenario,
   commits,
-  deploymentLog,
   newApp,
   newDomain,
   services,
@@ -31,6 +30,7 @@ import {
   snapshots,
   startDeployment,
 } from './fixtures.mjs';
+import { deploymentLog } from './deploy-log.mjs';
 import { LOG_SCENARIOS, registerLogRoutes } from './logs.mjs';
 
 const HOST = '127.0.0.1';
@@ -112,6 +112,22 @@ function findDeployment(state, id) {
     if (found) return found;
   }
   throw notFound('deployment_not_found');
+}
+
+/** What the log of a deployment depends on besides the deployment. */
+function logContext(state, entry) {
+  const app = state.apps.get(entry.app_slug);
+  const list = state.deployments.get(entry.app_slug) ?? [];
+  const previous = list
+    .slice(list.indexOf(entry) + 1)
+    .find((older) => older.status === 'succeeded');
+  return {
+    slug: entry.app_slug,
+    hostPort: app?.host_port ?? 20000,
+    healthPath: app?.healthcheck_path ?? '/',
+    backup: Boolean(app?.backup_before_deploy),
+    previousId: previous?.id ?? null,
+  };
 }
 
 function domainOf(context) {
@@ -217,12 +233,16 @@ route('POST', '/api/deployments/:id/cancel', ({ state, params }) => {
 });
 route('GET', '/api/deployments/:id/logs', ({ state, params, query }) => {
   const entry = findDeployment(state, params.id);
-  const lines = deploymentLog(entry);
+  const log = deploymentLog(entry, logContext(state, entry));
   if (query.get('format') === 'text') {
-    return { text: lines.join('\n') + '\n' };
+    return { text: log.lines.join('\n') + '\n' };
   }
-  const finished = entry.status !== 'running' && entry.status !== 'queued';
-  return { sse: lines, end: finished ? entry.status : undefined };
+  return {
+    sse: log.lines,
+    end: log.end,
+    // What the deployment writes from here on, until it is over.
+    next: log.next && (() => (settle(state), log.next())),
+  };
 });
 
 route('GET', '/api/apps/:slug/domains', (context) => ({
@@ -360,8 +380,8 @@ function sendError(response, error) {
   });
 }
 
-/** Server-sent events: the given lines, then either `end` or a live feed. */
-function sendEvents(request, response, { sse, end, live }) {
+/** Server-sent events: the given lines, then `end`, a feed or a live tail. */
+function sendEvents(request, response, { sse, end, live, next }) {
   response.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-store',
@@ -376,6 +396,18 @@ function sendEvents(request, response, { sse, end, live }) {
   sse.forEach(write);
   if (end !== undefined) {
     response.end(`event: end\ndata: ${end}\n\n`);
+    return;
+  }
+  if (next) {
+    // A deployment in progress: pass on what it writes until it is over.
+    const feed = setInterval(() => {
+      const { lines, end: status } = next();
+      lines.forEach(write);
+      if (status === undefined) return;
+      clearInterval(feed);
+      response.end(`event: end\ndata: ${status}\n\n`);
+    }, 500);
+    request.on('close', () => clearInterval(feed));
     return;
   }
   // Still running (or a live tail): keep the stream open and trickle lines.

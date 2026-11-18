@@ -19,6 +19,7 @@ export const SCENARIOS = {
   warnings:
     'a deployment in progress, a failed one, a stopped app, a pending domain, disk above the limit, stale backup',
   empty: 'no apps yet',
+  undeployed: 'one app that was created and never deployed',
   error: 'every API call fails with 500',
   loading: 'API calls take a minute to answer',
   login: 'not logged in',
@@ -323,6 +324,14 @@ export function buildScenario(name) {
       });
     case 'empty':
       return scenario([]);
+    case 'undeployed': {
+      const state = scenario([]);
+      const fresh = app('notes', { host_port: 20000, created_at: ago(MINUTE) });
+      state.apps.set(fresh.slug, fresh);
+      state.deployments.set(fresh.slug, []);
+      state.domains.set(fresh.slug, []);
+      return state;
+    }
     default:
       return scenario(healthyApps());
   }
@@ -358,57 +367,6 @@ export function settle(state) {
       }
     }
   }
-}
-
-const STEPS = [
-  ['fetch', 'Fetching the repository', ['Cloning octo/app at the commit']],
-  ['prepare', 'Generating the env file and override', ['Wrote 6 variables']],
-  ['validate', 'Validating the Compose project', ['Policy check passed']],
-  [
-    'build',
-    'Building images',
-    [
-      '#1 [web 1/6] FROM ruby:3.4-slim',
-      '#7 [web 6/6] RUN bundle install',
-      '#9 exporting to image',
-    ],
-  ],
-  [
-    'start',
-    'Starting containers',
-    ['Container web  Started', 'Container db  Healthy'],
-  ],
-  ['route', 'Updating the proxy', ['Caddy configuration unchanged']],
-  ['check', 'Checking the app over HTTP', ['GET /up -> 200']],
-];
-
-/** Deployment log lines, with the `==>` step headings the API documents. */
-export function deploymentLog(entry) {
-  const start = Date.parse(entry.started_at ?? entry.queued_at);
-  const failed = entry.status === 'failed';
-  const running = entry.status === 'running' || entry.status === 'queued';
-  const steps = running ? STEPS.slice(0, 4) : STEPS;
-  const lines = [];
-  let at = start;
-  for (const [key, title, body] of steps) {
-    lines.push(`==> ${new Date(at).toISOString()} ${key} ${title}`);
-    if (failed && key === 'check') {
-      lines.push('GET /up -> 500', 'GET /up -> 500 (attempt 5 of 5)');
-    } else {
-      lines.push(...body);
-    }
-    at += 8000;
-  }
-  if (failed) {
-    lines.push(
-      `==> ${new Date(at).toISOString()} failed failed: ${entry.error}`,
-      `==> ${new Date(at + 1000).toISOString()} rollback Rolling back to the previous release`,
-      'Container web  Started',
-    );
-  } else if (!running) {
-    lines.push(`==> ${new Date(at).toISOString()} done Deployment succeeded`);
-  }
-  return lines;
 }
 
 export function services(target) {
@@ -448,43 +406,6 @@ export const ENV_VARS = [
   { key: 'RAILS_ENV', value: 'production' },
   { key: 'SECRET_KEY_BASE', value: '0000000000000000000000000000000000000000' },
 ];
-
-const LOG_MESSAGES = [
-  ['web', 'Started GET "/" for 198.51.100.7'],
-  ['web', 'Completed 200 OK in 23ms (Views: 14.1ms | ActiveRecord: 3.2ms)'],
-  ['worker', 'Performed SessionCleanupJob in 41.8ms'],
-  ['db', 'checkpoint complete: wrote 12 buffers (0.1%)'],
-  ['web', 'Started GET "/posts/42" for 198.51.100.23'],
-  ['web', 'Completed 200 OK in 31ms (Views: 20.4ms | ActiveRecord: 5.9ms)'],
-];
-
-/** `count` runtime log lines ending now, oldest first. */
-export function logLines(count, service) {
-  const lines = [];
-  for (let i = count; i > 0; i--) {
-    const [name, line] = LOG_MESSAGES[i % LOG_MESSAGES.length];
-    if (service && service !== name) continue;
-    lines.push({ service: name, time: ago(i * 7000), line });
-  }
-  return lines;
-}
-
-export function logArchives(slug) {
-  const hour = 4 * HOUR;
-  const latest = Math.floor(Date.now() / hour) * hour;
-  return [0, 1, 2, 3, 4, 5].flatMap((n) =>
-    ['web', 'db'].map((service) => {
-      const at = new Date(latest - n * hour);
-      const day = at.toISOString().slice(0, 10).replaceAll('-', '/');
-      return {
-        key: `logs/${slug}/${service}/${day}/${String(at.getUTCHours()).padStart(2, '0')}.log.gz`,
-        service,
-        hour: at.toISOString(),
-        size: 18000 + n * 2311 + service.length * 977,
-      };
-    }),
-  );
-}
 
 export function snapshots() {
   return [0, 1, 2].flatMap((n) => [

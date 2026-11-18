@@ -34,6 +34,14 @@ Set `PAASD_URL` to proxy to a different paasd address.
   `environment-badge`, `status-indicator`, `icon`, `row-list`, `tabs`,
   `form-field`, `confirm-dialog`, `banner`, `empty-state`, `relative-time`,
   `copy-button`, `theme-switch`, `user-menu`.
+- The deploy tab is built from `deployment-detail` (one deployment, live over
+  SSE), `deployment-steps` (the vertical list of steps) and `step-log` (the
+  log of a step, following its tail). `app/utils/deploy-steps.ts` turns the
+  log into steps and reads the outcome of the automatic rollback from it.
+- App detail layout: on the routes listed in `FULL_SIZE_ROUTES`
+  (`app/templates/app.gts`) the root gets the class `app-detail-full`, the
+  page drops the centred column and `.app-detail-body` fills the rest of the
+  window (`app/styles/app-detail.css`).
 - `tests/unit/styles/tokens-test.ts` checks that text colours keep WCAG AA
   contrast on their backgrounds in both themes.
 
@@ -51,15 +59,16 @@ bin/dev sh -c 'cd web && pnpm build && node mock/server.mjs'
 
 The page URL selects what the API answers and, optionally, the theme:
 
-| URL                   | Shows                                                                                                         |
-| --------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `/?scenario=healthy`  | four apps, everything fine (the default)                                                                      |
-| `/?scenario=warnings` | a deployment in progress, a failed one, a stopped app, a pending domain, disk above the limit, a stale backup |
-| `/?scenario=empty`    | no apps yet                                                                                                   |
-| `/?scenario=error`    | every API call fails with 500                                                                                 |
-| `/?scenario=loading`  | API calls take a minute to answer                                                                             |
-| `/?scenario=login`    | not logged in                                                                                                 |
-| `...&theme=dark`      | pins the theme (`light`, `dark`, or `system` to unpin)                                                        |
+| URL                     | Shows                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `/?scenario=healthy`    | four apps, everything fine (the default)                                                                      |
+| `/?scenario=warnings`   | a deployment in progress, a failed one, a stopped app, a pending domain, disk above the limit, a stale backup |
+| `/?scenario=empty`      | no apps yet                                                                                                   |
+| `/?scenario=undeployed` | one app that was created and never deployed                                                                   |
+| `/?scenario=error`      | every API call fails with 500                                                                                 |
+| `/?scenario=loading`    | API calls take a minute to answer                                                                             |
+| `/?scenario=login`      | not logged in                                                                                                 |
+| `...&theme=dark`        | pins the theme (`light`, `dark`, or `system` to unpin)                                                        |
 
 The scenario is kept in a cookie, so it stays while navigating; changes made
 in the UI (deploying, adding a domain, ...) are kept in memory until the mock

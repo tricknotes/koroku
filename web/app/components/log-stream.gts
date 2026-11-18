@@ -19,16 +19,16 @@ interface LogStreamSignature {
     showService: boolean;
     /** Width of the service column, in characters. */
     serviceWidth: number;
-    /** Keep the newest row in view as rows arrive. */
-    follow: boolean;
+    /** The reader is at the end of a tail: keep the newest row in view. */
+    following: boolean;
     /** Offer the way back to the newest row (following was interrupted). */
     paused: boolean;
     /** Lines that arrived while paused. */
     waiting: number;
     selected: LogRow | null;
     onSelect: (row: LogRow | null) => unknown;
-    /** The reader scrolled: whether they are at the end now. */
-    onScroll: (atEnd: boolean) => unknown;
+    /** The reader left the end (false) or came back to it (true). */
+    onFollowChange: (atEnd: boolean) => unknown;
     onResume: () => unknown;
   };
 }
@@ -53,6 +53,43 @@ export default class LogStream extends Component<LogStreamSignature> {
     return id === undefined
       ? -1
       : this.args.rows.findIndex((row) => row.id === id);
+  }
+
+  /**
+   * Changes whenever what is rendered changes, for the follow modifier: the
+   * number of rows alone stays the same once the list is capped.
+   */
+  get revision(): string {
+    const { rows, wrap } = this.args;
+    return `${rows.length}:${rows[rows.length - 1]?.id ?? 0}:${wrap}`;
+  }
+
+  /**
+   * Index of the first (or last) row that is in view, where a keyboard
+   * selection starts. The rows are in order, so a binary search over their
+   * positions finds it without measuring thousands of them.
+   */
+  private edgeInView(viewport: HTMLElement, edge: 'first' | 'last'): number {
+    const elements = viewport.querySelectorAll('[data-row]');
+    const frame = viewport.getBoundingClientRect();
+    let low = 0;
+    let high = elements.length - 1;
+    while (low < high) {
+      const middle =
+        edge === 'first'
+          ? Math.floor((low + high) / 2)
+          : Math.ceil((low + high) / 2);
+      const rect = (elements[middle] as Element).getBoundingClientRect();
+      if (edge === 'first') {
+        if (rect.bottom > frame.top) high = middle;
+        else low = middle + 1;
+      } else if (rect.top < frame.bottom) {
+        low = middle;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return low;
   }
 
   pick = (event: MouseEvent) => {
@@ -84,9 +121,11 @@ export default class LogStream extends Component<LogStreamSignature> {
     const index = this.selectedIndex;
     let next: number;
     if (index < 0) {
-      // Start where the reader is looking: the newest row of a tail, the
-      // first row of a search result.
-      next = event.key === 'ArrowUp' || this.args.follow ? last : 0;
+      // Start where the reader is looking: the edge of what is in view.
+      next = this.edgeInView(
+        event.currentTarget as HTMLElement,
+        event.key === 'ArrowUp' ? 'last' : 'first',
+      );
     } else {
       next = Math.min(
         last,
@@ -135,7 +174,11 @@ export default class LogStream extends Component<LogStreamSignature> {
         data-test-log-viewport
         {{on "click" this.pick}}
         {{on "keydown" this.navigate}}
-        {{followTail @rows @wrap follow=@follow onScroll=@onScroll}}
+        {{followTail
+          this.revision
+          following=@following
+          onChange=@onFollowChange
+        }}
         {{this.reveal @selected}}
         {{this.columns @serviceWidth}}
       >
