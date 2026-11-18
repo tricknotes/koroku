@@ -157,6 +157,14 @@ func (e *Engine) Start(ctx context.Context, app store.App) error {
 	ctx, cancel := context.WithTimeout(ctx, e.opts.WaitTimeout+time.Minute)
 	defer cancel()
 	if inv, dir, ok := e.currentInvocation(app); ok {
+		// The release files are reused: check them again first.
+		meta, metaErr := e.readMeta(app.Slug, *app.CurrentDeploymentID)
+		if metaErr != nil {
+			return metaErr
+		}
+		if err := e.revalidate(ctx, app, *app.CurrentDeploymentID, meta.ComposeFile); err != nil {
+			return fmt.Errorf("the release cannot be started as it is (deploy the app again): %w", err)
+		}
 		wait := strconv.Itoa(int(e.opts.WaitTimeout / time.Second))
 		err = e.runCompose(ctx, inv, dir, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)
 	} else {

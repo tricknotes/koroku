@@ -48,7 +48,11 @@ func openDeployLog(path string, masker *secrets.Masker, now func() time.Time) (*
 	if now == nil {
 		now = time.Now
 	}
-	return &deployLog{file: f, lines: secrets.NewLineWriter(f, masker), masker: masker, now: now}, nil
+	limited := &cappedWriter{dst: f, remaining: maxDeployLogBytes}
+	if info, err := f.Stat(); err == nil {
+		limited.remaining -= info.Size()
+	}
+	return &deployLog{file: f, lines: secrets.NewLineWriter(limited, masker), masker: masker, now: now}, nil
 }
 
 // Writer returns the destination for command output.
@@ -86,4 +90,35 @@ func appendLogLine(path, line string) {
 	}
 	l.Printf("%s", line)
 	l.Close()
+}
+
+// maxDeployLogBytes bounds one deployment's log file. A build that prints
+// without end must not fill the disk every app shares.
+const maxDeployLogBytes = 50 << 20
+
+// cappedWriter stops writing once its budget is used up, leaving a note.
+// It never reports an error for dropped output: the command whose output
+// this is must not fail because of the log.
+type cappedWriter struct {
+	dst       io.Writer
+	remaining int64
+	noted     bool
+}
+
+func (c *cappedWriter) Write(p []byte) (int, error) {
+	if c.remaining <= 0 {
+		if !c.noted {
+			c.noted = true
+			_, _ = io.WriteString(c.dst, "[log truncated: the size limit of the deploy log was reached]\n")
+		}
+		return len(p), nil
+	}
+	if int64(len(p)) > c.remaining {
+		_, _ = c.dst.Write(p[:c.remaining])
+		c.remaining = 0
+		_, _ = c.Write(nil)
+		return len(p), nil
+	}
+	c.remaining -= int64(len(p))
+	return c.dst.Write(p)
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -146,5 +147,21 @@ func TestVacuumInto(t *testing.T) {
 	// An existing destination is never overwritten.
 	if err := s.VacuumInto(ctx, copyPath); err == nil {
 		t.Error("VacuumInto must refuse an existing file")
+	}
+}
+
+func TestDatabaseFileIsPrivate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "paas.db")
+	s, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("database mode = %04o, want 0600", info.Mode().Perm())
 	}
 }
