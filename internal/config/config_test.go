@@ -156,6 +156,65 @@ allowed_user_id = 42
 	}
 }
 
+func TestStorageLogsAndBackupConfig(t *testing.T) {
+	cfg, err := Parse(`base_domain = "dev.example.com"`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.Storage.Configured() {
+		t.Error("storage must not count as configured by default")
+	}
+	if cfg.Logs.Dir != "/var/lib/paas/logs" || cfg.Logs.RetentionDays != 14 || cfg.Logs.ArchiveIntervalHours != 4 {
+		t.Errorf("Logs = %+v", cfg.Logs)
+	}
+	if cfg.Backup.Hour != 3 || cfg.Backup.ResticPasswordFile != "/etc/paas/restic.key" {
+		t.Errorf("Backup = %+v", cfg.Backup)
+	}
+	if cfg.Timezone != "Asia/Tokyo" || cfg.Location().String() != "Asia/Tokyo" {
+		t.Errorf("Timezone = %q / %v", cfg.Timezone, cfg.Location())
+	}
+
+	full := `base_domain = "dev.example.com"
+data_dir = "/srv/paas"
+timezone = "UTC"
+[storage]
+endpoint = "https://s3.example.com"
+bucket = "paas"
+access_key_id = "AKIAEXAMPLE"
+secret_access_key = "example-secret-key"
+[logs]
+archive_interval_hours = 1
+[backup]
+hour = 4
+`
+	cfg, err = Parse(full)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !cfg.Storage.Configured() || cfg.Storage.Region != "auto" || cfg.Logs.Dir != "/srv/paas/logs" || cfg.Backup.Hour != 4 {
+		t.Errorf("config = %+v %+v %+v", cfg.Storage, cfg.Logs, cfg.Backup)
+	}
+
+	for name, text := range map[string]string{
+		"no bucket":          "[storage]\nendpoint = \"https://s3.example.com\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
+		"no credentials":     "[storage]\nendpoint = \"https://s3.example.com\"\nbucket = \"paas\"",
+		"endpoint no scheme": "[storage]\nendpoint = \"s3.example.com\"\nbucket = \"paas\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
+		"bad timezone":       "timezone = \"Mars/Olympus\"",
+		"zero retention":     "[logs]\nretention_days = 0",
+		"archive too rare":   "[logs]\narchive_interval_hours = 48",
+		"bad backup hour":    "[backup]\nhour = 24",
+		"relative log dir":   "[logs]\ndir = \"logs\"",
+	} {
+		if _, err := Parse("base_domain = \"dev.example.com\"\n" + text); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+	_, err = Parse("base_domain = \"dev.example.com\"\n[storage]\nsecret_access_key = \"super-secret-value\"")
+	if err == nil || strings.Contains(err.Error(), "super-secret-value") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte(`base_domain = "dev.example.com"`), 0o600); err != nil {

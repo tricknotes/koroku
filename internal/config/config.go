@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+	_ "time/tzdata" // the binary must know Asia/Tokyo on a host without zoneinfo
 
 	"github.com/BurntSushi/toml"
 )
@@ -35,9 +37,49 @@ type Config struct {
 	// MasterKeyFile holds the key used to encrypt environment variable values.
 	MasterKeyFile string `toml:"master_key_file"`
 
-	Deploy Deploy `toml:"deploy"`
-	Caddy  Caddy  `toml:"caddy"`
-	GitHub GitHub `toml:"github"`
+	// Timezone is the IANA zone used for schedules (daily backup, log
+	// archive windows) and for the dates of log files.
+	Timezone string `toml:"timezone"`
+
+	Deploy  Deploy  `toml:"deploy"`
+	Caddy   Caddy   `toml:"caddy"`
+	GitHub  GitHub  `toml:"github"`
+	Storage Storage `toml:"storage"`
+	Logs    Logs    `toml:"logs"`
+	Backup  Backup  `toml:"backup"`
+}
+
+// Storage is the S3-compatible object storage used for log archives and
+// restic backups (Cloudflare R2 in production; nothing R2-specific is used).
+type Storage struct {
+	Endpoint        string `toml:"endpoint"`
+	Region          string `toml:"region"`
+	Bucket          string `toml:"bucket"`
+	AccessKeyID     string `toml:"access_key_id"`
+	SecretAccessKey string `toml:"secret_access_key"`
+}
+
+// Configured reports whether object storage is set up at all.
+func (s Storage) Configured() bool {
+	return s.Endpoint != "" || s.Bucket != "" || s.AccessKeyID != "" || s.SecretAccessKey != ""
+}
+
+// Logs holds log collection settings.
+type Logs struct {
+	// Dir holds the collected logs. Defaults to <data_dir>/logs.
+	Dir string `toml:"dir"`
+	// RetentionDays is how long logs stay on local disk.
+	RetentionDays int `toml:"retention_days"`
+	// ArchiveIntervalHours is how often logs are archived to object storage.
+	ArchiveIntervalHours int `toml:"archive_interval_hours"`
+}
+
+// Backup holds backup settings. Backups need [storage] as well.
+type Backup struct {
+	// ResticPasswordFile holds the restic repository password (mode 0600).
+	ResticPasswordFile string `toml:"restic_password_file"`
+	// Hour is the local hour (in Timezone) of the daily backup.
+	Hour int `toml:"hour"`
 }
 
 // GitHub holds the GitHub App used for login and repository access.
@@ -96,6 +138,10 @@ func Default() Config {
 		DataDir:       "/var/lib/paas",
 		MasterKeyFile: "/etc/paas/master.key",
 		GitHub:        GitHub{PrivateKeyFile: "/etc/paas/github-app.pem"},
+		Timezone:      "Asia/Tokyo",
+		Storage:       Storage{Region: "auto"},
+		Logs:          Logs{RetentionDays: 14, ArchiveIntervalHours: 4},
+		Backup:        Backup{ResticPasswordFile: "/etc/paas/restic.key", Hour: 3},
 		Caddy: Caddy{
 			Enabled:      true,
 			AdminURL:     "http://127.0.0.1:2019",
@@ -137,6 +183,9 @@ func Parse(text string) (Config, error) {
 	if cfg.ConsoleHost == "" && cfg.BaseDomain != "" {
 		cfg.ConsoleHost = "console." + cfg.BaseDomain
 	}
+	if cfg.Logs.Dir == "" {
+		cfg.Logs.Dir = filepath.Join(cfg.DataDir, "logs")
+	}
 	if cfg.ConsoleURL == "" && cfg.ConsoleHost != "" {
 		cfg.ConsoleURL = "https://" + cfg.ConsoleHost
 	}
@@ -173,6 +222,39 @@ func (c Config) Validate() error {
 	if u, err := url.Parse(c.ConsoleURL); c.ConsoleURL != "" &&
 		(err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "") {
 		errs = append(errs, fmt.Errorf("console_url %q must be an origin such as https://console.example.com", c.ConsoleURL))
+	}
+	if _, err := time.LoadLocation(c.Timezone); err != nil || c.Timezone == "" {
+		errs = append(errs, fmt.Errorf("timezone %q is not a known time zone", c.Timezone))
+	}
+	if st := c.Storage; st.Configured() {
+		// Half-configured storage would silently skip backups.
+		if u, err := url.Parse(st.Endpoint); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+			errs = append(errs, fmt.Errorf("storage.endpoint %q must be a URL such as https://s3.example.com", st.Endpoint))
+		}
+		if st.Region == "" {
+			errs = append(errs, errors.New("storage.region is required"))
+		}
+		if st.Bucket == "" {
+			errs = append(errs, errors.New("storage.bucket is required"))
+		}
+		if st.AccessKeyID == "" || st.SecretAccessKey == "" {
+			errs = append(errs, errors.New("storage.access_key_id and storage.secret_access_key are required"))
+		}
+	}
+	if !filepath.IsAbs(c.Logs.Dir) {
+		errs = append(errs, fmt.Errorf("logs.dir %q must be an absolute path", c.Logs.Dir))
+	}
+	if c.Logs.RetentionDays < 1 {
+		errs = append(errs, fmt.Errorf("logs.retention_days %d must be at least 1", c.Logs.RetentionDays))
+	}
+	if h := c.Logs.ArchiveIntervalHours; h < 1 || h > 24 {
+		errs = append(errs, fmt.Errorf("logs.archive_interval_hours %d must be between 1 and 24", h))
+	}
+	if !filepath.IsAbs(c.Backup.ResticPasswordFile) {
+		errs = append(errs, fmt.Errorf("backup.restic_password_file %q must be an absolute path", c.Backup.ResticPasswordFile))
+	}
+	if c.Backup.Hour < 0 || c.Backup.Hour > 23 {
+		errs = append(errs, fmt.Errorf("backup.hour %d must be between 0 and 23", c.Backup.Hour))
 	}
 	if g := c.GitHub; g.Configured() {
 		// A half-configured App would lock the console or, worse, look
@@ -231,6 +313,15 @@ func (c Caddy) AdminListen() string {
 		return ""
 	}
 	return u.Host
+}
+
+// Location returns the configured time zone. Validate guarantees it loads.
+func (c Config) Location() *time.Location {
+	loc, err := time.LoadLocation(c.Timezone)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
 }
 
 // DBPath is the location of the SQLite database.

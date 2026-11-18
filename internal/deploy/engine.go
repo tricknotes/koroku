@@ -29,6 +29,12 @@ type Router interface {
 	Sync(ctx context.Context) error
 }
 
+// PreDeployBackup backs an app up before its containers are replaced. It is
+// used for apps that opted into "backup before deploy".
+type PreDeployBackup interface {
+	BackupApp(ctx context.Context, app store.App) error
+}
+
 // TokenSource mints a short-lived token for fetching an app's repository.
 // It returns "" for repositories that need no authentication.
 type TokenSource interface {
@@ -44,9 +50,10 @@ type Options struct {
 	System  system.Prober
 	Health  HealthChecker
 	Fetcher gitrepo.Fetcher
-	// Router and Tokens are optional.
+	// Router, Tokens and Backup are optional.
 	Router Router
 	Tokens TokenSource
+	Backup PreDeployBackup
 	Logger *slog.Logger
 
 	// AppsDir holds one directory per app (releases, env file, deploy logs).

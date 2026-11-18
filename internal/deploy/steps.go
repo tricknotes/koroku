@@ -150,6 +150,20 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		}
 	}
 
+	// Optional backup of the data the new release is about to touch. A
+	// first deploy has nothing to back up yet.
+	if app.BackupBeforeDeploy && app.CurrentDeploymentID != nil {
+		if e.opts.Backup == nil {
+			log.Printf("Backup before deploy is enabled for this app, but backups are not configured; skipping.")
+		} else {
+			log.Step("Backing up before deploy")
+			if err := e.opts.Backup.BackupApp(ctx, app); err != nil {
+				return false, fmt.Errorf("backup before deploy: %w", err)
+			}
+			log.Printf("Backup finished.")
+		}
+	}
+
 	// 6. Start. From here on a failure rolls back to the previous release.
 	log.Step("Starting containers")
 	if err := writeFileAtomic(e.EnvFile(app.Slug), []byte(envContent), 0o600); err != nil {

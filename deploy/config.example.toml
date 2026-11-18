@@ -19,6 +19,9 @@ public_ip = "203.0.113.10"
 # Key used to encrypt environment variable values (32 random bytes, mode 0600).
 master_key_file = "/etc/paas/master.key"
 
+# Time zone for schedules (daily backup, log archive windows) and log file dates.
+timezone = "Asia/Tokyo"
+
 [deploy]
 # Memory limit applied to every service unless the app overrides it.
 default_memory_limit = "512m"
@@ -55,3 +58,28 @@ access_log_dir = "/var/log/caddy/apps"
 # Numeric ID of the only GitHub user allowed to log in
 # (see https://api.github.com/users/<login>).
 # allowed_user_id = 0
+
+[storage]
+# S3-compatible object storage for log archives (logs/) and restic backups
+# (restic/). With Cloudflare R2: endpoint https://<account-id>.r2.cloudflarestorage.com
+# and region "auto". Use a token limited to this bucket, and add a lifecycle
+# rule that deletes objects under logs/ after 90 days (never under restic/).
+# Without this section logs stay local only and backups are disabled.
+# endpoint = "https://s3.example.com"
+# region = "auto"
+# bucket = "paas"
+# access_key_id = "..."
+# secret_access_key = "..."
+
+[logs]
+# Days of logs kept on local disk.
+retention_days = 14
+# How often logs are archived to object storage (1-24 hours).
+archive_interval_hours = 4
+
+[backup]
+# restic repository password (mode 0600). Keep a copy outside this host:
+# without it the backups cannot be restored.
+restic_password_file = "/etc/paas/restic.key"
+# Hour of the daily backup, in the time zone above.
+hour = 3
