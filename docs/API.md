@@ -181,7 +181,20 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | `POST /api/deployments/{id}/cancel` | 202 でその時点のデプロイ。実行中のものは非同期に止まる。終了済みは `409 not_cancelable` |
 | `GET /api/deployments/{id}/logs` | デプロイログの SSE（下記）。`?format=text` を付けると、その時点までの全文を `text/plain` で返す |
 
-**手順の見出し行**: デプロイログのうち `==> ` で始まる行は手順の区切りで、`==> <RFC 3339 の時刻> <キー> <表題>` の形をしている（例: `==> 2026-11-18T03:00:01Z build Building images`）。キーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done`、失敗時は `failed`（表題に最終状態と理由）と `rollback`。UI はこの行でログを手順に分け、次の見出しまでをその手順の所要時間とする。ビルドも pull も不要なアプリではその手順の行は出ない。
+**手順の見出し行**: デプロイログのうち `==> ` で始まる行は手順の区切りで、`==> <RFC 3339 の時刻> <キー> <表題>` の形をしている（例: `==> 2026-11-18T03:00:01Z build Building images`）。キーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done`、成功後の後片付けの `cleanup`、失敗時は `failed`（表題に最終状態と理由）と `rollback`。UI はこの行でログを手順に分け、次の見出しまでをその手順の所要時間とする。ビルドも pull も不要なアプリではその手順の行は出ない。
+
+**失敗とロールバックの行**: 専用の API は持たず、UI は同じログから「旧版に戻ったか」を読み取る。次の行は UI が解釈するので、変えるときは `web/app/utils/deploy-steps.ts` と同時に直す。
+
+| 行 | 意味 |
+| --- | --- |
+| `==> <時刻> failed Deployment failed: <理由>` / `Deployment canceled: <理由>` | 直前の手順で失敗（またはキャンセル）した。`start` より前なら稼働中のコンテナには触れていない |
+| `==> <時刻> rollback Rolling back to deployment #<id>` | 直前の成功リリースへ戻し始めた |
+| `Rolled back: deployment #<id> is running again.` | 戻し終えた |
+| `Rollback failed: ...` / `Rollback is not possible: ...` | 戻せなかった |
+| `==> <時刻> rollback No previous release; removing the failed containers` | 初回デプロイで戻す先がなく、起動しかけたコンテナを消した（失敗すると `Removing the containers failed: ...`） |
+| `paasd is shutting down; the previous release is not restored automatically.` | `paasd` の停止と重なり、ロールバックを実行しなかった |
+
+最初の見出しより前の行（`Queued deployment of <sha>.` など）は受付の記録。`paasd` の再起動で中断されたデプロイには `failed` の見出しがなく、末尾に `Failed: ...` の行だけが付く。
 
 **デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。
 

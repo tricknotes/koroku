@@ -1,16 +1,9 @@
 /*
  * Classes written directly by the screens that have not been redesigned yet
- * (the app detail header and its other tabs). They are restyled with the
+ * (the overview, logs, environment and domains tabs). They are restyled with the
  * tokens so those screens sit correctly in the new shell; each block goes
  * away when its screen moves to the shared components.
  */
-
-.app-title {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
-}
 
 .card {
   margin-bottom: var(--space-4);
@@ -31,10 +24,6 @@
   gap: var(--space-2) var(--space-3);
   align-items: center;
   margin-bottom: var(--space-3);
-}
-
-.card-header-end {
-  margin-left: auto;
 }
 
 .placeholder {
@@ -158,7 +147,6 @@ ul.field-error {
   overflow-wrap: anywhere;
 }
 
-.deploy-list,
 .domain-list,
 .env-list {
   margin: 0;
@@ -174,41 +162,20 @@ ul.field-error {
   overflow-wrap: anywhere;
 }
 
-.deploy-row,
 .domain-row {
   padding: var(--space-3) 0;
   border-top: 1px solid var(--color-border);
 }
 
-.deploy-row:first-child,
 .domain-row:first-child {
   border-top: 0;
 }
 
-.deploy-row.is-selected {
-  margin: 0 calc(var(--space-3) * -1);
-  padding: var(--space-3);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-hover);
-}
-
-.deploy-row-main,
-.deploy-row-meta,
 .domain-row-head {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1) var(--space-2);
   align-items: baseline;
-}
-
-.deploy-row-meta {
-  font-size: var(--text-sm);
-}
-
-.deploy-row-error {
-  color: var(--color-failed);
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
 }
 
 .log,

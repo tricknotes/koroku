@@ -358,7 +358,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | アプリ一覧のホスト状態行、警告バナー | ログ退避の最終成功時刻、ディスク警告のしきい値、Caddy への設定投入の状態 | `GET /api/system` に `disk_limit_percent`、`log_archive`（`configured`、`last_success_at`、`last_error`）、`caddy`（`enabled`、`last_loaded_at`、`last_error`）を足す |
 | アプリ一覧の行、詳細ヘッダー | プライマリ URL、検証待ちドメインの有無 | アプリの JSON に `primary_url`（プライマリドメインがあればその URL、なければ自動割当の URL）と `pending_domains`（検証待ちの数）を足す。一覧のためにアプリごとにドメイン API を呼ばずに済ませる |
 | 概要タブのサービス一覧 | メモリ使用量と上限 | `GET /api/apps/{slug}/services` の各サービスに `memory_bytes` と `memory_limit_bytes` を足す（`docker stats --no-stream` の値。取れなければ `null`） |
-| デプロイタブの手順表示 | 手順の区切りと、手順ごとの所要時間 | デプロイログの手順の見出し行を `==> <RFC 3339 の時刻> <手順のキー> <表題>` の形にする。UI はこの行でログを手順に分け、次の見出し（または終了）までを所要時間とする。手順のキーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done` と、失敗時の `failed` `rollback`。DB に手順の表は持たない（ログファイルが唯一の記録で、SSE の再接続とも整合する） |
+| デプロイタブの手順表示 | 手順の区切りと、手順ごとの所要時間 | デプロイログの手順の見出し行を `==> <RFC 3339 の時刻> <手順のキー> <表題>` の形にする。UI はこの行でログを手順に分け、次の見出し（または終了）までを所要時間とする。手順のキーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done` `cleanup` と、失敗時の `failed` `rollback`。DB に手順の表は持たない（ログファイルが唯一の記録で、SSE の再接続とも整合する）。自動ロールバックの結果も同じ理由でログの行から読み取り、デプロイの JSON にフィールドは足さない（UI が解釈する行は `docs/API.md`） |
 | バックアップタブ | 次回の実行予定、スナップショットのサイズ | `GET /api/backups` に `next_run_at`、スナップショットに `size_bytes`（restic が記録していれば。なければ `null`）を足す |
 | システム画面 | Docker のディスク内訳 | `GET /api/system/docker`（`docker system df` の結果: イメージ、コンテナ、volume、ビルドキャッシュそれぞれの合計と回収可能な量）。数秒かかりうるので `/api/system` とは分ける |
 

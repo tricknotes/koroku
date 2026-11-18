@@ -1,29 +1,45 @@
+import Component from '@glimmer/component';
 import type { TOC } from '@ember/component/template-only';
 import { hash } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
+import type RouterService from '@ember/routing/router-service';
+import { service } from '@ember/service';
 
 function models(model: string | number | undefined): (string | number)[] {
   return model === undefined ? [] : [model];
 }
 
-/** One tab: a link to a route, so the URL restores the selected tab. */
-const Tab: TOC<{
+interface TabSignature {
   Element: HTMLAnchorElement;
   Args: { route: string; model?: string | number };
   Blocks: { default: [] };
-}> = <template>
-  <LinkTo
-    @route={{@route}}
-    @models={{models @model}}
-    class="tab"
-    ...attributes
-  >{{yield}}</LinkTo>
-</template>;
+}
+
+/** One tab: a link to a route, so the URL restores the selected tab. */
+class Tab extends Component<TabSignature> {
+  @service declare router: RouterService;
+
+  /** `<LinkTo>` adds the `active` class; assistive technology needs this. */
+  get current(): 'page' | undefined {
+    const { route, model } = this.args;
+    return this.router.isActive(route, ...models(model)) ? 'page' : undefined;
+  }
+
+  <template>
+    <LinkTo
+      @route={{@route}}
+      @models={{models @model}}
+      class="tab"
+      aria-current={{this.current}}
+      ...attributes
+    >{{yield}}</LinkTo>
+  </template>
+}
 
 /**
  * Horizontal tabs for the sections of one record. They are plain navigation
- * links (the active one gets `aria-current="page"` from the router), not an
- * ARIA tablist: each tab has its own URL.
+ * links (the active one is marked with `aria-current="page"`), not an ARIA
+ * tablist: each tab has its own URL.
  */
 const Tabs: TOC<{
   Element: HTMLElement;
