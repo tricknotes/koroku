@@ -64,13 +64,14 @@ func TestCollectWritesOneFilePerServiceAndDay(t *testing.T) {
 	wantStrings(t, "Services", services, []string{"db1", "job-worker-2", "web"})
 }
 
-// resumeLines is what a first run wrote before it ended. Two of the lines
-// are identical and a third shares their timestamp.
+// resumeLines is what a first run wrote before it ended. Two replicas
+// printed an identical line at the same instant, and a third line shares
+// their timestamp.
 func resumeLines(base time.Time) []string {
 	return []string{
 		composeLine("web-1", base, "one"),
 		composeLine("web-1", base.Add(time.Second), "two"),
-		composeLine("web-1", base.Add(time.Second), "two"),
+		composeLine("web-2", base.Add(time.Second), "two"),
 		composeLine("web-1", base.Add(time.Second), "other text, same instant"),
 	}
 }

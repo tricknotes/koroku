@@ -143,7 +143,8 @@ func (c *Collector) startFollower(ctx context.Context, app App) *follower {
 // every line it delivers is checked against the entries written from that
 // point on. Entries are compared by service, timestamp and text and counted,
 // so distinct lines with the same timestamp are all kept, and so are
-// identical lines that were genuinely printed more than once.
+// identical lines of two replicas of a service. (A line one stream prints
+// twice for the same container is a different matter: see replayFilter.)
 type resume struct {
 	loaded bool
 	// high is the newest timestamp written.
@@ -340,7 +341,7 @@ func (f *composeFollow) once(ctx context.Context) (bool, error) {
 			return false, err
 		}
 	}
-	w := &followWriter{f: f, started: time.Now()}
+	w := &followWriter{f: f, started: time.Now(), replay: replayFilter{}}
 	w.since, w.all, w.seen = f.res.begin()
 	w.sp = splitter{max: f.c.maxLine + composePrefixRoom, emit: w.line}
 
@@ -445,6 +446,55 @@ func writeFileAtomic(path string, data []byte) error {
 	return err
 }
 
+// replayWindow is how many of a container's latest lines one run of the
+// follow command remembers.
+const replayWindow = 4096
+
+// replayFilter drops lines that one run of the follow command prints twice.
+//
+// `docker compose logs --follow` attaches to the containers it finds and to
+// every container that starts later. Started while a container is coming up
+// (which is what a follower waiting for a stopped app does at every deploy),
+// it can attach to that container twice, and from then on prints each of its
+// lines twice, timestamp included (seen with Compose 5.8; ARCHITECTURE 12).
+// Docker stamps every line of a container with its own nanosecond, so a line
+// that repeats container, timestamp and text is such an echo and not output
+// the app printed twice. The two copies arrive close together: remembering
+// the latest lines of each container is enough.
+type replayFilter map[string]*recentKeys
+
+// recentKeys is a ring of the latest keys with a count per key.
+type recentKeys struct {
+	ring  []uint64
+	next  int
+	count map[uint64]int
+}
+
+// printedBefore reports whether this run already printed the line with this
+// key for the container, and remembers the key otherwise.
+func (r replayFilter) printedBefore(container string, key uint64) bool {
+	recent := r[container]
+	if recent == nil {
+		recent = &recentKeys{count: map[uint64]int{}}
+		r[container] = recent
+	}
+	if recent.count[key] > 0 {
+		return true
+	}
+	if len(recent.ring) < replayWindow {
+		recent.ring = append(recent.ring, key)
+	} else {
+		old := recent.ring[recent.next]
+		if recent.count[old]--; recent.count[old] <= 0 {
+			delete(recent.count, old)
+		}
+		recent.ring[recent.next] = key
+		recent.next = (recent.next + 1) % replayWindow
+	}
+	recent.count[key]++
+	return false
+}
+
 // followWriter receives the standard output of one run of the follow command.
 type followWriter struct {
 	f  *composeFollow
@@ -453,6 +503,8 @@ type followWriter struct {
 	since time.Time
 	all   bool
 	seen  map[uint64]int
+	// replay recognises lines this run of the command printed twice.
+	replay replayFilter
 
 	started   time.Time
 	lastWrite time.Time
@@ -508,6 +560,9 @@ func (w *followWriter) line(raw []byte, truncated bool) {
 		return
 	}
 	text := cleanText(rawText, w.f.c.maxLine, truncated)
+	if w.replay.printedBefore(name, entryKey(name, ts, text)) {
+		return
+	}
 	key := entryKey(service, ts, text)
 	if w.seen[key] > 0 {
 		w.seen[key]--
