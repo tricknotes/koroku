@@ -1,0 +1,159 @@
+/* Backups tab: status, snapshots, restore and the backup settings. */
+
+.backup-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-6);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4);
+}
+
+.backup-note {
+  max-width: 44rem;
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.snapshot-rows {
+  --row-columns: minmax(0, 1.1fr) 5.5rem minmax(0, 1.2fr) 6rem 6.5rem 7.5rem;
+}
+
+.snapshot-rows .row {
+  min-height: 3.25rem;
+}
+
+.snapshot-target,
+.snapshot-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapshot-size {
+  font-variant-numeric: tabular-nums;
+}
+
+.snapshot-size,
+.snapshot-id {
+  color: var(--color-text-secondary);
+}
+
+.snapshot-id {
+  font-size: var(--text-xs);
+}
+
+.snapshot-action {
+  justify-self: end;
+}
+
+.snapshot-skeleton {
+  width: 40%;
+}
+
+/* A command with its copy button. */
+.command {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.command > .code-block {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+/* A text field with the button that adds what was typed. */
+.inline-add {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.inline-add > input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Backups are not set up on this host: what is missing, spelled out. */
+.unconfigured {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-12) var(--space-6);
+  text-align: center;
+}
+
+.unconfigured-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  line-height: var(--leading-relaxed);
+}
+
+@media (width <= 56rem) {
+  .snapshot-rows > .row-list-header {
+    display: none;
+  }
+
+  /* Stacked: when and what first, the figures below, the action beside. */
+  .snapshot-rows .row {
+    grid-template:
+      "time kind action" auto
+      "target target action" auto
+      "size id id" auto / minmax(0, 1fr) auto auto;
+    gap: var(--space-2) var(--space-3);
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .snapshot-time {
+    grid-area: time;
+    font-weight: var(--weight-medium);
+  }
+
+  .snapshot-kind {
+    grid-area: kind;
+  }
+
+  .snapshot-target {
+    grid-area: target;
+  }
+
+  .snapshot-size {
+    grid-area: size;
+  }
+
+  .snapshot-id {
+    grid-area: id;
+  }
+
+  .snapshot-action {
+    grid-area: action;
+    align-self: start;
+  }
+
+  .snapshot-rows .cell-label {
+    margin-right: var(--space-2);
+  }
+
+  .snapshot-time > .cell-label {
+    display: none;
+  }
+}
+
+@media (width <= 30rem) {
+  .backup-summary > .button {
+    width: 100%;
+  }
+
+  .inline-add {
+    flex-direction: column;
+  }
+}

@@ -2,25 +2,87 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
-import { eq, fn } from '@ember/helper';
+import { fn } from '@ember/helper';
+import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import AsyncView from 'paas-console/components/async-view';
 import Badge from 'paas-console/components/badge';
+import Banner from 'paas-console/components/banner';
+import Button, { buttonClass } from 'paas-console/components/button';
 import ConfirmDialog from 'paas-console/components/confirm-dialog';
+import CopyButton from 'paas-console/components/copy-button';
+import EmptyState from 'paas-console/components/empty-state';
 import ErrorMessage from 'paas-console/components/error-message';
+import FormField from 'paas-console/components/form-field';
+import Icon from 'paas-console/components/icon';
+import RelativeTime from 'paas-console/components/relative-time';
+import RowList from 'paas-console/components/row-list';
+import StatusIndicator from 'paas-console/components/status-indicator';
+import TimeUntil from 'paas-console/components/time-until';
 import type ApiService from 'paas-console/services/api';
+import type PollerService from 'paas-console/services/poller';
 import type AppContext from 'paas-console/utils/app-context';
-import { formatDateTime } from 'paas-console/utils/format';
+import BackupForm, { parseList } from 'paas-console/utils/backup-form';
+import { backupHealth } from 'paas-console/utils/backup-status';
+import {
+  inputChecked,
+  inputValue,
+  preventDefault,
+  setChecked,
+  setValue,
+} from 'paas-console/utils/dom';
+import { fieldErrors } from 'paas-console/utils/errors';
+import { formatBytes, formatDateTimeJst } from 'paas-console/utils/format';
 import Loadable from 'paas-console/utils/loadable';
-import type { Snapshot } from 'paas-console/utils/types';
+import { BACKUP_TRIGGER_LABELS } from 'paas-console/utils/status';
+import type {
+  App,
+  BackupOverview,
+  BackupRun,
+  Snapshot,
+} from 'paas-console/utils/types';
+
+/** A running backup is followed closely; an idle one is only looked at. */
+const RUNNING_INTERVAL = 5000;
+const IDLE_INTERVAL = 30000;
+
+const SKELETON_ROWS = [1, 2, 3];
 
 const KIND_LABELS: Record<Snapshot['kind'], string> = {
   volume: 'volume',
-  dump: 'DB ダンプ',
+  dump: 'ダンプ',
 };
 
 function kindLabel(snapshot: Snapshot): string {
   return KIND_LABELS[snapshot.kind] ?? snapshot.kind;
+}
+
+function isVolume(snapshot: Snapshot): boolean {
+  return snapshot.kind === 'volume';
+}
+
+function size(snapshot: Snapshot): string {
+  return formatBytes(snapshot.size_bytes) || '—';
+}
+
+function restoreLabel(snapshot: Snapshot): string {
+  return `${snapshot.target} をこのスナップショットからリストア`;
+}
+
+function downloadLabel(snapshot: Snapshot): string {
+  return `${snapshot.target} のダンプをダウンロード`;
+}
+
+function triggerLabel(run: BackupRun): string {
+  return BACKUP_TRIGGER_LABELS[run.trigger] ?? run.trigger;
+}
+
+/** One named volume of the app and whether it is backed up. */
+interface VolumeChoice {
+  name: string;
+  included: boolean;
+  /** Time of its newest snapshot, if it has one. */
+  latest: string | null;
 }
 
 interface Signature {
@@ -29,34 +91,142 @@ interface Signature {
 
 export default class AppBackupsTemplate extends Component<Signature> {
   @service declare api: ApiService;
+  @service declare poller: PollerService;
 
+  overview = new Loadable<BackupOverview>(() => this.api.getBackups());
   snapshots = new Loadable<Snapshot[]>(() => this.api.listSnapshots(this.slug));
 
+  @tracked starting = false;
+  @tracked runError: unknown = null;
+
   @tracked restoring: Snapshot | null = null;
-  @tracked busy = false;
-  @tracked restored = false;
-  @tracked error: unknown = null;
+  @tracked restoreBusy = false;
+  @tracked restored: Snapshot | null = null;
+  @tracked restoreError: unknown = null;
+
+  @tracked form: BackupForm;
+  /** Volume names typed in by hand, so they stay listed while unsaved. */
+  @tracked addedVolumes: string[] = [];
+  @tracked volumeName = '';
+  @tracked saving = false;
+  @tracked saved = false;
+  @tracked nothingToSave = false;
+  @tracked saveError: unknown = null;
+  @tracked errors: Record<string, string> = {};
 
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
-    void this.snapshots.load();
+    this.form = new BackupForm(this.app);
+    void this.load();
+    this.poller.every(this, RUNNING_INTERVAL, () => this.followRun());
+    this.poller.every(this, IDLE_INTERVAL, () => this.refreshOverview());
   }
 
   get slug(): string {
     return this.args.model.slug;
   }
 
+  get app(): App {
+    return this.args.model.app;
+  }
+
+  get health() {
+    return this.overview.value ? backupHealth(this.overview.value) : null;
+  }
+
+  get running(): boolean {
+    return this.overview.value?.running ?? false;
+  }
+
+  /** Loaded and nothing there: the empty state then holds the one action. */
+  get noSnapshots(): boolean {
+    return this.snapshots.loaded && this.snapshots.value?.length === 0;
+  }
+
+  /**
+   * The app's named volumes as far as they are known here: those that have
+   * a snapshot, those that are excluded, and those just typed in.
+   */
+  get volumes(): VolumeChoice[] {
+    const latest = new Map<string, string>();
+    for (const snapshot of this.snapshots.value ?? []) {
+      if (snapshot.kind !== 'volume') continue;
+      const seen = latest.get(snapshot.target);
+      if (!seen || snapshot.time > seen) {
+        latest.set(snapshot.target, snapshot.time);
+      }
+    }
+    const names = new Set([
+      ...latest.keys(),
+      ...(this.app.backup_exclude_volumes ?? []),
+      ...this.addedVolumes,
+    ]);
+    return [...names].sort().map((name) => ({
+      name,
+      included: !this.form.isExcluded(name),
+      latest: latest.get(name) ?? null,
+    }));
+  }
+
   get restoreExample(): string {
-    return `docker compose -p paas-${this.slug} exec -T db psql -U postgres app < dump.sql`;
+    const service = this.app.dump_hook_service || 'db';
+    return `docker compose -p paas-${this.slug} exec -T ${service} psql -U postgres app < dump.sql`;
+  }
+
+  get otherErrors(): string[] {
+    const known = new Set([
+      'backup_exclude_volumes',
+      'dump_hook_service',
+      'dump_hook_command',
+    ]);
+    return Object.entries(this.errors)
+      .filter(([name]) => !known.has(name))
+      .map(([name, reason]) => `${name}: ${reason}`);
+  }
+
+  /** The overview first: without backups there are no snapshots to ask for. */
+  private async load(): Promise<void> {
+    await this.overview.load();
+    if (this.overview.value?.configured) await this.snapshots.load();
+  }
+
+  reload = () => this.load();
+
+  /** Follows a running backup until it ends, then shows what it produced. */
+  private async followRun(): Promise<void> {
+    if (!this.running) return;
+    await this.overview.load({ quiet: true });
+    if (!this.running) await this.snapshots.load({ quiet: true });
+  }
+
+  /** Notices a scheduled run that started while the tab was open. */
+  private async refreshOverview(): Promise<void> {
+    if (!this.overview.value?.configured || this.running) return;
+    await this.overview.load({ quiet: true });
   }
 
   downloadUrl = (snapshot: Snapshot): string =>
     this.api.snapshotDownloadUrl(this.slug, snapshot.id);
 
+  runNow = async () => {
+    if (this.starting || this.running) return;
+    this.starting = true;
+    this.runError = null;
+    try {
+      await this.api.runBackup();
+    } catch (error) {
+      this.runError = error;
+    } finally {
+      this.starting = false;
+    }
+    await this.overview.load({ quiet: true });
+    if (!this.running) await this.snapshots.load({ quiet: true });
+  };
+
   requestRestore = (snapshot: Snapshot) => {
     this.restoring = snapshot;
-    this.restored = false;
-    this.error = null;
+    this.restored = null;
+    this.restoreError = null;
   };
 
   cancelRestore = () => {
@@ -66,122 +236,578 @@ export default class AppBackupsTemplate extends Component<Signature> {
   confirmRestore = async () => {
     const snapshot = this.restoring;
     if (!snapshot) return;
-    this.busy = true;
+    this.restoreBusy = true;
     try {
       await this.api.restoreSnapshot(this.slug, snapshot.id);
-      this.restored = true;
+      this.restored = snapshot;
     } catch (error) {
-      this.error = error;
+      this.restoreError = error;
     } finally {
-      this.busy = false;
+      this.restoreBusy = false;
       this.restoring = null;
     }
+    // The restore stops and starts the app.
     await this.args.model.reload();
   };
 
+  toggleVolume = (name: string, event: Event) => {
+    this.form.setIncluded(name, inputChecked(event));
+    this.touch();
+  };
+
+  setVolumeName = (event: Event) => {
+    this.volumeName = inputValue(event);
+  };
+
+  /** Takes the typed names out of the backup. */
+  excludeTyped = () => {
+    const names = parseList(this.volumeName);
+    if (names.length === 0) return;
+    this.addedVolumes = [...new Set([...this.addedVolumes, ...names])];
+    for (const name of names) this.form.setIncluded(name, false);
+    this.volumeName = '';
+    this.touch();
+  };
+
+  /** Enter in the name field adds the name instead of saving the form. */
+  excludeOnEnter = (event: KeyboardEvent) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    this.excludeTyped();
+  };
+
+  touch = () => {
+    this.saved = false;
+    this.nothingToSave = false;
+  };
+
+  save = async () => {
+    this.saved = false;
+    this.nothingToSave = false;
+    this.saveError = null;
+    this.errors = this.form.validate();
+    if (Object.keys(this.errors).length > 0) return;
+
+    const patch = this.form.patch(this.app);
+    if (Object.keys(patch).length === 0) {
+      this.nothingToSave = true;
+      return;
+    }
+
+    this.saving = true;
+    try {
+      const app = await this.api.updateApp(this.slug, patch);
+      this.args.model.set(app);
+      this.form = new BackupForm(app);
+      this.saved = true;
+    } catch (error) {
+      this.saveError = error;
+      this.errors = fieldErrors(error);
+    } finally {
+      this.saving = false;
+    }
+  };
+
   <template>
-    <section class="card" aria-labelledby="backups-title">
-      <h3 id="backups-title">バックアップ</h3>
-      <p
-        class="muted"
-      >このアプリのスナップショットです。取得の状況と手動実行は「システム」にあります。volume
-        と DB ダンプの対象は「設定」で変えられます。</p>
+    <AsyncView
+      @data={{this.overview}}
+      @errorTitle="バックアップの状況を取得できませんでした"
+      as |overview|
+    >
+      {{#if overview.configured}}
+        <div class="pane-notices" aria-live="polite">
+          {{#if this.overview.stale}}
+            <Banner @tone="warning" data-test-stale>
+              最新の状態を取得できていません。表示は最後に取得できた内容です。
+            </Banner>
+          {{/if}}
+          {{#if this.health.failedRun}}
+            <Banner
+              @tone="error"
+              @title="直近のバックアップが失敗しました"
+              data-test-backup-failed
+            >
+              <span>{{this.health.failedRun.error}}</span>
+              <span class="banner-detail">
+                {{triggerLabel this.health.failedRun}}実行、開始は
+                <RelativeTime @time={{this.health.failedRun.started_at}} />
+              </span>
+              {{#if this.health.stale}}
+                <span class="banner-detail">
+                  24 時間以上、成功したバックアップがありません。
+                </span>
+              {{/if}}
+            </Banner>
+          {{else if this.health.stale}}
+            <Banner @tone="warning" data-test-backup-warning>
+              {{#if overview.last_success_at}}
+                24 時間以上、バックアップが成功していません。
+              {{else}}
+                まだ一度もバックアップに成功していません。
+              {{/if}}
+            </Banner>
+          {{/if}}
+          {{#if this.restored}}
+            <Banner data-test-restored>
+              volume
+              <strong>{{this.restored.target}}</strong>
+              をリストアしました。アプリは元の状態に戻っています。
+            </Banner>
+          {{/if}}
+          <ErrorMessage @error={{this.restoreError}} />
+          <ErrorMessage @error={{this.runError}} />
+        </div>
 
-      <div aria-live="polite">
-        {{#if this.restored}}
-          <p
-            class="notice notice-ok"
-            data-test-restored
-          >リストアが完了し、アプリを起動しました。</p>
-        {{/if}}
-        <ErrorMessage @error={{this.error}} />
-      </div>
-
-      <AsyncView @data={{this.snapshots}} as |snapshots|>
-        {{#if snapshots.length}}
-          <div class="table-wrap">
-            <table class="table">
-              <thead>
-                <tr>
-                  <th scope="col">取得日時</th>
-                  <th scope="col">種類</th>
-                  <th scope="col">対象</th>
-                  <th scope="col">ID</th>
-                  <th scope="col"><span class="visually-hidden">操作</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {{#each snapshots key="id" as |snapshot|}}
-                  <tr data-test-snapshot={{snapshot.id}}>
-                    <td>{{formatDateTime snapshot.time}}</td>
-                    <td><Badge>{{kindLabel snapshot}}</Badge></td>
-                    <td>{{snapshot.target}}</td>
-                    <td><code>{{snapshot.id}}</code></td>
-                    <td class="table-actions">
-                      {{#if (eq snapshot.kind "volume")}}
-                        <button
-                          type="button"
-                          class="button button-small button-danger"
-                          disabled={{this.busy}}
-                          data-test-snapshot-restore
-                          {{on "click" (fn this.requestRestore snapshot)}}
-                        >リストア</button>
-                      {{else}}
-                        <a
-                          class="button button-small"
-                          href={{this.downloadUrl snapshot}}
-                          download
-                          data-test-snapshot-download
-                        >ダウンロード</a>
-                      {{/if}}
-                    </td>
-                  </tr>
-                {{/each}}
-              </tbody>
-            </table>
+        <section class="pane" aria-labelledby="backup-status-title">
+          <h2 class="visually-hidden" id="backup-status-title">
+            バックアップの状況
+          </h2>
+          <div class="box backup-summary" data-test-backup-summary>
+            <dl class="facts">
+              <div class="fact">
+                <dt>状態</dt>
+                <dd aria-live="polite" data-test-backup-state>
+                  {{#if this.health}}
+                    <StatusIndicator
+                      @kind={{this.health.kind}}
+                      @label={{this.health.label}}
+                      @quiet={{this.health.quiet}}
+                    />
+                  {{/if}}
+                </dd>
+              </div>
+              <div class="fact">
+                <dt>最終成功</dt>
+                <dd data-test-backup-last-success>
+                  {{#if overview.last_success_at}}
+                    <RelativeTime @time={{overview.last_success_at}} />
+                  {{else}}
+                    <span class="fact-none">まだありません</span>
+                  {{/if}}
+                </dd>
+              </div>
+              <div class="fact">
+                <dt>次回の実行</dt>
+                <dd data-test-backup-next-run>
+                  {{#if overview.next_run_at}}
+                    <TimeUntil @time={{overview.next_run_at}} />
+                  {{else}}
+                    <span class="fact-none">—</span>
+                  {{/if}}
+                </dd>
+              </div>
+            </dl>
+            {{#unless this.noSnapshots}}
+              <Button
+                @busy={{overview.running}}
+                @busyLabel="実行中…"
+                @disabled={{this.starting}}
+                data-test-backup-run
+                {{on "click" this.runNow}}
+              >今すぐ実行</Button>
+            {{/unless}}
           </div>
-        {{else}}
-          <p
-            class="muted"
-            data-test-no-snapshots
-          >スナップショットはまだありません。</p>
-        {{/if}}
+          <p class="backup-note">
+            バックアップは、すべてのアプリと基盤の設定をまとめて 1
+            回の実行で取ります。実行の履歴は<LinkTo
+              @route="system"
+            >システム</LinkTo>にあります。
+          </p>
+        </section>
 
-        <details class="help">
-          <summary>DB ダンプを戻すには</summary>
-          <p
-          >ダンプの流し込みは手動です。ダウンロードしたファイルをサーバーに置き、DB
-            のサービスへ標準入力で渡します。PostgreSQL の例:</p>
-          <pre class="code">{{this.restoreExample}}</pre>
-          <p
-            class="muted"
-          >サービス名、ユーザー名、データベース名はアプリに合わせて読み替えてください。</p>
-        </details>
-      </AsyncView>
-    </section>
+        <section class="pane" aria-labelledby="snapshots-title">
+          <div class="pane-header">
+            <h2 class="pane-title" id="snapshots-title">スナップショット</h2>
+          </div>
+
+          <AsyncView
+            @data={{this.snapshots}}
+            @errorTitle="スナップショットの一覧を取得できませんでした"
+          >
+            <:loading>
+              <div
+                class="row-list snapshot-rows"
+                role="status"
+                aria-label="読み込み中"
+                data-test-loading
+              >
+                {{#each SKELETON_ROWS as |n|}}
+                  <div class="row" aria-hidden="true" data-skeleton={{n}}>
+                    <span class="skeleton snapshot-skeleton"></span>
+                  </div>
+                {{/each}}
+              </div>
+            </:loading>
+
+            <:default as |snapshots|>
+              {{#if snapshots.length}}
+                <RowList class="snapshot-rows" @label="スナップショット">
+                  <:header>
+                    <span>取得日時</span>
+                    <span>種類</span>
+                    <span>対象</span>
+                    <span>サイズ</span>
+                    <span>ID</span>
+                  </:header>
+                  <:rows as |Row|>
+                    {{#each snapshots key="id" as |snapshot|}}
+                      <Row data-test-snapshot={{snapshot.id}}>
+                        <div class="snapshot-time">
+                          <span class="cell-label">取得日時</span>
+                          <RelativeTime @time={{snapshot.time}} />
+                        </div>
+                        <div class="snapshot-kind">
+                          <span class="visually-hidden">種類</span>
+                          <Badge data-test-snapshot-kind>
+                            {{kindLabel snapshot}}
+                          </Badge>
+                        </div>
+                        <div class="snapshot-target">
+                          <span class="cell-label">対象</span>
+                          <span>{{snapshot.target}}</span>
+                        </div>
+                        <div class="snapshot-size" data-test-snapshot-size>
+                          <span class="cell-label">サイズ</span>
+                          <span>{{size snapshot}}</span>
+                        </div>
+                        <div class="snapshot-id">
+                          <span class="cell-label">ID</span>
+                          <span class="mono">{{snapshot.id}}</span>
+                        </div>
+                        <div class="snapshot-action">
+                          {{#if (isVolume snapshot)}}
+                            <Button
+                              @size="small"
+                              @disabled={{this.restoreBusy}}
+                              class="button-danger-outline"
+                              aria-label={{restoreLabel snapshot}}
+                              data-test-snapshot-restore
+                              {{on "click" (fn this.requestRestore snapshot)}}
+                            >リストア</Button>
+                          {{else}}
+                            <a
+                              class={{buttonClass "default" "small"}}
+                              href={{this.downloadUrl snapshot}}
+                              download
+                              aria-label={{downloadLabel snapshot}}
+                              data-test-snapshot-download
+                            >ダウンロード</a>
+                          {{/if}}
+                        </div>
+                      </Row>
+                    {{/each}}
+                  </:rows>
+                </RowList>
+
+                <details class="disclosure" data-test-dump-help>
+                  <summary>ダンプを DB に戻すには</summary>
+                  <p>
+                    ダンプの流し込みは手動です。ダウンロードしたファイルをサーバーに置き、DB
+                    のサービスへ標準入力で渡します。PostgreSQL の例:
+                  </p>
+                  <div class="command">
+                    <pre class="code-block">{{this.restoreExample}}</pre>
+                    <CopyButton
+                      @text={{this.restoreExample}}
+                      @label="コマンド"
+                    />
+                  </div>
+                  <p>
+                    サービス名、ユーザー名、データベース名はアプリに合わせて読み替えてください。
+                  </p>
+                </details>
+              {{else}}
+                <div class="box" data-test-no-snapshots>
+                  <EmptyState
+                    @title="スナップショットはまだありません"
+                    @description="定期実行を待つか、いま 1 回実行すると、このアプリの volume とダンプがここに並びます。"
+                  >
+                    <:action>
+                      <Button
+                        @busy={{overview.running}}
+                        @busyLabel="実行中…"
+                        @disabled={{this.starting}}
+                        data-test-backup-run
+                        {{on "click" this.runNow}}
+                      >今すぐ実行</Button>
+                    </:action>
+                  </EmptyState>
+                </div>
+              {{/if}}
+            </:default>
+          </AsyncView>
+        </section>
+
+        <section class="pane" aria-labelledby="backup-settings-title">
+          <div class="pane-header">
+            <h2 class="pane-title" id="backup-settings-title">
+              バックアップの設定
+            </h2>
+          </div>
+
+          {{#if this.form.available}}
+            <form
+              novalidate
+              data-test-backup-form
+              {{on "submit" (preventDefault this.save)}}
+              {{on "input" this.touch}}
+            >
+              <div class="form-group">
+                <div>
+                  <h3 class="form-group-title">対象の volume</h3>
+                  <p class="form-group-description">
+                    named volume は、外したもの以外すべて取ります。稼働中の DB
+                    のデータディレクトリはコピーしても整合しないので、対象から外してダンプフックで取ります。
+                  </p>
+                </div>
+                <div class="form-group-body">
+                  {{#if this.volumes.length}}
+                    <fieldset class="option-group" data-test-volumes>
+                      <legend>バックアップする volume</legend>
+                      {{#each this.volumes key="name" as |volume|}}
+                        <label class="option" data-test-volume={{volume.name}}>
+                          <input
+                            type="checkbox"
+                            checked={{volume.included}}
+                            data-test-volume-include
+                            {{on "change" (fn this.toggleVolume volume.name)}}
+                          />
+                          <span class="option-body">
+                            <span class="option-label">{{volume.name}}</span>
+                            <span class="option-hint">
+                              {{#if volume.included}}
+                                {{#if volume.latest}}
+                                  最終取得
+                                  <RelativeTime @time={{volume.latest}} />
+                                {{else}}
+                                  次回のバックアップから取ります
+                                {{/if}}
+                              {{else}}
+                                バックアップしません
+                              {{/if}}
+                            </span>
+                          </span>
+                        </label>
+                      {{/each}}
+                    </fieldset>
+                  {{else}}
+                    <p class="muted" data-test-no-volumes>
+                      volume
+                      のスナップショットがまだないため、一覧は空です。初回のバックアップのあと、ここに
+                      volume が並びます。
+                    </p>
+                  {{/if}}
+
+                  <FormField
+                    @label="名前を指定して対象から外す"
+                    @hint="Compose ファイルに書いた volume 名。まだ一覧にない volume を、先に外しておけます。"
+                    @error={{this.errors.backup_exclude_volumes}}
+                    data-test-field-group="backup_exclude_volumes"
+                    as |field|
+                  >
+                    <div class="inline-add">
+                      <input
+                        id={{field.id}}
+                        type="text"
+                        spellcheck="false"
+                        autocomplete="off"
+                        placeholder="pgdata"
+                        value={{this.volumeName}}
+                        aria-describedby={{field.describedBy}}
+                        aria-invalid={{field.invalid}}
+                        data-test-exclude-name
+                        {{on "input" this.setVolumeName}}
+                        {{on "keydown" this.excludeOnEnter}}
+                      />
+                      <Button
+                        data-test-exclude-add
+                        {{on "click" this.excludeTyped}}
+                      >対象から外す</Button>
+                    </div>
+                  </FormField>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <div>
+                  <h3 class="form-group-title">ダンプフック</h3>
+                  <p class="form-group-description">
+                    バックアップのたびに、指定したサービスのコンテナでコマンドを実行し、標準出力をダンプとして保存します。使わないときは両方を空にします。
+                  </p>
+                </div>
+                <div class="form-group-body">
+                  <div class="form-grid">
+                    <FormField
+                      @label="サービス"
+                      @error={{this.errors.dump_hook_service}}
+                      data-test-field-group="dump_hook_service"
+                      as |field|
+                    >
+                      <input
+                        id={{field.id}}
+                        type="text"
+                        spellcheck="false"
+                        autocomplete="off"
+                        placeholder="db"
+                        value={{this.form.dumpHookService}}
+                        aria-describedby={{field.describedBy}}
+                        aria-invalid={{field.invalid}}
+                        data-test-field="dump_hook_service"
+                        {{on "input" (setValue this.form "dumpHookService")}}
+                      />
+                    </FormField>
+                    <FormField
+                      class="field-wide"
+                      @label="コマンド"
+                      @error={{this.errors.dump_hook_command}}
+                      data-test-field-group="dump_hook_command"
+                      as |field|
+                    >
+                      <input
+                        id={{field.id}}
+                        type="text"
+                        class="mono"
+                        spellcheck="false"
+                        autocomplete="off"
+                        placeholder="pg_dump -U postgres app"
+                        value={{this.form.dumpHookCommand}}
+                        aria-describedby={{field.describedBy}}
+                        aria-invalid={{field.invalid}}
+                        data-test-field="dump_hook_command"
+                        {{on "input" (setValue this.form "dumpHookCommand")}}
+                      />
+                    </FormField>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <div>
+                  <h3 class="form-group-title">デプロイの前</h3>
+                  <p class="form-group-description">
+                    コンテナを入れ替える直前に、このアプリだけのバックアップを取ります。失敗したらデプロイを中止します。
+                  </p>
+                </div>
+                <div class="form-group-body">
+                  <label class="option">
+                    <input
+                      type="checkbox"
+                      checked={{this.form.backupBeforeDeploy}}
+                      data-test-field="backup_before_deploy"
+                      {{on
+                        "change"
+                        (setChecked this.form "backupBeforeDeploy")
+                      }}
+                    />
+                    <span class="option-body">
+                      <span class="option-label">
+                        デプロイの前にバックアップを取る
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <div aria-live="polite">
+                <ErrorMessage @error={{this.saveError}} />
+                {{#if this.otherErrors.length}}
+                  <ul class="form-problems" data-test-other-errors>
+                    {{#each this.otherErrors as |line|}}
+                      <li>{{line}}</li>
+                    {{/each}}
+                  </ul>
+                {{/if}}
+              </div>
+
+              <div class="form-footer">
+                <Button
+                  @type="submit"
+                  @variant="primary"
+                  @busy={{this.saving}}
+                  @busyLabel="保存中…"
+                  data-test-backup-save
+                >保存</Button>
+                <p class="form-status" aria-live="polite">
+                  {{#if this.saved}}
+                    <span class="form-saved" data-test-backup-saved>
+                      <Icon @name="check" />
+                      保存しました。次回のバックアップから反映されます。
+                    </span>
+                  {{else if this.nothingToSave}}
+                    <span data-test-backup-unchanged>変更はありません。</span>
+                  {{else}}
+                    次回のバックアップから反映されます。
+                  {{/if}}
+                </p>
+              </div>
+            </form>
+          {{else}}
+            <p class="muted" data-test-backup-settings-unavailable>
+              バックアップの設定は、このサーバーではまだ利用できません。
+            </p>
+          {{/if}}
+        </section>
+      {{else}}
+        <div class="box unconfigured" data-test-backups-unconfigured>
+          <p class="empty-state-title">バックアップは設定されていません</p>
+          <p class="empty-state-description">
+            このアプリのデータは、どこにも退避されていません。サーバーに次の 2
+            つを置いて paasd を再起動すると、定期的に取得されます。
+          </p>
+          <ul class="unconfigured-list">
+            <li>
+              <code>/etc/paas/config.toml</code>
+              の
+              <code>[storage]</code>
+              （オブジェクトストレージの接続情報）
+            </li>
+            <li>
+              <code>/etc/paas/restic.key</code>
+              （restic のリポジトリパスワード）
+            </li>
+          </ul>
+          <div class="empty-state-action">
+            <Button
+              @busy={{this.overview.loading}}
+              data-test-backups-recheck
+              {{on "click" this.reload}}
+            >もう一度確認</Button>
+          </div>
+        </div>
+      {{/if}}
+    </AsyncView>
 
     {{#if this.restoring}}
       <ConfirmDialog
         @title="volume をリストアしますか？"
         @confirmLabel="リストアする"
         @danger={{true}}
-        @busy={{this.busy}}
+        @requireText={{this.slug}}
+        @busy={{this.restoreBusy}}
         @onConfirm={{this.confirmRestore}}
         @onCancel={{this.cancelRestore}}
       >
-        <p>volume
+        <p>
+          volume
           <strong>{{this.restoring.target}}</strong>
-          を
-          {{formatDateTime this.restoring.time}}
-          のスナップショット（<code
-          >{{this.restoring.id}}</code>）に戻します。</p>
+          を、{{formatDateTimeJst this.restoring.time}}
+          に取得したスナップショット
+          <code>{{this.restoring.id}}</code>
+          の内容に戻します。
+        </p>
         <ul>
-          <li>リストアの間、アプリ
+          <li>
+            リストアの間、{{if @model.isProduction "本番アプリ" "アプリ"}}
             <strong>{{this.slug}}</strong>
-            は<strong>停止</strong>します。</li>
-          <li>現在の volume の中身は消さずにサーバー上へ<strong
-            >退避</strong>し、7 日間残します。</li>
-          <li>終わるとアプリを起動します。完了までこの画面で待ちます。</li>
+            は<strong>停止</strong>し、アクセスには 503 のページが返ります。
+          </li>
+          <li>
+            いまの volume の中身は消さずにサーバー上へ<strong>退避</strong>し、7
+            日間残します。
+          </li>
+          <li>
+            終わると、稼働中だったアプリは起動します。完了までこの画面で待ちます。
+          </li>
         </ul>
       </ConfirmDialog>
     {{/if}}
