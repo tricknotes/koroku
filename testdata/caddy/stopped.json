@@ -1,0 +1,142 @@
+{
+  "admin": {
+    "listen": "127.0.0.1:2020"
+  },
+  "apps": {
+    "http": {
+      "servers": {
+        "http": {
+          "listen": [
+            ":80"
+          ],
+          "routes": [
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 404
+                }
+              ]
+            }
+          ]
+        },
+        "https": {
+          "listen": [
+            ":443"
+          ],
+          "routes": [
+            {
+              "handle": [
+                {
+                  "flush_interval": -1,
+                  "handler": "reverse_proxy",
+                  "upstreams": [
+                    {
+                      "dial": "127.0.0.1:8080"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "console.dev.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "reverse_proxy",
+                  "stream_close_delay": "5m",
+                  "upstreams": [
+                    {
+                      "dial": "127.0.0.1:20001"
+                    }
+                  ]
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "blog.dev.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "headers": {
+                    "Location": [
+                      "https://www.example.org{http.request.uri}"
+                    ]
+                  },
+                  "status_code": 308
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "shop.dev.example.com"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "body": "<!doctype html>\n<html lang=\"ja\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>停止中</title>\n</head>\n<body style=\"font-family: sans-serif; margin: 20vh auto 0; max-width: 32rem; padding: 0 1rem; color: #333;\">\n<h1 style=\"font-size: 1.25rem;\">このアプリは停止中です</h1>\n<p>しばらくしてから、もう一度アクセスしてください。</p>\n</body>\n</html>\n",
+                  "handler": "static_response",
+                  "headers": {
+                    "Cache-Control": [
+                      "no-store"
+                    ],
+                    "Content-Type": [
+                      "text/html; charset=utf-8"
+                    ]
+                  },
+                  "status_code": 503
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "www.example.org"
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "handle": [
+                {
+                  "handler": "static_response",
+                  "status_code": 404
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "tls": {
+      "automation": {
+        "policies": [
+          {
+            "issuers": [
+              {
+                "module": "acme"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
