@@ -267,6 +267,7 @@ func newBackupService(ctx context.Context, cfg config.Config, configDir string, 
 		System: &backup.System{
 			SnapshotDB: st.VacuumInto,
 			ConfigDir:  configDir,
+			SkipDirs:   []string{cfg.DataDir},
 		},
 		Controller: deps.controller,
 		WorkDir:    filepath.Join(cfg.DataDir, "backup-work"),

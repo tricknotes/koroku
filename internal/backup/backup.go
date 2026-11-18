@@ -118,6 +118,12 @@ type System struct {
 	SnapshotDB func(ctx context.Context, destPath string) error
 	// ConfigDir is copied into the snapshot (/etc/koroku). Empty skips it.
 	ConfigDir string
+	// SkipDirs are directories below ConfigDir that are not configuration
+	// and are left out of the copy: the data directory, when it lives
+	// inside the configuration directory (the local development setup
+	// keeps both under data/dev). Without this the copy would include the
+	// database, every release and the staging directory it is writing to.
+	SkipDirs []string
 }
 
 // Retention is the number of generations kept per snapshot group.
