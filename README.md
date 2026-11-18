@@ -33,24 +33,28 @@ bin/dev
 docker compose up
 ```
 
-リポジトリのルートで実行し、<http://localhost:4200> を開きます。[compose.yaml](compose.yaml) は開発専用で、次の 2 つを起動します。
+リポジトリのルートで実行し、<http://localhost:4200> を開きます。[compose.yaml](compose.yaml) は開発専用で、次のサービスを起動します。
 
 | サービス | 内容 |
 | --- | --- |
 | `web` | Vite の開発サーバー（development モード）。Ember アプリのソースを変えるとホットリロードされる。`/api` と `/auth` は `koroku` に転送する |
 | `koroku` | このチェックアウトからビルドしたコントロールプレーン。ログインなし（`--insecure-no-auth`）で `127.0.0.1:8080` で待ち受ける |
 | `caddy` | リバースプロキシ。`127.0.0.1` の 80 と 443 だけで待ち受け、`koroku` が本番と同じく設定を投入する。証明書は Caddy 内蔵の CA で出す |
+| `storage` | S3 互換のオブジェクトストレージ（[Versity S3 Gateway](https://github.com/versity/versitygw)）。R2 の代わりに、ログの退避と restic のバックアップの置き場になる。`127.0.0.1:9000` で待ち受け、WebUI は <http://127.0.0.1:9001>（アクセスキー `koroku-dev`、シークレット `koroku-dev-secret`）。中身は volume `koroku-dev-s3-data` にファイルとして並ぶ |
+| `storage-setup` | `storage` にバケット `koroku` を作って終わる |
 
 - アプリは手元の Docker にデプロイされ、`https://<slug>.dev.localhost` で開けます（`*.localhost` は OS やブラウザがループバックに解決します）。管理 UI は Vite の <http://localhost:4200> のほか、`pnpm build` 済みなら `https://console.dev.localhost` でも開けます。
 - 証明書の警告を消すには、Caddy の CA のルート証明書をブラウザ側の OS に信頼させます。取り出しは `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt data/dev/caddy-root.crt`。WSL2 で Windows のブラウザから開く場合は、Windows 側で `certutil -user -addstore Root <root.crt のパス>` を実行します（確認ダイアログが出ます）。CA は volume `koroku-dev-caddy-data` にあり、消すと作り直されるので、入れ直しが必要です。
 - 既存の `data/dev/config.toml` は上書きされません。以前に作ったものは `[caddy]` を [dev/serve.sh](dev/serve.sh) が書き出す内容に合わせてください（`enabled = false` にすれば Caddy なしで動き、アプリには `http://127.0.0.1:<ホストポート>` で届きます）。
+- バックアップは本番と同じく日次 03:00 JST に走り、システム画面から手動でも実行できます。restic のパスワードは初回に [dev/serve.sh](dev/serve.sh) が `data/dev/restic.key` に作ります。消すと既存のバックアップが読めなくなるので、やり直すときは volume `koroku-dev-s3-data` も消してください。
+- アプリの volume のバックアップとリストアは、Docker が volume を置くディレクトリを `koroku` のコンテナから直接読み書きします。`docker info -f '{{.DockerRootDir}}'` が `/var/lib/docker` でない環境（snap 版の Docker など）では、リポジトリ直下の `.env`（git の管理外）に `KOROKU_DOCKER_ROOT=<その値>` を書いてください。Docker Desktop では volume が VM の中にあるので、volume のバックアップは失敗します（基盤のバックアップとログの退避は動きます）。
 - GitHub App を設定していないので、アプリ作成では「URL を直接指定」で public リポジトリの URL を入れます。手元のクローンを `file:///...` で指定することもできます（リポジトリのあるディレクトリの配下に限る。コンテナからはそこしか見えません）。
 - Go のコードを変えたら `docker compose restart koroku` でビルドし直します。
-- 設定と状態は `data/dev/`（git の管理外）に置きます。設定ファイル `data/dev/config.toml` は初回に [dev/serve.sh](dev/serve.sh) が書き出し、以後は上書きしません。ログ退避やバックアップを試すときはここに `[storage]` などを足します。`data/dev/` を消すと最初からやり直せます。
+- 設定と状態は `data/dev/`（git の管理外）に置きます。設定ファイル `data/dev/config.toml` は初回に [dev/serve.sh](dev/serve.sh) が書き出し、以後は上書きしません。以前に作ったものには、`dev/serve.sh` が書き出す `[storage]` と `[backup]` を足してください。`data/dev/` を消すと最初からやり直せます。
 - 別のバックエンドに向けるときは `KOROKU_URL=http://127.0.0.1:<port> docker compose up web` とします。
 - `bin/dev` が先にキャッシュ用の volume を作っていると、Compose が「volume already exists but was not created by Docker Compose」と警告しますが、同じキャッシュを共有しているだけで害はありません。
 
-`--insecure-no-auth` はログインを外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。ループバックのホスト名でしか応答せず、`[caddy] enabled = true` のままでは起動を拒否します。`curl` で変更系の API を叩くときは `-H 'Content-Type: application/json'` を付けます。
+`--insecure-no-auth` はログインを外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。ループバックのホスト名（`*.localhost` を含む）でしか応答せず、Caddy が有効で `[caddy] listen_ip` がループバックでないときは起動を拒否します。`curl` で変更系の API を叩くときは `-H 'Content-Type: application/json'` を付けます。
 
 Compose を使わずに動かすこともできます。
 

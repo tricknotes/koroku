@@ -49,7 +49,7 @@ func (m *Manager) backupSystem(ctx context.Context) TargetResult {
 		return res
 	}
 	if dir := m.opts.System.ConfigDir; dir != "" {
-		if err := copyTree(dir, filepath.Join(stage, SystemConfigDir)); err != nil {
+		if err := copyTree(dir, filepath.Join(stage, SystemConfigDir), m.opts.System.SkipDirs); err != nil {
 			res.Err = fmt.Errorf("copy the configuration directory: %w", err)
 			return res
 		}
@@ -75,11 +75,20 @@ func (m *Manager) backupSystem(ctx context.Context) TargetResult {
 
 // copyTree copies the regular files, directories and symbolic links below
 // src to dst, keeping permissions and modification times. Ownership is not
-// kept: the copy belongs to the user koroku runs as.
-func copyTree(src, dst string) error {
+// kept: the copy belongs to the user koroku runs as. The directories in skip
+// are left out, and so is dst itself when it lies below src (otherwise the
+// walk would copy its own output until the path grew too long).
+func copyTree(src, dst string, skip []string) error {
+	skipped := map[string]bool{filepath.Clean(dst): true}
+	for _, dir := range skip {
+		skipped[filepath.Clean(dir)] = true
+	}
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if d.IsDir() && skipped[filepath.Clean(path)] {
+			return fs.SkipDir
 		}
 		rel, err := filepath.Rel(src, path)
 		if err != nil {
