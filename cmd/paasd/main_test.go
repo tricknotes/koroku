@@ -46,7 +46,7 @@ func TestServeAnswersSystemEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := filepath.Join(dir, "data")
 	configPath := filepath.Join(dir, "config.toml")
-	configText := fmt.Sprintf("base_domain = \"dev.example.com\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\nmaster_key_file = %q\n",
+	configText := fmt.Sprintf("base_domain = \"dev.example.com\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\nmaster_key_file = %q\n[caddy]\nenabled = false\n",
 		dataDir, filepath.Join(dir, "etc", "master.key"))
 	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 		t.Fatal(err)

@@ -38,6 +38,8 @@ type Options struct {
 	Refs RefResolver
 	// Router reloads the reverse proxy after routing changes. Optional.
 	Router Router
+	// Domains verifies custom domains. Optional.
+	Domains DomainChecker
 }
 
 // Server routes HTTP requests.
@@ -54,6 +56,7 @@ type Server struct {
 	deployer Deployer
 	refs     RefResolver
 	router   Router
+	domains  DomainChecker
 }
 
 // New builds a Server.
@@ -78,6 +81,7 @@ func New(opts Options) *Server {
 		deployer: opts.Deployer,
 		refs:     opts.Refs,
 		router:   opts.Router,
+		domains:  opts.Domains,
 	}
 }
 
@@ -94,6 +98,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/apps/{slug}/env", s.handlePutEnv)
 	mux.HandleFunc("GET /api/apps/{slug}/deployments", s.handleListDeployments)
 	mux.HandleFunc("POST /api/apps/{slug}/deployments", s.handleCreateDeployment)
+
+	mux.HandleFunc("GET /api/apps/{slug}/domains", s.handleListDomains)
+	mux.HandleFunc("POST /api/apps/{slug}/domains", s.handleAddDomain)
+	mux.HandleFunc("POST /api/apps/{slug}/domains/{id}/verify", s.handleVerifyDomain)
+	mux.HandleFunc("PATCH /api/apps/{slug}/domains/{id}", s.handleUpdateDomain)
+	mux.HandleFunc("DELETE /api/apps/{slug}/domains/{id}", s.handleDeleteDomain)
 
 	mux.HandleFunc("GET /api/deployments/{id}", s.handleGetDeployment)
 	mux.HandleFunc("GET /api/deployments/{id}/logs", s.handleDeploymentLogs)

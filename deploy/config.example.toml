@@ -29,3 +29,17 @@ port_range_start = 20000
 port_range_end = 20999
 # Remove dangling images after each successful deploy.
 prune_images = true
+
+[caddy]
+# paasd generates the whole Caddy configuration from its database and loads
+# it through the admin API. Set enabled = false to run without Caddy (local
+# development).
+enabled = true
+admin_url = "http://127.0.0.1:2019"
+# While testing the setup, use the Let's Encrypt staging directory to stay
+# clear of the production rate limits. Remove the line to get real certificates.
+acme_ca = "https://acme-staging-v02.api.letsencrypt.org/directory"
+# Optional contact address for the ACME account.
+# acme_email = "admin@example.com"
+# One access log per app; the caddy user must be able to write here.
+access_log_dir = "/var/log/caddy/apps"

@@ -16,10 +16,13 @@ import (
 	"time"
 
 	"github.com/tricknotes/koroku/internal/api"
+	"github.com/tricknotes/koroku/internal/caddy"
 	"github.com/tricknotes/koroku/internal/clock"
 	"github.com/tricknotes/koroku/internal/config"
 	"github.com/tricknotes/koroku/internal/deploy"
+	"github.com/tricknotes/koroku/internal/domains"
 	"github.com/tricknotes/koroku/internal/gitrepo"
+	"github.com/tricknotes/koroku/internal/routing"
 	"github.com/tricknotes/koroku/internal/runner"
 	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
@@ -110,7 +113,39 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	clk := clock.System{}
 	prober := system.Host{DataDir: cfg.DataDir, Runner: run}
 	fetcher := gitrepo.Fetcher{Runner: run, AllowFileURLs: cfg.Deploy.AllowFileRepos}
-	engine := deploy.New(deploy.Options{
+
+	// Routing: the whole Caddy configuration is derived from the database
+	// and loaded at every start, so the database stays the only truth.
+	var router *routing.Router
+	if cfg.Caddy.Enabled {
+		router = &routing.Router{
+			Store:  st,
+			Loader: &caddy.Client{AdminURL: cfg.Caddy.AdminURL},
+			Settings: routing.Settings{
+				BaseDomain:      cfg.BaseDomain,
+				ConsoleHost:     cfg.ConsoleHost,
+				ConsoleUpstream: cfg.Listen,
+				AdminListen:     cfg.Caddy.AdminListen(),
+				ACMECA:          cfg.Caddy.ACMECA,
+				ACMEEmail:       cfg.Caddy.ACMEEmail,
+				AccessLogDir:    cfg.Caddy.AccessLogDir,
+			},
+			Logger: logger,
+		}
+		if err := router.ForceSync(ctx); err != nil {
+			// Caddy may still be starting; the periodic sync retries.
+			logger.Error("loading the Caddy configuration failed; will retry", "error", err)
+		}
+	} else {
+		logger.Warn("caddy.enabled is false: routes are not configured")
+	}
+	checker := &routing.DomainChecker{
+		Store:    st,
+		Verifier: domains.Verifier{PublicIP: net.ParseIP(cfg.PublicIP)},
+		Clock:    clk,
+		Logger:   logger,
+	}
+	deployOpts := deploy.Options{
 		Store:            st,
 		Runner:           run,
 		Clock:            clk,
@@ -122,19 +157,30 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		DefaultMemory:    cfg.Deploy.DefaultMemoryLimit,
 		DiskLimitPercent: cfg.Deploy.DiskUsageLimitPercent,
 		PruneImages:      cfg.Deploy.PruneImages,
-	})
-	srv := api.New(api.Options{
-		Config:   cfg,
-		Store:    st,
-		System:   prober,
-		Web:      web.Dist(),
-		Logger:   logger,
-		Version:  version,
-		Clock:    clk,
-		Box:      box,
-		Deployer: engine,
-		Refs:     deploy.GitRefResolver{Fetcher: fetcher},
-	})
+	}
+	apiOpts := api.Options{
+		Config:  cfg,
+		Store:   st,
+		System:  prober,
+		Web:     web.Dist(),
+		Logger:  logger,
+		Version: version,
+		Clock:   clk,
+		Box:     box,
+		Refs:    deploy.GitRefResolver{Fetcher: fetcher},
+		Domains: checker,
+	}
+	// Assign the interfaces only when there is a router: a nil *Router
+	// stored in an interface would not compare equal to nil.
+	if router != nil {
+		checker.Router = router
+		deployOpts.Router = router
+		apiOpts.Router = router
+	}
+	engine := deploy.New(deployOpts)
+	apiOpts.Deployer = engine
+	srv := api.New(apiOpts)
+	go checker.Run(ctx, routing.RecheckInterval)
 
 	// The worker stops when ctx is canceled; a running deployment is then
 	// recorded as interrupted.

@@ -166,7 +166,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 }
 ```
 
-`status` は `pending` / `active`。`records` は利用者が設定する DNS レコードの候補（サブドメインなら CNAME、apex なら A）。`last_error` は直近の検証で分かった理由（英語の短文）。
+`status` は `pending` / `active`。`records` は利用者が設定する DNS レコードの候補（サブドメインなら CNAME、apex なら A）。`last_error` は直近の検証で分かった理由（英語の短文）。 `config.toml` に `public_ip` がなければ `records` に A レコードは含まれない。
 
 | メソッドとパス | 内容 |
 | --- | --- |

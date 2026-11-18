@@ -70,6 +70,10 @@ func TestParseRejectsInvalid(t *testing.T) {
 		"bad disk limit":      {"base_domain = \"example.com\"\n[deploy]\ndisk_usage_limit_percent = 0", "disk_usage_limit_percent"},
 		"bad port range":      {"base_domain = \"example.com\"\n[deploy]\nport_range_start = 30000", "port range"},
 		"syntax error":        {`base_domain = `, "parse config"},
+		"remote caddy admin":  {"base_domain = \"example.com\"\n[caddy]\nadmin_url = \"http://203.0.113.5:2019\"", "loopback"},
+		"https caddy admin":   {"base_domain = \"example.com\"\n[caddy]\nadmin_url = \"https://127.0.0.1:2019\"", "admin_url"},
+		"relative log dir":    {"base_domain = \"example.com\"\n[caddy]\naccess_log_dir = \"logs\"", "access_log_dir"},
+		"plain http acme":     {"base_domain = \"example.com\"\n[caddy]\nacme_ca = \"http://ca.example.com/dir\"", "acme_ca"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -81,6 +85,25 @@ func TestParseRejectsInvalid(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestCaddyDefaultsAndOptOut(t *testing.T) {
+	cfg, err := Parse(`base_domain = "dev.example.com"`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !cfg.Caddy.Enabled || cfg.Caddy.AdminURL != "http://127.0.0.1:2019" || cfg.Caddy.AdminListen() != "127.0.0.1:2019" {
+		t.Errorf("Caddy defaults = %+v", cfg.Caddy)
+	}
+	// With Caddy disabled its other settings are not validated.
+	off, err := Parse("base_domain = \"dev.example.com\"\n[caddy]\nenabled = false\nadmin_url = \"\"")
+	if err != nil || off.Caddy.Enabled {
+		t.Errorf("disabled Caddy: %+v, %v", off.Caddy, err)
+	}
+	local, err := Parse("base_domain = \"dev.example.com\"\n[caddy]\nadmin_url = \"http://localhost:2019\"")
+	if err != nil || local.Caddy.AdminListen() != "localhost:2019" {
+		t.Errorf("localhost admin: %+v, %v", local.Caddy, err)
 	}
 }
 
