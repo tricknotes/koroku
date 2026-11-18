@@ -26,6 +26,12 @@ export interface FakeCall {
 
 type Handler = (call: FakeCall) => unknown;
 
+/** A request the fake API has received and not answered yet. */
+export interface HeldRequest {
+  release(response?: unknown): void;
+  refuse(status: number, code: string, details?: Record<string, unknown>): void;
+}
+
 /**
  * Stands in for the `api` service. Only the transport is replaced, so the
  * real service still builds every path, query and body. Endpoints without a
@@ -34,6 +40,8 @@ type Handler = (call: FakeCall) => unknown;
 export class FakeApi extends ApiService {
   calls: FakeCall[] = [];
   private handlers = new Map<string, Handler>();
+  /** Ends the requests that are still held, one function per `hold()`. */
+  private abandon: (() => void)[] = [];
 
   /** Registers a response (or a function producing one) for an endpoint. */
   on(method: string, path: string, response: unknown): this {
@@ -54,6 +62,54 @@ export class FakeApi extends ApiService {
     return this.on(method, path, () => {
       throw apiError(status, code, details);
     });
+  }
+
+  /**
+   * Keeps the answer of an endpoint back, so a test can look at the screen
+   * while the request runs. The request stays open until `release` (the
+   * response) or `refuse` (an API error) is called. A test that stops
+   * before either (a failed step) does not leave it hanging: what is still
+   * held when the test ends is refused, so the next test starts settled.
+   */
+  hold(method: string, path: string): HeldRequest {
+    let settle: (answer: () => unknown) => void = () => {};
+    const answered = new Promise<() => unknown>((resolve) => {
+      settle = resolve;
+    });
+    const refuse = (
+      status: number,
+      code: string,
+      details: Record<string, unknown> = {},
+    ) =>
+      settle(() => {
+        throw apiError(status, code, details);
+      });
+    this.on(method, path, () => answered.then((answer) => answer()));
+    // Settling twice does nothing, so this is harmless after a release.
+    this.abandon.push(() => refuse(0, 'network_error'));
+    return {
+      release: (response?: unknown) => settle(() => response),
+      refuse,
+    };
+  }
+
+  willDestroy(): void {
+    super.willDestroy();
+    for (const end of this.abandon) end();
+  }
+
+  /**
+   * Makes every read that has a handler fail (the backend is in trouble),
+   * except the given paths.
+   */
+  failReads(status: number, code: string, except: string[] = []): this {
+    for (const key of [...this.handlers.keys()]) {
+      const [method = '', path = ''] = key.split(' ');
+      if (method === 'GET' && !except.includes(path)) {
+        this.fail(method, path, status, code);
+      }
+    }
+    return this;
   }
 
   callsTo(method: string, path: string): FakeCall[] {

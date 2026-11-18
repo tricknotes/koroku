@@ -427,11 +427,26 @@ module('Acceptance | app list', function (hooks) {
     assert.dom('[data-test-app="blog"]').exists();
   });
 
-  test('an unknown app shows a not-found message', async function (assert) {
-    fakes.api.fail('GET', '/api/apps/ghost', 404, 'app_not_found');
+  test('a server that cannot be reached is told apart from one that failed', async function (assert) {
+    fakes.api.fail('GET', '/api/apps', 0, 'network_error');
+    fakes.api.fail('GET', '/api/system', 0, 'network_error');
+    fakes.api.fail('GET', '/api/backups', 0, 'network_error');
 
-    await visit('/apps/ghost');
+    await visit('/');
 
-    assert.dom('[data-test-app-error]').includesText('アプリが見つかりません');
+    assert
+      .dom('[data-test-error]')
+      .exists({ count: 1 }, 'one message, not one per request')
+      .includesText('アプリの一覧を取得できませんでした')
+      .includesText('サーバーに接続できませんでした。');
+    assert.dom('[data-test-host="disk"] dd').hasText('—');
+    assert.dom('[data-test-empty]').doesNotExist('unknown is not "no apps"');
+    assert.dom('[data-test-attention]').doesNotExist();
+
+    fakes.api.on('GET', '/api/apps', { apps: [makeApp()] });
+    await click('[data-test-error] button');
+
+    assert.dom('[data-test-app="blog"]').exists();
+    assert.dom('[data-test-error]').doesNotExist();
   });
 });

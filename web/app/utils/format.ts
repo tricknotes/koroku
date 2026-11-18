@@ -5,18 +5,10 @@ const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-function pad(value: number): string {
-  return String(value).padStart(2, '0');
-}
-
 function parse(iso: string | null | undefined): Date | null {
   if (!iso) return null;
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function formatDate(date: Date): string {
-  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())}`;
 }
 
 const JST = new Intl.DateTimeFormat('ja-JP', {
@@ -29,6 +21,19 @@ const JST = new Intl.DateTimeFormat('ja-JP', {
   hourCycle: 'h23',
 });
 
+/** The fields of a time on the JST wall clock, each zero-padded. */
+function jstParts(date: Date): Record<string, string> {
+  const parts: Record<string, string> = {};
+  for (const part of JST.formatToParts(date)) parts[part.type] = part.value;
+  return parts;
+}
+
+/** `2026/11/18` (JST). */
+function formatDate(date: Date): string {
+  const parts = jstParts(date);
+  return `${parts['year']}/${parts['month']}/${parts['day']}`;
+}
+
 /**
  * `2026/11/18 12:34 JST`, whatever the browser's time zone: the absolute
  * time behind a relative one. The host runs on JST, and so do its schedules.
@@ -36,12 +41,14 @@ const JST = new Intl.DateTimeFormat('ja-JP', {
 export function formatDateTimeJst(iso: string | null | undefined): string {
   const date = parse(iso);
   if (!date) return '';
-  const parts: Record<string, string> = {};
-  for (const part of JST.formatToParts(date)) parts[part.type] = part.value;
-  return `${parts['year']}/${parts['month']}/${parts['day']} ${parts['hour']}:${parts['minute']} JST`;
+  const parts = jstParts(date);
+  return `${formatDate(date)} ${parts['hour']}:${parts['minute']} JST`;
 }
 
-/** `3 分前` style distance from `now`; falls back to the date after 30 days. */
+/**
+ * `3 分前` style distance from `now`; falls back to the date (JST, like the
+ * absolute time shown next to it) after 30 days.
+ */
 export function relativeTime(
   iso: string | null | undefined,
   now: number = Date.now(),
@@ -83,7 +90,13 @@ export function formatBytes(bytes: number | null | undefined): string {
   }
   let value = bytes;
   let unit = 0;
-  while (value >= 1024 && unit < UNITS.length - 1) {
+  const last = UNITS.length - 1;
+  while (value >= 1024 && unit < last) {
+    value /= 1024;
+    unit += 1;
+  }
+  // Just below the next unit the rounded figure would read "1024.0 KB".
+  if (unit > 0 && unit < last && Number(value.toFixed(1)) >= 1024) {
     value /= 1024;
     unit += 1;
   }
