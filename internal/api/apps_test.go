@@ -692,3 +692,70 @@ func TestDeploymentLogStreamStopsWhenClientLeaves(t *testing.T) {
 		t.Fatal("the handler kept running after the client disconnected")
 	}
 }
+
+func TestAppShowsCurrentAndLatestDeployment(t *testing.T) {
+	srv := newTestServer(t, nil)
+	h := srv.Handler()
+	createApp(t, h, "blog")
+	ctx := context.Background()
+	now := time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC)
+
+	good := decode[deploymentJSON](t, request(t, h, http.MethodPost, "/api/apps/blog/deployments", `{"sha": "`+testSHA+`"}`))
+	if err := srv.store.StartDeployment(ctx, good.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.store.FinishDeployment(ctx, good.ID, store.StatusSucceeded, "", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	bad := decode[deploymentJSON](t, request(t, h, http.MethodPost, "/api/apps/blog/deployments", `{"sha": "`+strings.Repeat("b", 40)+`"}`))
+	_ = srv.store.StartDeployment(ctx, bad.ID, now.Add(2*time.Minute))
+	_ = srv.store.FinishDeployment(ctx, bad.ID, store.StatusFailed, "health check did not pass", now.Add(3*time.Minute))
+
+	// The running release stays the good one; the latest attempt is the failed one.
+	app := decode[appJSON](t, request(t, h, http.MethodGet, "/api/apps/blog", ""))
+	if app.CurrentDeployment == nil || app.CurrentDeployment.ID != good.ID || app.CurrentDeployment.Status != "succeeded" ||
+		app.CurrentDeployment.FinishedAt == nil {
+		t.Errorf("current_deployment = %+v", app.CurrentDeployment)
+	}
+	if app.LatestDeployment == nil || app.LatestDeployment.ID != bad.ID || app.LatestDeployment.Status != "failed" ||
+		app.LatestDeployment.Error != "health check did not pass" {
+		t.Errorf("latest_deployment = %+v", app.LatestDeployment)
+	}
+	list := decode[struct{ Apps []appJSON }](t, request(t, h, http.MethodGet, "/api/apps", ""))
+	if list.Apps[0].CurrentDeployment == nil || list.Apps[0].LatestDeployment.ID != bad.ID {
+		t.Errorf("list entry = %+v", list.Apps[0])
+	}
+}
+
+func TestDeploymentLogStreamIgnoresBadLastEventID(t *testing.T) {
+	old := logPollInterval
+	logPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { logPollInterval = old })
+
+	srv := newTestServer(t, nil)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	createApp(t, srv.Handler(), "blog")
+	d := decode[deploymentJSON](t, request(t, srv.Handler(), http.MethodPost, "/api/apps/blog/deployments", `{"sha": "`+testSHA+`"}`))
+	if err := os.WriteFile(srv.deployer.LogPath("blog", d.ID), []byte("first\nsecond\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"abc", "-5", "999999"} {
+		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/deployments/%d/logs", ts.URL, d.ID), nil)
+		req.Header.Set("Last-Event-ID", id)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Last-Event-ID %q: status %d", id, resp.StatusCode)
+		}
+		if id != "999999" {
+			// Garbage means "from the start".
+			if ev := readEvent(t, bufio.NewReader(resp.Body)); ev.Data != "first" {
+				t.Errorf("Last-Event-ID %q: first event = %+v", id, ev)
+			}
+		}
+		_ = resp.Body.Close()
+	}
+}

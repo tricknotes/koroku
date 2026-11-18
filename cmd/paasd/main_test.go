@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -177,5 +178,63 @@ func TestGitHubPrivateKeyMustBePrivate(t *testing.T) {
 	err = serve(context.Background(), []string{"--config", configPath}, io.Discard, nil)
 	if err == nil || !strings.Contains(err.Error(), "github private key") || strings.Contains(err.Error(), "not a key") {
 		t.Fatalf("a malformed key must be rejected without echoing it: %v", err)
+	}
+}
+
+// TestServeStartsWhileCaddyIsUnreachable: Caddy may come up after paasd (or
+// be restarting). paasd must start anyway and report the failed load.
+func TestServeStartsWhileCaddyIsUnreachable(t *testing.T) {
+	// A port nothing listens on.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadAddr := l.Addr().String()
+	_ = l.Close()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	configText := fmt.Sprintf("base_domain = \"dev.example.com\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\nmaster_key_file = %q\n[caddy]\nadmin_url = \"http://%s\"\n",
+		filepath.Join(dir, "data"), filepath.Join(dir, "master.key"), deadAddr)
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- serve(ctx, []string{"--config", configPath, "--insecure-no-auth"}, io.Discard, ready)
+	}()
+	var addr string
+	select {
+	case addr = <-ready:
+	case err := <-done:
+		t.Fatalf("serve exited although only Caddy is down: %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("serve did not become ready")
+	}
+	resp, err := http.Get("http://" + addr + "/api/system")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Caddy struct {
+			Enabled      bool    `json:"enabled"`
+			LastLoadedAt *string `json:"last_loaded_at"`
+			LastError    string  `json:"last_error"`
+		} `json:"caddy"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if !body.Caddy.Enabled || body.Caddy.LastLoadedAt != nil || body.Caddy.LastError == "" {
+		t.Errorf("caddy status = %+v, want an error and no successful load", body.Caddy)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("serve did not shut down")
 	}
 }

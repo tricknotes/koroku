@@ -134,9 +134,20 @@ func (c *appController) Start(ctx context.Context, app backup.App) error {
 	return c.engine.Start(ctx, current)
 }
 
+// backupManager is the part of *backup.Manager the service uses.
+type backupManager interface {
+	State() backup.State
+	Start(ctx context.Context, trigger backup.Trigger) (*backup.Run, error)
+	BackupApp(ctx context.Context, app backup.App) (backup.RunResult, error)
+	Snapshots(ctx context.Context, app backup.App) ([]backup.Snapshot, error)
+	RestoreVolume(ctx context.Context, app backup.App, snapshotID string) (backup.RestoreResult, error)
+	LookupDump(ctx context.Context, app backup.App, snapshotID string) (backup.DumpFile, error)
+	WriteDump(ctx context.Context, file backup.DumpFile, w io.Writer) error
+}
+
 // backupService adapts the backup manager to the API and the deploy engine.
 type backupService struct {
-	manager   *backup.Manager
+	manager   backupManager
 	scheduler *backup.Scheduler
 	clock     clock.Clock
 	// serverCtx outlives single requests: a manual run keeps going after

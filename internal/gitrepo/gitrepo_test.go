@@ -242,3 +242,44 @@ func TestCheckoutDetectsWrongCommit(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestResolveRefPassesTokenThroughEnvironmentOnly(t *testing.T) {
+	const token = "ghs_exampleInstallationToken123"
+	sha := strings.Repeat("c", 40)
+	fake := &runner.Fake{Handler: func(context.Context, runner.Cmd) (string, error) {
+		return sha + "\trefs/heads/main\n", nil
+	}}
+	got, err := Fetcher{Runner: fake}.ResolveRef(context.Background(), "https://github.com/octo/private.git", "main", &Auth{Token: token})
+	if err != nil || got != sha {
+		t.Fatalf("ResolveRef = %q, %v", got, err)
+	}
+	call := fake.Calls()[0]
+	for _, arg := range call.Args {
+		if strings.Contains(arg, token) {
+			t.Errorf("token in argv: %v", call.Args)
+		}
+	}
+	if !strings.Contains(strings.Join(call.Env, "\n"), "http.extraheader") {
+		t.Error("the token was not passed through the environment")
+	}
+	// Without a token no auth header is configured at all.
+	fake.Reset()
+	_, _ = Fetcher{Runner: fake}.ResolveRef(context.Background(), "https://github.com/octo/public.git", "main", nil)
+	if strings.Contains(strings.Join(fake.Calls()[0].Env, "\n"), "http.extraheader") {
+		t.Error("an auth header was configured without a token")
+	}
+}
+
+func TestResolveRefFailureDoesNotLeakRemoteOutput(t *testing.T) {
+	fake := &runner.Fake{Handler: func(_ context.Context, cmd runner.Cmd) (string, error) {
+		_, _ = cmd.Stderr.Write([]byte("fatal: Authentication failed for 'https://x-access-token:ghs_secret@github.com/octo/private.git'\n"))
+		return "", &runner.ExitError{Cmd: "git", Code: 128}
+	}}
+	_, err := Fetcher{Runner: fake}.ResolveRef(context.Background(), "https://github.com/octo/private.git", "main", &Auth{Token: "ghs_secret"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if strings.Contains(err.Error(), "ghs_secret") || strings.Contains(err.Error(), "Authentication failed") {
+		t.Errorf("git's stderr leaked into the error: %v", err)
+	}
+}

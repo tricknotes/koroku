@@ -1194,3 +1194,153 @@ func TestDeployLogStepHeadlines(t *testing.T) {
 		t.Errorf("log:\n%s", h.log("blog", second.ID))
 	}
 }
+
+// TestRollbackImpossibleWhenPreviousReleaseIsGone: without the previous
+// release's files there is nothing to bring back. The deployment still ends
+// as failed, says so in its log, and does not run a second `up`.
+func TestRollbackImpossibleWhenPreviousReleaseIsGone(t *testing.T) {
+	cases := map[string]func(h *harness, prev int64){
+		"release directory removed": func(h *harness, prev int64) {
+			_ = os.RemoveAll(h.engine.ReleaseDir("blog", prev))
+		},
+		"release metadata removed": func(h *harness, prev int64) {
+			_ = os.Remove(filepath.Join(h.engine.stateDir("blog", prev), "release.json"))
+		},
+		"environment snapshot removed": func(h *harness, prev int64) {
+			_ = os.Remove(filepath.Join(h.engine.stateDir("blog", prev), "env"))
+		},
+	}
+	for name, breakIt := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, nil)
+			h.createApp("blog")
+			h.start()
+			first := h.deploy("blog", shaA)
+			breakIt(h, first.ID)
+
+			h.runner.Reset()
+			h.health.mu.Lock()
+			h.health.err = errors.New("health check did not pass")
+			h.health.mu.Unlock()
+			second := h.deploy("blog", shaB)
+			if second.Status != store.StatusFailed {
+				t.Fatalf("deployment = %+v", second)
+			}
+			log := h.log("blog", second.ID)
+			if !strings.Contains(log, "Rollback is not possible") {
+				t.Errorf("log:\n%s", log)
+			}
+			ups := 0
+			for _, sub := range h.dockerCalls() {
+				if sub == "up" {
+					ups++
+				}
+			}
+			if ups != 1 {
+				t.Errorf("up ran %d times, want only the failed start", ups)
+			}
+			app, _ := h.store.GetApp(context.Background(), "blog")
+			if *app.CurrentDeploymentID != first.ID {
+				t.Errorf("current deployment = %d", *app.CurrentDeploymentID)
+			}
+		})
+	}
+}
+
+func TestFailedRollbackIsReported(t *testing.T) {
+	h := newHarness(t, nil)
+	h.createApp("blog")
+	h.start()
+	h.deploy("blog", shaA)
+
+	h.mu.Lock()
+	h.onCompose = func(_ context.Context, sub string, _ runner.Cmd) error {
+		if sub == "up" {
+			return &runner.ExitError{Cmd: "docker", Code: 1}
+		}
+		return nil
+	}
+	h.mu.Unlock()
+	second := h.deploy("blog", shaB)
+	if second.Status != store.StatusFailed {
+		t.Fatalf("deployment = %+v", second)
+	}
+	if log := h.log("blog", second.ID); !strings.Contains(log, "Rollback failed") {
+		t.Errorf("log:\n%s", log)
+	}
+}
+
+// TestUndecryptableEnvFailsBeforeAnythingRuns: with the wrong master key the
+// stored values cannot be read. The deployment must fail early instead of
+// starting the app without its environment.
+func TestUndecryptableEnvFailsBeforeAnythingRuns(t *testing.T) {
+	h := newHarness(t, nil)
+	app := h.createApp("blog")
+	other, err := secrets.NewBox([]byte(strings.Repeat("x", secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, _ := other.Seal([]byte("s3cr3t-password"), secrets.EnvVarContext(app.ID, "DATABASE_URL"))
+	if err := h.store.ReplaceEnvVars(context.Background(), app.ID, []store.EnvVar{{Key: "DATABASE_URL", ValueEncrypted: sealed}}); err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+
+	d := h.deploy("blog", shaA)
+	if d.Status != store.StatusFailed || !strings.Contains(d.Error, "DATABASE_URL") || !strings.Contains(d.Error, "master key") {
+		t.Fatalf("deployment = %+v", d)
+	}
+	if calls := h.dockerCalls(); len(calls) != 0 {
+		t.Errorf("docker ran although the environment is unreadable: %v", calls)
+	}
+	if _, err := os.Stat(h.engine.EnvFile("blog")); !os.IsNotExist(err) {
+		t.Error("an env file was written")
+	}
+}
+
+func TestDeployWithoutRepositoryFails(t *testing.T) {
+	h := newHarness(t, nil)
+	app, err := h.store.CreateApp(context.Background(), store.App{
+		Slug: "norepo", DefaultBranch: "main", WebService: "web", WebPort: 3000, HealthcheckPath: "/",
+	}, 20000, 20999, h.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+	d, err := h.engine.Enqueue(context.Background(), app, "main", shaA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := h.wait(d.ID)
+	if got.Status != store.StatusFailed || !strings.Contains(got.Error, "no repository configured") {
+		t.Fatalf("deployment = %+v", got)
+	}
+	if calls := h.runner.Calls(); len(calls) != 0 {
+		t.Errorf("nothing may run: %v", calls)
+	}
+}
+
+// TestRedeployOfTheSameCommitGetsItsOwnRelease: rolling back means deploying
+// an older commit again, so the same SHA must be deployable repeatedly.
+func TestRedeployOfTheSameCommitGetsItsOwnRelease(t *testing.T) {
+	h := newHarness(t, nil)
+	h.createApp("blog")
+	h.start()
+	first := h.deploy("blog", shaA)
+	h.deploy("blog", shaB)
+	again := h.deploy("blog", shaA)
+	if again.Status != store.StatusSucceeded || again.ID == first.ID {
+		t.Fatalf("redeploy = %+v", again)
+	}
+	if h.engine.ReleaseDir("blog", again.ID) == h.engine.ReleaseDir("blog", first.ID) {
+		t.Error("the redeploy reused the old release directory")
+	}
+	override, err := os.ReadFile(filepath.Join(h.engine.ReleaseDir("blog", again.ID), compose.OverrideFileName))
+	if err != nil || !strings.Contains(string(override), fmt.Sprintf(`image: "paas-blog-web:r%d"`, again.ID)) {
+		t.Errorf("override of the redeploy: %v\n%s", err, override)
+	}
+	app, _ := h.store.GetApp(context.Background(), "blog")
+	if *app.CurrentDeploymentID != again.ID {
+		t.Errorf("current deployment = %d", *app.CurrentDeploymentID)
+	}
+}
