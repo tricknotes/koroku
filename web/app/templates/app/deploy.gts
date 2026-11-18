@@ -378,7 +378,7 @@ export default class AppDeployTemplate extends Component<Signature> {
       </form>
 
       <div aria-live="polite">
-        <ErrorMessage @error={{this.error}} />
+        <ErrorMessage @error={{this.error}} @showDetails={{true}} />
       </div>
     </section>
 

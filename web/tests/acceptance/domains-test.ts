@@ -193,4 +193,22 @@ module('Acceptance | domains', function (hooks) {
       .includesText('サーバーでエラーが発生しました');
     assert.dom('[data-test-domain="www.example.org"]').exists();
   });
+
+  test('the reason of a refused change is shown', async function (assert) {
+    domains = [makeDomain({ status: 'active' })];
+    fakes.api.fail(
+      'PATCH',
+      '/api/apps/blog/domains/3',
+      422,
+      'validation_failed',
+      { is_primary: 'only an active domain can be the primary domain' },
+    );
+
+    await visit('/apps/blog/domains');
+    await click('[data-test-domain-primary-toggle]');
+
+    assert
+      .dom('[data-test-error-detail]')
+      .hasText('is_primary: only an active domain can be the primary domain');
+  });
 });

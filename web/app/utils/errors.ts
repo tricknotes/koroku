@@ -41,8 +41,9 @@ const MESSAGES: Record<string, string> = {
   internal:
     'サーバーでエラーが発生しました。詳細はサーバーのログを確認してください。',
   not_configured: 'この機能は設定されていません。',
+  prune_failed: 'prune に失敗しました。',
   repo_not_found:
-    'リポジトリが見つかりません。GitHub App がインストールされているか確認してください。',
+    'リポジトリ、ブランチまたはファイルが見つかりません。GitHub App がインストールされているか確認してください。',
   github_rate_limited:
     'GitHub API の利用上限に達しました。しばらくしてからやり直してください。',
   github_error: 'GitHub との通信に失敗しました。',

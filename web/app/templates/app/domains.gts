@@ -142,7 +142,7 @@ export default class AppDomainsTemplate extends Component<Signature> {
         </dl>
 
         <div aria-live="polite">
-          <ErrorMessage @error={{this.error}} />
+          <ErrorMessage @error={{this.error}} @showDetails={{true}} />
         </div>
 
         {{#if list.domains.length}}

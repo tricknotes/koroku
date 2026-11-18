@@ -12,7 +12,7 @@ import RelativeTime from 'paas-console/components/relative-time';
 import type ApiService from 'paas-console/services/api';
 import type PollerService from 'paas-console/services/poller';
 import { preventDefault, setChecked } from 'paas-console/utils/dom';
-import { unavailability } from 'paas-console/utils/errors';
+import { ApiError, unavailability } from 'paas-console/utils/errors';
 import {
   formatBytes,
   formatDateTime,
@@ -111,6 +111,11 @@ export default class SystemTemplate extends Component {
       await this.system.load({ quiet: true });
     } catch (error) {
       this.pruneError = error;
+      // `500 prune_failed` carries what the command printed until it failed.
+      if (error instanceof ApiError) {
+        const output = error.details['output'];
+        if (typeof output === 'string') this.pruneOutput = output;
+      }
     } finally {
       this.pruning = false;
     }

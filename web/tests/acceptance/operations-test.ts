@@ -505,6 +505,28 @@ module('Acceptance | overview, logs, backups, system', function (hooks) {
         .exists({ count: 2 }, 'and so is prune once it turned out missing');
     });
 
+    test('a failed prune shows what the command printed', async function (assert) {
+      fakes.api
+        .on('GET', '/api/system', {
+          version: 'v0.1.0',
+          base_domain: 'dev.example.com',
+          disk: null,
+          memory: null,
+          docker_version: '29.8.0',
+        })
+        .fail('POST', '/api/system/prune', 500, 'prune_failed', {
+          output: 'Cannot connect to the Docker daemon',
+        });
+
+      await visit('/system');
+      await click('[data-test-prune-submit]');
+
+      assert.dom('[data-test-error]').hasText('prune に失敗しました。');
+      assert
+        .dom('[data-test-prune-output]')
+        .hasText('Cannot connect to the Docker daemon');
+    });
+
     test('backups that are not configured say so', async function (assert) {
       fakes.api
         .on('GET', '/api/system', {

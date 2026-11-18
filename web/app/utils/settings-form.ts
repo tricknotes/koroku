@@ -114,6 +114,17 @@ export default class SettingsForm {
         errors['service_memory_limits'] = memoryHint;
       }
     }
+    // The dump hook is a pair: both set or both empty.
+    const hookService = this.dumpHookService.trim();
+    const hookCommand = this.dumpHookCommand.trim();
+    if (this.hasBackupFields && hookCommand && !hookService) {
+      errors['dump_hook_service'] =
+        'コマンドを指定するときはサービスも入力してください。';
+    }
+    if (this.hasBackupFields && hookService && !hookCommand) {
+      errors['dump_hook_command'] =
+        'サービスを指定するときはコマンドも入力してください。';
+    }
     return errors;
   }
 

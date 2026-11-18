@@ -362,6 +362,11 @@ code {
   background: var(--warn-bg);
 }
 
+.alert-detail {
+  flex-basis: 100%;
+  font-size: 0.875rem;
+}
+
 .notice-ok {
   border-left-color: var(--ok);
   background: var(--ok-bg);

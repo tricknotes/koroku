@@ -92,6 +92,20 @@ module('Unit | Utility | settings-form', function () {
     assert.deepEqual(form.validate(), {});
   });
 
+  test('validate wants the dump hook as a pair', function (assert) {
+    const form = new SettingsForm(makeApp({ backup_before_deploy: false }));
+
+    form.dumpHookService = 'db';
+    assert.deepEqual(Object.keys(form.validate()), ['dump_hook_command']);
+
+    form.dumpHookService = '';
+    form.dumpHookCommand = 'pg_dump -U postgres app';
+    assert.deepEqual(Object.keys(form.validate()), ['dump_hook_service']);
+
+    form.dumpHookService = 'db';
+    assert.deepEqual(form.validate(), {});
+  });
+
   test('isValidMemoryLimit and parseList', function (assert) {
     assert.true(isValidMemoryLimit(''));
     assert.true(isValidMemoryLimit('512m'));
