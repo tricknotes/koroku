@@ -40,6 +40,8 @@ export interface HeldRequest {
 export class FakeApi extends ApiService {
   calls: FakeCall[] = [];
   private handlers = new Map<string, Handler>();
+  /** Ends the requests that are still held, one function per `hold()`. */
+  private abandon: (() => void)[] = [];
 
   /** Registers a response (or a function producing one) for an endpoint. */
   on(method: string, path: string, response: unknown): this {
@@ -65,21 +67,35 @@ export class FakeApi extends ApiService {
   /**
    * Keeps the answer of an endpoint back, so a test can look at the screen
    * while the request runs. The request stays open until `release` (the
-   * response) or `refuse` (an API error) is called.
+   * response) or `refuse` (an API error) is called. A test that stops
+   * before either (a failed step) does not leave it hanging: what is still
+   * held when the test ends is refused, so the next test starts settled.
    */
   hold(method: string, path: string): HeldRequest {
     let settle: (answer: () => unknown) => void = () => {};
     const answered = new Promise<() => unknown>((resolve) => {
       settle = resolve;
     });
+    const refuse = (
+      status: number,
+      code: string,
+      details: Record<string, unknown> = {},
+    ) =>
+      settle(() => {
+        throw apiError(status, code, details);
+      });
     this.on(method, path, () => answered.then((answer) => answer()));
+    // Settling twice does nothing, so this is harmless after a release.
+    this.abandon.push(() => refuse(0, 'network_error'));
     return {
       release: (response?: unknown) => settle(() => response),
-      refuse: (status, code, details = {}) =>
-        settle(() => {
-          throw apiError(status, code, details);
-        }),
+      refuse,
     };
+  }
+
+  willDestroy(): void {
+    super.willDestroy();
+    for (const end of this.abandon) end();
   }
 
   /**
