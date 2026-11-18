@@ -7,5 +7,6 @@ waived:
   [host_network] service "agent": network_mode: host is not allowed
   [host_pid] service "agent": pid: host is not allowed
   [bind_outside_release] service "web": bind mount of /var/lib/paas/apps/risky/releases/7/../../../other/env is outside the repository checkout
+  [bind_writable] service "web": bind mount of /var/lib/paas/apps/risky/releases/7/config must be read-only (add :ro; keep data in a named volume)
   [docker_socket] service "web": mounting the Docker socket is not allowed
   [privileged] service "web": privileged: true is not allowed

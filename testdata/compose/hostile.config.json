@@ -1,0 +1,198 @@
+{
+  "name": "paas-evil",
+  "services": {
+    "web": {
+      "image": "example/app:1",
+      "ports": [
+        {
+          "mode": "ingress",
+          "host_ip": "127.0.0.1",
+          "target": 3000,
+          "published": "20001",
+          "protocol": "tcp"
+        }
+      ],
+      "env_file": [
+        {
+          "path": "/var/lib/paas/apps/evil/env"
+        },
+        {
+          "path": "/var/lib/paas/apps/evil/releases/9/config/app.env"
+        },
+        {
+          "path": "/var/lib/paas/apps/blog/env"
+        }
+      ],
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "hostroot",
+          "target": "/host",
+          "volume": {}
+        },
+        {
+          "type": "volume",
+          "source": "other",
+          "target": "/other",
+          "volume": {}
+        },
+        {
+          "type": "volume",
+          "source": "renamed",
+          "target": "/renamed",
+          "volume": {}
+        },
+        {
+          "type": "volume",
+          "source": "data",
+          "target": "/data",
+          "volume": {}
+        },
+        {
+          "type": "bind",
+          "source": "/var/lib/paas/apps/evil/releases/9",
+          "target": "/app",
+          "bind": {}
+        },
+        {
+          "type": "bind",
+          "source": "/var/lib/paas/apps/evil/releases/9/config",
+          "target": "/config",
+          "read_only": true,
+          "bind": {}
+        }
+      ],
+      "volumes_from": [
+        "container:paas-blog-db-1",
+        "worker"
+      ],
+      "cap_add": [
+        "NET_BIND_SERVICE",
+        "SYS_ADMIN",
+        "cap_sys_ptrace"
+      ],
+      "devices": [
+        {
+          "source": "/dev/kmsg",
+          "target": "/dev/kmsg",
+          "permissions": "rwm"
+        }
+      ],
+      "security_opt": [
+        "seccomp:unconfined",
+        "no-new-privileges:true"
+      ],
+      "ipc": "host",
+      "uts": "host",
+      "userns_mode": "host",
+      "cgroup": "host",
+      "secrets": [
+        {
+          "source": "hostsecret",
+          "target": "/run/secrets/hostsecret"
+        }
+      ],
+      "networks": {
+        "default": null,
+        "foreign": null,
+        "named": null
+      },
+      "runtime": "sysbox-runc",
+      "oom_kill_disable": true,
+      "memswap_limit": "-1"
+    },
+    "worker": {
+      "image": "example/app:1",
+      "network_mode": "service:web",
+      "ipc": "service:web",
+      "device_cgroup_rules": [
+        "c 1:3 mr"
+      ]
+    },
+    "sibling": {
+      "image": "example/app:1",
+      "network_mode": "container:paas-blog-web-1",
+      "pid": "container:paas-blog-web-1"
+    },
+    "builder": {
+      "build": {
+        "context": "/etc",
+        "dockerfile": "/etc/hostname",
+        "additional_contexts": {
+          "extra": "/var/lib/paas",
+          "remote": "https://example.com/context.tar.gz",
+          "image": "docker-image://alpine"
+        },
+        "network": "host",
+        "privileged": true
+      }
+    },
+    "good-builder": {
+      "build": {
+        "context": "/var/lib/paas/apps/evil/releases/9/services/api",
+        "dockerfile": "Dockerfile"
+      }
+    }
+  },
+  "volumes": {
+    "hostroot": {
+      "name": "paas-evil_hostroot",
+      "driver": "local",
+      "driver_opts": {
+        "device": "/",
+        "o": "bind",
+        "type": "none"
+      }
+    },
+    "other": {
+      "name": "paas-blog_pgdata",
+      "external": true
+    },
+    "renamed": {
+      "name": "paas-blog_storage"
+    },
+    "data": {
+      "name": "paas-evil_data"
+    },
+    "nfs": {
+      "name": "paas-evil_nfs",
+      "driver": "local",
+      "driver_opts": {
+        "type": "nfs",
+        "o": "addr=203.0.113.20",
+        "device": ":/export"
+      }
+    }
+  },
+  "networks": {
+    "default": {
+      "name": "paas-evil_default",
+      "ipam": {}
+    },
+    "foreign": {
+      "name": "paas-blog_default",
+      "ipam": {},
+      "external": true
+    },
+    "named": {
+      "name": "shared-net",
+      "ipam": {}
+    }
+  },
+  "secrets": {
+    "hostsecret": {
+      "name": "paas-evil_hostsecret",
+      "file": "/etc/shadow"
+    },
+    "ok": {
+      "name": "paas-evil_ok",
+      "file": "/var/lib/paas/apps/evil/releases/9/secrets/token"
+    }
+  },
+  "configs": {
+    "hostconfig": {
+      "name": "paas-evil_hostconfig",
+      "file": "/etc/passwd"
+    }
+  }
+}

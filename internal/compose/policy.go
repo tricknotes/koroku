@@ -18,7 +18,32 @@ const (
 	RuleDockerSocket      = "docker_socket"
 	RuleBindOutside       = "bind_outside_release"
 	RulePortExposure      = "port_exposure"
+
+	// Rules beyond the original list: other ways a Compose file reaches the
+	// host or another app.
+	RuleVolumeHostPath   = "volume_host_path"
+	RuleForeignVolume    = "foreign_volume"
+	RuleForeignNetwork   = "foreign_network"
+	RuleHostNamespace    = "host_namespace"
+	RuleForeignNamespace = "foreign_namespace"
+	RuleCapability       = "capability"
+	RuleDevice           = "device"
+	RuleSecurityOpt      = "security_opt"
+	RuleFileOutside      = "file_outside_release"
+	RuleBindWritable     = "bind_writable"
+	RuleRuntime          = "runtime"
+	RuleMemoryGuard      = "memory_guard"
 )
+
+// allowedCapabilities are Docker's default capabilities plus two that
+// ordinary services ask for (memory locking, scheduling priority). Anything
+// else changes what the container can do to the host.
+var allowedCapabilities = map[string]bool{
+	"AUDIT_WRITE": true, "CHOWN": true, "DAC_OVERRIDE": true, "FOWNER": true, "FSETID": true,
+	"KILL": true, "MKNOD": true, "NET_BIND_SERVICE": true, "NET_RAW": true, "SETFCAP": true,
+	"SETGID": true, "SETPCAP": true, "SETUID": true, "SYS_CHROOT": true,
+	"IPC_LOCK": true, "SYS_NICE": true,
+}
 
 // Violation is one policy finding.
 type Violation struct {
@@ -40,6 +65,12 @@ func (v Violation) String() string {
 type PolicyParams struct {
 	// ReleaseDir is the checkout; bind mounts must stay inside it.
 	ReleaseDir string
+	// ProjectName prefixes the volumes and networks that belong to the app.
+	// Empty skips the ownership rules.
+	ProjectName string
+	// EnvFile is the platform's env file, the one env_file outside the
+	// checkout that is expected.
+	EnvFile    string
 	WebService string
 	WebPort    int
 	HostPort   int
@@ -110,6 +141,13 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 			case !isInside(releaseDir, source):
 				add(name, RuleBindOutside,
 					fmt.Sprintf("bind mount of %s is outside the repository checkout", m.Source), true)
+			case !m.ReadOnly:
+				// A container that can write to the checkout can replace
+				// the source of another bind mount with a symlink to any
+				// host path (Docker follows it at the next start), and can
+				// rewrite the Compose files paasd starts the app from.
+				add(name, RuleBindWritable,
+					fmt.Sprintf("bind mount of %s must be read-only (add :ro; keep data in a named volume)", m.Source), true)
 			}
 		}
 		for _, port := range svc.Ports {
@@ -121,11 +159,118 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 		}
 	}
 
+	for _, name := range p.ServiceNames() {
+		svc := p.Services[name]
+		for field, value := range map[string]string{"ipc": svc.Ipc, "uts": svc.Uts, "userns_mode": svc.UsernsMode, "cgroup": svc.Cgroup} {
+			if value == "host" {
+				add(name, RuleHostNamespace, fmt.Sprintf("%s: host is not allowed", field), true)
+			}
+		}
+		// Joining a container by name crosses the project boundary; sharing
+		// with a service of the same project (service:<name>) does not.
+		for field, value := range map[string]string{"network_mode": svc.NetworkMode, "pid": svc.Pid, "ipc": svc.Ipc} {
+			if strings.HasPrefix(value, "container:") {
+				add(name, RuleForeignNamespace, fmt.Sprintf("%s: %s joins a container outside the app", field, value), true)
+			}
+		}
+		for _, from := range svc.VolumesFrom {
+			if strings.HasPrefix(from, "container:") {
+				add(name, RuleForeignNamespace, fmt.Sprintf("volumes_from: %s takes volumes of a container outside the app", from), true)
+			}
+		}
+		for _, capability := range svc.CapAdd {
+			normalized := strings.TrimPrefix(strings.ToUpper(capability), "CAP_")
+			if !allowedCapabilities[normalized] {
+				add(name, RuleCapability, fmt.Sprintf("cap_add: %s is not allowed", capability), true)
+			}
+		}
+		if svc.Runtime != "" && svc.Runtime != "runc" {
+			add(name, RuleRuntime, fmt.Sprintf("runtime: %s is not allowed", svc.Runtime), true)
+		}
+		if svc.OomKillDisable {
+			add(name, RuleMemoryGuard, "oom_kill_disable defeats the memory limit", true)
+		}
+		if svc.MemswapLimit == "-1" {
+			add(name, RuleMemoryGuard, "memswap_limit: -1 allows unlimited swap beyond the memory limit", true)
+		}
+		if svc.Build != nil {
+			// A build with host networking can talk to services that only
+			// listen on the host's loopback, such as the proxy's admin API.
+			if svc.Build.Network == "host" {
+				add(name, RuleHostNetwork, "build.network: host is not allowed", true)
+			}
+			if svc.Build.Privileged {
+				add(name, RulePrivileged, "build.privileged: true is not allowed", true)
+			}
+		}
+		if len(svc.Devices) > 0 || len(svc.DeviceCgroupRules) > 0 {
+			add(name, RuleDevice, "host devices are not allowed", true)
+		}
+		for _, opt := range svc.SecurityOpt {
+			lowered := strings.ToLower(opt)
+			if strings.Contains(lowered, "unconfined") || strings.Contains(lowered, "disable") || strings.Contains(lowered, "systempaths") {
+				add(name, RuleSecurityOpt, fmt.Sprintf("security_opt: %s weakens the container sandbox", opt), true)
+			}
+		}
+		for _, envFile := range svc.EnvFiles {
+			if envFile.Path == params.EnvFile && params.EnvFile != "" {
+				continue
+			}
+			if !isInside(releaseDir, resolvePath(envFile.Path)) {
+				add(name, RuleFileOutside, fmt.Sprintf("env_file %s is outside the repository checkout", envFile.Path), true)
+			}
+		}
+		if svc.Build != nil {
+			paths := map[string]string{"build context": svc.Build.Context}
+			if filepath.IsAbs(svc.Build.Dockerfile) {
+				paths["Dockerfile"] = svc.Build.Dockerfile
+			}
+			for key, value := range svc.Build.AdditionalContexts {
+				paths["additional context "+key] = value
+			}
+			for what, path := range paths {
+				// Contexts may also be URLs or image references; only local
+				// paths can pull host files into an image.
+				if path == "" || !filepath.IsAbs(path) {
+					continue
+				}
+				if !isInside(releaseDir, resolvePath(path)) {
+					add(name, RuleFileOutside, fmt.Sprintf("%s %s is outside the repository checkout", what, path), true)
+				}
+			}
+		}
+	}
+
+	for name, volume := range p.Volumes {
+		if device := volume.DriverOpts["device"]; strings.HasPrefix(device, "/") {
+			add("", RuleVolumeHostPath, fmt.Sprintf("volume %q mounts the host path %s through driver options", name, device), true)
+		}
+		if params.ProjectName != "" && (volume.External || !strings.HasPrefix(volume.Name, params.ProjectName+"_")) {
+			add("", RuleForeignVolume, fmt.Sprintf("volume %q refers to %q, which does not belong to this app", name, volume.Name), true)
+		}
+	}
+	for name, network := range p.Networks {
+		if params.ProjectName != "" && (network.External || !strings.HasPrefix(network.Name, params.ProjectName+"_")) {
+			add("", RuleForeignNetwork, fmt.Sprintf("network %q refers to %q, which does not belong to this app", name, network.Name), true)
+		}
+	}
+	for kind, objects := range map[string]map[string]FileObject{"secret": p.Secrets, "config": p.Configs} {
+		for name, object := range objects {
+			if object.File != "" && !isInside(releaseDir, resolvePath(object.File)) {
+				add("", RuleFileOutside, fmt.Sprintf("%s %q reads %s, which is outside the repository checkout", kind, name, object.File), true)
+			}
+		}
+	}
+
+	// Map iteration above is unordered; the report must not be.
 	sort.SliceStable(found, func(i, j int) bool {
 		if found[i].Service != found[j].Service {
 			return found[i].Service < found[j].Service
 		}
-		return found[i].Rule < found[j].Rule
+		if found[i].Rule != found[j].Rule {
+			return found[i].Rule < found[j].Rule
+		}
+		return found[i].Message < found[j].Message
 	})
 	var result PolicyResult
 	for _, v := range found {
@@ -163,14 +308,29 @@ func isDockerSocket(path string) bool {
 	return dockerSocketPattern.MatchString(filepath.Clean(path))
 }
 
-// resolvePath cleans a path and follows symlinks where the path exists, so
-// that a symlink inside the checkout cannot smuggle a host directory in.
+// resolvePath cleans a path and follows symlinks, so that a symlink inside
+// the checkout cannot smuggle a host directory in. When the path does not
+// exist yet (Docker creates missing bind sources), the deepest existing
+// ancestor is resolved and the rest appended: `link/new` with link -> / is
+// /new, not a path inside the checkout.
 func resolvePath(path string) string {
 	clean := filepath.Clean(path)
-	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
-		return resolved
+	if !filepath.IsAbs(clean) {
+		return clean
 	}
-	return clean
+	rest := ""
+	current := clean
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return clean
+		}
+		rest = filepath.Join(filepath.Base(current), rest)
+		current = parent
+	}
 }
 
 func isInside(dir, path string) bool {

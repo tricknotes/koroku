@@ -20,29 +20,86 @@ const OverrideFileName = "paas.override.yaml"
 // inspects. The full output contains resolved environment values and must
 // never be logged.
 type Project struct {
-	Name     string             `json:"name"`
-	Services map[string]Service `json:"services"`
-	Volumes  map[string]Volume  `json:"volumes"`
+	Name     string                `json:"name"`
+	Services map[string]Service    `json:"services"`
+	Volumes  map[string]Volume     `json:"volumes"`
+	Networks map[string]Network    `json:"networks"`
+	Secrets  map[string]FileObject `json:"secrets"`
+	Configs  map[string]FileObject `json:"configs"`
 }
 
 // Service is one Compose service in normalized form.
 type Service struct {
-	Image       string          `json:"image"`
-	Build       json.RawMessage `json:"build"`
-	Ports       []Port          `json:"ports"`
-	Privileged  bool            `json:"privileged"`
-	NetworkMode string          `json:"network_mode"`
-	Pid         string          `json:"pid"`
-	Volumes     []Mount         `json:"volumes"`
-	Restart     string          `json:"restart"`
-	MemLimit    string          `json:"mem_limit"`
-	Deploy      *Deploy         `json:"deploy"`
+	Image       string   `json:"image"`
+	Build       *Build   `json:"build"`
+	Ports       []Port   `json:"ports"`
+	Privileged  bool     `json:"privileged"`
+	NetworkMode string   `json:"network_mode"`
+	Pid         string   `json:"pid"`
+	Ipc         string   `json:"ipc"`
+	Uts         string   `json:"uts"`
+	UsernsMode  string   `json:"userns_mode"`
+	Cgroup      string   `json:"cgroup"`
+	Volumes     []Mount  `json:"volumes"`
+	VolumesFrom []string `json:"volumes_from"`
+	Restart     string   `json:"restart"`
+	MemLimit    string   `json:"mem_limit"`
+	Deploy      *Deploy  `json:"deploy"`
+
+	CapAdd            []string          `json:"cap_add"`
+	Devices           []json.RawMessage `json:"devices"`
+	DeviceCgroupRules []string          `json:"device_cgroup_rules"`
+	SecurityOpt       []string          `json:"security_opt"`
+	// EnvFiles is only populated when the configuration was produced with
+	// --no-env-resolution; otherwise Compose folds the files' content into
+	// the environment and the paths are gone.
+	EnvFiles []EnvFile `json:"env_file"`
+
+	Runtime        string `json:"runtime"`
+	OomKillDisable bool   `json:"oom_kill_disable"`
+	MemswapLimit   string `json:"memswap_limit"`
+}
+
+// Build is the build section of a service.
+type Build struct {
+	Context            string            `json:"context"`
+	Dockerfile         string            `json:"dockerfile"`
+	AdditionalContexts map[string]string `json:"additional_contexts"`
+	Network            string            `json:"network"`
+	Privileged         bool              `json:"privileged"`
+}
+
+// EnvFile is one env_file entry of a service.
+type EnvFile struct {
+	Path string `json:"path"`
+}
+
+// UnmarshalJSON accepts both the object form and a bare path.
+func (e *EnvFile) UnmarshalJSON(data []byte) error {
+	var path string
+	if err := json.Unmarshal(data, &path); err == nil {
+		e.Path = path
+		return nil
+	}
+	type plain EnvFile
+	return json.Unmarshal(data, (*plain)(e))
+}
+
+// Network is a top-level network.
+type Network struct {
+	Name     string `json:"name"`
+	External bool   `json:"external"`
+}
+
+// FileObject is a top-level secret or config.
+type FileObject struct {
+	Name     string `json:"name"`
+	File     string `json:"file"`
+	External bool   `json:"external"`
 }
 
 // HasBuild reports whether the service is built from source.
-func (s Service) HasBuild() bool {
-	return len(s.Build) > 0 && string(s.Build) != "null"
-}
+func (s Service) HasBuild() bool { return s.Build != nil }
 
 // DeployMemoryLimit returns deploy.resources.limits.memory, or "".
 func (s Service) DeployMemoryLimit() string {
@@ -62,9 +119,10 @@ type Port struct {
 
 // Mount is one volume entry of a service.
 type Mount struct {
-	Type   string `json:"type"`
-	Source string `json:"source"`
-	Target string `json:"target"`
+	Type     string `json:"type"`
+	Source   string `json:"source"`
+	Target   string `json:"target"`
+	ReadOnly bool   `json:"read_only"`
 }
 
 // Deploy mirrors the part of the deploy section that carries resource limits.
@@ -84,8 +142,9 @@ type Limits struct {
 
 // Volume is a top-level named volume.
 type Volume struct {
-	Name     string `json:"name"`
-	External bool   `json:"external"`
+	Name       string            `json:"name"`
+	External   bool              `json:"external"`
+	DriverOpts map[string]string `json:"driver_opts"`
 }
 
 // ParseProject decodes the output of `docker compose config --format json`.
@@ -148,6 +207,10 @@ func DetectFile(releaseDir, configured string) (string, error) {
 		}
 		if !isRegularFile(filepath.Join(releaseDir, clean)) {
 			return "", fmt.Errorf("compose file %q was not found in the repository", configured)
+		}
+		// A directory on the way may be a symlink out of the checkout.
+		if !isInside(resolvePath(releaseDir), resolvePath(filepath.Join(releaseDir, clean))) {
+			return "", fmt.Errorf("compose file %q must be a path inside the repository", configured)
 		}
 		return clean, nil
 	}

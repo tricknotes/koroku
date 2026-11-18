@@ -5,6 +5,10 @@ services:
     env_file:
       - "/var/lib/paas/apps/blog/env"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: "512m"
   "migrate":
     image: "paas-blog-migrate:r42"
     ports: !reset []
