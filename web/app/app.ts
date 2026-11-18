@@ -14,10 +14,15 @@ import './styles/shell.css';
 import './styles/app-list.css';
 import './styles/app-detail.css';
 import './styles/deploy.css';
+import './styles/panes.css';
 import './styles/tab-section.css';
 import './styles/overview.css';
 import './styles/env.css';
 import './styles/domains.css';
+import './styles/backups.css';
+import './styles/settings.css';
+import './styles/system.css';
+import './styles/new-app.css';
 import './styles/legacy.css';
 
 if (macroCondition(isDevelopingApp())) {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tricknotes/koroku/internal/deploy"
+	"github.com/tricknotes/koroku/internal/system"
 )
 
 func newOpsServer(t *testing.T) (http.Handler, *fakeDeployer) {
@@ -184,9 +185,11 @@ func TestBackupSettingsOnApp(t *testing.T) {
 func TestSystemStatusAndDockerUsage(t *testing.T) {
 	loaded := time.Date(2026, 11, 18, 3, 0, 2, 0, time.UTC)
 	archived := time.Date(2026, 11, 18, 3, 10, 5, 0, time.UTC)
-	logs := &fakeLogs{status: LogArchiveStatus{Configured: true, LastSuccessAt: &archived}}
+	nextArchive := time.Date(2026, 11, 18, 7, 10, 0, 0, time.UTC)
+	logs := &fakeLogs{status: LogArchiveStatus{Configured: true, LastSuccessAt: &archived, NextRunAt: &nextArchive}}
 	srv := newTestServer(t, func(o *Options) {
 		o.Logs = logs
+		o.System = fakeProber{info: system.Info{Swap: &system.Swap{TotalBytes: 2 << 30, UsedBytes: 100 << 20}}}
 		o.RouteStatus = func() RouteStatus {
 			return RouteStatus{LastLoadedAt: &loaded, LastError: "load caddy config: connection refused"}
 		}
@@ -196,6 +199,7 @@ func TestSystemStatusAndDockerUsage(t *testing.T) {
 
 	body := decode[struct {
 		DiskLimitPercent int              `json:"disk_limit_percent"`
+		Swap             *system.Swap     `json:"swap"`
 		LogArchive       LogArchiveStatus `json:"log_archive"`
 		Caddy            struct {
 			Enabled      bool       `json:"enabled"`
@@ -209,6 +213,12 @@ func TestSystemStatusAndDockerUsage(t *testing.T) {
 	if !body.LogArchive.Configured || body.LogArchive.LastSuccessAt == nil || !body.LogArchive.LastSuccessAt.Equal(archived) {
 		t.Errorf("log_archive = %+v", body.LogArchive)
 	}
+	if body.LogArchive.NextRunAt == nil || !body.LogArchive.NextRunAt.Equal(nextArchive) {
+		t.Errorf("log_archive.next_run_at = %v", body.LogArchive.NextRunAt)
+	}
+	if body.Swap == nil || body.Swap.TotalBytes != 2<<30 || body.Swap.UsedBytes != 100<<20 {
+		t.Errorf("swap = %+v", body.Swap)
+	}
 	if !body.Caddy.Enabled || body.Caddy.LastLoadedAt == nil || !body.Caddy.LastLoadedAt.Equal(loaded) ||
 		!strings.Contains(body.Caddy.LastError, "connection refused") {
 		t.Errorf("caddy = %+v", body.Caddy)
@@ -217,7 +227,8 @@ func TestSystemStatusAndDockerUsage(t *testing.T) {
 	// Without the optional parts the fields are present and empty.
 	bare := request(t, newTestServer(t, func(o *Options) { o.Config.Caddy.Enabled = false }).Handler(), http.MethodGet, "/api/system", "")
 	for _, want := range []string{
-		`"log_archive":{"configured":false,"last_success_at":null,"last_error":""}`,
+		`"log_archive":{"configured":false,"last_success_at":null,"last_error":"","next_run_at":null}`,
+		`"swap":null`,
 		`"caddy":{"enabled":false,"last_loaded_at":null,"last_error":""}`,
 	} {
 		if !strings.Contains(bare.Body.String(), want) {

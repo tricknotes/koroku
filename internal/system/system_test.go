@@ -64,6 +64,30 @@ func TestInfoToleratesFailures(t *testing.T) {
 	}
 }
 
+func TestInfoSwap(t *testing.T) {
+	cases := []struct {
+		name    string
+		meminfo string
+		want    *Swap
+	}{
+		{"in use", meminfo + "SwapTotal:       2097148 kB\nSwapFree:        1994748 kB\n", &Swap{TotalBytes: 2097148 * 1024, UsedBytes: 102400 * 1024}},
+		{"unused", meminfo + "SwapTotal:       2097148 kB\nSwapFree:        2097148 kB\n", &Swap{TotalBytes: 2097148 * 1024}},
+		{"no swap on the host", meminfo + "SwapTotal:             0 kB\nSwapFree:              0 kB\n", nil},
+		{"not reported", meminfo, nil},
+		{"only the total", meminfo + "SwapTotal:       2097148 kB\n", nil},
+	}
+	for _, tc := range cases {
+		h := Host{DataDir: t.TempDir(), MeminfoPath: writeMeminfo(t, tc.meminfo)}
+		got := h.Info(context.Background()).Swap
+		switch {
+		case tc.want == nil && got != nil:
+			t.Errorf("%s: Swap = %+v, want nil", tc.name, got)
+		case tc.want != nil && (got == nil || *got != *tc.want):
+			t.Errorf("%s: Swap = %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestDiskUsageError(t *testing.T) {
 	if _, err := (Host{DataDir: "/nonexistent/paas"}).DiskUsage(); err == nil {
 		t.Error("expected an error for a missing directory")

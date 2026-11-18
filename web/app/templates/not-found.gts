@@ -1,11 +1,25 @@
 import { LinkTo } from '@ember/routing';
 import { pageTitle } from 'ember-page-title';
+import { buttonClass } from 'paas-console/components/button';
+import EmptyState from 'paas-console/components/empty-state';
 
 <template>
   {{pageTitle "ページが見つかりません"}}
 
-  <section class="card" data-test-not-found>
-    <h2>ページが見つかりません</h2>
-    <p><LinkTo @route="index">アプリ一覧に戻る</LinkTo></p>
-  </section>
+  <div class="box" data-test-not-found>
+    <EmptyState
+      @title="ページが見つかりません"
+      @description="URL が間違っているか、アプリが削除された可能性があります。"
+    >
+      <:action>
+        <LinkTo
+          @route="index"
+          class={{buttonClass "default"}}
+          data-test-back-to-list
+        >
+          アプリ一覧へ
+        </LinkTo>
+      </:action>
+    </EmptyState>
+  </div>
 </template>

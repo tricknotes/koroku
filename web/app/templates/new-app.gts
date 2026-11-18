@@ -7,8 +7,11 @@ import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import type RouterService from '@ember/routing/router-service';
 import { pageTitle } from 'ember-page-title';
+import Banner from 'paas-console/components/banner';
+import Button, { buttonClass } from 'paas-console/components/button';
 import ErrorMessage from 'paas-console/components/error-message';
-import FeatureUnavailable from 'paas-console/components/feature-unavailable';
+import FormField from 'paas-console/components/form-field';
+import Icon from 'paas-console/components/icon';
 import type ApiService from 'paas-console/services/api';
 import { inputValue, preventDefault, setValue } from 'paas-console/utils/dom';
 import { errorMessage, fieldErrors } from 'paas-console/utils/errors';
@@ -239,314 +242,370 @@ export default class NewAppTemplate extends Component {
     {{pageTitle "アプリを作成"}}
 
     <div class="page-header">
-      <h2>アプリを作成</h2>
-      <LinkTo @route="index" class="button">一覧に戻る</LinkTo>
+      <h1>アプリを作成</h1>
     </div>
 
     <form
-      class="card form"
+      class="new-app"
       novalidate
       data-test-new-app-form
       {{on "submit" (preventDefault this.submit)}}
     >
-      <fieldset class="form-section">
-        <legend>1. リポジトリ</legend>
-
-        {{#if this.manualRepo}}
-          {{#if this.repos.unavailable}}
-            <FeatureUnavailable @kind={{this.repos.unavailable}} />
-          {{/if}}
-          <label class="field" for="new-repo-url">
-            <span class="field-label">公開リポジトリの URL</span>
-            <input
-              id="new-repo-url"
-              type="url"
-              placeholder="https://github.com/octo/blog"
-              value={{this.repoUrl}}
-              aria-invalid={{if this.errors.repo_url "true"}}
-              data-test-field="repo_url"
-              {{on "input" this.setRepoUrl}}
-            />
-            <span class="field-hint">GitHub 連携が使えないため、公開リポジトリの
-              URL を直接指定します。</span>
-            {{#if this.errors.repo_url}}
-              <span class="field-error" data-test-field-error="repo_url">
-                {{this.errors.repo_url}}
-              </span>
-            {{/if}}
-          </label>
-        {{else if this.repos.error}}
-          <div class="alert alert-danger" role="alert" data-test-error>
-            <span>{{this.repos.errorMessage}}</span>
-            <button
-              type="button"
-              class="button button-small"
-              {{on "click" this.repos.reload}}
-            >再読み込み</button>
-          </div>
-        {{else if this.repos.loaded}}
-          <label class="field" for="new-repo">
-            <span class="field-label">リポジトリ</span>
-            <select
-              id="new-repo"
-              aria-invalid={{if this.errors.repo_full_name "true"}}
-              data-test-field="repo_full_name"
-              {{on "change" this.selectRepo}}
+      <div class="form-group">
+        <div>
+          <h2 class="form-group-title">1. リポジトリ</h2>
+          <p class="form-group-description">
+            デプロイするコードのあるリポジトリです。同じリポジトリから複数のアプリ（本番とステージングなど）を作れます。
+          </p>
+        </div>
+        <div class="form-group-body">
+          {{#if this.manualRepo}}
+            <Banner data-test-unavailable={{this.repos.unavailable}}>
+              GitHub
+              連携がこのサーバーに設定されていないため、リポジトリを一覧から選べません。公開リポジトリの
+              URL を直接指定します。
+            </Banner>
+            <FormField
+              @label="公開リポジトリの URL"
+              @error={{this.errors.repo_url}}
+              data-test-field-group="repo_url"
+              as |field|
             >
-              <option value="" selected={{eq this.repoFullName ""}}>
-                選択してください
-              </option>
-              {{#each this.repos.value key="id" as |repo|}}
-                <option
-                  value={{repo.full_name}}
-                  selected={{eq repo.full_name this.repoFullName}}
-                >{{repo.full_name}}{{if repo.private "（private）"}}</option>
-              {{/each}}
-            </select>
-            <span class="field-hint">GitHub App
-              をインストールしたリポジトリが並びます。同じリポジトリから複数のアプリ（本番とステージングなど）を作れます。</span>
-            {{#if this.errors.repo_full_name}}
-              <span class="field-error" data-test-field-error="repo_full_name">
-                {{this.errors.repo_full_name}}
-              </span>
-            {{/if}}
-          </label>
-        {{else}}
-          <p class="muted" aria-live="polite">リポジトリを読み込み中…</p>
-        {{/if}}
-
-        {{#if this.repoChosen}}
-          <label class="field" for="new-branch">
-            <span class="field-label">既定のブランチ</span>
-            <input
-              id="new-branch"
-              type="text"
-              value={{this.defaultBranch}}
-              placeholder="main"
-              spellcheck="false"
-              aria-invalid={{if this.errors.default_branch "true"}}
-              data-test-field="default_branch"
-              {{on "input" (setValue this "defaultBranch")}}
-            />
-            {{#if this.errors.default_branch}}
-              <span class="field-error" data-test-field-error="default_branch">
-                {{this.errors.default_branch}}
-              </span>
-            {{/if}}
-          </label>
-        {{/if}}
-      </fieldset>
-
-      {{#if this.repoChosen}}
-        <fieldset class="form-section">
-          <legend>2. Compose と公開サービス</legend>
-
-          <div aria-live="polite">
-            {{#if this.compose.loading}}
-              <p class="muted" data-test-compose-loading>Compose
-                ファイルを検出中…</p>
-            {{else if this.compose.unavailable}}
-              <p class="notice" data-test-compose-manual>Compose
-                ファイルの検出は利用できません。公開するサービスとポートを入力してください。</p>
-            {{else if this.composeError}}
-              <p
-                class="alert alert-danger"
-                role="alert"
-                data-test-compose-error
-              >
-                Compose ファイルを検出できませんでした。{{this.composeError}}
-              </p>
-            {{else if this.compose.loaded}}
-              {{#if this.files.length}}
-                <p data-test-compose-path>検出した Compose ファイル:
-                  <code>{{this.composePath}}</code></p>
-              {{else}}
-                <p class="notice" data-test-compose-missing>リポジトリ直下に
-                  Compose
-                  ファイルが見つかりませんでした。パスは作成後に「設定」で指定できます。</p>
-              {{/if}}
-              {{#if this.manualService}}
-                <p
-                  class="notice"
-                  data-test-compose-manual
-                >サービスを読み取れなかったため、公開するサービスとポートを入力してください。</p>
-              {{/if}}
-            {{/if}}
-          </div>
-
-          {{#if this.hasManyFiles}}
-            <label class="field" for="new-compose-path">
-              <span class="field-label">Compose ファイル</span>
+              <input
+                id={{field.id}}
+                type="url"
+                class="mono"
+                placeholder="https://github.com/octo/blog"
+                autocomplete="off"
+                value={{this.repoUrl}}
+                aria-describedby={{field.describedBy}}
+                aria-invalid={{field.invalid}}
+                data-test-field="repo_url"
+                {{on "input" this.setRepoUrl}}
+              />
+            </FormField>
+          {{else if this.repos.error}}
+            <Banner
+              @tone="error"
+              @title="リポジトリの一覧を取得できませんでした"
+              data-test-error
+            >
+              <:default>{{this.repos.errorMessage}}</:default>
+              <:actions>
+                <Button @size="small" {{on "click" this.repos.reload}}>
+                  再読み込み
+                </Button>
+              </:actions>
+            </Banner>
+          {{else if this.repos.loaded}}
+            <FormField
+              @label="リポジトリ"
+              @hint="GitHub App をインストールしたリポジトリが並びます。"
+              @error={{this.errors.repo_full_name}}
+              data-test-field-group="repo_full_name"
+              as |field|
+            >
               <select
-                id="new-compose-path"
-                data-test-field="compose_path"
-                {{on "change" this.selectComposePath}}
+                id={{field.id}}
+                aria-describedby={{field.describedBy}}
+                aria-invalid={{field.invalid}}
+                data-test-field="repo_full_name"
+                {{on "change" this.selectRepo}}
               >
-                {{#each this.files as |file|}}
-                  <option value={{file}} selected={{eq file this.composePath}}>
-                    {{file}}
-                  </option>
+                <option value="" selected={{eq this.repoFullName ""}}>
+                  選択してください
+                </option>
+                {{#each this.repos.value key="id" as |repo|}}
+                  <option
+                    value={{repo.full_name}}
+                    selected={{eq repo.full_name this.repoFullName}}
+                  >{{repo.full_name}}{{if repo.private "（private）"}}</option>
                 {{/each}}
               </select>
-              {{#if this.errors.compose_path}}
-                <span class="field-error" data-test-field-error="compose_path">
-                  {{this.errors.compose_path}}
-                </span>
-              {{/if}}
-            </label>
+            </FormField>
+          {{else}}
+            <p class="new-app-progress" aria-live="polite" data-test-loading>
+              <Icon @name="spinner" />
+              リポジトリを読み込み中…
+            </p>
           {{/if}}
 
-          <div class="field-row">
-            <label class="field" for="new-web-service">
-              <span class="field-label">公開するサービス</span>
-              {{#if this.manualService}}
-                <input
-                  id="new-web-service"
-                  type="text"
-                  placeholder="web"
-                  spellcheck="false"
-                  value={{this.webService}}
-                  aria-invalid={{if this.errors.web_service "true"}}
-                  data-test-field="web_service"
-                  {{on "input" (setValue this "webService")}}
-                />
-              {{else}}
-                <select
-                  id="new-web-service"
-                  aria-invalid={{if this.errors.web_service "true"}}
-                  data-test-field="web_service"
-                  {{on "change" this.selectService}}
+          {{#if this.repoChosen}}
+            <FormField
+              class="field-narrow"
+              @label="既定のブランチ"
+              @hint="デプロイの画面で最初に選ばれるブランチです。"
+              @error={{this.errors.default_branch}}
+              data-test-field-group="default_branch"
+              as |field|
+            >
+              <input
+                id={{field.id}}
+                type="text"
+                placeholder="main"
+                spellcheck="false"
+                autocomplete="off"
+                value={{this.defaultBranch}}
+                aria-describedby={{field.describedBy}}
+                aria-invalid={{field.invalid}}
+                data-test-field="default_branch"
+                {{on "input" (setValue this "defaultBranch")}}
+              />
+            </FormField>
+          {{/if}}
+        </div>
+      </div>
+
+      {{#if this.repoChosen}}
+        <div class="form-group">
+          <div>
+            <h2 class="form-group-title">2. Compose と公開サービス</h2>
+            <p class="form-group-description">
+              Compose
+              ファイルのサービスのうち、外からのリクエストを受けるものと、そのコンテナ側のポートです。
+            </p>
+          </div>
+          <div class="form-group-body">
+            <div aria-live="polite">
+              {{#if this.compose.loading}}
+                <p class="new-app-progress" data-test-compose-loading>
+                  <Icon @name="spinner" />
+                  Compose ファイルを検出中…
+                </p>
+              {{else if this.compose.unavailable}}
+                <Banner data-test-compose-manual>
+                  Compose
+                  ファイルの検出は利用できません。公開するサービスとポートを入力してください。
+                </Banner>
+              {{else if this.composeError}}
+                <Banner
+                  @tone="error"
+                  @title="Compose ファイルを検出できませんでした"
+                  data-test-compose-error
                 >
-                  {{#each this.services key="name" as |service|}}
+                  {{this.composeError}}
+                </Banner>
+              {{else if this.compose.loaded}}
+                {{#if this.files.length}}
+                  <dl class="readout">
+                    <dt>検出した Compose ファイル</dt>
+                    <dd>
+                      <span class="mono" data-test-compose-path>
+                        {{this.composePath}}
+                      </span>
+                    </dd>
+                  </dl>
+                {{else}}
+                  <Banner @tone="warning" data-test-compose-missing>
+                    リポジトリ直下に Compose
+                    ファイルが見つかりませんでした。パスは作成後に「設定」で指定できます。
+                  </Banner>
+                {{/if}}
+                {{#if this.manualService}}
+                  <Banner data-test-compose-manual>
+                    サービスを読み取れなかったため、公開するサービスとポートを入力してください。
+                  </Banner>
+                {{/if}}
+              {{/if}}
+            </div>
+
+            {{#if this.hasManyFiles}}
+              <FormField
+                @label="Compose ファイル"
+                @hint="候補が複数あります。使うものを選んでください。"
+                @error={{this.errors.compose_path}}
+                data-test-field-group="compose_path"
+                as |field|
+              >
+                <select
+                  id={{field.id}}
+                  class="mono"
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="compose_path"
+                  {{on "change" this.selectComposePath}}
+                >
+                  {{#each this.files as |file|}}
                     <option
-                      value={{service.name}}
-                      selected={{eq service.name this.webService}}
-                    >{{service.name}}</option>
+                      value={{file}}
+                      selected={{eq file this.composePath}}
+                    >{{file}}</option>
                   {{/each}}
                 </select>
-              {{/if}}
-              {{#if this.errors.web_service}}
-                <span class="field-error" data-test-field-error="web_service">
-                  {{this.errors.web_service}}
-                </span>
-              {{/if}}
-            </label>
+              </FormField>
+            {{/if}}
 
-            <label class="field" for="new-web-port">
-              <span class="field-label">コンテナ側のポート</span>
-              <input
-                id="new-web-port"
-                type="number"
-                inputmode="numeric"
-                min="1"
-                max="65535"
-                list="new-web-port-options"
-                placeholder="3000"
-                value={{this.webPort}}
-                aria-invalid={{if this.errors.web_port "true"}}
-                data-test-field="web_port"
-                {{on "input" (setValue this "webPort")}}
-              />
-              <datalist id="new-web-port-options">
-                {{#each this.detectedPorts as |port|}}
-                  <option value={{port}}></option>
-                {{/each}}
-              </datalist>
-              {{#if this.errors.web_port}}
-                <span class="field-error" data-test-field-error="web_port">
-                  {{this.errors.web_port}}
-                </span>
-              {{/if}}
-            </label>
-          </div>
-
-          <label class="field" for="new-healthcheck">
-            <span class="field-label">ヘルスチェックのパス</span>
-            <input
-              id="new-healthcheck"
-              type="text"
-              spellcheck="false"
-              value={{this.healthcheckPath}}
-              aria-invalid={{if this.errors.healthcheck_path "true"}}
-              data-test-field="healthcheck_path"
-              {{on "input" (setValue this "healthcheckPath")}}
-            />
-            <span class="field-hint">デプロイ後にこのパスへ HTTP
-              で応答を確認します。</span>
-            {{#if this.errors.healthcheck_path}}
-              <span
-                class="field-error"
-                data-test-field-error="healthcheck_path"
+            <div class="form-grid">
+              <FormField
+                @label="公開するサービス"
+                @error={{this.errors.web_service}}
+                data-test-field-group="web_service"
+                as |field|
               >
-                {{this.errors.healthcheck_path}}
-              </span>
-            {{/if}}
-          </label>
-        </fieldset>
+                {{#if this.manualService}}
+                  <input
+                    id={{field.id}}
+                    type="text"
+                    placeholder="web"
+                    spellcheck="false"
+                    autocomplete="off"
+                    value={{this.webService}}
+                    aria-describedby={{field.describedBy}}
+                    aria-invalid={{field.invalid}}
+                    data-test-field="web_service"
+                    {{on "input" (setValue this "webService")}}
+                  />
+                {{else}}
+                  <select
+                    id={{field.id}}
+                    aria-describedby={{field.describedBy}}
+                    aria-invalid={{field.invalid}}
+                    data-test-field="web_service"
+                    {{on "change" this.selectService}}
+                  >
+                    {{#each this.services key="name" as |service|}}
+                      <option
+                        value={{service.name}}
+                        selected={{eq service.name this.webService}}
+                      >{{service.name}}</option>
+                    {{/each}}
+                  </select>
+                {{/if}}
+              </FormField>
 
-        <fieldset class="form-section">
-          <legend>3. 名前と環境</legend>
+              <FormField
+                @label="コンテナ側のポート"
+                @error={{this.errors.web_port}}
+                data-test-field-group="web_port"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="number"
+                  class="mono"
+                  inputmode="numeric"
+                  min="1"
+                  max="65535"
+                  list="new-web-port-options"
+                  placeholder="3000"
+                  value={{this.webPort}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="web_port"
+                  {{on "input" (setValue this "webPort")}}
+                />
+                <datalist id="new-web-port-options">
+                  {{#each this.detectedPorts as |port|}}
+                    <option value={{port}}></option>
+                  {{/each}}
+                </datalist>
+              </FormField>
+            </div>
 
-          <label class="field" for="new-slug">
-            <span class="field-label">slug</span>
-            <input
-              id="new-slug"
-              type="text"
-              maxlength="40"
-              spellcheck="false"
-              autocapitalize="off"
-              value={{this.slug}}
-              aria-invalid={{if this.errors.slug "true"}}
-              data-test-field="slug"
-              {{on "input" this.setSlug}}
-            />
-            <span class="field-hint">URL の
-              <code>&lt;slug&gt;</code>
-              の部分になります。作成後は変えられません。</span>
-            {{#if this.errors.slug}}
-              <span class="field-error" data-test-field-error="slug">
-                {{this.errors.slug}}
-              </span>
-            {{/if}}
-          </label>
-
-          <div class="field" role="radiogroup" aria-labelledby="new-env-label">
-            <span class="field-label" id="new-env-label">環境</span>
-            <label class="choice">
+            <FormField
+              class="field-narrow"
+              @label="ヘルスチェックのパス"
+              @hint="デプロイのあと、このパスが HTTP で応答するかを確かめます。"
+              @error={{this.errors.healthcheck_path}}
+              data-test-field-group="healthcheck_path"
+              as |field|
+            >
               <input
-                type="radio"
-                name="environment"
-                value="staging"
-                checked={{eq this.environment "staging"}}
-                data-test-environment-option="staging"
-                {{on "change" this.setEnvironment}}
+                id={{field.id}}
+                type="text"
+                class="mono"
+                spellcheck="false"
+                autocomplete="off"
+                value={{this.healthcheckPath}}
+                aria-describedby={{field.describedBy}}
+                aria-invalid={{field.invalid}}
+                data-test-field="healthcheck_path"
+                {{on "input" (setValue this "healthcheckPath")}}
               />
-              ステージング
-            </label>
-            <label class="choice">
-              <input
-                type="radio"
-                name="environment"
-                value="production"
-                checked={{eq this.environment "production"}}
-                data-test-environment-option="production"
-                {{on "change" this.setEnvironment}}
-              />
-              本番（デプロイと削除の前に確認します）
-            </label>
-            {{#if this.errors.environment}}
-              <span class="field-error" data-test-field-error="environment">
-                {{this.errors.environment}}
-              </span>
-            {{/if}}
+            </FormField>
           </div>
-        </fieldset>
+        </div>
+
+        <div class="form-group">
+          <div>
+            <h2 class="form-group-title">3. 名前と環境</h2>
+            <p class="form-group-description">
+              名前は URL
+              の一部になり、作成後は変えられません。環境は、本番とステージングを取り違えないための目印です。
+            </p>
+          </div>
+          <div class="form-group-body">
+            <FormField
+              @label="アプリ名（slug）"
+              @hint="英小文字で始まる英小文字・数字・ハイフン、40 文字以内。"
+              @error={{this.errors.slug}}
+              data-test-field-group="slug"
+              as |field|
+            >
+              <input
+                id={{field.id}}
+                type="text"
+                class="mono"
+                maxlength="40"
+                spellcheck="false"
+                autocapitalize="off"
+                autocomplete="off"
+                value={{this.slug}}
+                aria-describedby={{field.describedBy}}
+                aria-invalid={{field.invalid}}
+                data-test-field="slug"
+                {{on "input" this.setSlug}}
+              />
+            </FormField>
+
+            <fieldset class="option-group" data-test-field-group="environment">
+              <legend>環境</legend>
+              <label class="option">
+                <input
+                  type="radio"
+                  name="environment"
+                  value="staging"
+                  checked={{eq this.environment "staging"}}
+                  data-test-environment-option="staging"
+                  {{on "change" this.setEnvironment}}
+                />
+                <span class="option-body">
+                  <span class="option-label">ステージング</span>
+                  <span class="option-hint">
+                    デプロイは確認なしで始まります。
+                  </span>
+                </span>
+              </label>
+              <label class="option">
+                <input
+                  type="radio"
+                  name="environment"
+                  value="production"
+                  checked={{eq this.environment "production"}}
+                  data-test-environment-option="production"
+                  {{on "change" this.setEnvironment}}
+                />
+                <span class="option-body">
+                  <span class="option-label">本番</span>
+                  <span class="option-hint">
+                    バッジで目立たせ、デプロイの前に確認します。
+                  </span>
+                </span>
+              </label>
+              {{#if this.errors.environment}}
+                <p class="field-error" data-test-field-error>
+                  {{this.errors.environment}}
+                </p>
+              {{/if}}
+            </fieldset>
+          </div>
+        </div>
       {{/if}}
 
       <div aria-live="polite">
         <ErrorMessage @error={{this.error}} />
         {{#if this.otherErrors.length}}
-          <ul class="field-error" data-test-other-errors>
+          <ul class="form-problems" data-test-other-errors>
             {{#each this.otherErrors as |line|}}
               <li>{{line}}</li>
             {{/each}}
@@ -554,16 +613,20 @@ export default class NewAppTemplate extends Component {
         {{/if}}
       </div>
 
-      {{#if this.repoChosen}}
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="button button-primary"
-            disabled={{this.submitting}}
+      <div class="form-footer">
+        {{#if this.repoChosen}}
+          <Button
+            @type="submit"
+            @variant="primary"
+            @busy={{this.submitting}}
+            @busyLabel="作成中…"
             data-test-submit
-          >{{if this.submitting "作成中…" "作成する"}}</button>
-        </div>
-      {{/if}}
+          >作成</Button>
+        {{/if}}
+        <LinkTo @route="index" class={{buttonClass "default"}} data-test-cancel>
+          キャンセル
+        </LinkTo>
+      </div>
     </form>
   </template>
 }

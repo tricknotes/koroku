@@ -49,6 +49,24 @@ module('Unit | Service | api (pure parts)', function () {
     });
   });
 
+  test('parseErrorBody keeps a list of details under `violations`', function (assert) {
+    const error = parseErrorBody(
+      422,
+      JSON.stringify({
+        error: {
+          code: 'policy_violation',
+          message: 'the release no longer passes the deploy policy',
+          details: [{ service: 'web', rule: 'privileged', message: 'no' }],
+        },
+      }),
+    );
+
+    assert.strictEqual(error.code, 'policy_violation');
+    assert.deepEqual(error.details, {
+      violations: [{ service: 'web', rule: 'privileged', message: 'no' }],
+    });
+  });
+
   test('parseErrorBody survives bodies that are not API errors', function (assert) {
     for (const body of ['', '<html>Bad Gateway</html>', '[]', '{"error":1}']) {
       const error = parseErrorBody(502, body);

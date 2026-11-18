@@ -140,6 +140,21 @@ func TestArchiveGrid(t *testing.T) {
 	}
 }
 
+func TestArchiveNextRun(t *testing.T) {
+	f := newFixture(t, nil)
+	a := newArchiver(t, f, objstore.NewMemory(), nil)
+
+	f.clock.Set(at(18, 3, 0))
+	if got, want := a.NextRun(), at(18, 4, 10); !got.Equal(want) {
+		t.Errorf("NextRun at 03:00 = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+	// On a grid point the next run is the following one.
+	f.clock.Set(at(18, 20, 10))
+	if got, want := a.NextRun(), at(19, 0, 10); !got.Equal(want) {
+		t.Errorf("NextRun at 20:10 = %s, want %s", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
 func TestArchiveUploadsEachWindowOnce(t *testing.T) {
 	f := newFixture(t, nil)
 	store := newFlakyStore()

@@ -69,6 +69,18 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - `log_archive.last_success_at` はログ退避が最後に成功した時刻（まだなければ `null`）。オブジェクトストレージが未設定なら `configured: false`。
 - `caddy.last_loaded_at` は Caddy へ設定を最後に投入できた時刻、`last_error` は直近の投入が失敗していればその理由（成功していれば空文字）。`[caddy] enabled = false` なら `enabled: false`。
 
+システム画面のために、さらに次が加わる（ARCHITECTURE 9.1）:
+
+```json
+{
+  "swap": { "total_bytes": 2147483648, "used_bytes": 104857600 },
+  "log_archive": { "configured": true, "last_success_at": "2026-11-18T03:10:05Z", "last_error": "", "next_run_at": "2026-11-18T07:10:00Z" }
+}
+```
+
+- `swap` はホストの swap の大きさと使用量。swap がない、または取得できなければ `null`。
+- `log_archive.next_run_at` は次にログ退避が走る予定の時刻。オブジェクトストレージが未設定なら `null`。
+
 `GET /api/system/docker`: Docker のディスク使用量。
 
 ```json
