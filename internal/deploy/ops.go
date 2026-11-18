@@ -434,10 +434,12 @@ var (
 // The command walks every image and volume, so it can take seconds.
 //
 // With the containerd image store (the default of new Docker installs), df
-// fails when a container or image it is walking is removed meanwhile, for
-// example by a deployment: "rw layer snapshot not found for container ..."
-// or "content digest sha256:...: not found". Such a failure is retried a
-// few times; other errors are returned at once.
+// fails when what it walks changes meanwhile: a container or image removed
+// by a deployment ("rw layer snapshot not found for container ...",
+// "content digest sha256:...: not found"), or a file deleted in a running
+// container's writable layer ("snapshotter.Usage failed for ...: lstat
+// ...: no such file or directory"). Errors the daemon returns are retried
+// a few times; others (the daemon is not reachable) are returned at once.
 func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -450,7 +452,7 @@ func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
 		if err == nil {
 			return parseSystemDF(out)
 		}
-		if attempt == dfAttempts || !strings.Contains(err.Error(), "not found") {
+		if attempt == dfAttempts || !strings.Contains(err.Error(), "Error response from daemon") {
 			break
 		}
 		timer := time.NewTimer(time.Duration(attempt) * dfRetryDelay)

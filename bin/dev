@@ -72,6 +72,9 @@ if [ -n "${GH_TOKEN:-}" ]; then
     flags="$flags --env GH_TOKEN"
 fi
 
+# /tmp is a tmpfs: the tests churn temporary files there, and in the
+# container's writable layer that churn makes `docker system df` (which the
+# integration tests call) fail while it walks the layer.
 # shellcheck disable=SC2086 # $flags is a list of separate words
 exec docker run --rm --interactive --init $flags \
     --network host \
@@ -80,6 +83,7 @@ exec docker run --rm --interactive --init $flags \
     --volume "$socket:/var/run/docker.sock" \
     --volume "$root:$root" \
     --workdir "$PWD" \
+    --tmpfs /tmp:exec,mode=1777 \
     --volume "$cache_go:/cache/go" \
     --volume "$cache_go_build:/cache/go-build" \
     --volume "$cache_pnpm:/cache/pnpm-store" \
