@@ -265,6 +265,20 @@ DNS にワイルドカードの A レコードを 1 本置き、証明書は Cad
 - アプリへの `reverse_proxy` には `stream_close_delay: 5m` を付ける。付けないと、設定を再投入した瞬間に、他アプリを含む WebSocket などのアップグレード済み接続が切れた（下の実機確認）。この指定には Caddy 2.7 以上が要るので、Ubuntu 標準の apt パッケージではなく Caddy 公式リポジトリのものを入れる（プロビジョニングスクリプトで対応）。
 - アクセスログはアプリごとに `<access_log_dir>/<slug>.log`（既定 `/var/log/caddy/apps`）へ出す。`koroku` のデータディレクトリは root 専用（0700）で Caddy のユーザーが書けないため、置き場所を分けた。ロガー名は `http.log.access.<slug>.app` とする。Caddy はロガー名を前方一致で選ぶので、slug そのままだと `shop-staging` のログが `shop.log` にも入るため。管理 UI と未知のホスト名のアクセスログは出さない。
 - Caddy の admin API は認証がなく設定全体を書き換えられるので、`caddy.admin_url` はループバックアドレスしか受け付けない。
+- `koroku` がデプロイの成功を記録したあとにも、もう一度設定を同期する。ルートの更新（手順 7）はデプロイが「現在のリリース」になる前に走るので、そこだけでは初回デプロイ（と停止中からのデプロイ）のアプリが 503 の固定ページのまま残り、5 分ごとの定期処理まで届かなかった（ローカル環境で検出、2026-11-19）。
+
+**ローカル環境の Caddy（2026-11-19）**
+
+手元でも本番と同じ経路（Caddy → アプリ）で `https://<slug>.dev.localhost` を開けるように、開発用の `compose.yaml` に Caddy を加えた。`koroku` 側の生成ロジックは本番と共通で、`config.toml` の 2 項目だけで切り替える。
+
+| 項目 | 内容 |
+| --- | --- |
+| `[caddy] listen_ip` | `:80` と `:443` を、このアドレスだけで待ち受ける（ローカルは `127.0.0.1`）。空なら全インターフェース（本番） |
+| `[caddy] internal_ca` | ACME の代わりに Caddy 内蔵の CA で証明書を出す。`*.localhost` には公的な証明書が出ないため。CA のルート証明書は利用者がブラウザ側の OS に手で入れる（コンテナの中の Caddy にはホストの信頼ストアを変えられないので、`install_trust` は切る） |
+
+- `--insecure-no-auth` は、Caddy が有効でも `listen_ip` がループバックなら起動を許す。拒否していた理由は「Caddy 経由で管理 UI がネットワークに出る」ことで、ループバックだけで待ち受けるならその心配がない。
+- 認証なしモードの Host 検査は `*.localhost` を受け付ける（`console.dev.localhost` で開くため）。`.localhost` 配下の名前は常にループバックに解決される（RFC 6761）ので、DNS リバインディングの対策は崩れない。変更系の `Origin` は `http://<Host>` に加えて `https://<Host>` も許す。同じ `dev.localhost` 配下のアプリからの要求は、従来どおり `Sec-Fetch-Site: same-site` と `Origin` の不一致で拒否する。
+- アクセスログは出さない（`access_log_dir = ""`）。Caddy はコンテナ内で root として動き、ログファイルを `koroku`（利用者の UID）が読めないため。
 
 **Squarespace Domains での設定**: `tricknotes.io` の DNS Settings → Custom Records に A レコードを追加する（[Adding DNS records to your domain](https://support.squarespace.com/hc/articles/360002101888)）。Host に `*.dev` を指定できるかは未確認。できない場合は `console.dev` とアプリごとの `<slug>.dev` を個別に登録する。証明書はホスト名ごとに取る設計なので、どちらでも `koroku` 側の実装は変わらない。
 
@@ -560,6 +574,8 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
   - 内容が変わる投入（アプリを 1 つ追加）と強制再読込では、サーバーが作り直されるが、SSE は 24 秒間の観測で 1 行も欠けなかった（平文、および TLS + HTTP/2 のどちらでも）。新しいルートは投入の 1 秒後には応答した。
   - アップグレード済み接続は、`stream_close_delay` なし（Caddy の既定）だと再読込の瞬間に切れた。`stream_close_delay: 10s` では再読込の 10.0 秒後に切れた。つまりこの指定は切断をなくすのではなく先送りする。生成する設定では 5 分にしているので、アプリの作成・ドメインやポートの変更・起動や停止のたびに、他アプリの WebSocket は最長 5 分後に 1 回切れる（クライアントの再接続に任せる）。5 分ちょうどで切れるところまでは待って確認していない。
   - 実際の ACME 発行（Let's Encrypt staging を含む）は VPS と DNS が要るので未確認。
+
+- ローカル環境の Caddy（2026-11-19、Caddy 2.11.9 の公式 Docker イメージ、WSL2）: `listen` を `127.0.0.1:80` / `127.0.0.1:443` にしても、HTTP から HTTPS への自動リダイレクトは挿入された（`http://<slug>.dev.localhost/` が 308）。内蔵 CA で `*.dev.localhost` の証明書が発行され、ルート証明書を信頼すれば検証も通る。WSL2 の localhost 転送で、Windows 側の `curl.exe` からも `https://<slug>.dev.localhost/` に届いた。
 
 - `docker compose logs --follow` の二重出力（2026-11-18、Docker 29.8.0 / Compose v5.8.0、ローカル環境）: コンテナがまだないプロジェクトに対して `logs --follow --timestamps` を繰り返し起動しながら `up -d` すると、起動直後のコンテナの行が、時刻まで同じ内容で 2 回ずつ出る流れに当たることがあった（1 行だけ出すコンテナで 8 回中 5 回、0.5 秒ごとに出し続けるコンテナでは 6 回中 6 回で、以後の行もすべて 2 回ずつ）。`koroku` のログコレクタはこの状況で実際に同じ行を 2 回保存していた（開発用の Compose 環境でサンプルアプリをデプロイして発見）。対処は 10.1 章。
 
