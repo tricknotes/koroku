@@ -1,5 +1,5 @@
 # Build output
-/bin/
+/bin/paasd
 
 # Local configuration and data (never commit real config or keys)
 /config.toml

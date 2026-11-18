@@ -1110,3 +1110,42 @@ func TestBackupBeforeDeployWithoutBackupConfigured(t *testing.T) {
 		t.Errorf("log:\n%s", h.log("blog", d.ID))
 	}
 }
+
+// TestLongDeploymentIsStillRecorded guards against starting the "record the
+// result" timeout when the job starts: a deployment that outlives that
+// timeout must still be marked finished instead of staying "running".
+func TestLongDeploymentIsStillRecorded(t *testing.T) {
+	h := newHarness(t, nil)
+	h.engine.finishTimeout = 40 * time.Millisecond
+	h.createApp("blog")
+	h.onCompose = func(_ context.Context, sub string, _ runner.Cmd) error {
+		if sub == "build" {
+			time.Sleep(150 * time.Millisecond) // several times the finish timeout
+		}
+		return nil
+	}
+	h.start()
+
+	d := h.deploy("blog", shaA)
+	if d.Status != store.StatusSucceeded || d.FinishedAt == nil {
+		t.Fatalf("deployment = %+v", d)
+	}
+	app, _ := h.store.GetApp(context.Background(), "blog")
+	if app.CurrentDeploymentID == nil || *app.CurrentDeploymentID != d.ID {
+		t.Errorf("current deployment = %v", app.CurrentDeploymentID)
+	}
+
+	// The same holds for a failing long deployment.
+	h.mu.Lock()
+	h.onCompose = func(_ context.Context, sub string, _ runner.Cmd) error {
+		if sub == "build" {
+			time.Sleep(150 * time.Millisecond)
+			return &runner.ExitError{Cmd: "docker", Code: 1}
+		}
+		return nil
+	}
+	h.mu.Unlock()
+	if failed := h.deploy("blog", shaB); failed.Status != store.StatusFailed {
+		t.Fatalf("deployment = %+v", failed)
+	}
+}

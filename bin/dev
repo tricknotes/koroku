@@ -1,0 +1,57 @@
+#!/bin/sh
+# Runs a command inside the development container, so that nothing has to be
+# installed on the host besides Docker.
+#
+#   bin/dev go test ./...
+#   bin/dev go test -tags integration ./...
+#   bin/dev sh -c 'cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm test'
+#   bin/dev make build
+#   bin/dev            # interactive shell
+#
+# The image is built from dev/Dockerfile on first use and rebuilt whenever
+# that file changes.
+set -eu
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+
+# Mount the main checkout at its host path. Linked worktrees live inside it
+# and refer to it by absolute path, and containers started by the tests are
+# created by the host's Docker daemon, which sees host paths.
+common=$(git -C "$here" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "$here/.git")
+root=$(dirname "$common")
+
+tag=$(sha256sum "$here/dev/Dockerfile" | cut -c1-12)
+image="paasd-dev:$tag"
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+    echo "bin/dev: building $image (first use or dev/Dockerfile changed)..." >&2
+    docker build --tag "$image" "$here/dev" >&2
+fi
+
+socket=${DOCKER_SOCKET:-/var/run/docker.sock}
+
+if [ "$#" -eq 0 ]; then
+    set -- bash
+fi
+
+# Optional flags, kept as plain words on purpose.
+flags=""
+if [ -t 0 ] && [ -t 1 ]; then
+    flags="$flags --tty"
+fi
+# Pass a GitHub token through only when the caller exported one.
+if [ -n "${GH_TOKEN:-}" ]; then
+    flags="$flags --env GH_TOKEN"
+fi
+
+# shellcheck disable=SC2086 # $flags is a list of separate words
+exec docker run --rm --interactive --init $flags \
+    --network host \
+    --user "$(id -u):$(id -g)" \
+    --group-add "$(stat -c %g "$socket")" \
+    --volume "$socket:/var/run/docker.sock" \
+    --volume "$root:$root" \
+    --workdir "$PWD" \
+    --volume paasd-dev-go:/cache/go \
+    --volume paasd-dev-go-build:/cache/go-build \
+    --volume paasd-dev-pnpm:/cache/pnpm-store \
+    "$image" "$@"
