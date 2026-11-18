@@ -626,3 +626,97 @@ func TestPolicyBlocksPrivilegedContainer(t *testing.T) {
 		t.Errorf("containers were started despite the policy: %v", ports)
 	}
 }
+
+// TestTwoAppsAreIsolated covers two acceptance scenarios with real
+// containers: while one app is being deployed the other keeps answering, and
+// two apps side by side cannot reach each other's services.
+func TestTwoAppsAreIsolated(t *testing.T) {
+	e := newEnv(t)
+	repoA, repoB := newRepo(t, "build-app"), newRepo(t, "build-app")
+	shaA := repoA.commit("App A")
+	// A different VERSION forces a real build for the second app.
+	repoB.write("VERSION", "b1\n")
+	shaB := repoB.commit("App B")
+	slugA, slugB := e.slug("iso-a"), e.slug("iso-b")
+	appA := e.createApp(slugA, repoA.url())
+	appB := e.createApp(slugB, repoB.url())
+
+	if d := e.deploy(slugA, map[string]string{"sha": shaA}); d.Status != "succeeded" {
+		t.Fatalf("deploy A %s: %s\n%s", d.Status, d.Error, e.logText(d.ID))
+	}
+
+	// Keep asking app A while app B is built and started.
+	stop := make(chan struct{})
+	type tally struct{ ok, failed int }
+	result := make(chan tally, 1)
+	go func() {
+		var counts tally
+		client := &http.Client{Timeout: 2 * time.Second}
+		for {
+			select {
+			case <-stop:
+				result <- counts
+				return
+			default:
+			}
+			resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", appA.HostPort))
+			if err != nil || resp.StatusCode != http.StatusOK {
+				counts.failed++
+			} else {
+				counts.ok++
+			}
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+	deployB := e.deploy(slugB, map[string]string{"sha": shaB})
+	close(stop)
+	counts := <-result
+	if deployB.Status != "succeeded" {
+		t.Fatalf("deploy B %s: %s\n%s", deployB.Status, deployB.Error, e.logText(deployB.ID))
+	}
+	if counts.failed != 0 || counts.ok < 5 {
+		t.Errorf("app A during the deployment of app B: %d ok, %d failed requests", counts.ok, counts.failed)
+	}
+	if got := page(t, appB.HostPort); got["version"] != "b1" {
+		t.Errorf("app B page = %v", got)
+	}
+
+	// Each app publishes only its web service, on loopback, on its own port.
+	for slug, app := range map[string]appInfo{slugA: appA, slugB: appB} {
+		ports := publishedPorts(t, "paas-"+slug)
+		if want := fmt.Sprintf("127.0.0.1:%d->8080/tcp", app.HostPort); ports["web"] != want || ports["sidecar"] != "" {
+			t.Errorf("%s ports = %v, want only web on %s", slug, ports, want)
+		}
+	}
+	if appA.HostPort == appB.HostPort {
+		t.Errorf("both apps got host port %d", appA.HostPort)
+	}
+
+	// Inside app A: its own sidecar resolves by name, app B's containers do
+	// not, and app B's web container is unreachable by address.
+	containerA := "paas-" + slugA + "-web-1"
+	containerB := "paas-" + slugB + "-web-1"
+	// (ping, because busybox nslookup exits 0 even for unknown names.)
+	if out, err := exec.Command("docker", "exec", containerA, "ping", "-c", "1", "-W", "3", "sidecar").CombinedOutput(); err != nil {
+		t.Errorf("app A cannot reach its own sidecar by name: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("docker", "exec", containerA, "ping", "-c", "1", "-W", "3", containerB).CombinedOutput(); err == nil {
+		t.Errorf("app A resolves and reaches a container of app B by name:\n%s", out)
+	}
+	ipB, err := exec.Command("docker", "inspect", "--format",
+		"{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", containerB).Output()
+	if err != nil || strings.TrimSpace(string(ipB)) == "" {
+		t.Fatalf("address of app B's container: %v %q", err, ipB)
+	}
+	target := fmt.Sprintf("http://%s:8080/", strings.TrimSpace(string(ipB)))
+	if out, err := exec.Command("docker", "exec", containerA, "wget", "-q", "-T", "3", "-O", "-", target).CombinedOutput(); err == nil {
+		t.Errorf("app A reached app B's web service at %s:\n%s", target, out)
+	}
+	// Sanity check of the probe itself: app A reaches its own web service.
+	if out, err := exec.Command("docker", "exec", containerA, "wget", "-q", "-T", "3", "-O", "-", "http://127.0.0.1:8080/").CombinedOutput(); err != nil {
+		t.Errorf("the probe does not work inside app A: %v\n%s", err, out)
+	}
+}

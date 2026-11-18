@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tricknotes/koroku/internal/logs"
 	"github.com/tricknotes/koroku/internal/objstore"
 	"github.com/tricknotes/koroku/internal/store"
 )
@@ -346,6 +349,63 @@ func TestServeBackupLogsAndSystemRestore(t *testing.T) {
 	env.call(http.MethodGet, "/api/system", nil, &system)
 	if !system.LogArchive.Configured {
 		t.Error("the log archiver is not reported as configured")
+	}
+
+	// --- log archive: object storage and presigned download -------------
+	// The archiver runs on a four-hour grid, so the test archives the
+	// current window itself, with the same directory, bucket and time zone
+	// as the server, and then goes through the server's API.
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	collector, err := logs.New(logs.Options{Dir: filepath.Join(env.dataDir, "logs"), Location: tokyo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects, err := objstore.NewS3(objstore.S3Config{
+		Endpoint: endpoint, Region: "us-east-1", Bucket: bucket, AccessKeyID: accessKey, SecretAccessKey: secretKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiver, err := logs.NewArchiver(logs.ArchiverOptions{Collector: collector, Store: objects, IntervalHours: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := archiver.ArchiveOnce(context.Background(), archiver.NextWindowEnd(time.Now())); err != nil {
+		t.Fatalf("archive the current window: %v", err)
+	}
+	var archives struct {
+		Archives []struct {
+			Key, Service string
+			Size         int64
+		} `json:"archives"`
+	}
+	env.call(http.MethodGet, "/api/apps/"+slug+"/logs/archives?service=web", nil, &archives)
+	if len(archives.Archives) != 1 || !strings.HasPrefix(archives.Archives[0].Key, "logs/"+slug+"/web/") || archives.Archives[0].Size <= 0 {
+		t.Fatalf("archives = %+v", archives.Archives)
+	}
+	var link struct {
+		URL string `json:"url"`
+	}
+	env.call(http.MethodGet, "/api/apps/"+slug+"/logs/archives/url?key="+url.QueryEscape(archives.Archives[0].Key), nil, &link)
+	archived, err := http.Get(link.URL)
+	if err != nil {
+		t.Fatalf("download through the presigned URL: %v", err)
+	}
+	gz, err := gzip.NewReader(archived.Body)
+	if err != nil {
+		t.Fatalf("the archive is not gzip (status %d): %v", archived.StatusCode, err)
+	}
+	content, _ := io.ReadAll(gz)
+	_ = archived.Body.Close()
+	if !strings.Contains(string(content), "booted version=v1") {
+		t.Errorf("archived log content = %q", content)
+	}
+	// A key of the backup repository in the same bucket is not signed.
+	if status := env.call(http.MethodGet, "/api/apps/"+slug+"/logs/archives/url?key="+url.QueryEscape("restic/config"), nil, nil); status != http.StatusUnprocessableEntity {
+		t.Errorf("presigning a backup key: status %d, want 422", status)
 	}
 
 	// --- restore-system on a "new host" -------------------------------

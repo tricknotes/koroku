@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,8 +14,10 @@ import (
 	"github.com/tricknotes/koroku/internal/api"
 	"github.com/tricknotes/koroku/internal/backup"
 	"github.com/tricknotes/koroku/internal/config"
+	"github.com/tricknotes/koroku/internal/deploy"
 	"github.com/tricknotes/koroku/internal/logs"
 	"github.com/tricknotes/koroku/internal/objstore"
+	"github.com/tricknotes/koroku/internal/runner"
 	"github.com/tricknotes/koroku/internal/store"
 )
 
@@ -368,5 +371,229 @@ func TestRestoreSystemNeedsBackupConfig(t *testing.T) {
 	err := run(context.Background(), []string{"restore-system", "--config", configPath}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "[storage]") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// fakeBackupManager scripts the backup manager for the adapter tests.
+type fakeBackupManager struct {
+	state      backup.State
+	startErr   error
+	result     backup.RunResult
+	backupErr  error
+	snapshots  []backup.Snapshot
+	restoreErr error
+	dumpErr    error
+	dumped     string
+	apps       []backup.App
+}
+
+func (f *fakeBackupManager) State() backup.State { return f.state }
+
+func (f *fakeBackupManager) Start(_ context.Context, trigger backup.Trigger) (*backup.Run, error) {
+	if f.startErr != nil {
+		return nil, f.startErr
+	}
+	return &backup.Run{ID: 7, Trigger: trigger, StartedAt: time.Date(2026, 11, 18, 18, 0, 0, 0, time.UTC)}, nil
+}
+
+func (f *fakeBackupManager) BackupApp(_ context.Context, app backup.App) (backup.RunResult, error) {
+	f.apps = append(f.apps, app)
+	return f.result, f.backupErr
+}
+
+func (f *fakeBackupManager) Snapshots(context.Context, backup.App) ([]backup.Snapshot, error) {
+	return f.snapshots, nil
+}
+
+func (f *fakeBackupManager) RestoreVolume(context.Context, backup.App, string) (backup.RestoreResult, error) {
+	return backup.RestoreResult{}, f.restoreErr
+}
+
+func (f *fakeBackupManager) LookupDump(_ context.Context, _ backup.App, id string) (backup.DumpFile, error) {
+	if f.dumpErr != nil {
+		return backup.DumpFile{}, f.dumpErr
+	}
+	return backup.DumpFile{Name: "blog-db-" + id + ".dump"}, nil
+}
+
+func (f *fakeBackupManager) WriteDump(_ context.Context, _ backup.DumpFile, w io.Writer) error {
+	_, err := io.WriteString(w, f.dumped)
+	return err
+}
+
+func TestBackupServiceAdapter(t *testing.T) {
+	ctx := context.Background()
+	manager := &fakeBackupManager{}
+	now := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	svc := &backupService{
+		manager:   manager,
+		scheduler: &backup.Scheduler{Hour: 3, Location: time.FixedZone("JST", 9*3600)},
+		clock:     fixedClock{now},
+		serverCtx: ctx,
+	}
+	current := int64(1)
+	app := store.App{Slug: "blog", DesiredState: store.DesiredRunning, CurrentDeploymentID: &current,
+		DumpHookService: "db", DumpHookCommand: "pg_dump app"}
+
+	// 03:00 JST is 18:00 UTC.
+	if next := svc.NextRun(); !next.Equal(time.Date(2026, 11, 18, 18, 0, 0, 0, time.UTC)) {
+		t.Errorf("NextRun = %v", next)
+	}
+	if svc.Running() {
+		t.Error("Running must be false while idle")
+	}
+	manager.state = backup.State{Busy: true, Operation: backup.OpRun}
+	if !svc.Running() {
+		t.Error("Running must follow the manager")
+	}
+
+	run, err := svc.StartManual(ctx)
+	if err != nil || run.ID != 7 || run.Trigger != store.BackupTriggerManual || run.Status != store.BackupRunning {
+		t.Errorf("StartManual = %+v, %v", run, err)
+	}
+	manager.startErr = &backup.BusyError{}
+	if _, err := svc.StartManual(ctx); !errors.Is(err, api.ErrBackupBusy) {
+		t.Errorf("StartManual while busy: %v", err)
+	}
+
+	manager.snapshots = []backup.Snapshot{
+		{ID: "4bba301e", Kind: backup.KindVolume, Target: "pgdata", Size: 2048},
+		{ID: "9c0ffee1", Kind: backup.KindDump, Target: "db"},
+	}
+	snapshots, err := svc.Snapshots(ctx, app)
+	if err != nil || len(snapshots) != 2 || snapshots[0].SizeBytes == nil || *snapshots[0].SizeBytes != 2048 ||
+		snapshots[1].SizeBytes != nil || snapshots[1].Kind != "dump" {
+		t.Errorf("Snapshots = %+v, %v", snapshots, err)
+	}
+
+	manager.restoreErr = backup.ErrSnapshotNotFound
+	if err := svc.RestoreVolume(ctx, app, "4bba301e"); !errors.Is(err, api.ErrSnapshotNotFound) {
+		t.Errorf("RestoreVolume: %v", err)
+	}
+	manager.restoreErr = nil
+	if err := svc.RestoreVolume(ctx, app, "4bba301e"); err != nil {
+		t.Errorf("RestoreVolume: %v", err)
+	}
+
+	manager.dumped = "-- dump --"
+	name, write, err := svc.OpenDump(ctx, app, "9c0ffee1")
+	var out bytes.Buffer
+	if err != nil || name != "blog-db-9c0ffee1.dump" || write(&out) != nil || out.String() != "-- dump --" {
+		t.Errorf("OpenDump = %q, %v, %q", name, err, out.String())
+	}
+	manager.dumpErr = backup.ErrSnapshotNotFound
+	if _, _, err := svc.OpenDump(ctx, app, "9c0ffee1"); !errors.Is(err, api.ErrSnapshotNotFound) {
+		t.Errorf("OpenDump of an unknown snapshot: %v", err)
+	}
+}
+
+// TestBackupBeforeDeployOutcome pins what the deploy engine sees: only a
+// fully successful backup lets the deploy continue.
+func TestBackupBeforeDeployOutcome(t *testing.T) {
+	ctx := context.Background()
+	manager := &fakeBackupManager{}
+	svc := &backupService{manager: manager}
+	current := int64(1)
+	app := store.App{Slug: "blog", DesiredState: store.DesiredRunning, CurrentDeploymentID: &current,
+		BackupExcludeVolumes: []string{"cache"}, DumpHookService: "db", DumpHookCommand: "pg_dump app"}
+
+	manager.result = backup.RunResult{Status: backup.StatusSucceeded}
+	if err := svc.BackupApp(ctx, app); err != nil {
+		t.Errorf("successful backup: %v", err)
+	}
+	if len(manager.apps) != 1 || manager.apps[0].Project != "paas-blog" || manager.apps[0].DumpService != "db" ||
+		len(manager.apps[0].ExcludeVolumes) != 1 {
+		t.Errorf("app passed to the manager = %+v", manager.apps)
+	}
+
+	manager.result = backup.RunResult{Status: backup.StatusFailed, Error: "volume pgdata: restic exited with 1"}
+	if err := svc.BackupApp(ctx, app); err == nil || !strings.Contains(err.Error(), "pgdata") {
+		t.Errorf("a failed target must fail the deploy: %v", err)
+	}
+	manager.result, manager.backupErr = backup.RunResult{}, &backup.BusyError{}
+	if err := svc.BackupApp(ctx, app); err == nil || !strings.Contains(err.Error(), "another backup is running") {
+		t.Errorf("busy: %v", err)
+	}
+	manager.backupErr = errors.New("restic: repository unreachable")
+	if err := svc.BackupApp(ctx, app); err == nil || !strings.Contains(err.Error(), "unreachable") {
+		t.Errorf("other errors: %v", err)
+	}
+}
+
+type fixedClock struct{ t time.Time }
+
+func (c fixedClock) Now() time.Time { return c.t }
+
+// TestAppControllerKeepsStoppedAppsStopped: a volume restore stops the app
+// and starts it again, but an app that was stopped before stays stopped.
+func TestAppControllerKeepsStoppedAppsStopped(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	app := testApp(t, st, "blog")
+	d, _, err := st.EnqueueDeployment(ctx, app.ID, "main", strings.Repeat("a", 40), "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.StartDeployment(ctx, d.ID, time.Now())
+	if err := st.FinishDeployment(ctx, d.ID, store.StatusSucceeded, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	fake := &runner.Fake{}
+	engine := deploy.New(deploy.Options{Store: st, Runner: fake, AppsDir: t.TempDir()})
+	controller := &appController{store: st, engine: engine}
+	target := backup.App{Slug: "blog", Project: "paas-blog"}
+	composeCalls := func() []string {
+		var subs []string
+		for _, c := range fake.Calls() {
+			subs = append(subs, c.Args[len(c.Args)-1])
+		}
+		return subs
+	}
+
+	// Running app: stopped for the restore, started afterwards.
+	if err := controller.Stop(ctx, target); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if got, _ := st.GetApp(ctx, "blog"); got.DesiredState != store.DesiredStopped {
+		t.Errorf("after Stop: %q", got.DesiredState)
+	}
+	if err := controller.Start(ctx, target); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if got, _ := st.GetApp(ctx, "blog"); got.DesiredState != store.DesiredRunning {
+		t.Errorf("after Start: %q", got.DesiredState)
+	}
+	if calls := composeCalls(); len(calls) != 2 || calls[0] != "stop" || calls[1] != "start" {
+		t.Errorf("docker calls = %v", calls)
+	}
+
+	// Already stopped: nothing runs and it stays stopped.
+	if err := st.SetAppDesiredState(ctx, app.ID, store.DesiredStopped, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	fake.Reset()
+	if err := controller.Stop(ctx, target); err != nil {
+		t.Fatalf("Stop of a stopped app: %v", err)
+	}
+	if err := controller.Start(ctx, target); err != nil {
+		t.Fatalf("Start of a previously stopped app: %v", err)
+	}
+	if calls := fake.Calls(); len(calls) != 0 {
+		t.Errorf("a stopped app must not be touched: %v", calls)
+	}
+	if got, _ := st.GetApp(ctx, "blog"); got.DesiredState != store.DesiredStopped {
+		t.Errorf("a stopped app was started: %q", got.DesiredState)
+	}
+	// The memory of "was stopped" is used once: a later restore of the app,
+	// now running, starts it again.
+	_ = st.SetAppDesiredState(ctx, app.ID, store.DesiredRunning, time.Now())
+	_ = controller.Stop(ctx, target)
+	_ = controller.Start(ctx, target)
+	if got, _ := st.GetApp(ctx, "blog"); got.DesiredState != store.DesiredRunning {
+		t.Errorf("second restore left the app %q", got.DesiredState)
+	}
+
+	if err := controller.Stop(ctx, backup.App{Slug: "missing"}); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("unknown app: %v", err)
 	}
 }

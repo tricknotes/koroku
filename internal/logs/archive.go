@@ -204,6 +204,10 @@ func (a *Archiver) NextWindowEnd(t time.Time) time.Time {
 func (a *Archiver) Run(ctx context.Context) {
 	due := a.LastWindowEnd(a.c.clk.Now())
 	for {
+		// The retry is timed from the start of the run. Reading the clock
+		// after the run would race with anyone who reacts to the recorded
+		// failure (the status is visible before this loop continues).
+		started := a.c.clk.Now()
 		err := a.runOnce(ctx, due)
 		if ctx.Err() != nil {
 			return
@@ -212,7 +216,7 @@ func (a *Archiver) Run(ctx context.Context) {
 			a.c.log.Warn("log archive run failed; retrying later", "window_end", due, "error", err)
 		}
 		next := a.NextWindowEnd(due)
-		retryAt := a.c.clk.Now().Add(a.retryEvery)
+		retryAt := started.Add(a.retryEvery)
 		for {
 			if !sleep(ctx, a.pollEvery) {
 				return

@@ -8,12 +8,15 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 	_ "time/tzdata" // the binary must know Asia/Tokyo on a host without zoneinfo
 
 	"github.com/BurntSushi/toml"
 )
+
+var memoryLimitPattern = regexp.MustCompile(`^[1-9][0-9]*[bkmg]?$`)
 
 // DefaultPath is where paasd looks for its configuration when --config is not given.
 const DefaultPath = "/etc/paas/config.toml"
@@ -289,8 +292,9 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("caddy.acme_ca %q must be an https URL", c.Caddy.ACMECA))
 		}
 	}
-	if c.Deploy.DefaultMemoryLimit == "" {
-		errs = append(errs, errors.New("deploy.default_memory_limit is required"))
+	if !memoryLimitPattern.MatchString(c.Deploy.DefaultMemoryLimit) {
+		// A malformed value would make every deployment fail at Compose time.
+		errs = append(errs, fmt.Errorf("deploy.default_memory_limit %q must be a number with an optional unit (b, k, m, g), for example 512m", c.Deploy.DefaultMemoryLimit))
 	}
 	return errors.Join(errs...)
 }
