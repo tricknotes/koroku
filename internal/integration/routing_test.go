@@ -25,6 +25,7 @@ func (c *captureLoader) Load(_ context.Context, config []byte) error {
 // database with running, stopped and never-deployed apps plus custom domains
 // and lets a real Caddy validate it.
 func TestGeneratedConfigIsAcceptedByCaddy(t *testing.T) {
+	t.Parallel()
 	const image = "caddy:2"
 	if err := exec.Command("docker", "image", "inspect", image).Run(); err != nil {
 		if out, err := exec.Command("docker", "pull", "--quiet", image).CombinedOutput(); err != nil {

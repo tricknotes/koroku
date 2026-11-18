@@ -13,13 +13,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,6 +48,8 @@ type env struct {
 
 // newEnv starts a koroku-like stack (store, engine, worker, API) that talks
 // to the local Docker daemon. Everything it creates is removed afterwards.
+// Environments share nothing (directory, database, slugs, host ports), so
+// the tests that use them run in parallel.
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	if out, err := exec.Command("docker", "compose", "version").CombinedOutput(); err != nil {
@@ -70,8 +75,7 @@ func newEnv(t *testing.T) *env {
 	cfg.BaseDomain = "dev.example.com"
 	cfg.DataDir = dir
 	cfg.Deploy.AllowFileRepos = true
-	cfg.Deploy.PortRangeStart = freePort(t)
-	cfg.Deploy.PortRangeEnd = cfg.Deploy.PortRangeStart + 50
+	cfg.Deploy.PortRangeStart, cfg.Deploy.PortRangeEnd = portRange(t)
 
 	run := runner.Exec{}
 	prober := system.Host{DataDir: dir, Runner: run}
@@ -108,6 +112,8 @@ func newEnv(t *testing.T) *env {
 		Refs:     deploy.GitRefResolver{Fetcher: fetcher},
 		// Authentication is covered by the API unit tests.
 		Auth: api.AuthOptions{InsecureNoAuth: true},
+		// Errors behind a 500 show up in the test's output.
+		Logger: slog.New(slog.NewTextHandler(t.Output(), nil)),
 	})
 	server := httptest.NewServer(srv.Handler())
 
@@ -122,6 +128,35 @@ func newEnv(t *testing.T) *env {
 		_ = st.Close()
 	})
 	return e
+}
+
+// portSpan is how many host ports each test environment may hand out.
+const portSpan = 50
+
+// reservedPorts holds the host port ranges of the environments of this
+// process. The tests run in parallel, and each engine only knows the ports
+// in its own database, so two environments must never share a range.
+var reservedPorts struct {
+	sync.Mutex
+	ranges [][2]int
+}
+
+// portRange returns a range of host ports, starting at a port that is free
+// now, that does not overlap the range of any other environment.
+func portRange(t *testing.T) (start, end int) {
+	t.Helper()
+	reservedPorts.Lock()
+	defer reservedPorts.Unlock()
+	for range 100 {
+		start = freePort(t)
+		end = start + portSpan
+		if !slices.ContainsFunc(reservedPorts.ranges, func(r [2]int) bool { return start <= r[1] && r[0] <= end }) {
+			reservedPorts.ranges = append(reservedPorts.ranges, [2]int{start, end})
+			return start, end
+		}
+	}
+	t.Fatal("no free host port range that does not overlap another environment")
+	return 0, 0
 }
 
 func freePort(t *testing.T) int {
@@ -349,6 +384,7 @@ func publishedPorts(t *testing.T, project string) map[string]string {
 // while the volume survives, and keep the old version when a commit fails
 // to start.
 func TestBuildAppLifecycle(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	source := newRepo(t, "build-app")
 	v1 := source.commit("Version 1")
@@ -452,6 +488,7 @@ func TestBuildAppLifecycle(t *testing.T) {
 
 // TestImageOnlyApp covers the second sample: no build, images are pulled.
 func TestImageOnlyApp(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	source := newRepo(t, "image-app")
 	sha := source.commit("Image-only app")
@@ -504,6 +541,7 @@ func projectVolumes(t *testing.T, project string) []string {
 // stop, start (data survives), the services listing, and deletion with and
 // without volumes.
 func TestStopStartDelete(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	source := newRepo(t, "build-app")
 	sha := source.commit("Version 1")
@@ -613,6 +651,7 @@ func TestStopStartDelete(t *testing.T) {
 // TestPolicyBlocksPrivilegedContainer checks that a rejected project never
 // reaches Docker.
 func TestPolicyBlocksPrivilegedContainer(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	source := newRepo(t, "")
 	source.write("compose.yaml", "services:\n  web:\n    image: busybox:1.37\n    privileged: true\n"+
@@ -634,6 +673,7 @@ func TestPolicyBlocksPrivilegedContainer(t *testing.T) {
 // containers: while one app is being deployed the other keeps answering, and
 // two apps side by side cannot reach each other's services.
 func TestTwoAppsAreIsolated(t *testing.T) {
+	t.Parallel()
 	e := newEnv(t)
 	repoA, repoB := newRepo(t, "build-app"), newRepo(t, "build-app")
 	shaA := repoA.commit("App A")

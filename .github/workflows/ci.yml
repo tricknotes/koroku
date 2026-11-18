@@ -60,9 +60,24 @@ jobs:
           key: integration-go-${{ hashFiles('dev/Dockerfile', 'go.sum') }}
       # The integration tests run inside the development image, the same way
       # as on a developer machine (bin/dev), so they have restic and the
-      # Compose version the project is developed against.
+      # Compose version the project is developed against. Like bin/dev, CI
+      # rebuilds the image only when dev/Dockerfile changes: loading the
+      # saved image is faster than building it.
+      - name: Restore the development image
+        id: image-cache
+        uses: actions/cache@v6.1.0
+        with:
+          path: ${{ runner.temp }}/koroku-dev-image.tar.zst
+          key: integration-image-${{ hashFiles('dev/Dockerfile') }}
+      - name: Load the development image
+        if: steps.image-cache.outputs.cache-hit == 'true'
+        run: zstd -dc "$RUNNER_TEMP/koroku-dev-image.tar.zst" | docker load
       - name: Build the development image
         run: bin/dev true
+      - name: Save the development image
+        if: steps.image-cache.outputs.cache-hit != 'true'
+        # The tag is the one bin/dev gives the "go" target.
+        run: docker save "koroku-dev:$(sha256sum dev/Dockerfile | cut -c1-12)-go" | zstd -T0 -o "$RUNNER_TEMP/koroku-dev-image.tar.zst"
       - name: Tool versions
         run: bin/dev sh -c 'go version && docker version --format "{{.Server.Version}}" && docker compose version && restic version'
       - name: go vet (integration tag)

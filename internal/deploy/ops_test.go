@@ -429,3 +429,54 @@ func TestParseDockerSize(t *testing.T) {
 		}
 	}
 }
+
+// docker system df races removals of containers, images and files in
+// running containers (containerd image store); errors from the daemon are
+// retried, a daemon that cannot be reached is not.
+func TestDockerDiskUsageRetriesDaemonErrors(t *testing.T) {
+	defer func(d time.Duration) { dfRetryDelay = d }(dfRetryDelay)
+	dfRetryDelay = time.Millisecond
+	const row = `{"Reclaimable":"0B (0%)","Size":"1GB","TotalCount":"2","Type":"Images"}` + "\n"
+	raced := errors.New("Error response from daemon: failed to retrieve container list: rw layer snapshot not found for container 0123456789ab")
+
+	for _, tc := range []struct {
+		name      string
+		failures  []error // returned by the first calls, in order
+		wantErr   string
+		wantCalls int
+	}{
+		{name: "one race", failures: []error{raced}, wantCalls: 2},
+		{name: "two races", failures: []error{raced, errors.New("Error response from daemon: failed to calculate image disk usage: content digest sha256:abc: not found")}, wantCalls: 3},
+		{name: "file removed in a running container", failures: []error{errors.New("Error response from daemon: failed to retrieve container list: snapshotter.Usage failed for 0123: lstat /var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/102/fs/tmp/x: no such file or directory")}, wantCalls: 2},
+		{name: "races every time", failures: []error{raced, raced, raced, raced}, wantErr: "rw layer snapshot not found", wantCalls: 3},
+		{name: "daemon down", failures: []error{errors.New("Cannot connect to the Docker daemon")}, wantErr: "Cannot connect", wantCalls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, nil)
+			calls := 0
+			h.runner.Handler = func(_ context.Context, cmd runner.Cmd) (string, error) {
+				if strings.Join(cmd.Args, " ") != "system df --format json" {
+					return "", errors.New("unexpected command")
+				}
+				calls++
+				if calls <= len(tc.failures) {
+					return "", tc.failures[calls-1]
+				}
+				return row, nil
+			}
+			usage, err := h.engine.DockerDiskUsage(context.Background())
+			if calls != tc.wantCalls {
+				t.Errorf("docker system df ran %d times, want %d", calls, tc.wantCalls)
+			}
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("err = %v, want it to mention %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || len(usage) != 1 || usage[0].Count != 2 {
+				t.Errorf("DockerDiskUsage = %+v, %v", usage, err)
+			}
+		})
+	}
+}
