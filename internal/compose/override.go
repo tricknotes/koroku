@@ -3,6 +3,7 @@ package compose
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -111,7 +112,10 @@ func Override(p OverrideParams) ([]byte, error) {
 
 // memoryLimit picks the limit to write for a service, or "" to leave the
 // repository's own setting alone. Precedence: per-service app setting,
-// app-wide setting, the repository's own limit, the configured default.
+// app-wide setting, the repository's own limit when it does not exceed the
+// configured default, the configured default. The default is a ceiling for
+// what a repository can claim on its own: raising a limit is done in the
+// app settings, not in the Compose file.
 func (p OverrideParams) memoryLimit(name string, svc Service) string {
 	if v := p.ServiceMemory[name]; v != "" {
 		return v
@@ -119,10 +123,42 @@ func (p OverrideParams) memoryLimit(name string, svc Service) string {
 	if p.AppMemory != "" {
 		return p.AppMemory
 	}
-	if svc.MemLimit != "" || svc.DeployMemoryLimit() != "" {
-		return ""
+	own := svc.MemLimit
+	if own == "" {
+		own = svc.DeployMemoryLimit()
+	}
+	if own != "" {
+		limit, okLimit := ParseMemory(own)
+		ceiling, okCeiling := ParseMemory(p.DefaultMemory)
+		if okLimit && okCeiling && limit <= ceiling {
+			return ""
+		}
 	}
 	return p.DefaultMemory
+}
+
+// ParseMemory converts a Compose memory value ("512m", "1g", "134217728")
+// to bytes.
+func ParseMemory(value string) (int64, bool) {
+	v := strings.ToLower(strings.TrimSpace(value))
+	v = strings.TrimSuffix(v, "b")
+	if v == "" {
+		return 0, false
+	}
+	multiplier := int64(1)
+	switch v[len(v)-1] {
+	case 'k':
+		multiplier, v = 1<<10, v[:len(v)-1]
+	case 'm':
+		multiplier, v = 1<<20, v[:len(v)-1]
+	case 'g':
+		multiplier, v = 1<<30, v[:len(v)-1]
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n * multiplier, true
 }
 
 // quote renders s as a YAML double-quoted scalar. A JSON string is a valid

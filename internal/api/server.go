@@ -73,6 +73,9 @@ type Server struct {
 	backups  Backups
 
 	routeStatus func() RouteStatus
+
+	// callbackLimiter bounds OAuth code exchanges (see handleCallback).
+	callbackLimiter *rateLimiter
 }
 
 // New builds a Server.
@@ -104,6 +107,9 @@ func New(opts Options) *Server {
 		backups:  opts.Backups,
 
 		routeStatus: opts.RouteStatus,
+
+		// One person logs in a few times a week; ten a minute is generous.
+		callbackLimiter: &rateLimiter{limit: 10, window: time.Minute},
 	}
 }
 
@@ -166,7 +172,7 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "not_found", "no such API endpoint")
 	})
 	mux.Handle("/", s.spaHandler())
-	return s.recoverPanics(s.logRequests(securityHeaders(s.guard(mux))))
+	return s.recoverPanics(s.logRequests(s.securityHeaders(s.guard(mux))))
 }
 
 type errorBody struct {

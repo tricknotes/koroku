@@ -1,0 +1,31 @@
+violations:
+  [file_outside_release] config "hostconfig" reads /etc/passwd, which is outside the repository checkout
+  [file_outside_release] secret "hostsecret" reads /etc/shadow, which is outside the repository checkout
+  [foreign_network] network "foreign" refers to "paas-blog_default", which does not belong to this app
+  [foreign_network] network "named" refers to "shared-net", which does not belong to this app
+  [foreign_volume] volume "other" refers to "paas-blog_pgdata", which does not belong to this app
+  [foreign_volume] volume "renamed" refers to "paas-blog_storage", which does not belong to this app
+  [volume_host_path] volume "hostroot" mounts the host path / through driver options
+  [file_outside_release] service "builder": Dockerfile /etc/hostname is outside the repository checkout
+  [file_outside_release] service "builder": additional context extra /var/lib/paas is outside the repository checkout
+  [file_outside_release] service "builder": build context /etc is outside the repository checkout
+  [host_network] service "builder": build.network: host is not allowed
+  [privileged] service "builder": build.privileged: true is not allowed
+  [foreign_namespace] service "sibling": network_mode: container:paas-blog-web-1 joins a container outside the app
+  [foreign_namespace] service "sibling": pid: container:paas-blog-web-1 joins a container outside the app
+  [bind_writable] service "web": bind mount of /var/lib/paas/apps/evil/releases/9 must be read-only (add :ro; keep data in a named volume)
+  [capability] service "web": cap_add: SYS_ADMIN is not allowed
+  [capability] service "web": cap_add: cap_sys_ptrace is not allowed
+  [device] service "web": host devices are not allowed
+  [file_outside_release] service "web": env_file /var/lib/paas/apps/blog/env is outside the repository checkout
+  [foreign_namespace] service "web": volumes_from: container:paas-blog-db-1 takes volumes of a container outside the app
+  [host_namespace] service "web": cgroup: host is not allowed
+  [host_namespace] service "web": ipc: host is not allowed
+  [host_namespace] service "web": userns_mode: host is not allowed
+  [host_namespace] service "web": uts: host is not allowed
+  [memory_guard] service "web": memswap_limit: -1 allows unlimited swap beyond the memory limit
+  [memory_guard] service "web": oom_kill_disable defeats the memory limit
+  [runtime] service "web": runtime: sysbox-runc is not allowed
+  [security_opt] service "web": security_opt: seccomp:unconfined weakens the container sandbox
+  [device] service "worker": host devices are not allowed
+waived:

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/tricknotes/koroku/internal/compose"
 	"github.com/tricknotes/koroku/internal/deploy"
 	"github.com/tricknotes/koroku/internal/store"
 )
@@ -22,6 +23,7 @@ type AppOperator interface {
 
 // writeOpError maps operation errors; it reports whether one was written.
 func (s *Server) writeOpError(w http.ResponseWriter, r *http.Request, err error) bool {
+	var policyErr *compose.PolicyError
 	switch {
 	case err == nil:
 		return false
@@ -29,6 +31,12 @@ func (s *Server) writeOpError(w http.ResponseWriter, r *http.Request, err error)
 		writeError(w, http.StatusConflict, "busy", "the app is being deployed or another operation is in progress")
 	case errors.Is(err, deploy.ErrNotDeployed):
 		writeError(w, http.StatusConflict, "not_deployed", "the app has not been deployed yet")
+	case errors.As(err, &policyErr):
+		writeJSON(w, http.StatusUnprocessableEntity, errorBody{Error: errorDetail{
+			Code:    "policy_violation",
+			Message: "the release no longer passes the deploy policy; deploy the app again",
+			Details: policyErr.Violations,
+		}})
 	default:
 		s.internalError(w, r, err)
 	}

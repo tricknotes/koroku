@@ -8,9 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tricknotes/koroku/internal/github"
@@ -18,6 +20,7 @@ import (
 )
 
 const (
+	// Cookie names. Over HTTPS they carry the __Host- prefix (see cookieName).
 	sessionCookie = "paas_session"
 	stateCookie   = "paas_oauth_state"
 	// SessionLifetime is how long a login lasts. The console has root-level
@@ -79,9 +82,22 @@ func (s *Server) secureCookies() bool {
 	return !strings.HasPrefix(s.auth.ConsoleURL, "http://")
 }
 
+// cookieName adds the __Host- prefix when the console is served over HTTPS.
+// The apps this platform hosts live on sibling subdomains of the console,
+// and a page on a sibling subdomain can set cookies for the shared parent
+// domain. Browsers accept a __Host- cookie only from the exact host, with
+// Secure and Path=/, so a hosted app cannot plant or replace the console's
+// session or login state cookie.
+func (s *Server) cookieName(name string) string {
+	if s.secureCookies() {
+		return "__Host-" + name
+	}
+	return name
+}
+
 func (s *Server) setCookie(w http.ResponseWriter, name, value string, maxAge time.Duration) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     name,
+		Name:     s.cookieName(name),
 		Value:    value,
 		Path:     "/",
 		MaxAge:   int(maxAge / time.Second),
@@ -93,14 +109,14 @@ func (s *Server) setCookie(w http.ResponseWriter, name, value string, maxAge tim
 
 func (s *Server) clearCookie(w http.ResponseWriter, name string) {
 	http.SetCookie(w, &http.Cookie{
-		Name: name, Value: "", Path: "/", MaxAge: -1,
+		Name: s.cookieName(name), Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: s.secureCookies(), SameSite: http.SameSiteLaxMode,
 	})
 }
 
 // lookupSession resolves the session cookie of a request.
 func (s *Server) lookupSession(r *http.Request) (store.Session, bool) {
-	cookie, err := r.Cookie(sessionCookie)
+	cookie, err := r.Cookie(s.cookieName(sessionCookie))
 	if err != nil || cookie.Value == "" {
 		return store.Session{}, false
 	}
@@ -128,7 +144,34 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		isAPI := strings.HasPrefix(path, "/api/")
+		// Browsers label where a request comes from. The console only ever
+		// calls its API from its own origin, so anything a browser marks as
+		// coming from another site (including a hosted app on a sibling
+		// subdomain) is refused before it can cost anything. Requests
+		// without the header (curl, old browsers) are judged by the checks
+		// below.
+		if site := r.Header.Get("Sec-Fetch-Site"); isAPI && site != "" && site != "same-origin" && site != "none" {
+			writeError(w, http.StatusForbidden, "forbidden_origin", "cross-site requests to the API are not allowed")
+			return
+		}
+		if isMutating(r.Method) && isAPI && r.ContentLength != 0 &&
+			!strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+			// A form or text/plain POST needs no CORS preflight; JSON does.
+			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "request bodies must be application/json")
+			return
+		}
 		if s.auth.InsecureNoAuth {
+			// Development mode has no login, so the browser of whoever runs
+			// it is the attack surface: any web page could otherwise post to
+			// 127.0.0.1, and DNS rebinding could read from it.
+			if !isLoopbackHost(r.Host) {
+				writeError(w, http.StatusForbidden, "forbidden_host", "in --insecure-no-auth mode the API answers only on a loopback host name")
+				return
+			}
+			if origin := r.Header.Get("Origin"); isMutating(r.Method) && origin != "" && origin != "http://"+r.Host {
+				writeError(w, http.StatusForbidden, "forbidden_origin", "the request does not come from the console")
+				return
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -153,13 +196,45 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	})
 }
 
+// contentSecurityPolicy fits the built console: scripts and styles come from
+// its own files only (the build has no inline script), the API is same
+// origin, and the only foreign resource is the GitHub avatar of the user.
+// Inline style attributes are allowed because templates may set them.
+const contentSecurityPolicy = "default-src 'self'; " +
+	"script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: https://avatars.githubusercontent.com; " +
+	"connect-src 'self'; " +
+	"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
+// isLoopbackHost reports whether a Host header names this machine itself.
+func isLoopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // securityHeaders sets headers that are right for every response.
-func securityHeaders(next http.Handler) http.Handler {
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		if s.secureCookies() {
+			// The console is only ever meant to be reached over HTTPS.
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -210,8 +285,15 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		loginErrorRedirect(w, r, "not_configured")
 		return
 	}
+	// Anyone can reach this endpoint with a made-up code and state; without
+	// a limit each such request would make paasd call GitHub with the App's
+	// client secret.
+	if !s.callbackLimiter.allow(s.clock.Now()) {
+		loginErrorRedirect(w, r, "github_error")
+		return
+	}
 	query := r.URL.Query()
-	cookie, err := r.Cookie(stateCookie)
+	cookie, err := r.Cookie(s.cookieName(stateCookie))
 	s.clearCookie(w, stateCookie)
 	state := query.Get("state")
 	if err != nil || state == "" || subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(state)) != 1 {
@@ -271,7 +353,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(sessionCookie); err == nil && cookie.Value != "" {
+	if cookie, err := r.Cookie(s.cookieName(sessionCookie)); err == nil && cookie.Value != "" {
 		if err := s.store.DeleteSession(r.Context(), hashToken(cookie.Value)); err != nil {
 			s.internalError(w, r, err)
 			return
@@ -279,4 +361,26 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearCookie(w, sessionCookie)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// rateLimiter allows a fixed number of events per window.
+type rateLimiter struct {
+	mu     sync.Mutex
+	limit  int
+	window time.Duration
+	start  time.Time
+	count  int
+}
+
+func (l *rateLimiter) allow(now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if now.Sub(l.start) >= l.window {
+		l.start, l.count = now, 0
+	}
+	if l.count >= l.limit {
+		return false
+	}
+	l.count++
+	return true
 }

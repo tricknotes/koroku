@@ -115,11 +115,22 @@ func NewLineWriter(dst io.Writer, masker *Masker) *LineWriter {
 	return &LineWriter{dst: dst, masker: masker}
 }
 
+// MaxLineBytes bounds how much output without a line break is buffered.
+// A longer run is cut into lines of this size, so a command that prints an
+// endless line cannot make the writer grow without limit.
+const MaxLineBytes = 64 << 10
+
 // Write buffers p and emits every complete line, masked.
 func (w *LineWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.buf.Write(p)
+	for w.buf.Len() > MaxLineBytes && bytes.IndexByte(w.buf.Bytes()[:MaxLineBytes], '\n') < 0 {
+		chunk := string(w.buf.Next(MaxLineBytes))
+		if _, err := io.WriteString(w.dst, w.masker.Mask(lastSegment(chunk))+"\n"); err != nil {
+			return len(p), err
+		}
+	}
 	for {
 		data := w.buf.Bytes()
 		i := bytes.IndexByte(data, '\n')
@@ -128,16 +139,22 @@ func (w *LineWriter) Write(p []byte) (int, error) {
 		}
 		line := string(data[:i])
 		w.buf.Next(i + 1)
-		// Progress output uses carriage returns; keep only the last state.
-		if j := strings.LastIndexByte(strings.TrimRight(line, "\r"), '\r'); j >= 0 {
-			line = line[j+1:]
-		}
-		line = strings.TrimRight(line, "\r")
-		if _, err := io.WriteString(w.dst, w.masker.Mask(line)+"\n"); err != nil {
+		if _, err := io.WriteString(w.dst, w.masker.Mask(lastSegment(line))+"\n"); err != nil {
 			return len(p), err
 		}
 	}
 	return len(p), nil
+}
+
+// lastSegment drops everything up to the last interior carriage return.
+// Progress output redraws a line with carriage returns; only its last state
+// is kept, and no carriage return ever reaches the log file.
+func lastSegment(line string) string {
+	line = strings.TrimRight(line, "\r")
+	if j := strings.LastIndexByte(line, '\r'); j >= 0 {
+		line = line[j+1:]
+	}
+	return line
 }
 
 // Flush writes any buffered partial line.
@@ -147,7 +164,7 @@ func (w *LineWriter) Flush() error {
 	if w.buf.Len() == 0 {
 		return nil
 	}
-	line := strings.TrimRight(w.buf.String(), "\r")
+	line := lastSegment(w.buf.String())
 	w.buf.Reset()
 	_, err := io.WriteString(w.dst, w.masker.Mask(line)+"\n")
 	return err

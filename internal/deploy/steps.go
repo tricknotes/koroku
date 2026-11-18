@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -102,7 +103,10 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if err := e.writeMeta(app.Slug, d.ID, meta); err != nil {
 		return false, fmt.Errorf("write release metadata: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(releaseDir, compose.OverrideFileName), override, 0o644); err != nil {
+	// The checkout is repository content: a file of this name may already
+	// exist there as a symlink to anywhere. Writing through a temporary
+	// file and renaming replaces the link itself instead of following it.
+	if err := writeFileAtomic(filepath.Join(releaseDir, compose.OverrideFileName), override, 0o644); err != nil {
 		return false, fmt.Errorf("write override: %w", err)
 	}
 
@@ -119,11 +123,13 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, err
 	}
 	policy := compose.CheckPolicy(project, compose.PolicyParams{
-		ReleaseDir: releaseDir,
-		WebService: app.WebService,
-		WebPort:    app.WebPort,
-		HostPort:   app.HostPort,
-		Relax:      app.RelaxPolicy,
+		ReleaseDir:  releaseDir,
+		ProjectName: app.ProjectName(),
+		EnvFile:     e.EnvFile(app.Slug),
+		WebService:  app.WebService,
+		WebPort:     app.WebPort,
+		HostPort:    app.HostPort,
+		Relax:       app.RelaxPolicy,
 	})
 	for _, v := range policy.Waived {
 		log.Printf("Policy waived for this app: %s", v)
@@ -227,21 +233,54 @@ func (e *Engine) renderEnv(ctx context.Context, app store.App, masker *secrets.M
 	return RenderEnvFile(vars)
 }
 
-// composeConfig runs `docker compose config --format json`. Its output holds
-// resolved environment values, so only stderr goes to the log.
+// composeConfig runs `docker compose config --format json`. With
+// --no-env-resolution the env files are listed by path instead of being
+// folded into the environment: the policy check needs the paths, and the
+// values of the app's variables stay out of the output. The output is still
+// never logged; only stderr goes to the log.
 func (e *Engine) composeConfig(ctx context.Context, inv compose.Invocation, dir string, log *deployLog) (compose.Project, error) {
+	return e.composeConfigTo(ctx, inv, dir, log.Writer())
+}
+
+func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, dir string, stderr io.Writer) (compose.Project, error) {
 	var stdout bytes.Buffer
 	err := e.opts.Runner.Run(ctx, runner.Cmd{
 		Name:   "docker",
-		Args:   inv.Args("config", "--format", "json"),
+		Args:   inv.Args("config", "--format", "json", "--no-env-resolution"),
 		Dir:    dir,
 		Stdout: &stdout,
-		Stderr: log.Writer(),
+		Stderr: stderr,
 	})
 	if err != nil {
 		return compose.Project{}, fmt.Errorf("the Compose file is not valid: %w", err)
 	}
 	return compose.ParseProject(stdout.Bytes())
+}
+
+// revalidate checks a stored release against the policy again right before
+// its files are used for another `up` (start, rollback). The files live in
+// the checkout; an app that was allowed a writable bind mount, or anything
+// else that got write access to the release directory, could have changed
+// them since the deploy that checked them.
+func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, composeFile string) error {
+	dir := e.ReleaseDir(app.Slug, id)
+	project, err := e.composeConfigTo(ctx, e.invocation(app, id, composeFile, true), dir, io.Discard)
+	if err != nil {
+		return err
+	}
+	policy := compose.CheckPolicy(project, compose.PolicyParams{
+		ReleaseDir:  dir,
+		ProjectName: app.ProjectName(),
+		EnvFile:     e.EnvFile(app.Slug),
+		WebService:  app.WebService,
+		WebPort:     app.WebPort,
+		HostPort:    app.HostPort,
+		Relax:       app.RelaxPolicy,
+	})
+	if !policy.OK() {
+		return &compose.PolicyError{Violations: policy.Violations}
+	}
+	return nil
 }
 
 func (e *Engine) compose(ctx context.Context, inv compose.Invocation, dir string, log *deployLog, sub ...string) error {
@@ -291,6 +330,10 @@ func (e *Engine) rollback(app store.App, log *deployLog) {
 	env, err := os.ReadFile(filepath.Join(e.stateDir(app.Slug, prev), "env"))
 	if err != nil {
 		log.Printf("Rollback is not possible: the previous environment snapshot is missing.")
+		return
+	}
+	if err := e.revalidate(ctx, app, prev, meta.ComposeFile); err != nil {
+		log.Printf("Rollback is not possible: the previous release no longer passes validation (%v).", err)
 		return
 	}
 	if err := writeFileAtomic(e.EnvFile(app.Slug), env, 0o600); err != nil {

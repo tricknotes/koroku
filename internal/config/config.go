@@ -161,12 +161,31 @@ func Default() Config {
 }
 
 // Load reads the TOML file at path, applies defaults and validates the result.
+// A file that holds secrets must not be readable by group or others.
 func Load(path string) (Config, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
-	return Parse(string(data))
+	cfg, err := Parse(string(data))
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.HasSecrets() && info.Mode().Perm()&0o077 != 0 {
+		return Config{}, fmt.Errorf("config %s holds secrets but its permissions are %04o; run: chmod 600 %s",
+			path, info.Mode().Perm(), path)
+	}
+	return cfg, nil
+}
+
+// HasSecrets reports whether the configuration itself contains credentials
+// (as opposed to pointing at key files).
+func (c Config) HasSecrets() bool {
+	return c.GitHub.ClientSecret != "" || c.Storage.SecretAccessKey != ""
 }
 
 // Parse decodes TOML text, applies defaults and validates the result.
@@ -207,8 +226,12 @@ func (c Config) Validate() error {
 	} else if strings.ContainsAny(c.BaseDomain, "/: ") || strings.HasPrefix(c.BaseDomain, ".") {
 		errs = append(errs, fmt.Errorf("base_domain %q is not a hostname", c.BaseDomain))
 	}
-	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
+	if host, _, err := net.SplitHostPort(c.Listen); err != nil {
 		errs = append(errs, fmt.Errorf("listen %q: %w", c.Listen, err))
+	} else if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		// paasd speaks plain HTTP and controls Docker; only the reverse
+		// proxy on the same host may reach it.
+		errs = append(errs, fmt.Errorf("listen %q must be a loopback address such as 127.0.0.1:8080", c.Listen))
 	}
 	if !filepath.IsAbs(c.DataDir) {
 		errs = append(errs, fmt.Errorf("data_dir %q must be an absolute path", c.DataDir))
@@ -233,6 +256,9 @@ func (c Config) Validate() error {
 		// Half-configured storage would silently skip backups.
 		if u, err := url.Parse(st.Endpoint); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
 			errs = append(errs, fmt.Errorf("storage.endpoint %q must be a URL such as https://s3.example.com", st.Endpoint))
+		} else if ip := net.ParseIP(u.Hostname()); u.Scheme == "http" && u.Hostname() != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			// Logs and backups carry secrets; plain HTTP is for a local test server only.
+			errs = append(errs, fmt.Errorf("storage.endpoint %q must use https", st.Endpoint))
 		}
 		if st.Region == "" {
 			errs = append(errs, errors.New("storage.region is required"))

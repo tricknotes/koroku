@@ -251,6 +251,92 @@ func TestPolicyGolden(t *testing.T) {
 	}
 }
 
+// TestPolicyHostileProject covers the ways a Compose file reaches the host
+// or another app besides the ones the original list names. Compose itself
+// accepts every one of them (checked with a real `docker compose config`).
+func TestPolicyHostileProject(t *testing.T) {
+	p := loadProject(t, "hostile")
+	params := PolicyParams{
+		ReleaseDir:  "/var/lib/paas/apps/evil/releases/9",
+		ProjectName: "paas-evil",
+		EnvFile:     "/var/lib/paas/apps/evil/env",
+		WebService:  "web", WebPort: 3000, HostPort: 20001,
+	}
+	render := func(r PolicyResult) []byte {
+		var b strings.Builder
+		b.WriteString("violations:\n")
+		for _, v := range r.Violations {
+			b.WriteString("  " + v.String() + "\n")
+		}
+		b.WriteString("waived:\n")
+		for _, v := range r.Waived {
+			b.WriteString("  " + v.String() + "\n")
+		}
+		return []byte(b.String())
+	}
+	strict := CheckPolicy(p, params)
+	checkGolden(t, "hostile.policy.txt", render(strict))
+
+	// What is fine must not be reported: the platform's own env file, files
+	// inside the checkout, a namespace shared with a service of the same
+	// app, a default capability, remote build contexts, an NFS volume.
+	text := string(render(strict))
+	for _, allowed := range []string{
+		"apps/evil/env ", "config/app.env", "service:web", "NET_BIND_SERVICE", "no-new-privileges:true",
+		"example.com/context", "docker-image://", "good-builder", `"data"`, `"nfs"`, `"default"`, `"ok"`,
+	} {
+		if strings.Contains(text, allowed) {
+			t.Errorf("%q must not be reported:\n%s", allowed, text)
+		}
+	}
+
+	// Every one of these is a deliberate choice the owner can make per app.
+	params.Relax = true
+	relaxed := CheckPolicy(p, params)
+	if !relaxed.OK() || len(relaxed.Waived) != len(strict.Violations) {
+		t.Errorf("with the relax flag: %d violations left, %d waived of %d", len(relaxed.Violations), len(relaxed.Waived), len(strict.Violations))
+	}
+
+	// Without a project name the ownership rules are skipped, not misfired.
+	params.Relax, params.ProjectName = false, ""
+	for _, v := range CheckPolicy(p, params).Violations {
+		if v.Rule == RuleForeignVolume || v.Rule == RuleForeignNetwork {
+			t.Errorf("ownership rule fired without a project name: %s", v)
+		}
+	}
+}
+
+func TestEnvFileUnmarshal(t *testing.T) {
+	p, err := ParseProject([]byte(`{"services": {"web": {"image": "x", "env_file": ["/a/.env", {"path": "/b/.env", "required": true}]}}}`))
+	if err != nil {
+		t.Fatalf("ParseProject: %v", err)
+	}
+	files := p.Services["web"].EnvFiles
+	if len(files) != 2 || files[0].Path != "/a/.env" || files[1].Path != "/b/.env" {
+		t.Errorf("EnvFiles = %+v", files)
+	}
+}
+
+func TestDetectFileRejectsSymlinkedDirectory(t *testing.T) {
+	root := t.TempDir()
+	release, outside := filepath.Join(root, "release"), filepath.Join(root, "outside")
+	for _, dir := range []string{release, outside} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(outside, "compose.yaml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// deploy/ is a symlink that leaves the checkout.
+	if err := os.Symlink(outside, filepath.Join(release, "deploy")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DetectFile(release, "deploy/compose.yaml"); err == nil {
+		t.Error("a Compose file reached through a symlinked directory must be rejected")
+	}
+}
+
 func TestPolicyAcceptsGeneratedOverride(t *testing.T) {
 	// The fixture is the repository file alone; simulate the merged result.
 	p := loadProject(t, "rails-postgres")
@@ -328,14 +414,32 @@ func TestPolicyFollowsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := Project{Services: map[string]Service{"web": {Image: "x", Volumes: []Mount{
-		{Type: "bind", Source: filepath.Join(release, "config"), Target: "/config"},
-		{Type: "bind", Source: filepath.Join(release, "escape"), Target: "/escape"},
-		{Type: "bind", Source: filepath.Join(release, "not-yet-created"), Target: "/new"},
+		{Type: "bind", Source: filepath.Join(release, "config"), Target: "/config", ReadOnly: true},
+		{Type: "bind", Source: filepath.Join(release, "escape"), Target: "/escape", ReadOnly: true},
+		{Type: "bind", Source: filepath.Join(release, "not-yet-created"), Target: "/new", ReadOnly: true},
+		// The link exists but the rest of the path does not: Docker would
+		// create it at the link's target, outside the checkout.
+		{Type: "bind", Source: filepath.Join(release, "escape", "made", "by-docker"), Target: "/made", ReadOnly: true},
 	}}}}
 	result := CheckPolicy(p, PolicyParams{ReleaseDir: release, WebService: "web", WebPort: 80, HostPort: 20000})
-	if len(result.Violations) != 1 || result.Violations[0].Rule != RuleBindOutside ||
-		!strings.Contains(result.Violations[0].Message, "escape") {
-		t.Errorf("violations = %+v", result.Violations)
+	if len(result.Violations) != 2 {
+		t.Fatalf("violations = %+v", result.Violations)
+	}
+	for _, v := range result.Violations {
+		if v.Rule != RuleBindOutside || !strings.Contains(v.Message, "escape") {
+			t.Errorf("unexpected violation: %s", v)
+		}
+	}
+
+	// A bind inside the checkout must be read-only: with write access a
+	// container could swap another bind source for a symlink.
+	writable := Project{Services: map[string]Service{"web": {Image: "x", Volumes: []Mount{
+		{Type: "bind", Source: release, Target: "/app"},
+		{Type: "bind", Source: filepath.Join(release, "config"), Target: "/config", ReadOnly: true},
+	}}}}
+	result = CheckPolicy(writable, PolicyParams{ReleaseDir: release, WebService: "web", WebPort: 80, HostPort: 20000})
+	if len(result.Violations) != 1 || result.Violations[0].Rule != RuleBindWritable {
+		t.Errorf("writable bind: violations = %+v", result.Violations)
 	}
 }
 
@@ -399,5 +503,66 @@ func TestInvocationArgs(t *testing.T) {
 	bare := Invocation{ProjectName: "paas-blog"}.Args("ps")
 	if !reflect.DeepEqual(bare, []string{"compose", "-p", "paas-blog", "ps"}) {
 		t.Errorf("Args = %v", bare)
+	}
+}
+
+func TestParseMemory(t *testing.T) {
+	cases := map[string]int64{
+		"512m": 512 << 20, "1g": 1 << 30, "64G": 64 << 30, "100k": 100 << 10, "2048": 2048,
+		"134217728": 134217728, "256mb": 256 << 20, " 1g ": 1 << 30,
+	}
+	for in, want := range cases {
+		if got, ok := ParseMemory(in); !ok || got != want {
+			t.Errorf("ParseMemory(%q) = %d, %v; want %d", in, got, ok, want)
+		}
+	}
+	for _, bad := range []string{"", "lots", "-1", "0", "1.5g", "g"} {
+		if _, ok := ParseMemory(bad); ok {
+			t.Errorf("ParseMemory(%q) must fail", bad)
+		}
+	}
+}
+
+// TestRepositoryCannotRaiseItsOwnMemoryLimit: the configured default is a
+// ceiling for limits a Compose file sets itself; only the app settings raise it.
+func TestRepositoryCannotRaiseItsOwnMemoryLimit(t *testing.T) {
+	p := Project{Services: map[string]Service{
+		"web":   {Image: "x", MemLimit: "68719476736"},                                                       // 64g
+		"small": {Image: "x", MemLimit: "134217728"},                                                         // 128m
+		"db":    {Image: "x", Deploy: &Deploy{Resources: &Resources{Limits: &Limits{Memory: "2147483648"}}}}, // 2g
+		"none":  {Image: "x"},
+	}}
+	base := OverrideParams{Project: p, WebService: "web", WebPort: 80, HostPort: 20000, EnvFile: "/env", DefaultMemory: "512m"}
+	got, err := Override(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	section := func(name string) string {
+		start := strings.Index(text, `  "`+name+`":`)
+		rest := text[start+1:]
+		if end := strings.Index(rest, "\n  \""); end >= 0 {
+			return rest[:end]
+		}
+		return rest
+	}
+	if !strings.Contains(section("web"), `mem_limit: "512m"`) {
+		t.Errorf("a 64g limit from the repository must be capped:\n%s", section("web"))
+	}
+	if strings.Contains(section("small"), "mem_limit") {
+		t.Errorf("a limit below the default must be left alone:\n%s", section("small"))
+	}
+	if !strings.Contains(section("db"), `memory: "512m"`) {
+		t.Errorf("a deploy limit above the default must be capped in the same form:\n%s", section("db"))
+	}
+	if !strings.Contains(section("none"), `mem_limit: "512m"`) {
+		t.Errorf("a service without a limit gets the default:\n%s", section("none"))
+	}
+
+	// The app settings are how a limit is raised.
+	base.ServiceMemory = map[string]string{"db": "2g"}
+	got, _ = Override(base)
+	if !strings.Contains(string(got), `memory: "2g"`) {
+		t.Errorf("the app setting must win:\n%s", got)
 	}
 }

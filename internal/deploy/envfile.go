@@ -77,6 +77,8 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	// CreateTemp opens with O_EXCL, so it never writes through an existing
+	// file or link, and the rename below replaces whatever is at path.
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return err

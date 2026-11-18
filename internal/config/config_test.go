@@ -64,6 +64,8 @@ func TestParseRejectsInvalid(t *testing.T) {
 		"missing base domain": {``, "base_domain is required"},
 		"bad base domain":     {`base_domain = "https://example.com"`, "is not a hostname"},
 		"bad listen":          {"base_domain = \"example.com\"\nlisten = \"nope\"", "listen"},
+		"public listen":       {"base_domain = \"example.com\"\nlisten = \"0.0.0.0:8080\"", "loopback"},
+		"wildcard listen":     {"base_domain = \"example.com\"\nlisten = \":8080\"", "loopback"},
 		"relative data dir":   {"base_domain = \"example.com\"\ndata_dir = \"data\"", "absolute path"},
 		"bad public ip":       {"base_domain = \"example.com\"\npublic_ip = \"example.com\"", "not an IP address"},
 		"unknown key":         {"base_domain = \"example.com\"\nbase_domian = \"x\"", "unknown keys: base_domian"},
@@ -203,6 +205,7 @@ hour = 4
 		"no credentials":     "[storage]\nendpoint = \"https://s3.example.com\"\nbucket = \"paas\"",
 		"endpoint no scheme": "[storage]\nendpoint = \"s3.example.com\"\nbucket = \"paas\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
 		"bad timezone":       "timezone = \"Mars/Olympus\"",
+		"plain http storage": "[storage]\nendpoint = \"http://s3.example.com\"\nbucket = \"paas\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
 		"zero retention":     "[logs]\nretention_days = 0",
 		"archive too rare":   "[logs]\narchive_interval_hours = 48",
 		"bad backup hour":    "[backup]\nhour = 24",
@@ -232,6 +235,36 @@ func TestLoad(t *testing.T) {
 	}
 	if _, err := Load(filepath.Join(t.TempDir(), "missing.toml")); err == nil {
 		t.Error("expected an error for a missing file")
+	}
+}
+
+func TestLoadRefusesReadableConfigWithSecrets(t *testing.T) {
+	dir := t.TempDir()
+	withSecret := "base_domain = \"dev.example.com\"\n[storage]\nendpoint = \"https://s3.example.com\"\nbucket = \"paas\"\naccess_key_id = \"a\"\nsecret_access_key = \"super-secret-value\"\n"
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(withSecret), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "chmod 600") {
+		t.Fatalf("world-readable config with secrets: err = %v", err)
+	}
+	if strings.Contains(err.Error(), "super-secret-value") {
+		t.Error("the error echoes the secret")
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Errorf("private config: %v", err)
+	}
+	// A config without credentials may be world-readable (development).
+	plain := filepath.Join(dir, "plain.toml")
+	if err := os.WriteFile(plain, []byte(`base_domain = "dev.example.com"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(plain); err != nil {
+		t.Errorf("config without secrets: %v", err)
 	}
 }
 

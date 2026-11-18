@@ -132,7 +132,7 @@ func request(t *testing.T, h http.Handler, method, target, body string) *httptes
 	if body != "" {
 		reader = strings.NewReader(body)
 	}
-	req := httptest.NewRequest(method, target, reader)
+	req := localRequest(method, target, reader)
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -678,7 +678,7 @@ func TestDeploymentLogStreamStopsWhenClientLeaves(t *testing.T) {
 	d := decode[deploymentJSON](t, request(t, h, http.MethodPost, "/api/apps/blog/deployments", `{"sha": "`+testSHA+`"}`))
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/deployments/%d/logs", d.ID), nil).WithContext(ctx)
+	req := localRequest(http.MethodGet, fmt.Sprintf("/api/deployments/%d/logs", d.ID), nil).WithContext(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

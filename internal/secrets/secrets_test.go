@@ -186,3 +186,46 @@ func TestLineWriterCollapsesCarriageReturns(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// TestLineWriterNeverEmitsCarriageReturns: the deploy log is streamed as
+// Server-Sent Events, where a carriage return ends a line. Neither a complete
+// nor a flushed partial line may carry one.
+func TestLineWriterNeverEmitsCarriageReturns(t *testing.T) {
+	var out bytes.Buffer
+	w := NewLineWriter(&out, NewMasker())
+	_, _ = w.Write([]byte("harmless\rid: 1\revent: end\nunterminated\rid: 2\revent: end\rdata: succeeded"))
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "\r") {
+		t.Errorf("carriage return in the output: %q", out.String())
+	}
+	if got := out.String(); got != "event: end\ndata: succeeded\n" {
+		t.Errorf("output = %q, want only the last state of each line", got)
+	}
+}
+
+// TestLineWriterBoundsUnterminatedOutput: output without any line break must
+// not be buffered without limit.
+func TestLineWriterBoundsUnterminatedOutput(t *testing.T) {
+	var out bytes.Buffer
+	w := NewLineWriter(&out, NewMasker("s3cr3t-password"))
+	chunk := bytes.Repeat([]byte("a"), 10<<10)
+	for i := 0; i < 100; i++ { // 1000 KiB, never a newline
+		if _, err := w.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out.Len() < 900<<10 {
+		t.Errorf("only %d bytes were passed on; the rest is buffered", out.Len())
+	}
+	for _, line := range strings.Split(strings.TrimRight(out.String(), "\n"), "\n") {
+		if len(line) > MaxLineBytes {
+			t.Fatalf("a line of %d bytes was emitted", len(line))
+		}
+	}
+	_ = w.Flush()
+	if strings.Count(out.String(), "a") != 1000<<10 {
+		t.Errorf("output lost or duplicated bytes: %d", strings.Count(out.String(), "a"))
+	}
+}

@@ -270,11 +270,12 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	return errs
 }
 
-func validateSlug(slug string) string {
+func (s *Server) validateSlug(slug string) string {
 	switch {
 	case !slugPattern.MatchString(slug):
 		return "must be 1-40 lowercase letters, digits or hyphens, starting with a letter"
-	case reservedSlugs[slug]:
+	case reservedSlugs[slug], slug+"."+s.cfg.BaseDomain == s.cfg.ConsoleHost:
+		// The console's own hostname can be configured to anything.
 		return "is reserved"
 	}
 	return ""
@@ -379,7 +380,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		errs.add("slug", "is required")
 	} else {
 		app.Slug = *in.Slug
-		if msg := validateSlug(app.Slug); msg != "" {
+		if msg := s.validateSlug(app.Slug); msg != "" {
 			errs.add("slug", msg)
 		}
 	}

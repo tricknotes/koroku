@@ -316,7 +316,9 @@ func streamLogLines(w io.Writer, path string, offset int64) (next int64, wrote b
 			return next, wrote, nil
 		}
 		next += int64(len(line))
-		text := strings.TrimRight(line, "\r\n")
+		// A carriage return ends a line in the SSE format, so one left in a
+		// log line could smuggle in fields such as "event: end".
+		text := strings.ReplaceAll(strings.TrimRight(line, "\r\n"), "\r", " ")
 		if _, err := fmt.Fprintf(w, "id: %d\ndata: %s\n\n", next, text); err != nil {
 			return next, wrote, err
 		}

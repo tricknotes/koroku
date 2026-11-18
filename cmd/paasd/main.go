@@ -193,6 +193,12 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		logger.Warn("the [github] section is not configured: login is unavailable")
 	}
 	if *insecureNoAuth {
+		// With Caddy in front the console is reachable from the internet;
+		// without login that would hand out root on the host.
+		if cfg.Caddy.Enabled {
+			return errors.New("--insecure-no-auth is refused while [caddy] enabled = true: " +
+				"it is for local development without Caddy only")
+		}
 		logger.Warn("AUTHENTICATION IS DISABLED (--insecure-no-auth): do not use this on a reachable host")
 	}
 	deployOpts := deploy.Options{
@@ -346,6 +352,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	httpServer := &http.Server{
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 	logger.Info("paasd listening", "addr", listener.Addr().String(), "version", version)

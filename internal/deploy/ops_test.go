@@ -129,7 +129,7 @@ func TestRestart(t *testing.T) {
 	if err := h.engine.Restart(ctx, h.reload("blog")); err != nil {
 		t.Fatalf("Restart of a stopped app: %v", err)
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"up"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "up"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	if got := h.reload("blog"); got.DesiredState != store.DesiredRunning {

@@ -60,6 +60,16 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if path != ":memory:" {
+		// The database holds session hashes and encrypted secrets. SQLite
+		// creates it with the process umask; make it private regardless of
+		// how the directory above is set up. The -wal and -shm files
+		// inherit the mode of the main file.
+		if err := os.Chmod(path, 0o600); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("restrict database permissions: %w", err)
+		}
+	}
 	return s, nil
 }
 

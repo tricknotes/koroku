@@ -166,6 +166,9 @@ func (e *env) call(method, path string, body any, out any) int {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		e.t.Fatalf("%s %s: %v", method, path, err)
