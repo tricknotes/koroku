@@ -17,9 +17,11 @@ FROM golang:1.27
 ARG PNPM_VERSION=12.21.0
 ARG RESTIC_VERSION=0.19.1
 
+# fonts-noto-cjk gives Chromium glyphs for Japanese text, so screenshots of
+# the management UI taken in this image are readable.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        bzip2 ca-certificates chromium curl git jq make shellcheck \
+        bzip2 ca-certificates chromium curl fonts-noto-cjk git jq make shellcheck \
     && rm -rf /var/lib/apt/lists/*
 
 # The frontend test runner (testem) launches "Chrome"; point that name at

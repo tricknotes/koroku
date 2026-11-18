@@ -7,8 +7,14 @@ import EventSourceService, {
   type StreamHandlers,
 } from 'paas-console/services/event-source';
 import PollerService from 'paas-console/services/poller';
+import StorageService from 'paas-console/services/storage';
 import { ApiError } from 'paas-console/utils/errors';
-import type { App, Deployment } from 'paas-console/utils/types';
+import type {
+  App,
+  BackupOverview,
+  Deployment,
+  SystemInfo,
+} from 'paas-console/utils/types';
 
 export interface FakeCall {
   method: string;
@@ -71,13 +77,16 @@ export class FakeApi extends ApiService {
     if (!handler) {
       return Promise.reject(apiError(404, 'not_found'));
     }
+    // A copy, as a real response would be: the app never shares objects
+    // with the fixture.
+    const copy = (response: unknown) =>
+      response === undefined ? undefined : structuredClone(response);
     try {
       const response = handler(call);
-      // A copy, as a real response would be: the app never shares objects
-      // with the fixture.
-      return Promise.resolve(
-        response === undefined ? undefined : structuredClone(response),
-      );
+      // A handler may answer later (a promise), to hold a request open.
+      return response instanceof Promise
+        ? response.then(copy)
+        : Promise.resolve(copy(response));
     } catch (error) {
       return Promise.reject(
         error instanceof Error ? error : new Error(String(error)),
@@ -166,6 +175,9 @@ export class FakeBrowser extends BrowserService {
   assigned: string[] = [];
   reloads = 0;
   query = '';
+  copied: string[] = [];
+  /** Makes `copy` fail, as when the browser refuses clipboard access. */
+  clipboardBlocked = false;
 
   override get search(): string {
     return this.query;
@@ -178,6 +190,31 @@ export class FakeBrowser extends BrowserService {
   override reload(): void {
     this.reloads += 1;
   }
+
+  override copy(text: string): Promise<void> {
+    if (this.clipboardBlocked) {
+      return Promise.reject(new Error('clipboard blocked'));
+    }
+    this.copied.push(text);
+    return Promise.resolve();
+  }
+}
+
+/** In-memory stand-in for `localStorage`. */
+export class FakeStorage extends StorageService {
+  items = new Map<string, string>();
+
+  override get(key: string): string | null {
+    return this.items.get(key) ?? null;
+  }
+
+  override set(key: string, value: string): void {
+    this.items.set(key, value);
+  }
+
+  override remove(key: string): void {
+    this.items.delete(key);
+  }
 }
 
 export interface Fakes {
@@ -185,6 +222,7 @@ export interface Fakes {
   eventSource: FakeEventSource;
   poller: FakePoller;
   browser: FakeBrowser;
+  storage: FakeStorage;
 }
 
 /**
@@ -196,12 +234,14 @@ export function installFakes(owner: Owner): Fakes {
   owner.register('service:event-source', FakeEventSource);
   owner.register('service:poller', FakePoller);
   owner.register('service:browser', FakeBrowser);
+  owner.register('service:storage', FakeStorage);
 
   const fakes: Fakes = {
     api: owner.lookup('service:api') as FakeApi,
     eventSource: owner.lookup('service:event-source') as FakeEventSource,
     poller: owner.lookup('service:poller') as FakePoller,
     browser: owner.lookup('service:browser') as FakeBrowser,
+    storage: owner.lookup('service:storage') as FakeStorage,
   };
   fakes.api.on('GET', '/api/session', {
     authenticated: true,
@@ -249,10 +289,52 @@ export function makeApp(overrides: Partial<App> = {}): App {
     memory_limit: '',
     service_memory_limits: {},
     url: `https://${slug}.dev.example.com`,
+    primary_url: `https://${slug}.dev.example.com`,
+    pending_domains: 0,
     current_deployment: null,
     latest_deployment: null,
     created_at: '2026-11-18T03:00:00Z',
     updated_at: '2026-11-18T03:00:00Z',
+    ...overrides,
+  };
+}
+
+export function makeSystem(overrides: Partial<SystemInfo> = {}): SystemInfo {
+  return {
+    version: 'v0.1.0',
+    base_domain: 'dev.example.com',
+    disk: {
+      total_bytes: 40 * 1024 ** 3,
+      used_bytes: 8.6 * 1024 ** 3,
+      used_percent: 21.5,
+    },
+    memory: { total_bytes: 4 * 1024 ** 3, available_bytes: 2 * 1024 ** 3 },
+    docker_version: '29.8.0',
+    disk_limit_percent: 85,
+    log_archive: {
+      configured: true,
+      last_success_at: '2026-11-18T03:10:05Z',
+      last_error: '',
+    },
+    caddy: {
+      enabled: true,
+      last_loaded_at: '2026-11-18T03:00:02Z',
+      last_error: '',
+    },
+    ...overrides,
+  };
+}
+
+export function makeBackups(
+  overrides: Partial<BackupOverview> = {},
+): BackupOverview {
+  return {
+    configured: true,
+    running: false,
+    last_success_at: '2026-11-17T18:00:40Z',
+    warning: false,
+    next_run_at: '2026-11-18T18:00:00Z',
+    runs: [],
     ...overrides,
   };
 }

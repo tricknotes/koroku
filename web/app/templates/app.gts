@@ -3,6 +3,7 @@ import { array } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import { pageTitle } from 'ember-page-title';
 import Badge from 'paas-console/components/badge';
+import Tabs from 'paas-console/components/tabs';
 import type AppContext from 'paas-console/utils/app-context';
 import { errorMessage } from 'paas-console/utils/errors';
 import {
@@ -51,50 +52,43 @@ const AppTemplate: TOC<{
       {{/if}}
     </div>
 
-    <nav class="tabs" aria-label="アプリのメニュー">
-      <LinkTo
+    <Tabs @label="アプリのメニュー" as |tabs|>
+      <tabs.Tab
         @route="app.index"
         @model={{@model.slug}}
-        class="tab"
         data-test-tab="index"
-      >概要</LinkTo>
-      <LinkTo
+      >概要</tabs.Tab>
+      <tabs.Tab
         @route="app.deploy"
         @model={{@model.slug}}
-        class="tab"
         data-test-tab="deploy"
-      >デプロイ</LinkTo>
-      <LinkTo
+      >デプロイ</tabs.Tab>
+      <tabs.Tab
         @route="app.logs"
         @model={{@model.slug}}
-        class="tab"
         data-test-tab="logs"
-      >ログ</LinkTo>
-      <LinkTo
+      >ログ</tabs.Tab>
+      <tabs.Tab
         @route="app.env"
         @model={{@model.slug}}
-        class="tab"
         data-test-tab="env"
-      >環境変数</LinkTo>
-      <LinkTo
+      >環境変数</tabs.Tab>
+      <tabs.Tab
         @route="app.domains"
         @model={{@model.slug}}
-        class="tab"
         data-test-tab="domains"
-      >ドメイン</LinkTo>
-      <LinkTo
+      >ドメイン</tabs.Tab>
+      <tabs.Tab
         @route="app.backups"
         @model={{@model.slug}}
-        class="tab"
         data-test-tab="backups"
-      >バックアップ</LinkTo>
-      <LinkTo
+      >バックアップ</tabs.Tab>
+      <tabs.Tab
         @route="app.settings"
         @model={{@model.slug}}
-        class="tab"
         data-test-tab="settings"
-      >設定</LinkTo>
-    </nav>
+      >設定</tabs.Tab>
+    </Tabs>
 
     {{! Going straight from one app to another keeps the same routes, and
         Ember would keep the tab's component (and what it loaded for the

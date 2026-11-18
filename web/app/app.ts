@@ -6,6 +6,14 @@ import config from 'paas-console/config/environment';
 import { importSync, isDevelopingApp, macroCondition } from '@embroider/macros';
 import setupInspector from '@embroider/legacy-inspector-support/ember-source-4.12';
 
+// Stylesheets, in cascade order. Later files may override earlier ones.
+import './styles/tokens.css';
+import './styles/base.css';
+import './styles/components.css';
+import './styles/shell.css';
+import './styles/app-list.css';
+import './styles/legacy.css';
+
 if (macroCondition(isDevelopingApp())) {
   importSync('./deprecation-workflow');
 }

@@ -206,7 +206,7 @@ module('Acceptance | deploy', function (hooks) {
     assert
       .dom('[data-test-deployment-error]')
       .hasText('web did not become healthy');
-    assert.dom('[data-test-app-state]').hasText('直近のデプロイに失敗');
+    assert.dom('[data-test-app-state]').hasText('失敗');
   });
 
   test('a queued or running deployment can be canceled', async function (assert) {

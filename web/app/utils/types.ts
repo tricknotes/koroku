@@ -21,6 +21,19 @@ export interface SystemInfo {
   } | null;
   memory: { total_bytes: number; available_bytes: number } | null;
   docker_version: string;
+  // Added for the UI redesign (ARCHITECTURE 9.1); absent on older backends.
+  /** Deployments are refused above this disk usage. */
+  disk_limit_percent?: number;
+  log_archive?: {
+    configured: boolean;
+    last_success_at: string | null;
+    last_error: string;
+  };
+  caddy?: {
+    enabled: boolean;
+    last_loaded_at: string | null;
+    last_error: string;
+  };
 }
 
 export type DeploymentStatus =
@@ -57,6 +70,10 @@ export interface App {
   memory_limit: string;
   service_memory_limits: Record<string, string> | null;
   url: string;
+  /** URL of the primary domain, or `url` when there is none. */
+  primary_url?: string;
+  /** Number of custom domains still waiting for DNS verification. */
+  pending_domains?: number;
   current_deployment: Deployment | null;
   latest_deployment: Deployment | null;
   created_at: string;
@@ -192,6 +209,8 @@ export interface BackupOverview {
   running: boolean;
   last_success_at: string | null;
   warning: boolean;
+  /** Next scheduled run; `null` when backups are not configured. */
+  next_run_at?: string | null;
   runs: BackupRun[] | null;
 }
 

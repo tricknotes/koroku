@@ -4,13 +4,19 @@ import type RouterService from '@ember/routing/router-service';
 import type Transition from '@ember/routing/transition';
 import type BrowserService from 'paas-console/services/browser';
 import type SessionService from 'paas-console/services/session';
+import type ThemeService from 'paas-console/services/theme';
 
 export default class ApplicationRoute extends Route {
   @service declare session: SessionService;
   @service declare router: RouterService;
   @service declare browser: BrowserService;
+  @service declare theme: ThemeService;
 
   async beforeModel(transition: Transition): Promise<void> {
+    // Creating the service applies a pinned theme; do it before anything
+    // waits on the network.
+    void this.theme.preference;
+
     // The OAuth callback redirects to `/?login_error=<code>` on refusal.
     const fromTransition = transition.to?.queryParams['login_error'];
     const code =

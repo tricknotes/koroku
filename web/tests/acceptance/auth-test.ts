@@ -82,6 +82,10 @@ module('Acceptance | auth', function (hooks) {
 
     assert.strictEqual(currentURL(), '/');
     assert.dom('[data-test-user]').hasText('octo');
+    assert.dom('[data-test-logout]').doesNotExist('the menu starts closed');
+
+    await click('[data-test-user-menu]');
+    assert.dom('[data-test-user-menu]').hasAttribute('aria-expanded', 'true');
 
     await click('[data-test-logout]');
 
@@ -96,14 +100,19 @@ module('Acceptance | auth', function (hooks) {
     assert.strictEqual(currentURL(), '/');
   });
 
-  test('a backend without the session endpoint is treated as open', async function (assert) {
+  test('a missing session endpoint is an error like any other', async function (assert) {
     fakes.api.fail('GET', '/api/session', 404, 'not_found');
 
     await visit('/');
 
-    assert.strictEqual(currentURL(), '/');
-    assert.dom('[data-test-app="blog"]').exists();
-    assert.dom('[data-test-logout]').doesNotExist();
+    assert.strictEqual(currentURL(), '/login');
+    assert.dom('[data-test-session-error]').exists();
+    assert.dom('[data-test-login-link]').doesNotExist();
+    assert.deepEqual(
+      fakes.api.callsTo('GET', '/api/apps'),
+      [],
+      'the console is not shown without a session',
+    );
   });
 
   test('a failing session check offers a reload', async function (assert) {

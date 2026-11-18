@@ -74,8 +74,8 @@ module('Acceptance | overview, logs, backups, system', function (hooks) {
         fakes.api.callsTo('POST', '/api/apps/blog/stop').length,
         1,
       );
-      assert.dom('[data-test-overview-state]').hasText('停止中');
-      assert.dom('[data-test-app-state]').hasText('停止中');
+      assert.dom('[data-test-overview-state]').hasText('停止');
+      assert.dom('[data-test-app-state]').hasText('停止');
       assert.dom('[data-test-notice]').hasText('停止しました。');
 
       await click('[data-test-control="start"]');

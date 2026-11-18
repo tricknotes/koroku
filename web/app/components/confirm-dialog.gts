@@ -4,6 +4,8 @@ import { on } from '@ember/modifier';
 import { uniqueId } from '@ember/helper';
 import showModal from 'paas-console/modifiers/show-modal';
 import { inputValue } from 'paas-console/utils/dom';
+import Button from './button';
+import FormField from './form-field';
 
 interface ConfirmDialogSignature {
   Args: {
@@ -36,6 +38,10 @@ export default class ConfirmDialog extends Component<ConfirmDialogSignature> {
     return !required || this.typed === required;
   }
 
+  get cannotConfirm(): boolean {
+    return !this.canConfirm;
+  }
+
   setTyped = (event: Event) => {
     this.typed = inputValue(event);
   };
@@ -65,36 +71,39 @@ export default class ConfirmDialog extends Component<ConfirmDialogSignature> {
           <div class="dialog-body">{{yield}}</div>
 
           {{#if @requireText}}
-            <label class="field" for="{{id}}-confirm">
-              <span class="field-label">確認のため
+            <FormField>
+              <:label>確認のため
                 <code>{{@requireText}}</code>
-                と入力してください</span>
-              <input
-                id="{{id}}-confirm"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-                value={{this.typed}}
-                data-test-dialog-input
-                {{on "input" this.setTyped}}
-              />
-            </label>
+                と入力してください</:label>
+              <:default as |field|>
+                <input
+                  id={{field.id}}
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  class="mono"
+                  value={{this.typed}}
+                  data-test-dialog-input
+                  {{on "input" this.setTyped}}
+                />
+              </:default>
+            </FormField>
           {{/if}}
 
           <div class="dialog-actions">
-            <button
-              type="button"
-              class="button"
-              disabled={{@busy}}
+            <Button
+              @disabled={{@busy}}
               data-test-dialog-cancel
               {{on "click" this.cancel}}
-            >キャンセル</button>
-            <button
-              type="submit"
-              class="button {{if @danger 'button-danger' 'button-primary'}}"
-              disabled={{if this.canConfirm false true}}
+            >キャンセル</Button>
+            <Button
+              @type="submit"
+              @variant={{if @danger "danger" "primary"}}
+              @disabled={{this.cannotConfirm}}
+              @busy={{@busy}}
+              @busyLabel="実行中…"
               data-test-dialog-confirm
-            >{{if @busy "実行中…" @confirmLabel}}</button>
+            >{{@confirmLabel}}</Button>
           </div>
         </form>
       </dialog>

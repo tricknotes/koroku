@@ -4,8 +4,10 @@ import {
   formatBytes,
   formatClock,
   formatDateTime,
+  formatDateTimeJst,
   formatDuration,
   formatPercent,
+  hostOf,
   isFullSha,
   isValidEnvKey,
   isValidSlug,
@@ -44,6 +46,37 @@ module('Unit | Utility | format', function () {
     assert.strictEqual(formatClock(local), '09:05:07');
     assert.strictEqual(formatDateTime(null), '');
     assert.strictEqual(formatClock(''), '');
+  });
+
+  test('formatDateTimeJst is JST whatever the local time zone', function (assert) {
+    assert.strictEqual(
+      formatDateTimeJst('2026-11-18T03:04:05Z'),
+      '2026/11/18 12:04 JST',
+    );
+    assert.strictEqual(
+      formatDateTimeJst('2026-11-18T18:30:00Z'),
+      '2026/11/19 03:30 JST',
+      'the date rolls over with the zone',
+    );
+    assert.strictEqual(
+      formatDateTimeJst('2026-11-17T15:00:00Z'),
+      '2026/11/18 00:00 JST',
+      'midnight is 00, not 24',
+    );
+    assert.strictEqual(formatDateTimeJst(null), '');
+    assert.strictEqual(formatDateTimeJst('not a date'), '');
+  });
+
+  test('hostOf', function (assert) {
+    assert.strictEqual(hostOf('https://www.example.org'), 'www.example.org');
+    assert.strictEqual(
+      hostOf('https://blog.dev.example.com/'),
+      'blog.dev.example.com',
+    );
+    assert.strictEqual(hostOf('http://localhost:20000'), 'localhost:20000');
+    assert.strictEqual(hostOf('not a url'), 'not a url');
+    assert.strictEqual(hostOf(''), '');
+    assert.strictEqual(hostOf(undefined), '');
   });
 
   test('formatDuration', function (assert) {
