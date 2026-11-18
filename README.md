@@ -3,6 +3,7 @@
 VPS 1 台の上で、GitHub リポジトリの Docker Compose アプリを UI からデプロイする、個人用の Heroku ライクなホスティング基盤です。コントロールプレーンは Go 製シングルバイナリ `paasd`（SQLite、Ember 製 SPA を同梱）で、リバースプロキシに Caddy を使います。
 
 - 設計: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- HTTP API: [docs/API.md](docs/API.md)
 - マイルストーンと実装規約: [CLAUDE.md](CLAUDE.md)
 
 ## 開発
