@@ -7,5 +7,16 @@ export default class Router extends EmberRouter {
 }
 
 Router.map(function () {
-  // Add route declarations here
+  this.route('login');
+  this.route('new-app', { path: '/apps/new' });
+  this.route('app', { path: '/apps/:slug' }, function () {
+    this.route('deploy');
+    this.route('logs');
+    this.route('env');
+    this.route('domains');
+    this.route('backups');
+    this.route('settings');
+  });
+  this.route('system');
+  this.route('not-found', { path: '/*path' });
 });
