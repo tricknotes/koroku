@@ -80,14 +80,14 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 
 ### M1 デプロイエンジン
 
-- [ ] public リポジトリの URL と SHA を API で受け、取得 → env ファイルと override 生成 → `config` で検証 → build / pull → `up --wait` → HTTP 確認
-- [ ] ポリシー検査（ARCHITECTURE 6 章）と、アプリ単位の「検査を緩める」フラグ
-- [ ] サービスごとのメモリ上限を override で付与（既定値あり、アプリ設定で変更可）
-- [ ] ディスク使用率 85% 超でデプロイ拒否
-- [ ] 状態機械（queued / running / succeeded / failed / canceled）、同時実行 1、起動時の中断ジョブ処理
-- [ ] 手順 6 以降の失敗で直前の成功リリースへ自動ロールバック
-- [ ] デプロイログのファイル出力とマスク
-- [ ] 実機確認: `--env-file` 指定時にリポジトリ内の `.env` がどう扱われるか。結果を ARCHITECTURE 12 章に追記
+- [x] public リポジトリの URL と SHA を API で受け、取得 → env ファイルと override 生成 → `config` で検証 → build / pull → `up --wait` → HTTP 確認
+- [x] ポリシー検査（ARCHITECTURE 6 章）と、アプリ単位の「検査を緩める」フラグ
+- [x] サービスごとのメモリ上限を override で付与（既定値あり、アプリ設定で変更可）
+- [x] ディスク使用率 85% 超でデプロイ拒否
+- [x] 状態機械（queued / running / succeeded / failed / canceled）、同時実行 1、起動時の中断ジョブ処理
+- [x] 手順 6 以降の失敗で直前の成功リリースへ自動ロールバック
+- [x] デプロイログのファイル出力とマスク
+- [x] 実機確認: `--env-file` 指定時にリポジトリ内の `.env` がどう扱われるか。結果を ARCHITECTURE 12 章に追記
 - 完了条件: サンプル 2 種（`build:` あり / `image:` のみ）が API 経由で起動し、起動に失敗するコミットでは旧版が応答し続ける
 
 ### M2 ルーティングとドメイン

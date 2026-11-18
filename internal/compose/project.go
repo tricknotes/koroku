@@ -1,0 +1,185 @@
+// Package compose handles everything paasd knows about Docker Compose
+// projects: locating the Compose file, reading the normalized configuration,
+// generating the override file and checking the deploy policy.
+package compose
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// OverrideFileName is the name of the generated override inside a release directory.
+const OverrideFileName = "paas.override.yaml"
+
+// Project is the subset of `docker compose config --format json` that paasd
+// inspects. The full output contains resolved environment values and must
+// never be logged.
+type Project struct {
+	Name     string             `json:"name"`
+	Services map[string]Service `json:"services"`
+	Volumes  map[string]Volume  `json:"volumes"`
+}
+
+// Service is one Compose service in normalized form.
+type Service struct {
+	Image       string          `json:"image"`
+	Build       json.RawMessage `json:"build"`
+	Ports       []Port          `json:"ports"`
+	Privileged  bool            `json:"privileged"`
+	NetworkMode string          `json:"network_mode"`
+	Pid         string          `json:"pid"`
+	Volumes     []Mount         `json:"volumes"`
+	Restart     string          `json:"restart"`
+	MemLimit    string          `json:"mem_limit"`
+	Deploy      *Deploy         `json:"deploy"`
+}
+
+// HasBuild reports whether the service is built from source.
+func (s Service) HasBuild() bool {
+	return len(s.Build) > 0 && string(s.Build) != "null"
+}
+
+// DeployMemoryLimit returns deploy.resources.limits.memory, or "".
+func (s Service) DeployMemoryLimit() string {
+	if s.Deploy == nil || s.Deploy.Resources == nil || s.Deploy.Resources.Limits == nil {
+		return ""
+	}
+	return s.Deploy.Resources.Limits.Memory
+}
+
+// Port is one published port.
+type Port struct {
+	HostIP    string `json:"host_ip"`
+	Target    int    `json:"target"`
+	Published string `json:"published"`
+	Protocol  string `json:"protocol"`
+}
+
+// Mount is one volume entry of a service.
+type Mount struct {
+	Type   string `json:"type"`
+	Source string `json:"source"`
+	Target string `json:"target"`
+}
+
+// Deploy mirrors the part of the deploy section that carries resource limits.
+type Deploy struct {
+	Resources *Resources `json:"resources"`
+}
+
+// Resources holds resource limits.
+type Resources struct {
+	Limits *Limits `json:"limits"`
+}
+
+// Limits holds the memory limit.
+type Limits struct {
+	Memory string `json:"memory"`
+}
+
+// Volume is a top-level named volume.
+type Volume struct {
+	Name     string `json:"name"`
+	External bool   `json:"external"`
+}
+
+// ParseProject decodes the output of `docker compose config --format json`.
+func ParseProject(data []byte) (Project, error) {
+	var p Project
+	if err := json.Unmarshal(data, &p); err != nil {
+		// The input may contain secrets, so the error carries no excerpt.
+		return Project{}, errors.New("parse compose config: output is not the expected JSON")
+	}
+	if len(p.Services) == 0 {
+		return Project{}, errors.New("parse compose config: the project defines no services")
+	}
+	return p, nil
+}
+
+// ServiceNames returns the service names in sorted order.
+func (p Project) ServiceNames() []string {
+	names := make([]string, 0, len(p.Services))
+	for name := range p.Services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// NeedsBuild reports whether any service has a build section.
+func (p Project) NeedsBuild() bool {
+	for _, s := range p.Services {
+		if s.HasBuild() {
+			return true
+		}
+	}
+	return false
+}
+
+// NeedsPull reports whether any service runs a prebuilt image.
+func (p Project) NeedsPull() bool {
+	for _, s := range p.Services {
+		if !s.HasBuild() {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultFiles are tried in order when the app does not configure a path.
+var defaultFiles = []string{"compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml"}
+
+// DetectFile returns the Compose file to use, relative to the release
+// directory. A configured path must stay inside the release directory.
+func DetectFile(releaseDir, configured string) (string, error) {
+	if configured != "" {
+		clean := filepath.Clean(configured)
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("compose file %q must be a path inside the repository", configured)
+		}
+		if !isRegularFile(filepath.Join(releaseDir, clean)) {
+			return "", fmt.Errorf("compose file %q was not found in the repository", configured)
+		}
+		return clean, nil
+	}
+	for _, name := range defaultFiles {
+		if isRegularFile(filepath.Join(releaseDir, name)) {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("no Compose file found in the repository (looked for %s)", strings.Join(defaultFiles, ", "))
+}
+
+func isRegularFile(path string) bool {
+	// Lstat: a symlink could point outside the repository.
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// Invocation describes how `docker compose` is called for one release.
+type Invocation struct {
+	// ProjectName is passed with -p; it namespaces containers and volumes.
+	ProjectName string
+	// Files are passed with -f in order (the repository file, then the override).
+	Files []string
+	// EnvFile is passed with --env-file for ${VAR} interpolation. With this
+	// flag Compose does not read the repository's own .env for interpolation.
+	EnvFile string
+}
+
+// Args returns the full argument list for `docker`, ending with sub.
+func (i Invocation) Args(sub ...string) []string {
+	args := []string{"compose", "-p", i.ProjectName}
+	for _, f := range i.Files {
+		args = append(args, "-f", f)
+	}
+	if i.EnvFile != "" {
+		args = append(args, "--env-file", i.EnvFile)
+	}
+	return append(args, sub...)
+}

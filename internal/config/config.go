@@ -42,6 +42,11 @@ type Deploy struct {
 	// PortRangeStart and PortRangeEnd bound the host ports assigned to apps.
 	PortRangeStart int `toml:"port_range_start"`
 	PortRangeEnd   int `toml:"port_range_end"`
+	// PruneImages runs `docker image prune -f` after each successful deploy.
+	PruneImages bool `toml:"prune_images"`
+	// AllowFileRepos accepts file:// repository URLs. Only for local
+	// development and tests; keep it off on a real host.
+	AllowFileRepos bool `toml:"allow_file_repos"`
 }
 
 // Default returns the configuration used for fields that are not set in the file.
@@ -55,6 +60,7 @@ func Default() Config {
 			DiskUsageLimitPercent: 85,
 			PortRangeStart:        20000,
 			PortRangeEnd:          20999,
+			PruneImages:           true,
 		},
 	}
 }

@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tricknotes/koroku/internal/clock"
 	"github.com/tricknotes/koroku/internal/config"
+	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
 	"github.com/tricknotes/koroku/internal/system"
 )
@@ -27,6 +29,15 @@ type Options struct {
 	Web     fs.FS
 	Logger  *slog.Logger
 	Version string
+
+	Clock clock.Clock
+	// Box encrypts environment variable values.
+	Box      *secrets.Box
+	Deployer Deployer
+	// Refs resolves branch names for deployments. Optional.
+	Refs RefResolver
+	// Router reloads the reverse proxy after routing changes. Optional.
+	Router Router
 }
 
 // Server routes HTTP requests.
@@ -37,6 +48,12 @@ type Server struct {
 	web     fs.FS
 	log     *slog.Logger
 	version string
+
+	clock    clock.Clock
+	box      *secrets.Box
+	deployer Deployer
+	refs     RefResolver
+	router   Router
 }
 
 // New builds a Server.
@@ -45,13 +62,22 @@ func New(opts Options) *Server {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
+	clk := opts.Clock
+	if clk == nil {
+		clk = clock.System{}
+	}
 	return &Server{
-		cfg:     opts.Config,
-		store:   opts.Store,
-		system:  opts.System,
-		web:     opts.Web,
-		log:     logger,
-		version: opts.Version,
+		cfg:      opts.Config,
+		store:    opts.Store,
+		system:   opts.System,
+		web:      opts.Web,
+		log:      logger,
+		version:  opts.Version,
+		clock:    clk,
+		box:      opts.Box,
+		deployer: opts.Deployer,
+		refs:     opts.Refs,
+		router:   opts.Router,
 	}
 }
 
@@ -59,6 +85,20 @@ func New(opts Options) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/system", s.handleSystem)
+
+	mux.HandleFunc("GET /api/apps", s.handleListApps)
+	mux.HandleFunc("POST /api/apps", s.handleCreateApp)
+	mux.HandleFunc("GET /api/apps/{slug}", s.handleGetApp)
+	mux.HandleFunc("PATCH /api/apps/{slug}", s.handleUpdateApp)
+	mux.HandleFunc("GET /api/apps/{slug}/env", s.handleGetEnv)
+	mux.HandleFunc("PUT /api/apps/{slug}/env", s.handlePutEnv)
+	mux.HandleFunc("GET /api/apps/{slug}/deployments", s.handleListDeployments)
+	mux.HandleFunc("POST /api/apps/{slug}/deployments", s.handleCreateDeployment)
+
+	mux.HandleFunc("GET /api/deployments/{id}", s.handleGetDeployment)
+	mux.HandleFunc("GET /api/deployments/{id}/logs", s.handleDeploymentLogs)
+	mux.HandleFunc("POST /api/deployments/{id}/cancel", s.handleCancelDeployment)
+
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such API endpoint")
 	})

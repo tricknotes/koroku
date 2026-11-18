@@ -11,3 +11,6 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Worktrees of local agent sessions
+/.claude/worktrees/

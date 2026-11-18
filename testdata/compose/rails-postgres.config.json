@@ -1,0 +1,35 @@
+{
+  "name": "paas-blog",
+  "services": {
+    "web": {
+      "build": {"context": "/var/lib/paas/apps/blog/releases/42", "dockerfile": "Dockerfile"},
+      "command": ["bin/rails", "server", "-b", "0.0.0.0"],
+      "depends_on": {"db": {"condition": "service_healthy", "required": true}},
+      "ports": [{"mode": "ingress", "target": 3000, "published": "3000", "protocol": "tcp"}],
+      "volumes": [
+        {"type": "volume", "source": "storage", "target": "/rails/storage", "volume": {}},
+        {"type": "bind", "source": "/var/lib/paas/apps/blog/releases/42/config/puma.rb", "target": "/rails/config/puma.rb", "bind": {"create_host_path": true}}
+      ]
+    },
+    "worker": {
+      "build": {"context": "/var/lib/paas/apps/blog/releases/42", "dockerfile": "Dockerfile"},
+      "command": ["bin/jobs"],
+      "restart": "always"
+    },
+    "migrate": {
+      "build": {"context": "/var/lib/paas/apps/blog/releases/42", "dockerfile": "Dockerfile"},
+      "command": ["bin/rails", "db:prepare"],
+      "restart": "no"
+    },
+    "db": {
+      "image": "postgres:17",
+      "ports": [{"mode": "ingress", "target": 5432, "published": "5432", "protocol": "tcp"}],
+      "volumes": [{"type": "volume", "source": "pgdata", "target": "/var/lib/postgresql/data", "volume": {}}],
+      "deploy": {"resources": {"limits": {"memory": "1073741824"}}, "placement": {}}
+    }
+  },
+  "volumes": {
+    "pgdata": {"name": "paas-blog_pgdata"},
+    "storage": {"name": "paas-blog_storage"}
+  }
+}

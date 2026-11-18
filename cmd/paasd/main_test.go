@@ -46,7 +46,8 @@ func TestServeAnswersSystemEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	dataDir := filepath.Join(dir, "data")
 	configPath := filepath.Join(dir, "config.toml")
-	configText := fmt.Sprintf("base_domain = \"dev.example.com\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\n", dataDir)
+	configText := fmt.Sprintf("base_domain = \"dev.example.com\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\nmaster_key_file = %q\n",
+		dataDir, filepath.Join(dir, "etc", "master.key"))
 	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +92,17 @@ func TestServeAnswersSystemEndpoint(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dataDir, "paas.db")); err != nil {
 		t.Errorf("database was not created: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "etc", "master.key")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("master key was not created with mode 0600: %v", err)
+	}
+	appsResp, err := http.Get("http://" + addr + "/api/apps")
+	if err != nil {
+		t.Fatalf("GET /api/apps: %v", err)
+	}
+	_ = appsResp.Body.Close()
+	if appsResp.StatusCode != http.StatusOK {
+		t.Errorf("GET /api/apps status = %d", appsResp.StatusCode)
 	}
 
 	cancel()

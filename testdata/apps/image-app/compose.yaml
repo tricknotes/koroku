@@ -1,0 +1,11 @@
+# Sample app that only uses a prebuilt image, used by the integration tests.
+services:
+  web:
+    image: busybox:1.37
+    stop_signal: SIGKILL
+    # $$ defers expansion to the container, where GREETING comes from the
+    # env file that paasd injects into every service.
+    command:
+      - sh
+      - -c
+      - 'mkdir -p /www && echo "image-app greeting=$${GREETING:-none}" > /www/index.html && exec httpd -f -p 8080 -h /www'

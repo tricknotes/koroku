@@ -8,8 +8,11 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
+	"github.com/tricknotes/koroku/internal/clock"
 	"github.com/tricknotes/koroku/internal/config"
+	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
 	"github.com/tricknotes/koroku/internal/system"
 )
@@ -38,9 +41,17 @@ func newTestServer(t *testing.T, mutate func(*Options)) *Server {
 	cfg.BaseDomain = "dev.example.com"
 	cfg.ConsoleHost = "console.dev.example.com"
 	cfg.DataDir = t.TempDir()
+	box, err := secrets.NewBox([]byte(strings.Repeat("k", secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	opts := Options{
-		Config: cfg,
-		Store:  st,
+		Clock:    clock.NewFake(time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC)),
+		Box:      box,
+		Deployer: &fakeDeployer{store: st, logDir: t.TempDir()},
+		Refs:     fakeRefs{"main": testSHA},
+		Config:   cfg,
+		Store:    st,
 		System: fakeProber{info: system.Info{
 			Disk:          &system.Disk{TotalBytes: 100, UsedBytes: 40, UsedPercent: 40},
 			Memory:        &system.Memory{TotalBytes: 4096, AvailableBytes: 1024},

@@ -1,0 +1,464 @@
+// Package deploy implements the deploy job: its state machine, the single
+// worker that runs jobs one at a time, and the steps of ARCHITECTURE chapter 7.
+package deploy
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/tricknotes/koroku/internal/clock"
+	"github.com/tricknotes/koroku/internal/compose"
+	"github.com/tricknotes/koroku/internal/gitrepo"
+	"github.com/tricknotes/koroku/internal/runner"
+	"github.com/tricknotes/koroku/internal/secrets"
+	"github.com/tricknotes/koroku/internal/store"
+	"github.com/tricknotes/koroku/internal/system"
+)
+
+// Router makes the reverse proxy configuration match the database. Sync is a
+// no-op when nothing changed, so ordinary redeploys do not reload the proxy.
+type Router interface {
+	Sync(ctx context.Context) error
+}
+
+// TokenSource mints a short-lived token for fetching an app's repository.
+// It returns "" for repositories that need no authentication.
+type TokenSource interface {
+	RepoToken(ctx context.Context, app store.App) (string, error)
+}
+
+// Options are the dependencies and settings of the Engine.
+type Options struct {
+	Store   *store.Store
+	Runner  runner.Runner
+	Clock   clock.Clock
+	Box     *secrets.Box
+	System  system.Prober
+	Health  HealthChecker
+	Fetcher gitrepo.Fetcher
+	// Router and Tokens are optional.
+	Router Router
+	Tokens TokenSource
+	Logger *slog.Logger
+
+	// AppsDir holds one directory per app (releases, env file, deploy logs).
+	AppsDir string
+	// DefaultMemory is the memory limit for services without one.
+	DefaultMemory string
+	// DiskLimitPercent rejects deployments when the data disk is fuller.
+	DiskLimitPercent int
+	// WaitTimeout bounds `docker compose up --wait`.
+	WaitTimeout time.Duration
+	// HealthTimeout bounds the HTTP check after start.
+	HealthTimeout time.Duration
+	// JobTimeout bounds a whole deployment.
+	JobTimeout time.Duration
+	// KeepReleases is the number of successful release directories kept.
+	KeepReleases int
+	// PruneImages runs `docker image prune -f` after a successful deploy.
+	PruneImages bool
+}
+
+func (o *Options) applyDefaults() {
+	if o.Clock == nil {
+		o.Clock = clock.System{}
+	}
+	if o.Logger == nil {
+		o.Logger = slog.New(slog.DiscardHandler)
+	}
+	if o.Health == nil {
+		o.Health = HTTPHealthChecker{}
+	}
+	if o.Fetcher.Runner == nil {
+		o.Fetcher.Runner = o.Runner
+	}
+	if o.DefaultMemory == "" {
+		o.DefaultMemory = "512m"
+	}
+	if o.DiskLimitPercent == 0 {
+		o.DiskLimitPercent = 85
+	}
+	if o.WaitTimeout == 0 {
+		o.WaitTimeout = 300 * time.Second
+	}
+	if o.HealthTimeout == 0 {
+		o.HealthTimeout = 60 * time.Second
+	}
+	if o.JobTimeout == 0 {
+		o.JobTimeout = 30 * time.Minute
+	}
+	if o.KeepReleases == 0 {
+		o.KeepReleases = 3
+	}
+}
+
+// Engine accepts deployments and runs them one at a time.
+type Engine struct {
+	opts Options
+	wake chan struct{}
+
+	mu      sync.Mutex
+	cancels map[int64]context.CancelCauseFunc
+}
+
+// New builds an Engine. Call Run to start the worker.
+func New(opts Options) *Engine {
+	opts.applyDefaults()
+	return &Engine{
+		opts:    opts,
+		wake:    make(chan struct{}, 1),
+		cancels: map[int64]context.CancelCauseFunc{},
+	}
+}
+
+// DiskFullError is returned when the disk usage limit blocks a deployment.
+type DiskFullError struct {
+	UsedPercent  float64
+	LimitPercent int
+}
+
+func (e *DiskFullError) Error() string {
+	return fmt.Sprintf("disk usage is %.0f%%, above the limit of %d%%; free up space before deploying",
+		e.UsedPercent, e.LimitPercent)
+}
+
+// ErrNotCancelable is returned when a deployment already finished.
+var ErrNotCancelable = errors.New("deployment is not queued or running")
+
+var errCanceledByUser = errors.New("canceled by user")
+
+// --- paths ---
+
+func (e *Engine) appDir(slug string) string { return filepath.Join(e.opts.AppsDir, slug) }
+
+// EnvFile is the env file every service of the app reads.
+func (e *Engine) EnvFile(slug string) string { return filepath.Join(e.appDir(slug), "env") }
+
+// ReleaseDir is the checkout of one deployment.
+func (e *Engine) ReleaseDir(slug string, id int64) string {
+	return filepath.Join(e.appDir(slug), "releases", strconv.FormatInt(id, 10))
+}
+
+// LogPath is the deploy log of one deployment.
+func (e *Engine) LogPath(slug string, id int64) string {
+	return filepath.Join(e.appDir(slug), "deploys", strconv.FormatInt(id, 10)+".log")
+}
+
+// stateDir holds what is needed to bring a release back up later: the env
+// file as it was at deploy time and the Compose file that was used. It lives
+// outside the checkout so that secrets never enter a Docker build context.
+func (e *Engine) stateDir(slug string, id int64) string {
+	return filepath.Join(e.appDir(slug), "release-state", strconv.FormatInt(id, 10))
+}
+
+type releaseMeta struct {
+	ComposeFile string `json:"compose_file"`
+	// Images are the per-release images built for this release. They are
+	// removed together with the release.
+	Images []string `json:"images,omitempty"`
+}
+
+func (e *Engine) writeMeta(slug string, id int64, meta releaseMeta) error {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(filepath.Join(e.stateDir(slug, id), "release.json"), data, 0o600)
+}
+
+func (e *Engine) readMeta(slug string, id int64) (releaseMeta, error) {
+	var meta releaseMeta
+	data, err := os.ReadFile(filepath.Join(e.stateDir(slug, id), "release.json"))
+	if err != nil {
+		return meta, err
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return meta, err
+	}
+	return meta, nil
+}
+
+// invocation builds the docker compose call for a release.
+func (e *Engine) invocation(app store.App, id int64, composeFile string, withOverride bool) compose.Invocation {
+	dir := e.ReleaseDir(app.Slug, id)
+	files := []string{filepath.Join(dir, composeFile)}
+	if withOverride {
+		files = append(files, filepath.Join(dir, compose.OverrideFileName))
+	}
+	return compose.Invocation{ProjectName: app.ProjectName(), Files: files, EnvFile: e.EnvFile(app.Slug)}
+}
+
+// --- accepting and canceling ---
+
+// CheckDisk returns a *DiskFullError when the data disk is above the limit.
+// A failure to read disk usage does not block deployments.
+func (e *Engine) CheckDisk() error {
+	if e.opts.System == nil {
+		return nil
+	}
+	disk, err := e.opts.System.DiskUsage()
+	if err != nil {
+		e.opts.Logger.Warn("disk usage unavailable; skipping the deploy disk check", "error", err)
+		return nil
+	}
+	if disk.UsedPercent > float64(e.opts.DiskLimitPercent) {
+		return &DiskFullError{UsedPercent: disk.UsedPercent, LimitPercent: e.opts.DiskLimitPercent}
+	}
+	return nil
+}
+
+// Enqueue records a deployment of the given commit and wakes the worker.
+// Older queued deployments of the same app are canceled.
+func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message string) (store.Deployment, error) {
+	if !gitrepo.IsFullSHA(sha) {
+		return store.Deployment{}, fmt.Errorf("commit %q is not a full SHA", sha)
+	}
+	if err := e.CheckDisk(); err != nil {
+		return store.Deployment{}, err
+	}
+	d, superseded, err := e.opts.Store.EnqueueDeployment(ctx, app.ID, ref, sha, message, e.opts.Clock.Now())
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	for _, id := range superseded {
+		appendLogLine(e.LogPath(app.Slug, id), "Canceled: "+store.SupersededError+".")
+	}
+	appendLogLine(e.LogPath(app.Slug, d.ID), fmt.Sprintf("Queued deployment of %s.", sha))
+	e.notify()
+	return d, nil
+}
+
+// Cancel stops a queued or running deployment.
+func (e *Engine) Cancel(ctx context.Context, id int64) error {
+	d, err := e.opts.Store.GetDeployment(ctx, id)
+	if err != nil {
+		return err
+	}
+	err = e.opts.Store.CancelQueuedDeployment(ctx, id, e.opts.Clock.Now())
+	if err == nil {
+		if app, appErr := e.opts.Store.GetAppByID(ctx, d.AppID); appErr == nil {
+			appendLogLine(e.LogPath(app.Slug, id), "Canceled before it started.")
+		}
+		return nil
+	}
+	if !errors.Is(err, store.ErrInvalidTransition) {
+		return err
+	}
+	e.mu.Lock()
+	cancel, running := e.cancels[id]
+	e.mu.Unlock()
+	if !running {
+		return ErrNotCancelable
+	}
+	cancel(errCanceledByUser)
+	return nil
+}
+
+func (e *Engine) notify() {
+	select {
+	case e.wake <- struct{}{}:
+	default:
+	}
+}
+
+// --- worker ---
+
+// Run processes queued deployments until ctx is canceled. Only one
+// deployment runs at a time across all apps, which serializes build load.
+func (e *Engine) Run(ctx context.Context) error {
+	now := e.opts.Clock.Now()
+	interrupted, err := e.opts.Store.FailInterruptedDeployments(ctx, now)
+	if err != nil {
+		return fmt.Errorf("recover interrupted deployments: %w", err)
+	}
+	for _, id := range interrupted {
+		e.opts.Logger.Warn("deployment was interrupted by a restart", "deployment", id)
+		if d, err := e.opts.Store.GetDeployment(ctx, id); err == nil {
+			if app, err := e.opts.Store.GetAppByID(ctx, d.AppID); err == nil {
+				appendLogLine(e.LogPath(app.Slug, id), "Failed: "+store.InterruptedError+".")
+			}
+		}
+	}
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		d, err := e.opts.Store.NextQueuedDeployment(ctx)
+		if err != nil {
+			if !errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
+				e.opts.Logger.Error("reading the deploy queue failed", "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-e.wake:
+			case <-time.After(15 * time.Second):
+			}
+			continue
+		}
+		e.process(ctx, d)
+	}
+}
+
+func (e *Engine) process(ctx context.Context, d store.Deployment) {
+	logger := e.opts.Logger.With("deployment", d.ID)
+
+	jobCtx, cancelCause := context.WithCancelCause(ctx)
+	defer cancelCause(nil)
+	jobCtx, cancelTimeout := context.WithTimeout(jobCtx, e.opts.JobTimeout)
+	defer cancelTimeout()
+
+	// Register before the status changes so that Cancel always finds either
+	// a queued row or a cancel function.
+	e.mu.Lock()
+	e.cancels[d.ID] = cancelCause
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		delete(e.cancels, d.ID)
+		e.mu.Unlock()
+	}()
+
+	if err := e.opts.Store.StartDeployment(ctx, d.ID, e.opts.Clock.Now()); err != nil {
+		if !errors.Is(err, store.ErrInvalidTransition) {
+			logger.Error("starting the deployment failed", "error", err)
+		}
+		return
+	}
+
+	// Finishing must work even while paasd is shutting down.
+	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancelFinish()
+
+	app, err := e.opts.Store.GetAppByID(ctx, d.AppID)
+	if err != nil {
+		logger.Error("loading the app failed", "error", err)
+		_ = e.opts.Store.FinishDeployment(finishCtx, d.ID, store.StatusFailed, "the app could not be loaded", e.opts.Clock.Now())
+		return
+	}
+	logger = logger.With("app", app.Slug)
+
+	masker := secrets.NewMasker()
+	log, err := openDeployLog(e.LogPath(app.Slug, d.ID), masker)
+	if err != nil {
+		logger.Error("opening the deploy log failed", "error", err)
+		_ = e.opts.Store.FinishDeployment(finishCtx, d.ID, store.StatusFailed, "the deploy log could not be opened", e.opts.Clock.Now())
+		return
+	}
+	defer log.Close()
+
+	logger.Info("deployment started", "commit", d.CommitSHA)
+	touched, runErr := e.execute(jobCtx, d, app, log)
+
+	status, message := store.StatusSucceeded, ""
+	if runErr != nil {
+		status, message = e.classify(ctx, jobCtx, runErr, masker)
+		log.Printf("%s", "")
+		log.Step("Deployment %s: %s", status, message)
+		if touched {
+			if ctx.Err() != nil {
+				log.Printf("paasd is shutting down; the previous release is not restored automatically.")
+			} else {
+				e.rollback(app, log)
+			}
+		}
+	}
+
+	if err := e.opts.Store.FinishDeployment(finishCtx, d.ID, status, message, e.opts.Clock.Now()); err != nil {
+		logger.Error("recording the deployment result failed", "error", err)
+		return
+	}
+	logger.Info("deployment finished", "status", status)
+
+	if status == store.StatusSucceeded {
+		log.Step("Deployment succeeded")
+		if app.DesiredState != store.DesiredRunning {
+			_ = e.opts.Store.SetAppDesiredState(finishCtx, app.ID, store.DesiredRunning, e.opts.Clock.Now())
+		}
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancelCleanup()
+		e.cleanupAfterSuccess(cleanupCtx, app, log)
+	} else if ctx.Err() == nil {
+		// A failed checkout is never needed again; its log stays. During
+		// shutdown it is left for the cleanup after the next success.
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+		defer cancelCleanup()
+		e.removeRelease(cleanupCtx, app.Slug, d.ID)
+	}
+}
+
+// classify maps a job error to the final status and the message stored in
+// the database. The message is masked like the log.
+func (e *Engine) classify(parent, job context.Context, err error, masker *secrets.Masker) (string, string) {
+	switch {
+	case parent.Err() != nil:
+		return store.StatusFailed, store.InterruptedError
+	case errors.Is(context.Cause(job), errCanceledByUser):
+		return store.StatusCanceled, "canceled by user"
+	case errors.Is(job.Err(), context.DeadlineExceeded):
+		return store.StatusFailed, fmt.Sprintf("timed out after %s", e.opts.JobTimeout)
+	default:
+		return store.StatusFailed, masker.Mask(err.Error())
+	}
+}
+
+// removeRelease deletes the checkout, the state and the images of a release.
+func (e *Engine) removeRelease(ctx context.Context, slug string, id int64) {
+	if meta, err := e.readMeta(slug, id); err == nil && len(meta.Images) > 0 {
+		args := append([]string{"image", "rm"}, meta.Images...)
+		// Best effort: an image may never have been built.
+		if err := e.opts.Runner.Run(ctx, runner.Cmd{Name: "docker", Args: args}); err != nil {
+			e.opts.Logger.Debug("removing release images failed", "app", slug, "release", id, "error", err)
+		}
+	}
+	_ = os.RemoveAll(e.ReleaseDir(slug, id))
+	_ = os.RemoveAll(e.stateDir(slug, id))
+}
+
+// cleanupAfterSuccess keeps the newest successful releases and drops the
+// rest, then prunes dangling images.
+func (e *Engine) cleanupAfterSuccess(ctx context.Context, app store.App, log *deployLog) {
+	kept, err := e.opts.Store.SucceededDeployments(ctx, app.ID, e.opts.KeepReleases)
+	if err != nil {
+		e.opts.Logger.Warn("listing releases to keep failed", "app", app.Slug, "error", err)
+		return
+	}
+	keep := map[string]bool{}
+	for _, d := range kept {
+		keep[strconv.FormatInt(d.ID, 10)] = true
+	}
+	stale := map[int64]bool{}
+	for _, parent := range []string{"releases", "release-state"} {
+		entries, err := os.ReadDir(filepath.Join(e.appDir(app.Slug), parent))
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if id, err := strconv.ParseInt(entry.Name(), 10, 64); err == nil && !keep[entry.Name()] {
+				stale[id] = true
+			}
+		}
+	}
+	for id := range stale {
+		e.removeRelease(ctx, app.Slug, id)
+	}
+	if e.opts.PruneImages {
+		log.Step("Pruning dangling images")
+		pruneCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		if err := e.opts.Runner.Run(pruneCtx, runner.Cmd{
+			Name: "docker", Args: []string{"image", "prune", "-f"},
+			Stdout: log.Writer(), Stderr: log.Writer(),
+		}); err != nil {
+			log.Printf("image prune failed (ignored): %v", err)
+		}
+	}
+}

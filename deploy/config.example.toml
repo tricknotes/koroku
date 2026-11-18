@@ -27,3 +27,5 @@ disk_usage_limit_percent = 85
 # Host ports assigned to apps (bound to 127.0.0.1 only).
 port_range_start = 20000
 port_range_end = 20999
+# Remove dangling images after each successful deploy.
+prune_images = true

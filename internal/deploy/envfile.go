@@ -1,0 +1,98 @@
+package deploy
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+var (
+	envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	envRawPattern = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]*$`)
+)
+
+// ValidEnvKey reports whether key is usable as an environment variable name.
+func ValidEnvKey(key string) bool {
+	return len(key) <= 255 && envKeyPattern.MatchString(key)
+}
+
+// RenderEnvFile renders variables in the dotenv dialect Compose reads for
+// both env_file and --env-file. Values are written so that Compose performs
+// no interpolation on them:
+//
+//   - plain values are written as is;
+//   - anything else is single-quoted, which Compose takes literally;
+//   - values containing a single quote or a line break are double-quoted
+//     with backslash escapes, including `\$` to keep dollars literal.
+//
+// The quoting rules were verified against Compose (see the integration tests).
+func RenderEnvFile(vars map[string]string) (string, error) {
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		if !ValidEnvKey(k) {
+			return "", fmt.Errorf("invalid environment variable name %q", k)
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	for _, k := range keys {
+		v := vars[k]
+		if strings.ContainsRune(v, 0) {
+			return "", fmt.Errorf("environment variable %s contains a NUL byte", k)
+		}
+		b.WriteString(k)
+		b.WriteByte('=')
+		b.WriteString(quoteEnvValue(v))
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
+}
+
+func quoteEnvValue(v string) string {
+	if envRawPattern.MatchString(v) {
+		return v
+	}
+	if !strings.ContainsAny(v, "'\n\r") {
+		return "'" + v + "'"
+	}
+	replacer := strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		`$`, `\$`,
+		"\n", `\n`,
+		"\r", `\r`,
+	)
+	return `"` + replacer.Replace(v) + `"`
+}
+
+// writeFileAtomic writes data to path through a temporary file in the same
+// directory so that readers never observe a partial file.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
