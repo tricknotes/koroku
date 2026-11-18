@@ -203,16 +203,16 @@ func sameFilesystem(a, b string) (bool, error) {
 	return sa.Dev == sb.Dev, nil
 }
 
-// moveContents renames every entry of src into dst. The directory src itself
+// moveContents moves every entry of src into dst. The directory src itself
 // stays: it is the volume's mountpoint, and its owner and mode are what the
-// container expects.
+// container expects. See moveEntry for how one entry moves.
 func moveContents(src, dst string) error {
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		return err
 	}
 	for _, e := range entries {
-		if err := os.Rename(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
+		if err := moveEntry(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
 			return err
 		}
 	}
