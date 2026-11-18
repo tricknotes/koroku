@@ -29,7 +29,8 @@ const DEPLOYMENT = '[data-test-deployment]';
 
 /**
  * name, path, what to wait for, and optionally: viewport, `dark`, `keys`
- * (pressed before the capture, to show keyboard focus) or `click`.
+ * (pressed before the capture, to show keyboard focus), `click`, or
+ * `settle` (how long to wait before the capture, in milliseconds).
  */
 const SHOTS = [
   { name: 'list-healthy', path: '/?scenario=healthy', wait: LIST },
@@ -203,6 +204,16 @@ const SHOTS = [
     ...PHONE,
     themes: ['light'],
   },
+  // Last, because it changes the scenario: a deployment started in the UI,
+  // a few seconds in, with its log streaming.
+  {
+    name: 'deploy-live',
+    path: '/apps/shop-staging/deploy?scenario=healthy',
+    wait: DEPLOYMENT,
+    click: '[data-test-deploy-submit]',
+    settle: 6000,
+    themes: ['light'],
+  },
 ];
 
 function tabs(count) {
@@ -315,7 +326,7 @@ async function capture(browser, shot, theme) {
     await page('Input.dispatchKeyEvent', { type: 'keyDown', ...event });
     await page('Input.dispatchKeyEvent', { type: 'keyUp', ...event });
   }
-  await sleep(300);
+  await sleep(shot.settle ?? 300);
 
   const options = { format: 'png' };
   if (fullPage) {
