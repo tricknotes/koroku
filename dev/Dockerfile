@@ -9,24 +9,27 @@
 # The container talks to the host's Docker daemon through the mounted socket
 # (integration tests start real containers) and shares the host network so
 # that ports published on 127.0.0.1 are reachable from the tests.
+#
+# Two targets:
+#
+#   go    Go, Git, the Docker CLI with Compose and restic: enough for the Go
+#         unit and integration tests. CI builds only this one
+#         (KOROKU_DEV_TARGET=go bin/dev ...), which saves most of the build.
+#   full  (default) adds Chromium, CJK fonts, Node.js and pnpm for the
+#         Ember app and its screenshots.
+#
+# Both share every layer of "go", so the Go toolchain is the same in each.
 
 FROM node:26-slim AS node
 
-FROM golang:1.27
+FROM golang:1.27 AS go
 
-ARG PNPM_VERSION=12.21.0
 ARG RESTIC_VERSION=0.19.1
 
-# fonts-noto-cjk gives Chromium glyphs for Japanese text, so screenshots of
-# the management UI taken in this image are readable.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        bzip2 ca-certificates chromium curl fonts-noto-cjk git jq make shellcheck \
+        bzip2 ca-certificates curl git jq make shellcheck \
     && rm -rf /var/lib/apt/lists/*
-
-# The frontend test runner (testem) launches "Chrome"; point that name at
-# the distribution's Chromium.
-RUN ln -s /usr/bin/chromium /usr/local/bin/google-chrome
 
 # Docker CLI with the Compose and Buildx plugins (no daemon in the image).
 RUN install -m 0755 -d /etc/apt/keyrings \
@@ -37,14 +40,6 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get update \
     && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin \
     && rm -rf /var/lib/apt/lists/*
-
-# Node.js (copied from the official image) and pnpm for the Ember app.
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && npm install --global "pnpm@${PNPM_VERSION}" \
-    && npm cache clean --force
 
 # restic for the backup integration tests. Debian's package is too old for
 # the features the backup code uses, so the official release is installed and
@@ -68,3 +63,27 @@ ENV HOME=/home/dev \
 RUN mkdir -p /home/dev /cache/go /cache/go-build /cache/pnpm-store \
     && chmod 1777 /home/dev /cache/go /cache/go-build /cache/pnpm-store
 ENV PATH=/cache/go/bin:$PATH
+
+FROM go AS full
+
+ARG PNPM_VERSION=12.21.0
+
+# fonts-noto-cjk gives Chromium glyphs for Japanese text, so screenshots of
+# the management UI taken in this image are readable.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends chromium fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
+# The frontend test runner (testem) launches "Chrome"; point that name at
+# the distribution's Chromium.
+RUN ln -s /usr/bin/chromium /usr/local/bin/google-chrome
+
+# Node.js (copied from the official image) and pnpm for the Ember app. npm
+# runs as root here, so it gets root's HOME: the shared /home/dev must not
+# end up with a root-owned ~/.npm.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && HOME=/root npm install --global "pnpm@${PNPM_VERSION}" \
+    && HOME=/root npm cache clean --force
