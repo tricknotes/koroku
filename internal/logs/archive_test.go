@@ -232,7 +232,7 @@ func TestArchiveContinuesAfterRestartAndCompression(t *testing.T) {
 	mustArchive(t, newArchiver(t, f1, store, nil), at(19, 0, 10))
 	f1.c.closeWriters("blog")
 
-	// paasd restarts; yesterday's file is compressed; a line arrives late
+	// koroku restarts; yesterday's file is compressed; a line arrives late
 	// for the compressed day.
 	f2 := newFixtureIn(t, dir, nil)
 	f2.clock.Set(at(19, 1, 0))
@@ -308,7 +308,7 @@ func TestArchiveRetriesFailedUpload(t *testing.T) {
 			wantStrings(t, "next window", texts(objectLines(t, store, "logs/blog/web/2026/11/18/04.log.gz")), []string{"w2"})
 			wantStrings(t, "everything archived, once", archivedTexts(t, store, "blog", "web"), []string{"w1 " + secret, "w2"})
 			if strings.Contains(f.logs.String()+f2.logs.String(), secret) {
-				t.Error("line content leaked into paasd's log")
+				t.Error("line content leaked into koroku's log")
 			}
 		})
 	}
@@ -603,7 +603,7 @@ func TestValidateArchiveKey(t *testing.T) {
 		"logs/blog2/web/2026/11/18/04.log.gz",
 		"logs/blo/web/2026/11/18/04.log.gz",
 		"backups/blog/web/2026/11/18/04.log.gz",
-		"paas.db",
+		"koroku.db",
 		"logs/blog/_deploy/0.log.gz",
 		"logs/blog/_deploy/012.log.gz",
 		"logs/blog/_deploy/../web/2026/11/18/04.log.gz",

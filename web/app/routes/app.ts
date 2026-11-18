@@ -1,7 +1,7 @@
 import Route from '@ember/routing/route';
 import { service } from '@ember/service';
-import type ApiService from 'paas-console/services/api';
-import AppContext from 'paas-console/utils/app-context';
+import type ApiService from 'koroku-console/services/api';
+import AppContext from 'koroku-console/utils/app-context';
 
 export default class AppRoute extends Route {
   @service declare api: ApiService;

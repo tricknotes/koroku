@@ -89,7 +89,7 @@ func TestInfoSwap(t *testing.T) {
 }
 
 func TestDiskUsageError(t *testing.T) {
-	if _, err := (Host{DataDir: "/nonexistent/paas"}).DiskUsage(); err == nil {
+	if _, err := (Host{DataDir: "/nonexistent/koroku"}).DiskUsage(); err == nil {
 		t.Error("expected an error for a missing directory")
 	}
 }

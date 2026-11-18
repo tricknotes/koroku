@@ -1,4 +1,4 @@
-# paasd configuration. Copy to /etc/paas/config.toml and adjust.
+# koroku configuration. Copy to /etc/koroku/config.toml and adjust.
 # Values here are placeholders; do not commit real addresses or secrets.
 
 # Apps are served at <slug>.<base_domain>.
@@ -7,17 +7,17 @@ base_domain = "dev.example.com"
 # Hostname of the management UI. Defaults to console.<base_domain>.
 # console_host = "console.dev.example.com"
 
-# paasd listens on loopback only; Caddy terminates TLS in front of it.
+# koroku listens on loopback only; Caddy terminates TLS in front of it.
 listen = "127.0.0.1:8080"
 
 # SQLite database, releases, env files and logs live here.
-data_dir = "/var/lib/paas"
+data_dir = "/var/lib/koroku"
 
 # Public address of this host. Custom domains must resolve to it.
 public_ip = "203.0.113.10"
 
 # Key used to encrypt environment variable values (32 random bytes, mode 0600).
-master_key_file = "/etc/paas/master.key"
+master_key_file = "/etc/koroku/master.key"
 
 # Time zone for schedules (daily backup, log archive windows) and log file dates.
 timezone = "Asia/Tokyo"
@@ -34,7 +34,7 @@ port_range_end = 20999
 prune_images = true
 
 [caddy]
-# paasd generates the whole Caddy configuration from its database and loads
+# koroku generates the whole Caddy configuration from its database and loads
 # it through the admin API. Set enabled = false to run without Caddy (local
 # development).
 enabled = true
@@ -54,7 +54,7 @@ access_log_dir = "/var/log/caddy/apps"
 # app_id = 123456
 # client_id = "Iv1.xxxxxxxxxxxxxxxx"
 # client_secret = "..."
-# private_key_file = "/etc/paas/github-app.pem"
+# private_key_file = "/etc/koroku/github-app.pem"
 # Numeric ID of the only GitHub user allowed to log in
 # (see https://api.github.com/users/<login>).
 # allowed_user_id = 0
@@ -67,7 +67,7 @@ access_log_dir = "/var/log/caddy/apps"
 # Without this section logs stay local only and backups are disabled.
 # endpoint = "https://s3.example.com"
 # region = "auto"
-# bucket = "paas"
+# bucket = "koroku"
 # access_key_id = "..."
 # secret_access_key = "..."
 
@@ -80,6 +80,6 @@ archive_interval_hours = 4
 [backup]
 # restic repository password (mode 0600). Keep a copy outside this host:
 # without it the backups cannot be restored.
-restic_password_file = "/etc/paas/restic.key"
+restic_password_file = "/etc/koroku/restic.key"
 # Hour of the daily backup, in the time zone above.
 hour = 3

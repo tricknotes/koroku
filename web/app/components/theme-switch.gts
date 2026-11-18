@@ -3,8 +3,8 @@ import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import { guidFor } from '@ember/object/internals';
-import type ThemeService from 'paas-console/services/theme';
-import type { ThemePreference } from 'paas-console/services/theme';
+import type ThemeService from 'koroku-console/services/theme';
+import type { ThemePreference } from 'koroku-console/services/theme';
 import Icon, { type IconName } from './icon';
 
 interface Option {

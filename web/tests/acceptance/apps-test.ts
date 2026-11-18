@@ -1,6 +1,6 @@
 import { module, test } from 'qunit';
 import { click, currentURL, visit, waitFor } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   SHA_A,
   SHA_B,
@@ -10,7 +10,7 @@ import {
   makeDeployment,
   makeSystem,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
+} from 'koroku-console/tests/helpers/fakes';
 
 module('Acceptance | app list', function (hooks) {
   setupApplicationTest(hooks);

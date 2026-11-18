@@ -1,7 +1,7 @@
 import { tracked } from '@glimmer/tracking';
 import { assert } from '@ember/debug';
-import type ApiService from 'paas-console/services/api';
-import type { App } from 'paas-console/utils/types';
+import type ApiService from 'koroku-console/services/api';
+import type { App } from 'koroku-console/utils/types';
 
 /**
  * Model of the `app` route, shared by every tab: the app as last seen and a

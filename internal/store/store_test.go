@@ -48,7 +48,7 @@ func TestOpenAppliesMigrations(t *testing.T) {
 
 func TestOpenIsIdempotentOnDisk(t *testing.T) {
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "nested", "paas.db")
+	path := filepath.Join(t.TempDir(), "nested", "koroku.db")
 
 	first, err := Open(ctx, path)
 	if err != nil {
@@ -115,7 +115,7 @@ func TestSchemaConstraints(t *testing.T) {
 func TestVacuumInto(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
-	s, err := Open(ctx, filepath.Join(dir, "paas.db"))
+	s, err := Open(ctx, filepath.Join(dir, "koroku.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestVacuumInto(t *testing.T) {
 }
 
 func TestDatabaseFileIsPrivate(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "paas.db")
+	path := filepath.Join(t.TempDir(), "koroku.db")
 	s, err := Open(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)

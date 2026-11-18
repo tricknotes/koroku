@@ -43,7 +43,7 @@ type env struct {
 	suffix string
 }
 
-// newEnv starts a paasd-like stack (store, engine, worker, API) that talks
+// newEnv starts a koroku-like stack (store, engine, worker, API) that talks
 // to the local Docker daemon. Everything it creates is removed afterwards.
 func newEnv(t *testing.T) *env {
 	t.Helper()
@@ -53,7 +53,7 @@ func newEnv(t *testing.T) *env {
 	ctx, cancel := context.WithCancel(context.Background())
 	dir := t.TempDir()
 
-	st, err := store.Open(ctx, filepath.Join(dir, "paas.db"))
+	st, err := store.Open(ctx, filepath.Join(dir, "koroku.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,10 +143,10 @@ func (e *env) slug(name string) string {
 	e.t.Helper()
 	slug := fmt.Sprintf("it-%s-%s", name, e.suffix)
 	e.t.Cleanup(func() {
-		out, err := exec.Command("docker", "compose", "-p", "paas-"+slug,
+		out, err := exec.Command("docker", "compose", "-p", "koroku-"+slug,
 			"down", "--volumes", "--remove-orphans", "--rmi", "local", "--timeout", "1").CombinedOutput()
 		if err != nil {
-			e.t.Logf("cleanup of paas-%s failed: %v\n%s", slug, err, out)
+			e.t.Logf("cleanup of koroku-%s failed: %v\n%s", slug, err, out)
 		}
 	})
 	return slug
@@ -381,7 +381,7 @@ func TestBuildAppLifecycle(t *testing.T) {
 	}
 
 	// Only the web service is published, and only on loopback.
-	ports := publishedPorts(t, "paas-"+slug)
+	ports := publishedPorts(t, "koroku-"+slug)
 	if want := fmt.Sprintf("127.0.0.1:%d->8080/tcp", app.HostPort); ports["web"] != want {
 		t.Errorf("web ports = %q, want %q", ports["web"], want)
 	}
@@ -508,7 +508,7 @@ func TestStopStartDelete(t *testing.T) {
 	source := newRepo(t, "build-app")
 	sha := source.commit("Version 1")
 	slug := e.slug("ops")
-	project := "paas-" + slug
+	project := "koroku-" + slug
 	app := e.createApp(slug, source.url())
 
 	if status := e.call(http.MethodPost, "/api/apps/"+slug+"/start", nil, nil); status != http.StatusConflict {
@@ -625,7 +625,7 @@ func TestPolicyBlocksPrivilegedContainer(t *testing.T) {
 	if d.Status != "failed" || !strings.Contains(d.Error, "privileged") || !strings.Contains(d.Error, "docker_socket") {
 		t.Fatalf("deployment = %+v\n%s", d, e.logText(d.ID))
 	}
-	if ports := publishedPorts(t, "paas-"+slug); len(ports) != 0 {
+	if ports := publishedPorts(t, "koroku-"+slug); len(ports) != 0 {
 		t.Errorf("containers were started despite the policy: %v", ports)
 	}
 }
@@ -689,7 +689,7 @@ func TestTwoAppsAreIsolated(t *testing.T) {
 
 	// Each app publishes only its web service, on loopback, on its own port.
 	for slug, app := range map[string]appInfo{slugA: appA, slugB: appB} {
-		ports := publishedPorts(t, "paas-"+slug)
+		ports := publishedPorts(t, "koroku-"+slug)
 		if want := fmt.Sprintf("127.0.0.1:%d->8080/tcp", app.HostPort); ports["web"] != want || ports["sidecar"] != "" {
 			t.Errorf("%s ports = %v, want only web on %s", slug, ports, want)
 		}
@@ -700,8 +700,8 @@ func TestTwoAppsAreIsolated(t *testing.T) {
 
 	// Inside app A: its own sidecar resolves by name, app B's containers do
 	// not, and app B's web container is unreachable by address.
-	containerA := "paas-" + slugA + "-web-1"
-	containerB := "paas-" + slugB + "-web-1"
+	containerA := "koroku-" + slugA + "-web-1"
+	containerB := "koroku-" + slugB + "-web-1"
 	// (ping, because busybox nslookup exits 0 even for unknown names.)
 	if out, err := exec.Command("docker", "exec", containerA, "ping", "-c", "1", "-W", "3", "sidecar").CombinedOutput(); err != nil {
 		t.Errorf("app A cannot reach its own sidecar by name: %v\n%s", err, out)

@@ -1,8 +1,11 @@
 import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { on } from '@ember/modifier';
-import followTail from 'paas-console/modifiers/follow-tail';
-import { logSegments, type LogSegment } from 'paas-console/utils/deploy-steps';
+import followTail from 'koroku-console/modifiers/follow-tail';
+import {
+  logSegments,
+  type LogSegment,
+} from 'koroku-console/utils/deploy-steps';
 import Button from './button';
 import Icon from './icon';
 

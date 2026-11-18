@@ -1,4 +1,4 @@
-# Development toolchain for paasd.
+# Development toolchain for koroku.
 #
 # Everything needed to build and test the project lives in this image, so the
 # host only needs Docker. Use it through bin/dev, for example:

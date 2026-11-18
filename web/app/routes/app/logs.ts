@@ -1,4 +1,4 @@
-import AppTabRoute from 'paas-console/utils/app-tab-route';
+import AppTabRoute from 'koroku-console/utils/app-tab-route';
 
 const REPLACE = { replace: true };
 

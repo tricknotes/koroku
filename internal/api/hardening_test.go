@@ -27,7 +27,7 @@ func send(h http.Handler, req *http.Request) *httptest.ResponseRecorder {
 }
 
 // TestNoAuthModeStillGuardsTheBrowser: without login, the browser of the
-// person running paasd is the attack surface. A page on another site must
+// person running koroku is the attack surface. A page on another site must
 // not be able to post to 127.0.0.1, and DNS rebinding must not reach the API.
 func TestNoAuthModeStillGuardsTheBrowser(t *testing.T) {
 	h := newTestServer(t, nil).Handler() // InsecureNoAuth
@@ -117,7 +117,7 @@ func TestAPIRejectsCrossSiteBrowserRequests(t *testing.T) {
 }
 
 // TestOAuthCallbackIsRateLimited: the callback can be reached by anyone with
-// a self-chosen state, and each accepted call makes paasd talk to GitHub.
+// a self-chosen state, and each accepted call makes koroku talk to GitHub.
 func TestOAuthCallbackIsRateLimited(t *testing.T) {
 	gh := defaultGitHub()
 	srv, clk := newAuthServer(t, gh)

@@ -1,7 +1,7 @@
 import type { TOC } from '@ember/component/template-only';
 import { LinkTo } from '@ember/routing';
-import type { AttentionItem } from 'paas-console/utils/attention';
-import { formatPercent } from 'paas-console/utils/format';
+import type { AttentionItem } from 'koroku-console/utils/attention';
+import { formatPercent } from 'koroku-console/utils/format';
 import Banner from './banner';
 import RelativeTime from './relative-time';
 

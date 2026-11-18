@@ -1,7 +1,7 @@
-# paas-console
+# koroku-console
 
-Management UI of paasd, written in Ember + TypeScript. The production build
-(`dist/`) is embedded into the `paasd` binary.
+Management UI of koroku, written in Ember + TypeScript. The production build
+(`dist/`) is embedded into the `koroku` binary.
 
 ## Development
 
@@ -10,12 +10,12 @@ container with `bin/dev` from the repository root (see the top-level README).
 
 ```sh
 bin/dev sh -c 'cd web && pnpm install --frozen-lockfile'
-bin/dev sh -c 'cd web && pnpm start'   # http://localhost:4200, proxies /api and /auth to paasd on 127.0.0.1:8080
+bin/dev sh -c 'cd web && pnpm start'   # http://localhost:4200, proxies /api and /auth to koroku on 127.0.0.1:8080
 bin/dev sh -c 'cd web && pnpm lint && pnpm test'
 bin/dev sh -c 'cd web && pnpm build'   # writes dist/
 ```
 
-Set `PAASD_URL` to proxy to a different paasd address.
+Set `KOROKU_URL` to proxy to a different koroku address.
 
 ## Design system
 

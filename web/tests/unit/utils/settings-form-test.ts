@@ -2,8 +2,8 @@ import { module, test } from 'qunit';
 import SettingsForm, {
   LimitRow,
   isValidMemoryLimit,
-} from 'paas-console/utils/settings-form';
-import { makeApp } from 'paas-console/tests/helpers/fakes';
+} from 'koroku-console/utils/settings-form';
+import { makeApp } from 'koroku-console/tests/helpers/fakes';
 
 module('Unit | Utility | settings-form', function () {
   test('an untouched form produces an empty patch', function (assert) {

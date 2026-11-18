@@ -1,8 +1,8 @@
 import Component from '@glimmer/component';
 import { service } from '@ember/service';
-import type ClockService from 'paas-console/services/clock';
-import { formatDateTimeJst } from 'paas-console/utils/format';
-import { timeUntil } from 'paas-console/utils/schedule';
+import type ClockService from 'koroku-console/services/clock';
+import { formatDateTimeJst } from 'koroku-console/utils/format';
+import { timeUntil } from 'koroku-console/utils/schedule';
 
 interface TimeUntilSignature {
   Element: HTMLTimeElement;

@@ -18,7 +18,7 @@ func TestParseAppliesDefaults(t *testing.T) {
 	if cfg.Listen != "127.0.0.1:8080" {
 		t.Errorf("Listen = %q", cfg.Listen)
 	}
-	if cfg.DBPath() != "/var/lib/paas/paas.db" {
+	if cfg.DBPath() != "/var/lib/koroku/koroku.db" {
 		t.Errorf("DBPath = %q", cfg.DBPath())
 	}
 	if cfg.Deploy.DiskUsageLimitPercent != 85 {
@@ -34,7 +34,7 @@ func TestParseOverrides(t *testing.T) {
 base_domain = "dev.example.com"
 console_host = "admin.example.com"
 listen = "127.0.0.1:9000"
-data_dir = "/srv/paas"
+data_dir = "/srv/koroku"
 public_ip = "203.0.113.10"
 
 [deploy]
@@ -44,7 +44,7 @@ disk_usage_limit_percent = 70
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if cfg.ConsoleHost != "admin.example.com" || cfg.Listen != "127.0.0.1:9000" || cfg.DataDir != "/srv/paas" {
+	if cfg.ConsoleHost != "admin.example.com" || cfg.Listen != "127.0.0.1:9000" || cfg.DataDir != "/srv/koroku" {
 		t.Errorf("unexpected config: %+v", cfg)
 	}
 	if cfg.Deploy.DefaultMemoryLimit != "1g" || cfg.Deploy.DiskUsageLimitPercent != 70 {
@@ -130,7 +130,7 @@ console_url = "http://localhost:8080/"
 app_id = 12345
 client_id = "Iv1.example"
 client_secret = "example-secret"
-private_key_file = "/etc/paas/github-app.pem"
+private_key_file = "/etc/koroku/github-app.pem"
 allowed_user_id = 42
 `
 	cfg, err = Parse(full)
@@ -169,10 +169,10 @@ func TestStorageLogsAndBackupConfig(t *testing.T) {
 	if cfg.Storage.Configured() {
 		t.Error("storage must not count as configured by default")
 	}
-	if cfg.Logs.Dir != "/var/lib/paas/logs" || cfg.Logs.RetentionDays != 14 || cfg.Logs.ArchiveIntervalHours != 4 {
+	if cfg.Logs.Dir != "/var/lib/koroku/logs" || cfg.Logs.RetentionDays != 14 || cfg.Logs.ArchiveIntervalHours != 4 {
 		t.Errorf("Logs = %+v", cfg.Logs)
 	}
-	if cfg.Backup.Hour != 3 || cfg.Backup.ResticPasswordFile != "/etc/paas/restic.key" {
+	if cfg.Backup.Hour != 3 || cfg.Backup.ResticPasswordFile != "/etc/koroku/restic.key" {
 		t.Errorf("Backup = %+v", cfg.Backup)
 	}
 	if cfg.Timezone != "Asia/Tokyo" || cfg.Location().String() != "Asia/Tokyo" {
@@ -180,11 +180,11 @@ func TestStorageLogsAndBackupConfig(t *testing.T) {
 	}
 
 	full := `base_domain = "dev.example.com"
-data_dir = "/srv/paas"
+data_dir = "/srv/koroku"
 timezone = "UTC"
 [storage]
 endpoint = "https://s3.example.com"
-bucket = "paas"
+bucket = "koroku"
 access_key_id = "AKIAEXAMPLE"
 secret_access_key = "example-secret-key"
 [logs]
@@ -196,16 +196,16 @@ hour = 4
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if !cfg.Storage.Configured() || cfg.Storage.Region != "auto" || cfg.Logs.Dir != "/srv/paas/logs" || cfg.Backup.Hour != 4 {
+	if !cfg.Storage.Configured() || cfg.Storage.Region != "auto" || cfg.Logs.Dir != "/srv/koroku/logs" || cfg.Backup.Hour != 4 {
 		t.Errorf("config = %+v %+v %+v", cfg.Storage, cfg.Logs, cfg.Backup)
 	}
 
 	for name, text := range map[string]string{
 		"no bucket":          "[storage]\nendpoint = \"https://s3.example.com\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
-		"no credentials":     "[storage]\nendpoint = \"https://s3.example.com\"\nbucket = \"paas\"",
-		"endpoint no scheme": "[storage]\nendpoint = \"s3.example.com\"\nbucket = \"paas\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
+		"no credentials":     "[storage]\nendpoint = \"https://s3.example.com\"\nbucket = \"koroku\"",
+		"endpoint no scheme": "[storage]\nendpoint = \"s3.example.com\"\nbucket = \"koroku\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
 		"bad timezone":       "timezone = \"Mars/Olympus\"",
-		"plain http storage": "[storage]\nendpoint = \"http://s3.example.com\"\nbucket = \"paas\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
+		"plain http storage": "[storage]\nendpoint = \"http://s3.example.com\"\nbucket = \"koroku\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
 		"zero retention":     "[logs]\nretention_days = 0",
 		"archive too rare":   "[logs]\narchive_interval_hours = 48",
 		"bad backup hour":    "[backup]\nhour = 24",
@@ -240,7 +240,7 @@ func TestLoad(t *testing.T) {
 
 func TestLoadRefusesReadableConfigWithSecrets(t *testing.T) {
 	dir := t.TempDir()
-	withSecret := "base_domain = \"dev.example.com\"\n[storage]\nendpoint = \"https://s3.example.com\"\nbucket = \"paas\"\naccess_key_id = \"a\"\nsecret_access_key = \"super-secret-value\"\n"
+	withSecret := "base_domain = \"dev.example.com\"\n[storage]\nendpoint = \"https://s3.example.com\"\nbucket = \"koroku\"\naccess_key_id = \"a\"\nsecret_access_key = \"super-secret-value\"\n"
 	path := filepath.Join(dir, "config.toml")
 	if err := os.WriteFile(path, []byte(withSecret), 0o644); err != nil {
 		t.Fatal(err)

@@ -4,8 +4,8 @@ import { on } from '@ember/modifier';
 import { guidFor } from '@ember/object/internals';
 import onDismiss, {
   type DismissReason,
-} from 'paas-console/modifiers/on-dismiss';
-import type { SessionUser } from 'paas-console/utils/types';
+} from 'koroku-console/modifiers/on-dismiss';
+import type { SessionUser } from 'koroku-console/utils/types';
 import Icon from './icon';
 
 interface UserMenuSignature {

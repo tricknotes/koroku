@@ -14,7 +14,7 @@
 // Options.Location.
 //
 // Log lines are app output and may contain secrets. Nothing in this package
-// puts line content into errors or into paasd's own log.
+// puts line content into errors or into koroku's own log.
 package logs
 
 import (
@@ -66,7 +66,7 @@ type Line struct {
 // App is one app whose logs are collected.
 type App struct {
 	Slug string
-	// Project is the Compose project name (paas-<slug>).
+	// Project is the Compose project name (koroku-<slug>).
 	Project string
 	// AccessLogPath is the access log the reverse proxy writes for this app.
 	// Empty means there is none.

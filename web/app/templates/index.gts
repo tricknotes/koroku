@@ -3,25 +3,25 @@ import { service } from '@ember/service';
 import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
-import AsyncView from 'paas-console/components/async-view';
-import AttentionBanner from 'paas-console/components/attention-banner';
-import Banner from 'paas-console/components/banner';
-import { buttonClass } from 'paas-console/components/button';
-import EmptyState from 'paas-console/components/empty-state';
-import EnvironmentBadge from 'paas-console/components/environment-badge';
-import HostStatus from 'paas-console/components/host-status';
-import Icon from 'paas-console/components/icon';
-import RelativeTime from 'paas-console/components/relative-time';
-import RowList from 'paas-console/components/row-list';
-import StatusIndicator from 'paas-console/components/status-indicator';
-import type ApiService from 'paas-console/services/api';
-import type PollerService from 'paas-console/services/poller';
+import AsyncView from 'koroku-console/components/async-view';
+import AttentionBanner from 'koroku-console/components/attention-banner';
+import Banner from 'koroku-console/components/banner';
+import { buttonClass } from 'koroku-console/components/button';
+import EmptyState from 'koroku-console/components/empty-state';
+import EnvironmentBadge from 'koroku-console/components/environment-badge';
+import HostStatus from 'koroku-console/components/host-status';
+import Icon from 'koroku-console/components/icon';
+import RelativeTime from 'koroku-console/components/relative-time';
+import RowList from 'koroku-console/components/row-list';
+import StatusIndicator from 'koroku-console/components/status-indicator';
+import type ApiService from 'koroku-console/services/api';
+import type PollerService from 'koroku-console/services/poller';
 import {
   attentionItems,
   type AttentionItem,
-} from 'paas-console/utils/attention';
-import { firstLine, hostOf, shortSha } from 'paas-console/utils/format';
-import Loadable from 'paas-console/utils/loadable';
+} from 'koroku-console/utils/attention';
+import { firstLine, hostOf, shortSha } from 'koroku-console/utils/format';
+import Loadable from 'koroku-console/utils/loadable';
 import {
   APP_STATE_HINTS,
   APP_STATE_KINDS,
@@ -29,13 +29,13 @@ import {
   DEPLOYMENT_STATUS_KINDS,
   DEPLOYMENT_STATUS_LABELS,
   deriveAppState,
-} from 'paas-console/utils/status';
+} from 'koroku-console/utils/status';
 import type {
   App,
   BackupOverview,
   Deployment,
   SystemInfo,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 /** How often the apps are re-read; a deployment changes them within seconds. */
 const APPS_INTERVAL = 5000;

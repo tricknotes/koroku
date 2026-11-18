@@ -1,4 +1,4 @@
-// Package config loads and validates the paasd configuration file.
+// Package config loads and validates the koroku configuration file.
 package config
 
 import (
@@ -18,8 +18,8 @@ import (
 
 var memoryLimitPattern = regexp.MustCompile(`^[1-9][0-9]*[bkmg]?$`)
 
-// DefaultPath is where paasd looks for its configuration when --config is not given.
-const DefaultPath = "/etc/paas/config.toml"
+// DefaultPath is where koroku looks for its configuration when --config is not given.
+const DefaultPath = "/etc/koroku/config.toml"
 
 // Config is the content of config.toml.
 type Config struct {
@@ -31,7 +31,7 @@ type Config struct {
 	// https://<ConsoleHost> and only needs to be set for local development
 	// (for example http://localhost:8080).
 	ConsoleURL string `toml:"console_url"`
-	// Listen is the address paasd binds to. It must be a loopback address in production.
+	// Listen is the address koroku binds to. It must be a loopback address in production.
 	Listen string `toml:"listen"`
 	// DataDir holds the SQLite database, releases, env files and logs.
 	DataDir string `toml:"data_dir"`
@@ -103,7 +103,7 @@ func (g GitHub) Configured() bool {
 
 // Caddy holds reverse proxy settings.
 type Caddy struct {
-	// Enabled makes paasd load its generated configuration into Caddy.
+	// Enabled makes koroku load its generated configuration into Caddy.
 	// Turn it off for local development without Caddy.
 	Enabled bool `toml:"enabled"`
 	// AdminURL is the Caddy admin API. It must be a loopback address.
@@ -138,13 +138,13 @@ type Deploy struct {
 func Default() Config {
 	return Config{
 		Listen:        "127.0.0.1:8080",
-		DataDir:       "/var/lib/paas",
-		MasterKeyFile: "/etc/paas/master.key",
-		GitHub:        GitHub{PrivateKeyFile: "/etc/paas/github-app.pem"},
+		DataDir:       "/var/lib/koroku",
+		MasterKeyFile: "/etc/koroku/master.key",
+		GitHub:        GitHub{PrivateKeyFile: "/etc/koroku/github-app.pem"},
 		Timezone:      "Asia/Tokyo",
 		Storage:       Storage{Region: "auto"},
 		Logs:          Logs{RetentionDays: 14, ArchiveIntervalHours: 4},
-		Backup:        Backup{ResticPasswordFile: "/etc/paas/restic.key", Hour: 3},
+		Backup:        Backup{ResticPasswordFile: "/etc/koroku/restic.key", Hour: 3},
 		Caddy: Caddy{
 			Enabled:      true,
 			AdminURL:     "http://127.0.0.1:2019",
@@ -229,7 +229,7 @@ func (c Config) Validate() error {
 	if host, _, err := net.SplitHostPort(c.Listen); err != nil {
 		errs = append(errs, fmt.Errorf("listen %q: %w", c.Listen, err))
 	} else if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		// paasd speaks plain HTTP and controls Docker; only the reverse
+		// koroku speaks plain HTTP and controls Docker; only the reverse
 		// proxy on the same host may reach it.
 		errs = append(errs, fmt.Errorf("listen %q must be a loopback address such as 127.0.0.1:8080", c.Listen))
 	}
@@ -355,7 +355,7 @@ func (c Config) Location() *time.Location {
 }
 
 // DBPath is the location of the SQLite database.
-func (c Config) DBPath() string { return filepath.Join(c.DataDir, "paas.db") }
+func (c Config) DBPath() string { return filepath.Join(c.DataDir, "koroku.db") }
 
 // AppsDir is the directory holding per-app releases, env files and deploy logs.
 func (c Config) AppsDir() string { return filepath.Join(c.DataDir, "apps") }

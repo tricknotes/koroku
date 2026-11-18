@@ -60,7 +60,7 @@ func startS3Server(t *testing.T) (endpoint, accessKey, secretKey string) {
 
 	accessKey = "it" + randomHex(t, 8)
 	secretKey = randomHex(t, 20)
-	name := "paasd-objstore-it-" + randomHex(t, 4)
+	name := "koroku-objstore-it-" + randomHex(t, 4)
 	_, err := runner.Output(ctx, run, runner.Cmd{Name: "docker", Args: []string{
 		"run", "--detach", "--rm", "--name", name,
 		"--publish", "127.0.0.1::9000",

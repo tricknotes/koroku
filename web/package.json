@@ -1,8 +1,8 @@
 {
-  "name": "paas-console",
+  "name": "koroku-console",
   "version": "0.0.0",
   "private": true,
-  "description": "Management UI of paasd",
+  "description": "Management UI of koroku",
   "repository": "",
   "license": "UNLICENSED",
   "author": "",

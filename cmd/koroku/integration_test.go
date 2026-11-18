@@ -49,7 +49,7 @@ func startObjectStorage(t *testing.T) (endpoint, accessKey, secretKey string) {
 		}
 	}
 	accessKey, secretKey = "it"+randomHex(t, 8), randomHex(t, 20)
-	name := "paasd-serve-it-" + randomHex(t, 4)
+	name := "koroku-serve-it-" + randomHex(t, 4)
 	out, err := exec.Command("docker", "run", "--detach", "--rm", "--name", name,
 		"--publish", "127.0.0.1::9000",
 		"--env", "MINIO_ROOT_USER="+accessKey, "--env", "MINIO_ROOT_PASSWORD="+secretKey,
@@ -92,7 +92,7 @@ type serveEnv struct {
 	etcDir  string
 }
 
-// startServe writes a configuration and runs the real `paasd serve`.
+// startServe writes a configuration and runs the real `koroku serve`.
 func startServe(t *testing.T, endpoint, accessKey, secretKey, bucket string) *serveEnv {
 	t.Helper()
 	root := t.TempDir()
@@ -153,7 +153,7 @@ restic_password_file = %q
 			t.Error("serve did not shut down")
 		}
 		if t.Failed() {
-			t.Logf("paasd log:\n%s", logs.String())
+			t.Logf("koroku log:\n%s", logs.String())
 		}
 	})
 	return env
@@ -190,7 +190,7 @@ func (e *serveEnv) call(method, path string, body, out any) int {
 	return resp.StatusCode
 }
 
-// TestServeBackupLogsAndSystemRestore runs the real `paasd serve` against
+// TestServeBackupLogsAndSystemRestore runs the real `koroku serve` against
 // real Docker, real restic and an S3-compatible server: deploy an app, back
 // it up (dump hook + system), list and download the dump through the API,
 // find its output in the collected logs, and bring the database and the
@@ -206,8 +206,8 @@ func TestServeBackupLogsAndSystemRestore(t *testing.T) {
 		t.Skip("curl is not installed (it creates the test bucket)")
 	}
 	endpoint, accessKey, secretKey := startObjectStorage(t)
-	bucket := "paasd-it-" + randomHex(t, 4)
-	// In production the bucket is created by hand before paasd is set up;
+	bucket := "koroku-it-" + randomHex(t, 4)
+	// In production the bucket is created by hand before koroku is set up;
 	// restic does not create it. curl signs the request (SigV4) for us.
 	if out, err := exec.Command("curl", "--fail", "--silent", "--show-error", "--request", "PUT",
 		"--aws-sigv4", "aws:amz:us-east-1:s3", "--user", accessKey+":"+secretKey,
@@ -242,7 +242,7 @@ func TestServeBackupLogsAndSystemRestore(t *testing.T) {
 
 	slug := "it-serve-" + randomHex(t, 4)
 	t.Cleanup(func() {
-		_ = exec.Command("docker", "compose", "-p", "paas-"+slug, "down", "--volumes", "--remove-orphans", "--rmi", "local", "--timeout", "1").Run()
+		_ = exec.Command("docker", "compose", "-p", "koroku-"+slug, "down", "--volumes", "--remove-orphans", "--rmi", "local", "--timeout", "1").Run()
 	})
 	var app struct {
 		HostPort int `json:"host_port"`
@@ -459,7 +459,7 @@ func TestServeBackupLogsAndSystemRestore(t *testing.T) {
 	if kept, _ := os.ReadFile(newConfig); string(kept) != minimal {
 		t.Error("the new host's config.toml was overwritten")
 	}
-	restored, err := store.Open(context.Background(), filepath.Join(newVar, "paas.db"))
+	restored, err := store.Open(context.Background(), filepath.Join(newVar, "koroku.db"))
 	if err != nil {
 		t.Fatalf("open the restored database: %v", err)
 	}

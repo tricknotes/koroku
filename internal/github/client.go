@@ -1,4 +1,4 @@
-// Package github is paasd's GitHub App client. It covers the two things the
+// Package github is koroku's GitHub App client. It covers the two things the
 // control plane needs from GitHub: signing the operator in through the web
 // application flow, and reading repositories (listing, commit lookup, file
 // contents, installation access tokens for git fetch).
@@ -33,7 +33,7 @@ const (
 
 	acceptAPI  = "application/vnd.github+json"
 	apiVersion = "2022-11-28"
-	userAgent  = "paasd"
+	userAgent  = "koroku"
 
 	// maxResponseBytes caps how much of a response body is read into memory.
 	maxResponseBytes = 8 << 20
@@ -48,7 +48,7 @@ const (
 )
 
 // Config holds everything the client needs. It is filled by the caller from
-// the paasd configuration; this package reads no files and no environment.
+// the koroku configuration; this package reads no files and no environment.
 type Config struct {
 	// AppID is the numeric ID of the GitHub App.
 	AppID int64

@@ -1,7 +1,7 @@
 import loadConfigFromMeta from '@embroider/config-meta-loader';
 import { assert } from '@ember/debug';
 
-const config = loadConfigFromMeta('paas-console') as unknown;
+const config = loadConfigFromMeta('koroku-console') as unknown;
 
 assert(
   'config is not an object',

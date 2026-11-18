@@ -73,10 +73,10 @@ const (
 type App struct {
 	// Slug identifies the app in snapshot tags (app:<slug>).
 	Slug string
-	// Project is the Compose project name (paas-<slug>).
+	// Project is the Compose project name (koroku-<slug>).
 	Project string
 	// ExcludeVolumes lists volumes that are not backed up, by the name
-	// written in the Compose file (pgdata, not paas-blog_pgdata).
+	// written in the Compose file (pgdata, not koroku-blog_pgdata).
 	ExcludeVolumes []string
 	// DumpService and DumpCommand are the dump hook: the command runs with
 	// `sh -c` inside the service's container and its standard output is
@@ -116,7 +116,7 @@ type System struct {
 	// SnapshotDB writes a consistent copy of the database to destPath
 	// (VACUUM INTO). destPath does not exist when it is called.
 	SnapshotDB func(ctx context.Context, destPath string) error
-	// ConfigDir is copied into the snapshot (/etc/paas). Empty skips it.
+	// ConfigDir is copied into the snapshot (/etc/koroku). Empty skips it.
 	ConfigDir string
 }
 
@@ -165,10 +165,10 @@ type Options struct {
 	Controller AppController
 
 	// WorkDir is a private directory where the system backup is staged
-	// (/var/lib/paas/backup-work). Needed when System is set.
+	// (/var/lib/koroku/backup-work). Needed when System is set.
 	WorkDir string
 	// TrashDir receives the previous contents of a restored volume
-	// (/var/lib/paas/restore-trash). It must be on the same filesystem as
+	// (/var/lib/koroku/restore-trash). It must be on the same filesystem as
 	// the Docker volumes: the contents are moved with rename so that
 	// ownership and special files survive untouched.
 	TrashDir string
@@ -176,7 +176,7 @@ type Options struct {
 	TrashRetention time.Duration
 
 	// Host is recorded as the host name of every snapshot. It is fixed so
-	// that replacing the machine does not change it. Default "paasd".
+	// that replacing the machine does not change it. Default "koroku".
 	Host string
 	// Keep defaults to 7 daily, 4 weekly and 6 monthly generations.
 	Keep     Retention
@@ -194,7 +194,7 @@ func (o *Options) applyDefaults() {
 		o.TrashRetention = 7 * 24 * time.Hour
 	}
 	if o.Host == "" {
-		o.Host = "paasd"
+		o.Host = "koroku"
 	}
 	if o.Keep == (Retention{}) {
 		o.Keep = Retention{Daily: 7, Weekly: 4, Monthly: 6}

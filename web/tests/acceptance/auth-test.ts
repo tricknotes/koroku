@@ -1,11 +1,11 @@
 import { module, test } from 'qunit';
 import { click, currentURL, visit } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   installFakes,
   makeApp,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
+} from 'koroku-console/tests/helpers/fakes';
 
 module('Acceptance | auth', function (hooks) {
   setupApplicationTest(hooks);

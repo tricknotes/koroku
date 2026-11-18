@@ -1,6 +1,6 @@
 import Component from '@glimmer/component';
 import { on } from '@ember/modifier';
-import type Loadable from 'paas-console/utils/loadable';
+import type Loadable from 'koroku-console/utils/loadable';
 import Banner from './banner';
 import Button from './button';
 import FeatureUnavailable from './feature-unavailable';

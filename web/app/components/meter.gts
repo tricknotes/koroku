@@ -1,7 +1,7 @@
 import type { TOC } from '@ember/component/template-only';
 import { htmlSafe } from '@ember/template';
 import type { SafeString } from '@ember/template';
-import { formatPercent } from 'paas-console/utils/format';
+import { formatPercent } from 'koroku-console/utils/format';
 
 export type MeterTone = 'ok' | 'warn' | 'danger';
 

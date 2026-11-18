@@ -7,8 +7,8 @@ import {
   stepLabel,
   type DeployStep,
   type StepState,
-} from 'paas-console/utils/deploy-steps';
-import { formatDuration } from 'paas-console/utils/format';
+} from 'koroku-console/utils/deploy-steps';
+import { formatDuration } from 'koroku-console/utils/format';
 import Icon, { type IconName } from './icon';
 import StepLog from './step-log';
 
@@ -59,7 +59,7 @@ function logLabel(step: DeployStep): string {
   return `${stepLabel(step.key)}のログ`;
 }
 
-/** Name, paasd's own title and the state / duration of one step. */
+/** Name, koroku's own title and the state / duration of one step. */
 const StepSummary: TOC<{ Args: { step: DeployStep } }> = <template>
   <span class="step-name">{{stepLabel @step.key}}</span>
   <span class="step-title">{{@step.title}}</span>

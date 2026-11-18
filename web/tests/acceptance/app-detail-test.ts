@@ -1,14 +1,14 @@
 import { module, test } from 'qunit';
 import { click, currentURL, find, settled, visit } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   SHA_A,
   installFakes,
   makeApp,
   makeDeployment,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
-import type { App } from 'paas-console/utils/types';
+} from 'koroku-console/tests/helpers/fakes';
+import type { App } from 'koroku-console/utils/types';
 
 module('Acceptance | app detail', function (hooks) {
   setupApplicationTest(hooks);

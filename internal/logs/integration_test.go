@@ -78,7 +78,7 @@ func TestCollectFromRealCompose(t *testing.T) {
 	}
 	// Everything this test creates in Docker carries this project name and
 	// is removed again; nothing else is touched.
-	project := "paasd-logs-it-" + hex.EncodeToString(suffix)
+	project := "koroku-logs-it-" + hex.EncodeToString(suffix)
 	composeFile := filepath.Join(t.TempDir(), "compose.yaml")
 	if err := os.WriteFile(composeFile, []byte(integrationCompose), 0o600); err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestCollectFromRealCompose(t *testing.T) {
 	// The collector is down while the app keeps logging.
 	time.Sleep(2 * time.Second)
 
-	// Second collector, as after a restart of paasd: fills the gap from
+	// Second collector, as after a restart of koroku: fills the gap from
 	// Docker and writes no line twice.
 	second := &recordingRunner{}
 	c2 := newCollector(second)

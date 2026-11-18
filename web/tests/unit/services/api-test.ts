@@ -1,5 +1,9 @@
 import { module, test } from 'qunit';
-import { buildUrl, parseErrorBody, repoPath } from 'paas-console/services/api';
+import {
+  buildUrl,
+  parseErrorBody,
+  repoPath,
+} from 'koroku-console/services/api';
 
 module('Unit | Service | api (pure parts)', function () {
   test('buildUrl leaves out empty parameters and encodes the rest', function (assert) {

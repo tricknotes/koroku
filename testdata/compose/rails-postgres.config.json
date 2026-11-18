@@ -1,9 +1,9 @@
 {
-  "name": "paas-blog",
+  "name": "koroku-blog",
   "services": {
     "web": {
       "build": {
-        "context": "/var/lib/paas/apps/blog/releases/42",
+        "context": "/var/lib/koroku/apps/blog/releases/42",
         "dockerfile": "Dockerfile"
       },
       "command": [
@@ -35,7 +35,7 @@
         },
         {
           "type": "bind",
-          "source": "/var/lib/paas/apps/blog/releases/42/config/puma.rb",
+          "source": "/var/lib/koroku/apps/blog/releases/42/config/puma.rb",
           "target": "/rails/config/puma.rb",
           "bind": {
             "create_host_path": true
@@ -46,7 +46,7 @@
     },
     "worker": {
       "build": {
-        "context": "/var/lib/paas/apps/blog/releases/42",
+        "context": "/var/lib/koroku/apps/blog/releases/42",
         "dockerfile": "Dockerfile"
       },
       "command": [
@@ -56,7 +56,7 @@
     },
     "migrate": {
       "build": {
-        "context": "/var/lib/paas/apps/blog/releases/42",
+        "context": "/var/lib/koroku/apps/blog/releases/42",
         "dockerfile": "Dockerfile"
       },
       "command": [
@@ -95,10 +95,10 @@
   },
   "volumes": {
     "pgdata": {
-      "name": "paas-blog_pgdata"
+      "name": "koroku-blog_pgdata"
     },
     "storage": {
-      "name": "paas-blog_storage"
+      "name": "koroku-blog_storage"
     }
   }
 }

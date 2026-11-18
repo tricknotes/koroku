@@ -5,47 +5,47 @@ import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
-import AsyncView from 'paas-console/components/async-view';
-import Badge from 'paas-console/components/badge';
-import Banner from 'paas-console/components/banner';
-import Button, { buttonClass } from 'paas-console/components/button';
-import ConfirmDialog from 'paas-console/components/confirm-dialog';
-import CopyButton from 'paas-console/components/copy-button';
-import EmptyState from 'paas-console/components/empty-state';
-import ErrorMessage from 'paas-console/components/error-message';
-import FormField from 'paas-console/components/form-field';
-import Icon from 'paas-console/components/icon';
-import RelativeTime from 'paas-console/components/relative-time';
-import RowList from 'paas-console/components/row-list';
-import StatusIndicator from 'paas-console/components/status-indicator';
-import TimeUntil from 'paas-console/components/time-until';
-import type ApiService from 'paas-console/services/api';
-import type PollerService from 'paas-console/services/poller';
-import type AppContext from 'paas-console/utils/app-context';
+import AsyncView from 'koroku-console/components/async-view';
+import Badge from 'koroku-console/components/badge';
+import Banner from 'koroku-console/components/banner';
+import Button, { buttonClass } from 'koroku-console/components/button';
+import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import CopyButton from 'koroku-console/components/copy-button';
+import EmptyState from 'koroku-console/components/empty-state';
+import ErrorMessage from 'koroku-console/components/error-message';
+import FormField from 'koroku-console/components/form-field';
+import Icon from 'koroku-console/components/icon';
+import RelativeTime from 'koroku-console/components/relative-time';
+import RowList from 'koroku-console/components/row-list';
+import StatusIndicator from 'koroku-console/components/status-indicator';
+import TimeUntil from 'koroku-console/components/time-until';
+import type ApiService from 'koroku-console/services/api';
+import type PollerService from 'koroku-console/services/poller';
+import type AppContext from 'koroku-console/utils/app-context';
 import BackupForm, {
   parseList,
   volumeChoices,
   type VolumeChoice,
-} from 'paas-console/utils/backup-form';
-import { backupHealth } from 'paas-console/utils/backup-status';
+} from 'koroku-console/utils/backup-form';
+import { backupHealth } from 'koroku-console/utils/backup-status';
 import {
   inputChecked,
   inputValue,
   preventDefault,
   setChecked,
   setValue,
-} from 'paas-console/utils/dom';
-import { fieldErrors } from 'paas-console/utils/errors';
-import { formatBytes, formatDateTimeJst } from 'paas-console/utils/format';
-import Loadable from 'paas-console/utils/loadable';
-import { BACKUP_TRIGGER_LABELS } from 'paas-console/utils/status';
+} from 'koroku-console/utils/dom';
+import { fieldErrors } from 'koroku-console/utils/errors';
+import { formatBytes, formatDateTimeJst } from 'koroku-console/utils/format';
+import Loadable from 'koroku-console/utils/loadable';
+import { BACKUP_TRIGGER_LABELS } from 'koroku-console/utils/status';
 import type {
   App,
   AppVolume,
   BackupOverview,
   BackupRun,
   Snapshot,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 /** A running backup is followed closely; an idle one is only looked at. */
 const RUNNING_INTERVAL = 5000;
@@ -176,7 +176,7 @@ export default class AppBackupsTemplate extends Component<Signature> {
 
   get restoreExample(): string {
     const service = this.app.dump_hook_service || 'db';
-    return `docker compose -p paas-${this.slug} exec -T ${service} psql -U postgres app < dump.sql`;
+    return `docker compose -p koroku-${this.slug} exec -T ${service} psql -U postgres app < dump.sql`;
   }
 
   get otherErrors(): string[] {
@@ -831,17 +831,17 @@ export default class AppBackupsTemplate extends Component<Signature> {
           <p class="empty-state-title">バックアップは設定されていません</p>
           <p class="empty-state-description">
             このアプリのデータは、どこにも退避されていません。サーバーに次の 2
-            つを置いて paasd を再起動すると、定期的に取得されます。
+            つを置いて koroku を再起動すると、定期的に取得されます。
           </p>
           <ul class="unconfigured-list">
             <li>
-              <code>/etc/paas/config.toml</code>
+              <code>/etc/koroku/config.toml</code>
               の
               <code>[storage]</code>
               （オブジェクトストレージの接続情報）
             </li>
             <li>
-              <code>/etc/paas/restic.key</code>
+              <code>/etc/koroku/restic.key</code>
               （restic のリポジトリパスワード）
             </li>
           </ul>

@@ -4,29 +4,29 @@ import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import type Owner from '@ember/owner';
-import AsyncView from 'paas-console/components/async-view';
-import Badge from 'paas-console/components/badge';
-import Banner from 'paas-console/components/banner';
-import Button, { buttonClass } from 'paas-console/components/button';
-import ConfirmDialog from 'paas-console/components/confirm-dialog';
-import CopyButton from 'paas-console/components/copy-button';
-import ErrorMessage from 'paas-console/components/error-message';
-import FormField from 'paas-console/components/form-field';
-import Icon from 'paas-console/components/icon';
-import RelativeTime from 'paas-console/components/relative-time';
-import StatusIndicator from 'paas-console/components/status-indicator';
-import TabSection from 'paas-console/components/tab-section';
-import type ApiService from 'paas-console/services/api';
-import type PollerService from 'paas-console/services/poller';
-import type AppContext from 'paas-console/utils/app-context';
-import { preventDefault, setValue } from 'paas-console/utils/dom';
-import { fieldErrors } from 'paas-console/utils/errors';
-import Loadable from 'paas-console/utils/loadable';
+import AsyncView from 'koroku-console/components/async-view';
+import Badge from 'koroku-console/components/badge';
+import Banner from 'koroku-console/components/banner';
+import Button, { buttonClass } from 'koroku-console/components/button';
+import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import CopyButton from 'koroku-console/components/copy-button';
+import ErrorMessage from 'koroku-console/components/error-message';
+import FormField from 'koroku-console/components/form-field';
+import Icon from 'koroku-console/components/icon';
+import RelativeTime from 'koroku-console/components/relative-time';
+import StatusIndicator from 'koroku-console/components/status-indicator';
+import TabSection from 'koroku-console/components/tab-section';
+import type ApiService from 'koroku-console/services/api';
+import type PollerService from 'koroku-console/services/poller';
+import type AppContext from 'koroku-console/utils/app-context';
+import { preventDefault, setValue } from 'koroku-console/utils/dom';
+import { fieldErrors } from 'koroku-console/utils/errors';
+import Loadable from 'koroku-console/utils/loadable';
 import {
   DOMAIN_STATUS_KINDS,
   DOMAIN_STATUS_LABELS,
-} from 'paas-console/utils/status';
-import type { DnsRecord, Domain, DomainList } from 'paas-console/utils/types';
+} from 'koroku-console/utils/status';
+import type { DnsRecord, Domain, DomainList } from 'koroku-console/utils/types';
 
 /**
  * How often pending domains are re-read. The server re-checks them every

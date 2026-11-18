@@ -1,17 +1,17 @@
 import { module, test } from 'qunit';
 import { click, settled, visit } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   installFakes,
   makeBackups,
   makeSystem,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
+} from 'koroku-console/tests/helpers/fakes';
 import type {
   BackupRun,
   DockerUsageItem,
   SystemInfo,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 const GB = 1024 ** 3;
 
@@ -109,7 +109,7 @@ module('Acceptance | system', function (hooks) {
         .includesText('512.0 MB / 2.0 GB');
       assert.dom('[data-test-resource-flag]').doesNotExist('quiet when fine');
       assert.dom('[data-test-disk-warning]').doesNotExist();
-      assert.dom('[data-test-paasd-version]').hasText('v0.1.0');
+      assert.dom('[data-test-koroku-version]').hasText('v0.1.0');
       assert.dom('[data-test-docker-version]').hasText('29.8.0');
     });
 
@@ -486,7 +486,7 @@ module('Acceptance | system', function (hooks) {
       assert
         .dom('[data-test-backup-unconfigured]')
         .includesText('[storage]')
-        .includesText('/etc/paas/restic.key');
+        .includesText('/etc/koroku/restic.key');
       assert.dom('[data-test-backup-run]').doesNotExist();
       assert.dom('[data-test-backup-runs]').doesNotExist();
       assert.dom('[data-test-archive-state]').hasText('未設定');

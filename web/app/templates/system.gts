@@ -4,40 +4,43 @@ import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
-import AsyncView from 'paas-console/components/async-view';
-import Banner from 'paas-console/components/banner';
-import Button from 'paas-console/components/button';
-import ConfirmDialog from 'paas-console/components/confirm-dialog';
-import ErrorMessage from 'paas-console/components/error-message';
-import Icon from 'paas-console/components/icon';
-import Meter, { type MeterTone } from 'paas-console/components/meter';
-import RelativeTime from 'paas-console/components/relative-time';
-import RowList from 'paas-console/components/row-list';
-import StatusIndicator from 'paas-console/components/status-indicator';
-import TimeUntil from 'paas-console/components/time-until';
-import type ApiService from 'paas-console/services/api';
-import type PollerService from 'paas-console/services/poller';
-import { diskLimitPercent, diskOverLimit } from 'paas-console/utils/attention';
-import { backupHealth } from 'paas-console/utils/backup-status';
-import { setChecked } from 'paas-console/utils/dom';
-import { ApiError, unavailability } from 'paas-console/utils/errors';
+import AsyncView from 'koroku-console/components/async-view';
+import Banner from 'koroku-console/components/banner';
+import Button from 'koroku-console/components/button';
+import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import ErrorMessage from 'koroku-console/components/error-message';
+import Icon from 'koroku-console/components/icon';
+import Meter, { type MeterTone } from 'koroku-console/components/meter';
+import RelativeTime from 'koroku-console/components/relative-time';
+import RowList from 'koroku-console/components/row-list';
+import StatusIndicator from 'koroku-console/components/status-indicator';
+import TimeUntil from 'koroku-console/components/time-until';
+import type ApiService from 'koroku-console/services/api';
+import type PollerService from 'koroku-console/services/poller';
+import {
+  diskLimitPercent,
+  diskOverLimit,
+} from 'koroku-console/utils/attention';
+import { backupHealth } from 'koroku-console/utils/backup-status';
+import { setChecked } from 'koroku-console/utils/dom';
+import { ApiError, unavailability } from 'koroku-console/utils/errors';
 import {
   formatBytes,
   formatDuration,
   formatPercent,
-} from 'paas-console/utils/format';
-import Loadable from 'paas-console/utils/loadable';
+} from 'koroku-console/utils/format';
+import Loadable from 'koroku-console/utils/loadable';
 import {
   BACKUP_STATUS_LABELS,
   BACKUP_TRIGGER_LABELS,
   type StatusKind,
-} from 'paas-console/utils/status';
+} from 'koroku-console/utils/status';
 import type {
   BackupOverview,
   BackupRun,
   DockerUsageItem,
   SystemInfo,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 /** A running backup is followed closely; the host figures move slowly. */
 const RUNNING_INTERVAL = 5000;
@@ -610,11 +613,11 @@ export default class SystemTemplate extends Component {
               {{else}}
                 <p class="job-note" data-test-backup-unconfigured>
                   いまは、どのアプリのデータも退避されていません。
-                  <code>/etc/paas/config.toml</code>
+                  <code>/etc/koroku/config.toml</code>
                   の
                   <code>[storage]</code>
                   と、restic のパスワードファイル
-                  <code>/etc/paas/restic.key</code>
+                  <code>/etc/koroku/restic.key</code>
                   を置くと有効になります。
                 </p>
               {{/if}}
@@ -801,8 +804,8 @@ export default class SystemTemplate extends Component {
             <h2 class="pane-title" id="versions-title">バージョン</h2>
           </div>
           <dl class="readout system-versions">
-            <dt>paasd</dt>
-            <dd data-test-paasd-version>{{system.version}}</dd>
+            <dt>koroku</dt>
+            <dd data-test-koroku-version>{{system.version}}</dd>
             <dt>Docker</dt>
             <dd data-test-docker-version>
               {{#if system.docker_version}}

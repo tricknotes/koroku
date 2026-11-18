@@ -206,7 +206,7 @@ func TestSyncLoadsOnlyWhenChanged(t *testing.T) {
 		t.Error("the new app is missing from the loaded configuration")
 	}
 
-	// ForceSync always loads; paasd uses it at startup.
+	// ForceSync always loads; koroku uses it at startup.
 	if err := router.ForceSync(ctx); err != nil {
 		t.Fatalf("ForceSync: %v", err)
 	}

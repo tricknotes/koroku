@@ -7,7 +7,7 @@ import {
   visit,
   waitFor,
 } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   installFakes,
   makeApp,
@@ -16,13 +16,13 @@ import {
   makeVolume,
   type FakeCall,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
+} from 'koroku-console/tests/helpers/fakes';
 import type {
   App,
   AppVolume,
   BackupRun,
   Snapshot,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 const VOLUME: Snapshot = {
   id: '4bba301e',
@@ -154,7 +154,7 @@ module('Acceptance | backups', function (hooks) {
       assert
         .dom('[data-test-dump-help]')
         .includesText(
-          'docker compose -p paas-blog exec -T db psql',
+          'docker compose -p koroku-blog exec -T db psql',
           'the example uses the service of the dump hook',
         );
     });
@@ -715,7 +715,7 @@ module('Acceptance | backups', function (hooks) {
         .dom('[data-test-backups-unconfigured]')
         .includesText('バックアップは設定されていません')
         .includesText('[storage]')
-        .includesText('/etc/paas/restic.key');
+        .includesText('/etc/koroku/restic.key');
       assert.dom('[data-test-backup-run]').doesNotExist();
       assert.dom('[data-test-backup-form]').doesNotExist();
       assert.dom('[data-test-error]').doesNotExist();

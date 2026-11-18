@@ -102,7 +102,7 @@ func newSite(t *testing.T) *site {
 	if err := os.WriteFile(password, []byte(testPassword+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s.configDir = filepath.Join(s.dir, "etc-paas")
+	s.configDir = filepath.Join(s.dir, "etc-koroku")
 	writeFiles(t, s.configDir, map[string]string{"config.toml": "base_domain = \"example.com\"\n", "keys/app.pem": "private key"})
 	if err := os.Chmod(filepath.Join(s.configDir, "keys", "app.pem"), 0o600); err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestIntegrationVolumeBackupAndRestore(t *testing.T) {
 	s.volume(blog, "cache", map[string]string{"tmp": "not worth keeping"})
 	app := blog
 	app.ExcludeVolumes = []string{"cache"}
-	s.apps = []App{app, {Slug: "shop", Project: "paas-shop"}}
+	s.apps = []App{app, {Slug: "shop", Project: "koroku-shop"}}
 
 	// First use: the repository does not exist yet and is created.
 	res, err := s.m.RunAll(ctx, TriggerManual)
@@ -208,7 +208,7 @@ func TestIntegrationVolumeBackupAndRestore(t *testing.T) {
 	if want := int64(len("<h1>blog</h1>") + len("first post")); snaps[0].Size != want {
 		t.Errorf("snapshot size = %d, want %d", snaps[0].Size, want)
 	}
-	if other := s.snapshots(App{Slug: "shop", Project: "paas-shop"}); len(other) != 0 {
+	if other := s.snapshots(App{Slug: "shop", Project: "koroku-shop"}); len(other) != 0 {
 		t.Errorf("an app without volumes has snapshots: %+v", other)
 	}
 
@@ -221,7 +221,7 @@ func TestIntegrationVolumeBackupAndRestore(t *testing.T) {
 	changed["empty"] = ""
 
 	// A dump or another app's ID cannot be restored into the volume.
-	if _, err := s.m.RestoreVolume(ctx, App{Slug: "shop", Project: "paas-shop"}, snaps[0].ID); !errors.Is(err, ErrSnapshotNotFound) {
+	if _, err := s.m.RestoreVolume(ctx, App{Slug: "shop", Project: "koroku-shop"}, snaps[0].ID); !errors.Is(err, ErrSnapshotNotFound) {
 		t.Errorf("restore of another app's snapshot: %v", err)
 	}
 
@@ -299,7 +299,7 @@ func TestIntegrationDumpRoundTrip(t *testing.T) {
 	if err := os.WriteFile(dumpFile, dump, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	app := App{Slug: "blog", Project: "paas-blog", DumpService: "db", DumpCommand: "cat '" + dumpFile + "'"}
+	app := App{Slug: "blog", Project: "koroku-blog", DumpService: "db", DumpCommand: "cat '" + dumpFile + "'"}
 
 	res, err := s.m.BackupApp(ctx, app)
 	if err != nil {
@@ -327,7 +327,7 @@ func TestIntegrationDumpRoundTrip(t *testing.T) {
 	if !bytes.Equal(body.Bytes(), dump) {
 		t.Errorf("downloaded %d bytes that differ from the %d bytes dumped", body.Len(), len(dump))
 	}
-	if _, err := s.m.LookupDump(ctx, App{Slug: "shop", Project: "paas-shop"}, snaps[0].ID); !errors.Is(err, ErrSnapshotNotFound) {
+	if _, err := s.m.LookupDump(ctx, App{Slug: "shop", Project: "koroku-shop"}, snaps[0].ID); !errors.Is(err, ErrSnapshotNotFound) {
 		t.Errorf("another app got the dump: %v", err)
 	}
 
@@ -376,8 +376,8 @@ func TestIntegrationRetentionKeepsGenerationsPerTarget(t *testing.T) {
 	ctx := testContext(t)
 	uploads := s.volume(blog, "uploads", map[string]string{"a.txt": "1"})
 	s.volume(blog, "assets", map[string]string{"b.txt": "1"})
-	app := App{Slug: "blog", Project: "paas-blog", DumpService: "db", DumpCommand: "echo dump"}
-	shop := App{Slug: "shop", Project: "paas-shop"}
+	app := App{Slug: "blog", Project: "koroku-blog", DumpService: "db", DumpCommand: "echo dump"}
+	shop := App{Slug: "shop", Project: "koroku-shop"}
 	s.volume(shop, "uploads", map[string]string{"c.txt": "1"})
 	s.apps = []App{app, shop}
 
@@ -461,11 +461,11 @@ func TestIntegrationSystemBackupAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestoreSystem: %v", err)
 	}
-	if got.SnapshotID != system[0].ID || got.Dir != dest || got.DatabasePath != filepath.Join(dest, "paas.db") || got.ConfigDir != filepath.Join(dest, "config") {
+	if got.SnapshotID != system[0].ID || got.Dir != dest || got.DatabasePath != filepath.Join(dest, "koroku.db") || got.ConfigDir != filepath.Join(dest, "config") {
 		t.Errorf("result = %+v", got)
 	}
 	want := map[string]string{
-		"paas.db":             "SQLite format 3 (copy 2)",
+		"koroku.db":           "SQLite format 3 (copy 2)",
 		"config/config.toml":  "base_domain = \"example.org\"\n",
 		"config/keys/app.pem": "private key",
 	}

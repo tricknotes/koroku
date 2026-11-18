@@ -48,15 +48,15 @@ func listVolumes(t *testing.T, h http.Handler, slug string) string {
 
 func TestListVolumes(t *testing.T) {
 	h, fake := newVolumesServer(t)
-	fake.names["paas-blog"] = []string{"pgdata", "uploads"}
-	fake.names["paas-shop"] = []string{"data"}
+	fake.names["koroku-blog"] = []string{"pgdata", "uploads"}
+	fake.names["koroku-shop"] = []string{"data"}
 
 	// Nothing excluded yet: every volume of this app, and only of this app.
 	want := `{"volumes":[{"name":"pgdata","excluded":false,"exists":true},{"name":"uploads","excluded":false,"exists":true}]}`
 	if got := listVolumes(t, h, "blog"); got != want {
 		t.Errorf("volumes = %s\n     want %s", got, want)
 	}
-	if len(fake.projects) != 1 || fake.projects[0] != "paas-blog" {
+	if len(fake.projects) != 1 || fake.projects[0] != "koroku-blog" {
 		t.Errorf("asked for the volumes of %v", fake.projects)
 	}
 
@@ -88,7 +88,7 @@ func TestListVolumesOfAnAppThatWasNeverDeployed(t *testing.T) {
 
 // Listing volumes takes Docker only: it answers on a host without backups.
 func TestListVolumesWithoutBackups(t *testing.T) {
-	fake := &fakeVolumes{names: map[string][]string{"paas-blog": {"uploads"}}}
+	fake := &fakeVolumes{names: map[string][]string{"koroku-blog": {"uploads"}}}
 	srv := newTestServer(t, func(o *Options) { o.Volumes = fake })
 	if srv.backups != nil {
 		t.Fatal("the test needs a server without backups")

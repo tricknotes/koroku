@@ -1,4 +1,4 @@
-// Package web embeds the built Ember single-page app into the paasd binary.
+// Package web embeds the built Ember single-page app into the koroku binary.
 package web
 
 import (

@@ -40,7 +40,7 @@ func TestFailedCheckCopiesContainerOutputIntoTheLog(t *testing.T) {
 	}
 
 	logs := h.lastCall("logs")
-	if want := []string{"compose", "-p", "paas-blog", "logs", "--no-color", "--tail", "30"}; !slices.Equal(logs.Args, want) {
+	if want := []string{"compose", "-p", "koroku-blog", "logs", "--no-color", "--tail", "30"}; !slices.Equal(logs.Args, want) {
 		t.Errorf("logs args = %q, want %q", logs.Args, want)
 	}
 

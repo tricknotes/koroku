@@ -50,7 +50,7 @@ func TestExecRunExitError(t *testing.T) {
 }
 
 func TestExecRunMissingBinary(t *testing.T) {
-	err := Exec{}.Run(context.Background(), Cmd{Name: "paasd-no-such-binary"})
+	err := Exec{}.Run(context.Background(), Cmd{Name: "koroku-no-such-binary"})
 	if err == nil {
 		t.Fatal("expected an error")
 	}

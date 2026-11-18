@@ -5,8 +5,8 @@ import {
   parseDeployLog,
   parseHeadline,
   stepLabel,
-} from 'paas-console/utils/deploy-steps';
-import type { Deployment } from 'paas-console/utils/types';
+} from 'koroku-console/utils/deploy-steps';
+import type { Deployment } from 'koroku-console/utils/types';
 
 type Times = Pick<
   Deployment,
@@ -43,7 +43,7 @@ const UNTIL_START = [
   '#1 [web 1/6] FROM ruby:3.4-slim',
   '#9 exporting to image',
   head(50, 'start', 'Starting containers'),
-  ' Container paas-blog-web-1  Started',
+  ' Container koroku-blog-web-1  Started',
 ];
 
 function summary(lines: string[], deployment: Times): string[] {
@@ -170,7 +170,7 @@ module('Unit | Utility | deploy-steps', function () {
         '',
         head(63, 'failed', 'Deployment failed: health check did not pass'),
         head(63, 'rollback', 'Rolling back to deployment #41'),
-        ' Container paas-blog-web-1  Started',
+        ' Container koroku-blog-web-1  Started',
         'Rolled back: deployment #41 is running again.',
       ],
       times({ status: 'failed', finished_at: '2026-11-18T03:01:09Z' }),
@@ -211,7 +211,7 @@ module('Unit | Utility | deploy-steps', function () {
     const rolling = head(58, 'rollback', 'Rolling back to deployment #41');
 
     const going = parseDeployLog(
-      [...failedAt, rolling, ' Container paas-blog-web-1  Starting'],
+      [...failedAt, rolling, ' Container koroku-blog-web-1  Starting'],
       times({ status: 'running', finished_at: null }),
     );
     assert.strictEqual(going.rollback?.kind, 'restoring');
@@ -298,7 +298,7 @@ module('Unit | Utility | deploy-steps', function () {
           'rollback',
           'No previous release; removing the failed containers',
         ),
-        ' Container paas-blog-web-1  Removed',
+        ' Container koroku-blog-web-1  Removed',
       ],
       times({ status: 'failed' }),
     );
@@ -313,7 +313,7 @@ module('Unit | Utility | deploy-steps', function () {
         ...UNTIL_START,
         '',
         head(58, 'failed', 'Deployment failed: interrupted'),
-        'paasd is shutting down; the previous release is not restored automatically.',
+        'koroku is shutting down; the previous release is not restored automatically.',
       ],
       times({ status: 'failed' }),
     );
@@ -347,7 +347,7 @@ module('Unit | Utility | deploy-steps', function () {
     const { steps, failure, rollback } = parseDeployLog(
       [
         ...UNTIL_START.slice(0, 10),
-        'Failed: interrupted: paasd restarted while the deployment was running.',
+        'Failed: interrupted: koroku restarted while the deployment was running.',
       ],
       times({ status: 'failed' }),
     );
@@ -393,7 +393,7 @@ module('Unit | Utility | deploy-steps', function () {
     }
     for (const line of [
       '#7 [web 5/7] RUN bundle install',
-      ' Container paas-blog-web-1  Started',
+      ' Container koroku-blog-web-1  Started',
       'GET /up returned 200 OK',
       'web-1  | Loaded the terrorism-free word list',
       'Last output of the containers:',

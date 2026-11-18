@@ -1,21 +1,21 @@
 import { registerDestructor } from '@ember/destroyable';
 import type Owner from '@ember/owner';
-import ApiService from 'paas-console/services/api';
-import BrowserService from 'paas-console/services/browser';
+import ApiService from 'koroku-console/services/api';
+import BrowserService from 'koroku-console/services/browser';
 import EventSourceService, {
   type Stream,
   type StreamHandlers,
-} from 'paas-console/services/event-source';
-import PollerService from 'paas-console/services/poller';
-import StorageService from 'paas-console/services/storage';
-import { ApiError } from 'paas-console/utils/errors';
+} from 'koroku-console/services/event-source';
+import PollerService from 'koroku-console/services/poller';
+import StorageService from 'koroku-console/services/storage';
+import { ApiError } from 'koroku-console/utils/errors';
 import type {
   App,
   AppVolume,
   BackupOverview,
   Deployment,
   SystemInfo,
-} from 'paas-console/utils/types';
+} from 'koroku-console/utils/types';
 
 export interface FakeCall {
   method: string;

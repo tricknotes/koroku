@@ -1,5 +1,5 @@
 {
-  "name": "paas-evil",
+  "name": "koroku-evil",
   "services": {
     "web": {
       "image": "example/app:1",
@@ -14,13 +14,13 @@
       ],
       "env_file": [
         {
-          "path": "/var/lib/paas/apps/evil/env"
+          "path": "/var/lib/koroku/apps/evil/env"
         },
         {
-          "path": "/var/lib/paas/apps/evil/releases/9/config/app.env"
+          "path": "/var/lib/koroku/apps/evil/releases/9/config/app.env"
         },
         {
-          "path": "/var/lib/paas/apps/blog/env"
+          "path": "/var/lib/koroku/apps/blog/env"
         }
       ],
       "volumes": [
@@ -50,20 +50,20 @@
         },
         {
           "type": "bind",
-          "source": "/var/lib/paas/apps/evil/releases/9",
+          "source": "/var/lib/koroku/apps/evil/releases/9",
           "target": "/app",
           "bind": {}
         },
         {
           "type": "bind",
-          "source": "/var/lib/paas/apps/evil/releases/9/config",
+          "source": "/var/lib/koroku/apps/evil/releases/9/config",
           "target": "/config",
           "read_only": true,
           "bind": {}
         }
       ],
       "volumes_from": [
-        "container:paas-blog-db-1",
+        "container:koroku-blog-db-1",
         "worker"
       ],
       "cap_add": [
@@ -111,15 +111,15 @@
     },
     "sibling": {
       "image": "example/app:1",
-      "network_mode": "container:paas-blog-web-1",
-      "pid": "container:paas-blog-web-1"
+      "network_mode": "container:koroku-blog-web-1",
+      "pid": "container:koroku-blog-web-1"
     },
     "builder": {
       "build": {
         "context": "/etc",
         "dockerfile": "/etc/hostname",
         "additional_contexts": {
-          "extra": "/var/lib/paas",
+          "extra": "/var/lib/koroku",
           "remote": "https://example.com/context.tar.gz",
           "image": "docker-image://alpine"
         },
@@ -129,14 +129,14 @@
     },
     "good-builder": {
       "build": {
-        "context": "/var/lib/paas/apps/evil/releases/9/services/api",
+        "context": "/var/lib/koroku/apps/evil/releases/9/services/api",
         "dockerfile": "Dockerfile"
       }
     }
   },
   "volumes": {
     "hostroot": {
-      "name": "paas-evil_hostroot",
+      "name": "koroku-evil_hostroot",
       "driver": "local",
       "driver_opts": {
         "device": "/",
@@ -145,17 +145,17 @@
       }
     },
     "other": {
-      "name": "paas-blog_pgdata",
+      "name": "koroku-blog_pgdata",
       "external": true
     },
     "renamed": {
-      "name": "paas-blog_storage"
+      "name": "koroku-blog_storage"
     },
     "data": {
-      "name": "paas-evil_data"
+      "name": "koroku-evil_data"
     },
     "nfs": {
-      "name": "paas-evil_nfs",
+      "name": "koroku-evil_nfs",
       "driver": "local",
       "driver_opts": {
         "type": "nfs",
@@ -166,11 +166,11 @@
   },
   "networks": {
     "default": {
-      "name": "paas-evil_default",
+      "name": "koroku-evil_default",
       "ipam": {}
     },
     "foreign": {
-      "name": "paas-blog_default",
+      "name": "koroku-blog_default",
       "ipam": {},
       "external": true
     },
@@ -181,17 +181,17 @@
   },
   "secrets": {
     "hostsecret": {
-      "name": "paas-evil_hostsecret",
+      "name": "koroku-evil_hostsecret",
       "file": "/etc/shadow"
     },
     "ok": {
-      "name": "paas-evil_ok",
-      "file": "/var/lib/paas/apps/evil/releases/9/secrets/token"
+      "name": "koroku-evil_ok",
+      "file": "/var/lib/koroku/apps/evil/releases/9/secrets/token"
     }
   },
   "configs": {
     "hostconfig": {
-      "name": "paas-evil_hostconfig",
+      "name": "koroku-evil_hostconfig",
       "file": "/etc/passwd"
     }
   }

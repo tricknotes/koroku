@@ -101,7 +101,7 @@ func (c *DomainChecker) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// resync loads the configuration even when paasd believes it is current.
+// resync loads the configuration even when koroku believes it is current.
 // Caddy forgets what was loaded when it restarts on its own; an identical
 // load is a no-op on Caddy's side, so repeating it is free and repairs that.
 func (c *DomainChecker) resync(ctx context.Context) {

@@ -1,5 +1,5 @@
 import { module, test } from 'qunit';
-import { formatDotenv, parseDotenv } from 'paas-console/utils/dotenv';
+import { formatDotenv, parseDotenv } from 'koroku-console/utils/dotenv';
 
 module('Unit | Utility | dotenv', function () {
   test('plain lines, comments, blank lines and the export prefix', function (assert) {

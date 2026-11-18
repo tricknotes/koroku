@@ -1,7 +1,7 @@
 import { LinkTo } from '@ember/routing';
 import { pageTitle } from 'ember-page-title';
-import { buttonClass } from 'paas-console/components/button';
-import EmptyState from 'paas-console/components/empty-state';
+import { buttonClass } from 'koroku-console/components/button';
+import EmptyState from 'koroku-console/components/empty-state';
 
 <template>
   {{pageTitle "ページが見つかりません"}}

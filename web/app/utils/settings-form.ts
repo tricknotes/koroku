@@ -1,5 +1,5 @@
 import { tracked } from '@glimmer/tracking';
-import type { App, AppPatch, Environment } from 'paas-console/utils/types';
+import type { App, AppPatch, Environment } from 'koroku-console/utils/types';
 
 let nextLimitId = 0;
 

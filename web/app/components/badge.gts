@@ -1,5 +1,5 @@
 import type { TOC } from '@ember/component/template-only';
-import type { Tone } from 'paas-console/utils/status';
+import type { Tone } from 'koroku-console/utils/status';
 
 /**
  * Small label for a category or a count. The text carries the meaning; the

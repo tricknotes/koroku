@@ -4,20 +4,20 @@ import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { registerDestructor } from '@ember/destroyable';
 import type Owner from '@ember/owner';
-import type ApiService from 'paas-console/services/api';
-import type EventSourceService from 'paas-console/services/event-source';
-import type { Stream } from 'paas-console/services/event-source';
-import DeployLogBuffer from 'paas-console/utils/deploy-log-buffer';
+import type ApiService from 'koroku-console/services/api';
+import type EventSourceService from 'koroku-console/services/event-source';
+import type { Stream } from 'koroku-console/services/event-source';
+import DeployLogBuffer from 'koroku-console/utils/deploy-log-buffer';
 import {
   parseDeployLog,
   stepLabel,
   type ParsedDeployLog,
   type RollbackKind,
   type RollbackOutcome,
-} from 'paas-console/utils/deploy-steps';
-import { formatDateTimeJst } from 'paas-console/utils/format';
-import { isActiveDeployment } from 'paas-console/utils/status';
-import type { Deployment } from 'paas-console/utils/types';
+} from 'koroku-console/utils/deploy-steps';
+import { formatDateTimeJst } from 'koroku-console/utils/format';
+import { isActiveDeployment } from 'koroku-console/utils/status';
+import type { Deployment } from 'koroku-console/utils/types';
 import Banner, { type BannerTone } from './banner';
 import Button, { buttonClass } from './button';
 import CopyButton from './copy-button';
@@ -77,7 +77,7 @@ const ROLLBACK_NOTICES: Record<
   skipped: () => ({
     tone: 'warning',
     title: '旧版には自動で戻していません',
-    text: 'paasd の停止と重なったため、ロールバックを実行していません。アプリの状態を確認してください。',
+    text: 'koroku の停止と重なったため、ロールバックを実行していません。アプリの状態を確認してください。',
   }),
 };
 

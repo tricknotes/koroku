@@ -145,7 +145,7 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 				// A container that can write to the checkout can replace
 				// the source of another bind mount with a symlink to any
 				// host path (Docker follows it at the next start), and can
-				// rewrite the Compose files paasd starts the app from.
+				// rewrite the Compose files koroku starts the app from.
 				add(name, RuleBindWritable,
 					fmt.Sprintf("bind mount of %s must be read-only (add :ro; keep data in a named volume)", m.Source), true)
 			}

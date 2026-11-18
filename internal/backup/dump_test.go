@@ -13,7 +13,7 @@ import (
 	"github.com/tricknotes/koroku/internal/runner"
 )
 
-var blogWithHook = App{Slug: "blog", Project: "paas-blog", DumpService: "db", DumpCommand: "pg_dump -U postgres app"}
+var blogWithHook = App{Slug: "blog", Project: "koroku-blog", DumpService: "db", DumpCommand: "pg_dump -U postgres app"}
 
 func dumpTarget(t *testing.T, res RunResult) TargetResult {
 	t.Helper()
@@ -199,7 +199,7 @@ func TestLookupAndWriteDump(t *testing.T) {
 	e := newEnv(t)
 	at := time.Date(2026, 11, 18, 18, 0, 12, 0, time.FixedZone("JST", 9*3600))
 	dump := e.host.addRecord(at, "/blog-db.dump", "app:blog", "kind:dump", "target:db")
-	vol := e.host.addRecord(at, "/var/lib/docker/volumes/paas-blog_uploads/_data", "app:blog", "kind:volume", "target:uploads")
+	vol := e.host.addRecord(at, "/var/lib/docker/volumes/koroku-blog_uploads/_data", "app:blog", "kind:volume", "target:uploads")
 	other := e.host.addRecord(at, "/shop-db.dump", "app:shop", "kind:dump", "target:db")
 	e.host.set("restic dump", func(context.Context, runner.Cmd) (string, error) { return "CREATE TABLE posts;\n", nil })
 

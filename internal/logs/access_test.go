@@ -39,7 +39,7 @@ func uris(lines []string) []string {
 
 // newAccessTail returns a tail that the test drives by calling poll.
 func newAccessTail(f *fixture, path string) *accessTail {
-	a := &accessTail{c: f.c, app: App{Slug: "blog", Project: "paas-blog", AccessLogPath: path}}
+	a := &accessTail{c: f.c, app: App{Slug: "blog", Project: "koroku-blog", AccessLogPath: path}}
 	a.sp = splitter{max: f.c.maxLine, emit: a.line}
 	a.chunk = make([]byte, 64<<10)
 	f.t.Cleanup(a.closeFile)
@@ -157,7 +157,7 @@ func TestAccessTailResumesWithoutDuplicates(t *testing.T) {
 		t.Fatalf("first pass stored %d lines, want 3", n)
 	}
 
-	// While paasd was down: one request, and one entry that sorts into the
+	// While koroku was down: one request, and one entry that sorts into the
 	// overlap but was never collected.
 	appendFile(t, path, accessEntry(1795000002, "/while-down")+"\n"+accessEntry(1795000000.5, "/late")+"\n")
 
@@ -185,7 +185,7 @@ func TestAccessTailResumesWithoutDuplicates(t *testing.T) {
 func TestAccessLogIsCollectedByRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "blog.log")
 	appendFile(t, path, accessEntry(1795000000, "/a")+"\n")
-	app := App{Slug: "blog", Project: "paas-blog", AccessLogPath: path}
+	app := App{Slug: "blog", Project: "koroku-blog", AccessLogPath: path}
 	s := &script{}
 	f := newFixture(t, func(o *Options) { o.Runner = s.runner(); o.Apps = oneApp(app) })
 	lines, cancel := f.c.Subscribe("blog")

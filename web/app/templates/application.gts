@@ -3,11 +3,11 @@ import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { LinkTo } from '@ember/routing';
 import { pageTitle } from 'ember-page-title';
-import ErrorMessage from 'paas-console/components/error-message';
-import Icon from 'paas-console/components/icon';
-import ThemeSwitch from 'paas-console/components/theme-switch';
-import UserMenu from 'paas-console/components/user-menu';
-import type SessionService from 'paas-console/services/session';
+import ErrorMessage from 'koroku-console/components/error-message';
+import Icon from 'koroku-console/components/icon';
+import ThemeSwitch from 'koroku-console/components/theme-switch';
+import UserMenu from 'koroku-console/components/user-menu';
+import type SessionService from 'koroku-console/services/session';
 
 /**
  * The global shell: one top bar (wordmark and the two sections on the left,
@@ -32,13 +32,13 @@ export default class ApplicationTemplate extends Component {
   };
 
   <template>
-    {{pageTitle "PaaS コンソール"}}
+    {{pageTitle "koroku"}}
 
     <header class="topbar">
       <div class="topbar-inner">
         <LinkTo @route="index" class="wordmark" data-test-wordmark>
           <Icon @name="logo" />
-          paasd
+          koroku
         </LinkTo>
 
         {{#if this.session.authenticated}}

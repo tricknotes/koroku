@@ -1,7 +1,7 @@
 import Service, { service } from '@ember/service';
 import { tracked } from '@glimmer/tracking';
 import type RouterService from '@ember/routing/router-service';
-import type { SessionUser } from 'paas-console/utils/types';
+import type { SessionUser } from 'koroku-console/utils/types';
 import type ApiService from './api';
 
 /** Who is logged in, as reported by `GET /api/session`. */

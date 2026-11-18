@@ -29,7 +29,7 @@ const (
 var testNow = time.Date(2026, 11, 18, 18, 0, 0, 0, time.UTC)
 
 // blog is the app most tests use.
-var blog = App{Slug: "blog", Project: "paas-blog"}
+var blog = App{Slug: "blog", Project: "koroku-blog"}
 
 type handler func(ctx context.Context, cmd runner.Cmd) (string, error)
 
@@ -332,12 +332,12 @@ func newEnv(t *testing.T, mutate ...func(*Options)) *env {
 	opts := Options{
 		Repository: Repository{
 			Endpoint:        "https://s3.example.com/",
-			Bucket:          "paas-backups",
+			Bucket:          "koroku-backups",
 			Region:          "auto",
 			AccessKeyID:     testAccessKey,
 			SecretAccessKey: testSecretKey,
 			PasswordFile:    e.password,
-			CacheDir:        "/var/cache/paas/restic",
+			CacheDir:        "/var/cache/koroku/restic",
 		},
 		Runner:     e.host.run,
 		Clock:      e.clock,
@@ -361,12 +361,12 @@ func newEnv(t *testing.T, mutate ...func(*Options)) *env {
 // wantEnv is the environment every restic command of newEnv must carry.
 func (e *env) wantEnv() []string {
 	return []string{
-		"RESTIC_REPOSITORY=s3:https://s3.example.com/paas-backups/restic",
+		"RESTIC_REPOSITORY=s3:https://s3.example.com/koroku-backups/restic",
 		"RESTIC_PASSWORD_FILE=" + e.password,
 		"AWS_ACCESS_KEY_ID=" + testAccessKey,
 		"AWS_SECRET_ACCESS_KEY=" + testSecretKey,
 		"AWS_DEFAULT_REGION=auto",
-		"RESTIC_CACHE_DIR=/var/cache/paas/restic",
+		"RESTIC_CACHE_DIR=/var/cache/koroku/restic",
 	}
 }
 

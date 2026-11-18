@@ -804,7 +804,7 @@ const LOG_SHOTS = [
     // The choice is remembered per browser; forget it for the next shots.
     script: `(() => {
       document.querySelector('[data-test-log-wrap]').click();
-      localStorage.removeItem('paasd.logs.wrap');
+      localStorage.removeItem('koroku.logs.wrap');
     })()`,
     themes: ['dark'],
   },
@@ -1030,13 +1030,13 @@ async function capture(browser, shot, theme) {
 }
 
 const only = process.argv[2] ?? '';
-const profile = await mkdtemp(join(tmpdir(), 'paasd-shots-'));
+const profile = await mkdtemp(join(tmpdir(), 'koroku-shots-'));
 await mkdir(OUT, { recursive: true });
 
 const mock = start(
   process.execPath,
   [join(HERE, 'server.mjs')],
-  /mock paasd: http/,
+  /mock koroku: http/,
   { MOCK_PORT: String(PORT) },
 );
 const chromium = start(

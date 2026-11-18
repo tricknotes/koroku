@@ -1,4 +1,4 @@
-// Package api implements the HTTP interface of paasd: the JSON REST API,
+// Package api implements the HTTP interface of koroku: the JSON REST API,
 // SSE streams and delivery of the embedded single-page app.
 package api
 
@@ -261,7 +261,7 @@ func (s *Server) spaHandler() http.Handler {
 		if err != nil {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("The frontend is not built. Run `make web` and rebuild paasd.\n"))
+			_, _ = w.Write([]byte("The frontend is not built. Run `make web` and rebuild koroku.\n"))
 			return
 		}
 		name := strings.TrimPrefix(r.URL.Path, "/")

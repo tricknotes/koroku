@@ -30,7 +30,7 @@ func TestRunVersionAndUsage(t *testing.T) {
 	if err := run(context.Background(), []string{"bogus"}, &stdout, &stderr); err == nil {
 		t.Error("expected an error for an unknown command")
 	}
-	if !strings.Contains(stderr.String(), "Usage: paasd") {
+	if !strings.Contains(stderr.String(), "Usage: koroku") {
 		t.Errorf("usage not printed: %q", stderr.String())
 	}
 }
@@ -42,7 +42,7 @@ func TestServeRejectsMissingConfig(t *testing.T) {
 	}
 }
 
-// TestServeAnswersSystemEndpoint is the M0 completion check: `paasd serve`
+// TestServeAnswersSystemEndpoint is the M0 completion check: `koroku serve`
 // starts from a config file and GET /api/system responds.
 func TestServeAnswersSystemEndpoint(t *testing.T) {
 	dir := t.TempDir()
@@ -94,7 +94,7 @@ func TestServeAnswersSystemEndpoint(t *testing.T) {
 	if body.Disk == nil || body.Disk.TotalBytes == 0 {
 		t.Errorf("disk usage missing: %+v", body.Disk)
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "paas.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(dataDir, "koroku.db")); err != nil {
 		t.Errorf("database was not created: %v", err)
 	}
 	if info, err := os.Stat(filepath.Join(dir, "etc", "master.key")); err != nil || info.Mode().Perm() != 0o600 {
@@ -182,8 +182,8 @@ func TestGitHubPrivateKeyMustBePrivate(t *testing.T) {
 	}
 }
 
-// TestServeStartsWhileCaddyIsUnreachable: Caddy may come up after paasd (or
-// be restarting). paasd must start anyway and log the failed load.
+// TestServeStartsWhileCaddyIsUnreachable: Caddy may come up after koroku (or
+// be restarting). koroku must start anyway and log the failed load.
 func TestServeStartsWhileCaddyIsUnreachable(t *testing.T) {
 	// A port nothing listens on.
 	l, err := net.Listen("tcp", "127.0.0.1:0")

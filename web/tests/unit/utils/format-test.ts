@@ -12,7 +12,7 @@ import {
   relativeTime,
   shortSha,
   suggestSlug,
-} from 'paas-console/utils/format';
+} from 'koroku-console/utils/format';
 
 const NOW = Date.parse('2026-11-18T12:00:00Z');
 

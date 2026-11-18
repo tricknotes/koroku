@@ -21,8 +21,8 @@ import (
 
 const (
 	// Cookie names. Over HTTPS they carry the __Host- prefix (see cookieName).
-	sessionCookie = "paas_session"
-	stateCookie   = "paas_oauth_state"
+	sessionCookie = "koroku_session"
+	stateCookie   = "koroku_oauth_state"
 	// SessionLifetime is how long a login lasts. The console has root-level
 	// power over the host, so sessions are short and do not slide.
 	SessionLifetime = 7 * 24 * time.Hour
@@ -286,7 +286,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Anyone can reach this endpoint with a made-up code and state; without
-	// a limit each such request would make paasd call GitHub with the App's
+	// a limit each such request would make koroku call GitHub with the App's
 	// client secret.
 	if !s.callbackLimiter.allow(s.clock.Now()) {
 		loginErrorRedirect(w, r, "github_error")

@@ -1,4 +1,4 @@
-// Package compose handles everything paasd knows about Docker Compose
+// Package compose handles everything koroku knows about Docker Compose
 // projects: locating the Compose file, reading the normalized configuration,
 // generating the override file and checking the deploy policy.
 package compose
@@ -14,9 +14,9 @@ import (
 )
 
 // OverrideFileName is the name of the generated override inside a release directory.
-const OverrideFileName = "paas.override.yaml"
+const OverrideFileName = "koroku.override.yaml"
 
-// Project is the subset of `docker compose config --format json` that paasd
+// Project is the subset of `docker compose config --format json` that koroku
 // inspects. The full output contains resolved environment values and must
 // never be logged.
 type Project struct {

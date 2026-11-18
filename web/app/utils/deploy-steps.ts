@@ -1,6 +1,6 @@
 // Turns a deployment log into the steps the deploy tab shows.
 //
-// paasd keeps no table of steps: the log file is the only record. A step
+// koroku keeps no table of steps: the log file is the only record. A step
 // starts at a headline `==> <RFC 3339 time> <key> <title>` (docs/API.md) and
 // lasts until the next one. What happened after a failure (the automatic
 // rollback) is read from the same log; the phrases matched below are written
@@ -14,7 +14,7 @@ export interface DeployStep {
   /** Unique within one log: the key, or `key-2` for a repeated key. */
   id: string;
   key: string;
-  /** The title paasd gave the step (English), e.g. "Building images". */
+  /** The title koroku gave the step (English), e.g. "Building images". */
   title: string;
   startedAt: string | null;
   /** When the next step began; `null` while running or when unknown. */
@@ -34,7 +34,7 @@ export type RollbackKind =
   | 'removed'
   /** It failed before the running containers were touched. */
   | 'untouched'
-  /** paasd was shutting down and left the containers as they were. */
+  /** koroku was shutting down and left the containers as they were. */
   | 'skipped';
 
 export interface RollbackOutcome {
@@ -103,7 +103,7 @@ const ORDER = [
 
 /**
  * Steps every deployment goes through. The others (build, pull, backup,
- * route) depend on the app and appear once paasd announces them.
+ * route) depend on the app and appear once koroku announces them.
  */
 const ALWAYS = new Set([
   'fetch',
@@ -144,7 +144,7 @@ const ROLLBACK_DONE = /^Rolled back: /;
 const ROLLBACK_BROKEN =
   /^(Rollback failed|Rollback is not possible|Removing the containers failed)\b/;
 const ROLLBACK_NOTHING = /^No previous release/;
-const SHUTTING_DOWN = /^paasd is shutting down/;
+const SHUTTING_DOWN = /^koroku is shutting down/;
 const CANCELED = /^Deployment canceled\b/;
 
 function isActive(status: Deployment['status']): boolean {
@@ -288,7 +288,7 @@ export function parseDeployLog(
     } else if (active) {
       last.state = 'running';
     } else if (deployment.status === 'failed') {
-      // No `failed` headline: paasd was restarted in the middle.
+      // No `failed` headline: koroku was restarted in the middle.
       last.state = 'failed';
     } else if (deployment.status === 'canceled') {
       last.state = 'canceled';

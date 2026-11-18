@@ -14,7 +14,7 @@ import (
 // Layout of a system snapshot, and so of the directory RestoreSystem fills.
 const (
 	// SystemDatabaseFile is the database copy at the root of the snapshot.
-	SystemDatabaseFile = "paas.db"
+	SystemDatabaseFile = "koroku.db"
 	// SystemConfigDir holds the contents of the configuration directory.
 	SystemConfigDir = "config"
 )
@@ -75,7 +75,7 @@ func (m *Manager) backupSystem(ctx context.Context) TargetResult {
 
 // copyTree copies the regular files, directories and symbolic links below
 // src to dst, keeping permissions and modification times. Ownership is not
-// kept: the copy belongs to the user paasd runs as.
+// kept: the copy belongs to the user koroku runs as.
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -136,7 +136,7 @@ type SystemRestore struct {
 	Time       time.Time
 	// Dir is the staging directory the snapshot was restored into.
 	Dir string
-	// DatabasePath is the database copy (Dir/paas.db).
+	// DatabasePath is the database copy (Dir/koroku.db).
 	DatabasePath string
 	// ConfigDir holds the contents of the configuration directory
 	// (Dir/config). It is empty when the snapshot has none.

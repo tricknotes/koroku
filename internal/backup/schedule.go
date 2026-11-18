@@ -38,7 +38,7 @@ func NextRun(now time.Time, hour, minute int, loc *time.Location) time.Time {
 // CheckWeekday also verifies the repository (`restic check`); a failed check
 // fails that run, which is how it reaches the UI.
 //
-// A run that was due while paasd was not running is not made up for; the
+// A run that was due while koroku was not running is not made up for; the
 // next one happens at the next scheduled time.
 type Scheduler struct {
 	Manager *Manager

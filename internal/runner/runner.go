@@ -1,4 +1,4 @@
-// Package runner is the single place where paasd executes external commands
+// Package runner is the single place where koroku executes external commands
 // (docker, git, restic). Arguments are always passed as a slice; no shell is involved.
 package runner
 

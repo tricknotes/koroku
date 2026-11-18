@@ -7,7 +7,7 @@ import {
   visit,
   waitFor,
 } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   SHA_A,
   installFakes,
@@ -15,8 +15,8 @@ import {
   makeDeployment,
   type FakeCall,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
-import type { App } from 'paas-console/utils/types';
+} from 'koroku-console/tests/helpers/fakes';
+import type { App } from 'koroku-console/utils/types';
 
 const SECRET = 'postgres://app:hunter2@db/app';
 

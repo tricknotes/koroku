@@ -1,13 +1,13 @@
 import { module, test } from 'qunit';
 import { click, fillIn, visit, waitFor } from '@ember/test-helpers';
-import { setupApplicationTest } from 'paas-console/tests/helpers';
+import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   installFakes,
   makeApp,
   type FakeCall,
   type Fakes,
-} from 'paas-console/tests/helpers/fakes';
-import type { Domain } from 'paas-console/utils/types';
+} from 'koroku-console/tests/helpers/fakes';
+import type { Domain } from 'koroku-console/utils/types';
 
 const DOMAINS = '/api/apps/blog/domains';
 const NO_HOST = 'lookup www.example.org: no such host';

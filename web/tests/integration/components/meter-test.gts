@@ -1,9 +1,9 @@
 import { module, test } from 'qunit';
 import { find, render } from '@ember/test-helpers';
-import { setupRenderingTest } from 'paas-console/tests/helpers';
-import { installFakes } from 'paas-console/tests/helpers/fakes';
-import Meter from 'paas-console/components/meter';
-import TimeUntil from 'paas-console/components/time-until';
+import { setupRenderingTest } from 'koroku-console/tests/helpers';
+import { installFakes } from 'koroku-console/tests/helpers/fakes';
+import Meter from 'koroku-console/components/meter';
+import TimeUntil from 'koroku-console/components/time-until';
 
 module('Integration | Component | meter and time-until', function (hooks) {
   setupRenderingTest(hooks);

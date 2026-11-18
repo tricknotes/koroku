@@ -1,6 +1,6 @@
 import type { TOC } from '@ember/component/template-only';
-import { ENVIRONMENT_LABELS } from 'paas-console/utils/status';
-import type { Environment } from 'paas-console/utils/types';
+import { ENVIRONMENT_LABELS } from 'koroku-console/utils/status';
+import type { Environment } from 'koroku-console/utils/types';
 
 function label(environment: Environment): string {
   return ENVIRONMENT_LABELS[environment] ?? environment;
