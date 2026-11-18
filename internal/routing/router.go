@@ -24,6 +24,8 @@ type Settings struct {
 	ACMECA          string
 	ACMEEmail       string
 	AccessLogDir    string
+	ListenIP        string
+	InternalCA      bool
 }
 
 // Router regenerates the whole Caddy configuration from the database and
@@ -91,6 +93,8 @@ func (r *Router) Build(ctx context.Context) ([]byte, error) {
 		ACMECA:          r.Settings.ACMECA,
 		ACMEEmail:       r.Settings.ACMEEmail,
 		AccessLogDir:    r.Settings.AccessLogDir,
+		ListenIP:        r.Settings.ListenIP,
+		InternalCA:      r.Settings.InternalCA,
 	}
 	for _, app := range apps {
 		route := caddy.App{

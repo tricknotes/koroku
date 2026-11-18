@@ -38,9 +38,12 @@ docker compose up
 | サービス | 内容 |
 | --- | --- |
 | `web` | Vite の開発サーバー（development モード）。Ember アプリのソースを変えるとホットリロードされる。`/api` と `/auth` は `koroku` に転送する |
-| `koroku` | このチェックアウトからビルドしたコントロールプレーン。ログインなし（`--insecure-no-auth`）、Caddy なしで `127.0.0.1:8080` で待ち受ける |
+| `koroku` | このチェックアウトからビルドしたコントロールプレーン。ログインなし（`--insecure-no-auth`）で `127.0.0.1:8080` で待ち受ける |
+| `caddy` | リバースプロキシ。`127.0.0.1` の 80 と 443 だけで待ち受け、`koroku` が本番と同じく設定を投入する。証明書は Caddy 内蔵の CA で出す |
 
-- アプリは手元の Docker にデプロイされます。Caddy を使わないので、デプロイしたアプリには `http://127.0.0.1:<割り当てられたホストポート>` で届きます（画面に出る `<slug>.dev.localhost` の URL は開けません）。
+- アプリは手元の Docker にデプロイされ、`https://<slug>.dev.localhost` で開けます（`*.localhost` は OS やブラウザがループバックに解決します）。管理 UI は Vite の <http://localhost:4200> のほか、`pnpm build` 済みなら `https://console.dev.localhost` でも開けます。
+- 証明書の警告を消すには、Caddy の CA のルート証明書をブラウザ側の OS に信頼させます。取り出しは `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt data/dev/caddy-root.crt`。WSL2 で Windows のブラウザから開く場合は、Windows 側で `certutil -user -addstore Root <root.crt のパス>` を実行します（確認ダイアログが出ます）。CA は volume `koroku-dev-caddy-data` にあり、消すと作り直されるので、入れ直しが必要です。
+- 既存の `data/dev/config.toml` は上書きされません。以前に作ったものは `[caddy]` を [dev/serve.sh](dev/serve.sh) が書き出す内容に合わせてください（`enabled = false` にすれば Caddy なしで動き、アプリには `http://127.0.0.1:<ホストポート>` で届きます）。
 - GitHub App を設定していないので、アプリ作成では「URL を直接指定」で public リポジトリの URL を入れます。手元のクローンを `file:///...` で指定することもできます（リポジトリのあるディレクトリの配下に限る。コンテナからはそこしか見えません）。
 - Go のコードを変えたら `docker compose restart koroku` でビルドし直します。
 - 設定と状態は `data/dev/`（git の管理外）に置きます。設定ファイル `data/dev/config.toml` は初回に [dev/serve.sh](dev/serve.sh) が書き出し、以後は上書きしません。ログ退避やバックアップを試すときはここに `[storage]` などを足します。`data/dev/` を消すと最初からやり直せます。

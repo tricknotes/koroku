@@ -410,6 +410,17 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 			_ = e.opts.Store.SetAppDesiredState(stateCtx, app.ID, store.DesiredRunning, e.opts.Clock.Now())
 			cancelState()
 		}
+		if e.opts.Router != nil {
+			// The route step ran before this deployment became the current
+			// one, so an app's first release (or one that was stopped) is
+			// still routed to the 503 page. Sync is a no-op when nothing
+			// changed; a failure is retried by the periodic sync.
+			routeCtx, cancelRoute := context.WithTimeout(context.WithoutCancel(ctx), e.finishTimeout)
+			if err := e.opts.Router.Sync(routeCtx); err != nil {
+				logger.Error("updating routes after the deployment failed; will retry", "error", err)
+			}
+			cancelRoute()
+		}
 		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancelCleanup()
 		e.cleanupAfterSuccess(cleanupCtx, app, log)

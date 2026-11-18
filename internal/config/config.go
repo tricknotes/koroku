@@ -116,6 +116,18 @@ type Caddy struct {
 	// AccessLogDir receives one access log per app (<slug>.log). Caddy
 	// writes there, so its user needs write access. Empty disables them.
 	AccessLogDir string `toml:"access_log_dir"`
+	// ListenIP restricts Caddy to one address (ports 80 and 443). Empty
+	// means every interface. Local development uses 127.0.0.1.
+	ListenIP string `toml:"listen_ip"`
+	// InternalCA issues certificates from Caddy's own local CA instead of
+	// ACME. Only for local development (*.localhost hostnames).
+	InternalCA bool `toml:"internal_ca"`
+}
+
+// LoopbackOnly reports whether Caddy accepts connections from this host only.
+func (c Caddy) LoopbackOnly() bool {
+	ip := net.ParseIP(c.ListenIP)
+	return ip != nil && ip.IsLoopback()
 }
 
 // Deploy holds deploy engine settings.
@@ -313,6 +325,9 @@ func (c Config) Validate() error {
 		}
 		if c.Caddy.AccessLogDir != "" && !filepath.IsAbs(c.Caddy.AccessLogDir) {
 			errs = append(errs, fmt.Errorf("caddy.access_log_dir %q must be an absolute path", c.Caddy.AccessLogDir))
+		}
+		if c.Caddy.ListenIP != "" && net.ParseIP(c.Caddy.ListenIP) == nil {
+			errs = append(errs, fmt.Errorf("caddy.listen_ip %q is not an IP address", c.Caddy.ListenIP))
 		}
 		if c.Caddy.ACMECA != "" && !strings.HasPrefix(c.Caddy.ACMECA, "https://") {
 			errs = append(errs, fmt.Errorf("caddy.acme_ca %q must be an https URL", c.Caddy.ACMECA))
