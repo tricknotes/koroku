@@ -1,0 +1,35 @@
+{
+  "name": "paas-risky",
+  "services": {
+    "web": {
+      "image": "example/app:1",
+      "ports": [
+        {"mode": "ingress", "host_ip": "127.0.0.1", "target": 3000, "published": "20001", "protocol": "tcp"},
+        {"mode": "ingress", "target": 9229, "published": "9229", "protocol": "tcp"}
+      ],
+      "privileged": true,
+      "volumes": [
+        {"type": "bind", "source": "/var/run/docker.sock", "target": "/var/run/docker.sock"},
+        {"type": "bind", "source": "/var/lib/paas/apps/risky/releases/7/config", "target": "/config"},
+        {"type": "bind", "source": "/var/lib/paas/apps/risky/releases/7/../../../other/env", "target": "/stolen"},
+        {"type": "volume", "source": "data", "target": "/data"},
+        {"type": "tmpfs", "target": "/tmp"}
+      ]
+    },
+    "agent": {
+      "image": "example/agent:1",
+      "network_mode": "host",
+      "pid": "host",
+      "volumes": [{"type": "bind", "source": "/etc", "target": "/host/etc"}]
+    },
+    "db": {
+      "image": "postgres:17",
+      "ports": [{"mode": "ingress", "host_ip": "127.0.0.1", "target": 5432, "published": "5432", "protocol": "tcp"}]
+    },
+    "probe": {
+      "image": "example/probe:1",
+      "ports": [{"mode": "ingress", "target": 8080, "protocol": "udp"}]
+    }
+  },
+  "volumes": {"data": {"name": "paas-risky_data"}}
+}

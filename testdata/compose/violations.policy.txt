@@ -1,0 +1,11 @@
+violations:
+  [bind_outside_release] service "agent": bind mount of /etc is outside the repository checkout
+  [host_network] service "agent": network_mode: host is not allowed
+  [host_pid] service "agent": pid: host is not allowed
+  [port_exposure] service "db": unexpected published port 127.0.0.1:5432->5432 (only the web service may publish, on loopback)
+  [port_exposure] service "probe": unexpected published port 0.0.0.0:(random)->8080 (only the web service may publish, on loopback)
+  [bind_outside_release] service "web": bind mount of /var/lib/paas/apps/risky/releases/7/../../../other/env is outside the repository checkout
+  [docker_socket] service "web": mounting the Docker socket is not allowed
+  [port_exposure] service "web": unexpected published port 0.0.0.0:9229->9229 (only the web service may publish, on loopback)
+  [privileged] service "web": privileged: true is not allowed
+waived:
