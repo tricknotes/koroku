@@ -22,9 +22,16 @@ export class ApiError extends Error {
 const MESSAGES: Record<string, string> = {
   invalid_json: 'リクエストの形式が正しくありません。',
   invalid_limit: '件数の指定が正しくありません。',
+  invalid_volumes: 'volume を削除するかどうかの指定が正しくありません。',
+  body_too_large: '送信した内容が大きすぎます。',
+  unsupported_media_type:
+    'リクエストの形式（Content-Type）が JSON ではないため受け付けられませんでした。ページを再読み込みしてください。',
+  method_not_allowed: 'この操作はサーバーが受け付けていません。',
   unauthenticated: 'ログインが必要です。',
   forbidden_origin:
     'この画面からの操作として認められませんでした。ページを再読み込みしてください。',
+  forbidden_host:
+    'このホスト名ではコンソールを使えません。開発用モードでは localhost か 127.0.0.1 で開いてください。',
   not_found: '対象が見つかりません。',
   app_not_found: 'アプリが見つかりません。',
   deployment_not_found: 'デプロイが見つかりません。',
@@ -38,6 +45,9 @@ const MESSAGES: Record<string, string> = {
   busy: 'ほかの処理が実行中です。しばらくしてからやり直してください。',
   not_deployed: 'まだ一度もデプロイされていません。先にデプロイしてください。',
   validation_failed: '入力内容に誤りがあります。',
+  policy_violation:
+    '稼働中のリリースがポリシー検査を通らなくなっているため起動できません。再デプロイすると直ります。',
+  file_too_large: 'ファイルが大きすぎて読み取れません。',
   ref_unresolvable: '指定したブランチまたはコミットが見つかりません。',
   disk_full: 'ディスク使用率が上限を超えているためデプロイできません。',
   internal:
@@ -99,6 +109,30 @@ export function fieldErrors(error: unknown): Record<string, string> {
     fields[name] = typeof reason === 'string' ? reason : JSON.stringify(reason);
   }
   return fields;
+}
+
+/**
+ * The findings of a `422 policy_violation`, one line each: the service (when
+ * the finding is about one) and the reason as the server words it.
+ */
+export function policyViolations(error: unknown): string[] {
+  if (!(error instanceof ApiError) || error.code !== 'policy_violation') {
+    return [];
+  }
+  const violations = error.details['violations'];
+  if (!Array.isArray(violations)) return [];
+  const lines: string[] = [];
+  for (const entry of violations as unknown[]) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const { service, message } = entry as Record<string, unknown>;
+    if (typeof message !== 'string' || message === '') continue;
+    lines.push(
+      typeof service === 'string' && service !== ''
+        ? `${service}: ${message}`
+        : message,
+    );
+  }
+  return lines;
 }
 
 export type Unavailability = 'not_configured' | 'unavailable';

@@ -1,6 +1,6 @@
 /*
  * Classes written directly by the screens that have not been redesigned yet
- * (app detail tabs other than deploy, new app, system, login). They are restyled with the
+ * (the overview, logs, environment and domains tabs). They are restyled with the
  * tokens so those screens sit correctly in the new shell; each block goes
  * away when its screen moves to the shared components.
  */
@@ -18,21 +18,12 @@
   margin-bottom: var(--space-3);
 }
 
-.card-danger {
-  border-color: var(--color-failed-border);
-}
-
 .card-header {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
   align-items: center;
   margin-bottom: var(--space-3);
-}
-
-.login {
-  max-width: 26rem;
-  margin: var(--space-12) auto;
 }
 
 .placeholder {
@@ -96,19 +87,6 @@
   background: var(--color-running-bg);
 }
 
-.form-section {
-  min-width: 0;
-  margin: 0 0 var(--space-4);
-  padding: 0;
-  border: 0;
-}
-
-.form-section > legend {
-  margin-bottom: var(--space-2);
-  padding: 0;
-  font-weight: var(--weight-semibold);
-}
-
 .field-row {
   display: flex;
   flex-wrap: wrap;
@@ -140,13 +118,6 @@ ul.field-error {
   padding-left: var(--space-5);
 }
 
-.choice {
-  display: flex;
-  gap: var(--space-2);
-  align-items: baseline;
-  margin: var(--space-1) 0;
-}
-
 .form-inline {
   display: flex;
   flex-wrap: wrap;
@@ -176,16 +147,8 @@ ul.field-error {
   overflow-wrap: anywhere;
 }
 
-.meter {
-  width: 10rem;
-  max-width: 100%;
-  margin-right: var(--space-2);
-  vertical-align: middle;
-}
-
 .domain-list,
-.env-list,
-.limit-list {
+.env-list {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -245,8 +208,7 @@ ul.field-error {
 }
 
 .env-row .field,
-.env-row .button-row,
-.limit-row .field {
+.env-row .button-row {
   margin: 0;
 }
 
@@ -254,18 +216,6 @@ ul.field-error {
   padding: var(--space-1) var(--space-2);
   color: var(--color-text-secondary);
   letter-spacing: 0.15em;
-}
-
-.limit-row {
-  display: grid;
-  grid-template-columns: minmax(6rem, 14rem) minmax(5rem, 10rem) auto;
-  gap: var(--space-2);
-  align-items: center;
-  margin-bottom: var(--space-2);
-}
-
-.limit-row > .button {
-  justify-self: start;
 }
 
 .help {
@@ -293,10 +243,6 @@ ul.field-error {
 
   .env-row {
     grid-template-columns: 1fr;
-  }
-
-  .limit-row {
-    grid-template-columns: 1fr 1fr auto;
   }
 
   .log {

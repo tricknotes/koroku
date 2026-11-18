@@ -1,0 +1,307 @@
+/* System screen: host resources, Docker usage, background jobs. */
+
+.system-note {
+  max-width: 44rem;
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.system-skeleton {
+  width: 12rem;
+  max-width: 60%;
+}
+
+/* Resources: name, share, a thin meter and the plain numbers. */
+
+.resource-rows,
+.job-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.resource {
+  display: grid;
+  grid-template-columns: 6rem 4rem minmax(6rem, 16rem) minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-4);
+  align-items: center;
+  min-height: 3rem;
+  padding: var(--space-3) var(--space-4);
+}
+
+.resource + .resource {
+  border-top: 1px solid var(--color-border);
+}
+
+.resource-name {
+  font-weight: var(--weight-medium);
+}
+
+.resource-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-semibold);
+  text-align: right;
+}
+
+.resource-detail,
+.resource-missing {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-missing {
+  grid-column: 2 / -1;
+}
+
+.resource-flag,
+.job-state,
+.run-status {
+  display: flex;
+}
+
+.resource-flag {
+  justify-content: flex-end;
+}
+
+.resource[data-tone="danger"] > .resource-value {
+  color: var(--color-failed);
+}
+
+.resource[data-tone="warn"] > .resource-value {
+  color: var(--color-pending);
+}
+
+/* Docker usage */
+
+.docker-rows {
+  --row-columns: minmax(0, 1fr) 5rem 7rem 7rem;
+}
+
+.docker-rows .row {
+  min-height: 2.75rem;
+}
+
+.docker-type {
+  font-weight: var(--weight-medium);
+}
+
+.docker-number {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.docker-reclaimable {
+  color: var(--color-text-secondary);
+}
+
+/* Background jobs: backup, log archive, proxy configuration. */
+
+.job {
+  display: grid;
+  grid-template-columns: 11rem 12rem minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  min-height: 3.5rem;
+  padding: var(--space-3) var(--space-4);
+}
+
+.job + .job {
+  border-top: 1px solid var(--color-border);
+}
+
+.job-name {
+  font-weight: var(--weight-medium);
+}
+
+.job-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-8);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.job-facts > div {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.job-facts dt {
+  color: var(--color-text-secondary);
+}
+
+.job-facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.job-action {
+  grid-column: 4;
+  justify-self: end;
+}
+
+/* What went wrong, or why the job does nothing: a line of its own. */
+.job-problem,
+.job-note {
+  grid-column: 2 / -1;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  overflow-wrap: anywhere;
+}
+
+.job-note {
+  max-width: 44rem;
+  color: var(--color-text-secondary);
+}
+
+.job-problem {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-failed-border);
+  border-radius: var(--radius-md);
+  background: var(--color-failed-bg);
+}
+
+.job-problem > .icon {
+  margin-top: 0.3em;
+  color: var(--color-failed);
+}
+
+/* Backup runs */
+
+.run-rows {
+  --row-columns: 6.5rem 7rem 6rem 7rem minmax(0, 1fr);
+}
+
+.run-rows .row {
+  min-height: 2.75rem;
+}
+
+.run-start,
+.run-trigger,
+.run-duration {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-error {
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.system-versions {
+  margin-bottom: 0;
+}
+
+.dialog-options {
+  margin: var(--space-4) 0 0;
+  color: var(--color-text);
+}
+
+@media (width <= 56rem) {
+  .resource {
+    grid-template:
+      "name value flag" auto
+      "meter meter meter" auto
+      "detail detail detail" auto / auto auto minmax(0, 1fr);
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .resource-name {
+    grid-area: name;
+  }
+
+  .resource-value {
+    grid-area: value;
+    text-align: left;
+  }
+
+  .resource-meter {
+    grid-area: meter;
+  }
+
+  .resource-detail {
+    grid-area: detail;
+  }
+
+  .resource-flag {
+    grid-area: flag;
+    justify-self: end;
+  }
+
+  .resource-missing {
+    grid-column: 2 / -1;
+  }
+
+  .docker-rows > .row-list-header,
+  .run-rows > .row-list-header {
+    display: none;
+  }
+
+  .docker-rows .row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-1) var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .docker-type {
+    grid-column: 1 / -1;
+  }
+
+  .docker-number {
+    text-align: left;
+  }
+
+  .docker-rows .cell-label,
+  .run-rows .cell-label {
+    margin-right: var(--space-2);
+  }
+
+  .job {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .job-state {
+    justify-self: end;
+  }
+
+  .job-facts,
+  .job-problem,
+  .job-note {
+    grid-column: 1 / -1;
+  }
+
+  .job-action {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .run-rows .row {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-1) var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .run-status {
+    grid-row: span 3;
+    align-self: start;
+    min-width: 5rem;
+  }
+
+  .run-error {
+    grid-column: 1 / -1;
+  }
+
+  .run-error:empty {
+    display: none;
+  }
+}

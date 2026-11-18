@@ -28,10 +28,18 @@ type Memory struct {
 	AvailableBytes uint64 `json:"available_bytes"`
 }
 
-// Info is the payload of GET /api/system. Sections that could not be read are nil.
+// Swap describes host swap space in bytes.
+type Swap struct {
+	TotalBytes uint64 `json:"total_bytes"`
+	UsedBytes  uint64 `json:"used_bytes"`
+}
+
+// Info is the payload of GET /api/system. Sections that could not be read
+// are nil; Swap is also nil on a host without swap.
 type Info struct {
 	Disk          *Disk   `json:"disk"`
 	Memory        *Memory `json:"memory"`
+	Swap          *Swap   `json:"swap"`
 	DockerVersion string  `json:"docker_version"`
 }
 
@@ -59,8 +67,9 @@ func (h Host) Info(ctx context.Context) Info {
 	if d, err := h.DiskUsage(); err == nil {
 		info.Disk = &d
 	}
-	if m, err := h.memory(); err == nil {
+	if m, swap, err := h.memory(); err == nil {
 		info.Memory = &m
+		info.Swap = swap
 	}
 	info.DockerVersion = h.dockerVersion(ctx)
 	return info
@@ -84,19 +93,22 @@ func (h Host) DiskUsage() (Disk, error) {
 	return d, nil
 }
 
-func (h Host) memory() (Memory, error) {
+// memory reads memory and swap usage from meminfo. The swap is nil when the
+// host has none or the file does not report it.
+func (h Host) memory() (Memory, *Swap, error) {
 	path := h.MeminfoPath
 	if path == "" {
 		path = "/proc/meminfo"
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return Memory{}, fmt.Errorf("open meminfo: %w", err)
+		return Memory{}, nil, fmt.Errorf("open meminfo: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
 	var m Memory
-	found := 0
+	var swapTotal, swapFree uint64
+	found, swapFound := 0, 0
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		key, rest, ok := strings.Cut(scanner.Text(), ":")
@@ -118,15 +130,25 @@ func (h Host) memory() (Memory, error) {
 		case "MemAvailable":
 			m.AvailableBytes = kb * 1024
 			found++
+		case "SwapTotal":
+			swapTotal = kb * 1024
+			swapFound++
+		case "SwapFree":
+			swapFree = kb * 1024
+			swapFound++
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return Memory{}, fmt.Errorf("read meminfo: %w", err)
+		return Memory{}, nil, fmt.Errorf("read meminfo: %w", err)
 	}
 	if found < 2 {
-		return Memory{}, fmt.Errorf("meminfo: MemTotal or MemAvailable missing")
+		return Memory{}, nil, fmt.Errorf("meminfo: MemTotal or MemAvailable missing")
 	}
-	return m, nil
+	var swap *Swap
+	if swapFound == 2 && swapTotal > 0 && swapFree <= swapTotal {
+		swap = &Swap{TotalBytes: swapTotal, UsedBytes: swapTotal - swapFree}
+	}
+	return m, swap, nil
 }
 
 func (h Host) dockerVersion(ctx context.Context) string {

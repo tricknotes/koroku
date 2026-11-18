@@ -5,60 +5,234 @@ import { on } from '@ember/modifier';
 import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
 import AsyncView from 'paas-console/components/async-view';
-import Badge from 'paas-console/components/badge';
+import Banner from 'paas-console/components/banner';
+import Button from 'paas-console/components/button';
+import ConfirmDialog from 'paas-console/components/confirm-dialog';
 import ErrorMessage from 'paas-console/components/error-message';
-import FeatureUnavailable from 'paas-console/components/feature-unavailable';
+import Icon from 'paas-console/components/icon';
+import Meter, { type MeterTone } from 'paas-console/components/meter';
 import RelativeTime from 'paas-console/components/relative-time';
+import RowList from 'paas-console/components/row-list';
+import StatusIndicator from 'paas-console/components/status-indicator';
+import TimeUntil from 'paas-console/components/time-until';
 import type ApiService from 'paas-console/services/api';
 import type PollerService from 'paas-console/services/poller';
-import { preventDefault, setChecked } from 'paas-console/utils/dom';
+import { diskLimitPercent, diskOverLimit } from 'paas-console/utils/attention';
+import { backupHealth } from 'paas-console/utils/backup-status';
+import { setChecked } from 'paas-console/utils/dom';
 import { ApiError, unavailability } from 'paas-console/utils/errors';
 import {
   formatBytes,
-  formatDateTime,
   formatDuration,
   formatPercent,
 } from 'paas-console/utils/format';
 import Loadable from 'paas-console/utils/loadable';
 import {
   BACKUP_STATUS_LABELS,
-  BACKUP_STATUS_TONES,
   BACKUP_TRIGGER_LABELS,
+  type StatusKind,
 } from 'paas-console/utils/status';
 import type {
   BackupOverview,
   BackupRun,
+  DockerUsageItem,
   SystemInfo,
 } from 'paas-console/utils/types';
 
-const POLL_INTERVAL = 5000;
+/** A running backup is followed closely; the host figures move slowly. */
+const RUNNING_INTERVAL = 5000;
+const HOST_INTERVAL = 30000;
 
-function runStatusLabel(run: BackupRun): string {
+/** Memory in use above which the row is flagged. */
+const MEMORY_WARN_PERCENT = 90;
+
+/** How many of the latest backup runs are listed. */
+const RUNS_SHOWN = 8;
+
+const SKELETON_ROWS = [1, 2, 3];
+
+/** One line of the resources block: a share of something finite. */
+interface Resource {
+  name: 'disk' | 'memory' | 'swap';
+  label: string;
+  /** `null` when the host did not report it. */
+  percent: number | null;
+  detail: string;
+  /** Text shown instead of the figures (no swap, not readable). */
+  missing?: string;
+  tone: MeterTone;
+  /** Threshold drawn on the bar. */
+  mark?: number;
+  /** What is wrong, as a state with a label; absent when all is well. */
+  flag?: { kind: StatusKind; label: string };
+}
+
+function share(used: number, total: number): number {
+  return total > 0 ? (used / total) * 100 : 0;
+}
+
+function resources(system: SystemInfo): Resource[] {
+  const rows: Resource[] = [];
+
+  if (system.disk) {
+    const over = diskOverLimit(system);
+    const limit = diskLimitPercent(system);
+    rows.push({
+      name: 'disk',
+      label: 'ディスク',
+      percent: system.disk.used_percent,
+      detail: `${formatBytes(system.disk.used_bytes)} / ${formatBytes(system.disk.total_bytes)}、デプロイの上限 ${limit}%`,
+      tone: over ? 'danger' : 'ok',
+      mark: limit,
+      ...(over ? { flag: { kind: 'failed', label: '上限超過' } } : {}),
+    });
+  } else {
+    rows.push(missing('disk', 'ディスク'));
+  }
+
+  if (system.memory) {
+    const { total_bytes: total, available_bytes: available } = system.memory;
+    const used = Math.max(0, total - available);
+    const percent = share(used, total);
+    const tight = percent >= MEMORY_WARN_PERCENT;
+    rows.push({
+      name: 'memory',
+      label: 'メモリ',
+      percent,
+      detail: `${formatBytes(used)} / ${formatBytes(total)}、空き ${formatBytes(available)}`,
+      tone: tight ? 'warn' : 'ok',
+      ...(tight ? { flag: { kind: 'pending', label: '残りわずか' } } : {}),
+    });
+  } else {
+    rows.push(missing('memory', 'メモリ'));
+  }
+
+  // Absent on a backend that does not report swap: then there is no row.
+  if (system.swap) {
+    const { total_bytes: total, used_bytes: used } = system.swap;
+    rows.push({
+      name: 'swap',
+      label: 'スワップ',
+      percent: share(used, total),
+      detail: `${formatBytes(used)} / ${formatBytes(total)}`,
+      tone: 'ok',
+    });
+  } else if (system.swap === null) {
+    rows.push({ ...missing('swap', 'スワップ'), missing: 'ありません' });
+  }
+  return rows;
+}
+
+function missing(name: Resource['name'], label: string): Resource {
+  return {
+    name,
+    label,
+    percent: null,
+    detail: '',
+    missing: '取得できません',
+    tone: 'ok',
+  };
+}
+
+function hasPercent(resource: Resource): resource is Resource & {
+  percent: number;
+} {
+  return resource.percent !== null;
+}
+
+const DOCKER_LABELS: Record<DockerUsageItem['type'], string> = {
+  images: 'イメージ',
+  build_cache: 'ビルドキャッシュ',
+  volumes: 'volume',
+  containers: 'コンテナ',
+};
+
+const DOCKER_ORDER: DockerUsageItem['type'][] = [
+  'images',
+  'build_cache',
+  'volumes',
+  'containers',
+];
+
+function dockerRows(items: DockerUsageItem[]): DockerUsageItem[] {
+  return [...items].sort(
+    (a, b) => DOCKER_ORDER.indexOf(a.type) - DOCKER_ORDER.indexOf(b.type),
+  );
+}
+
+function dockerLabel(item: DockerUsageItem): string {
+  return DOCKER_LABELS[item.type] ?? item.type;
+}
+
+function reclaimable(item: DockerUsageItem): string {
+  return item.reclaimable_bytes > 0 ? formatBytes(item.reclaimable_bytes) : '—';
+}
+
+function dockerTotal(items: DockerUsageItem[]): string {
+  return formatBytes(items.reduce((sum, item) => sum + item.total_bytes, 0));
+}
+
+/** The state of a background job: one of the five states plus a label. */
+interface JobState {
+  kind: StatusKind;
+  label: string;
+  quiet: boolean;
+}
+
+function archiveState(
+  archive: NonNullable<SystemInfo['log_archive']>,
+): JobState {
+  if (!archive.configured) {
+    return { kind: 'stopped', label: '未設定', quiet: true };
+  }
+  if (archive.last_error !== '') {
+    return { kind: 'failed', label: '直近の実行が失敗', quiet: false };
+  }
+  if (!archive.last_success_at) {
+    return { kind: 'stopped', label: 'まだ実行されていません', quiet: true };
+  }
+  return { kind: 'running', label: '正常', quiet: true };
+}
+
+function caddyState(caddy: NonNullable<SystemInfo['caddy']>): JobState {
+  if (!caddy.enabled) return { kind: 'stopped', label: '無効', quiet: true };
+  if (caddy.last_error !== '') {
+    return { kind: 'failed', label: '投入に失敗', quiet: false };
+  }
+  if (!caddy.last_loaded_at) {
+    return { kind: 'pending', label: 'まだ投入されていません', quiet: false };
+  }
+  return { kind: 'running', label: '正常', quiet: true };
+}
+
+const RUN_KINDS: Record<BackupRun['status'], StatusKind> = {
+  running: 'deploying',
+  succeeded: 'running',
+  failed: 'failed',
+};
+
+function runKind(run: BackupRun): StatusKind {
+  return RUN_KINDS[run.status] ?? 'stopped';
+}
+
+function runLabel(run: BackupRun): string {
   return BACKUP_STATUS_LABELS[run.status] ?? run.status;
 }
 
-function runStatusTone(run: BackupRun) {
-  return BACKUP_STATUS_TONES[run.status] ?? 'muted';
+function runSucceeded(run: BackupRun): boolean {
+  return run.status === 'succeeded';
 }
 
-function runTriggerLabel(run: BackupRun): string {
+function triggerLabel(run: BackupRun): string {
   return BACKUP_TRIGGER_LABELS[run.trigger] ?? run.trigger;
 }
 
-function memoryUsedBytes(memory: NonNullable<SystemInfo['memory']>): number {
-  return Math.max(0, memory.total_bytes - memory.available_bytes);
+function duration(run: BackupRun): string {
+  return formatDuration(run.started_at, run.finished_at) || '—';
 }
 
-function memoryUsedPercent(memory: NonNullable<SystemInfo['memory']>): number {
-  if (memory.total_bytes <= 0) return 0;
-  return (memoryUsedBytes(memory) / memory.total_bytes) * 100;
-}
-
-/** Deployments are refused above this disk usage (ARCHITECTURE 8.2). */
-const DISK_LIMIT_PERCENT = 85;
-
-function diskIsHigh(disk: NonNullable<SystemInfo['disk']>): boolean {
-  return disk.used_percent > DISK_LIMIT_PERCENT;
+function latestRuns(overview: BackupOverview): BackupRun[] {
+  return (overview.runs ?? []).slice(0, RUNS_SHOWN);
 }
 
 export default class SystemTemplate extends Component {
@@ -66,40 +240,83 @@ export default class SystemTemplate extends Component {
   @service declare poller: PollerService;
 
   system = new Loadable<SystemInfo>(() => this.api.getSystem());
+  docker = new Loadable<DockerUsageItem[]>(() => this.api.getDockerUsage());
   backups = new Loadable<BackupOverview>(() => this.api.getBackups());
 
+  @tracked confirmingPrune = false;
   @tracked pruneImages = true;
   @tracked pruneBuilder = true;
   @tracked pruning = false;
+  @tracked pruned = false;
   @tracked pruneOutput: string | null = null;
   @tracked pruneError: unknown = null;
 
   @tracked startingBackup = false;
-  @tracked backupStarted = false;
   @tracked backupError: unknown = null;
 
   constructor(owner: Owner, args: object) {
     super(owner, args);
     void this.system.load();
+    void this.docker.load();
     void this.backups.load();
-    this.poller.every(this, POLL_INTERVAL, () => this.refreshWhileRunning());
+    this.poller.every(this, RUNNING_INTERVAL, () => this.followBackup());
+    this.poller.every(this, HOST_INTERVAL, () => this.refreshHost());
   }
 
-  get pruneUnavailable() {
-    return unavailability(this.pruneError);
+  get backupHealth() {
+    return this.backups.value ? backupHealth(this.backups.value) : null;
+  }
+
+  get backupRunning(): boolean {
+    return this.backups.value?.running ?? false;
+  }
+
+  /** The backup figures are still on their way for the first time. */
+  get backupsPending(): boolean {
+    return !this.backups.loaded && !this.backups.error;
   }
 
   get nothingToPrune(): boolean {
     return !this.pruneImages && !this.pruneBuilder;
   }
 
-  /** Follows a running backup until it finishes. */
-  async refreshWhileRunning(): Promise<void> {
-    if (this.backups.value?.running) await this.backups.load({ quiet: true });
+  /** The backend has no prune endpoint: said in place of the result. */
+  get pruneUnavailable(): boolean {
+    return unavailability(this.pruneError) !== null;
   }
 
+  get stale(): boolean {
+    return this.system.stale || this.backups.stale;
+  }
+
+  /** Follows a running backup until it finishes. */
+  private async followBackup(): Promise<void> {
+    if (this.backupRunning) await this.backups.load({ quiet: true });
+  }
+
+  private async refreshHost(): Promise<void> {
+    const reads = [];
+    if (this.system.loaded) reads.push(this.system.load({ quiet: true }));
+    if (this.backups.loaded && !this.backupRunning) {
+      reads.push(this.backups.load({ quiet: true }));
+    }
+    await Promise.all(reads);
+  }
+
+  requestPrune = () => {
+    this.pruneImages = true;
+    this.pruneBuilder = true;
+    this.confirmingPrune = true;
+  };
+
+  cancelPrune = () => {
+    this.confirmingPrune = false;
+  };
+
   prune = async () => {
+    if (this.nothingToPrune) return;
     this.pruning = true;
+    this.pruned = false;
     this.pruneOutput = null;
     this.pruneError = null;
     try {
@@ -108,7 +325,7 @@ export default class SystemTemplate extends Component {
         builder: this.pruneBuilder,
       });
       this.pruneOutput = output;
-      await this.system.load({ quiet: true });
+      this.pruned = true;
     } catch (error) {
       this.pruneError = error;
       // `500 prune_failed` carries what the command printed until it failed.
@@ -118,16 +335,21 @@ export default class SystemTemplate extends Component {
       }
     } finally {
       this.pruning = false;
+      this.confirmingPrune = false;
     }
+    // Whatever happened, the numbers on screen are now out of date.
+    await Promise.all([
+      this.system.load({ quiet: true }),
+      this.docker.load({ quiet: true }),
+    ]);
   };
 
   runBackup = async () => {
+    if (this.startingBackup || this.backupRunning) return;
     this.startingBackup = true;
-    this.backupStarted = false;
     this.backupError = null;
     try {
       await this.api.runBackup();
-      this.backupStarted = true;
     } catch (error) {
       this.backupError = error;
     } finally {
@@ -140,213 +362,514 @@ export default class SystemTemplate extends Component {
     {{pageTitle "システム"}}
 
     <div class="page-header">
-      <h2>システム</h2>
+      <h1>システム</h1>
     </div>
 
-    <section class="card" aria-labelledby="resources-title">
-      <h3 id="resources-title">リソース</h3>
-      <AsyncView @data={{this.system}} as |system|>
-        <dl class="definition" data-test-system>
-          <dt>ディスク</dt>
-          <dd data-test-disk>
-            {{#if system.disk}}
-              <meter
-                class="meter"
-                min="0"
-                max="100"
-                high="85"
-                value={{system.disk.used_percent}}
-                aria-label="ディスク使用率"
-              ></meter>
-              {{formatPercent system.disk.used_percent}}
-              <span class="muted">（{{formatBytes system.disk.used_bytes}}
-                /
-                {{formatBytes system.disk.total_bytes}}）</span>
-              {{#if (diskIsHigh system.disk)}}
-                <p class="alert alert-danger" data-test-disk-warning>
-                  使用率が 85% を超えているため、デプロイは拒否されます。下の
-                  prune で空きを作ってください。
-                </p>
-              {{/if}}
-            {{else}}
-              <span class="muted">取得できません</span>
-            {{/if}}
-          </dd>
-          <dt>メモリ</dt>
-          <dd data-test-memory>
-            {{#if system.memory}}
-              <meter
-                class="meter"
-                min="0"
-                max="100"
-                high="90"
-                value={{memoryUsedPercent system.memory}}
-                aria-label="メモリ使用率"
-              ></meter>
-              {{formatPercent (memoryUsedPercent system.memory)}}
-              <span class="muted">（{{formatBytes
-                  (memoryUsedBytes system.memory)
-                }}
-                /
-                {{formatBytes system.memory.total_bytes}}、空き
-                {{formatBytes system.memory.available_bytes}}）</span>
-            {{else}}
-              <span class="muted">取得できません</span>
-            {{/if}}
-          </dd>
-          <dt>Docker</dt>
-          <dd data-test-docker-version>
-            {{#if system.docker_version}}
-              {{system.docker_version}}
-            {{else}}
-              <span class="muted">取得できません</span>
-            {{/if}}
-          </dd>
-          <dt>paasd</dt>
-          <dd>{{system.version}}</dd>
-          <dt>ベースドメイン</dt>
-          <dd>{{system.base_domain}}</dd>
-        </dl>
+    {{#if this.stale}}
+      <div class="pane-notices">
+        <Banner @tone="warning" data-test-stale>
+          最新の状態を取得できていません。表示は最後に取得できた内容です。
+        </Banner>
+      </div>
+    {{/if}}
+
+    <section class="pane" aria-labelledby="resources-title">
+      <div class="pane-header">
+        <h2 class="pane-title" id="resources-title">ホストのリソース</h2>
+      </div>
+
+      <AsyncView
+        @data={{this.system}}
+        @errorTitle="ホストの状態を取得できませんでした"
+      >
+        <:loading>
+          <div
+            class="box resource-rows"
+            role="status"
+            aria-label="読み込み中"
+            data-test-loading
+          >
+            {{#each SKELETON_ROWS as |n|}}
+              <div class="resource" aria-hidden="true" data-skeleton={{n}}>
+                <span class="skeleton system-skeleton"></span>
+              </div>
+            {{/each}}
+          </div>
+        </:loading>
+
+        <:default as |system|>
+          {{#if (diskOverLimit system)}}
+            <div class="pane-notices">
+              <Banner
+                @tone="error"
+                @title="ディスク使用率が上限を超えています"
+                data-test-disk-warning
+              >
+                使用率が
+                {{diskLimitPercent system}}%
+                を下回るまで、デプロイを受け付けません。下の「不要なデータを削除」で空きを作ってください。
+              </Banner>
+            </div>
+          {{/if}}
+
+          <ul class="box resource-rows" data-test-system>
+            {{#each (resources system) key="name" as |resource|}}
+              <li
+                class="resource"
+                data-test-resource={{resource.name}}
+                data-tone={{resource.tone}}
+              >
+                <span class="resource-name">{{resource.label}}</span>
+                {{#if (hasPercent resource)}}
+                  <span class="resource-value">
+                    {{formatPercent resource.percent}}
+                  </span>
+                  <Meter
+                    class="resource-meter"
+                    @label="{{resource.label}}の使用率"
+                    @percent={{resource.percent}}
+                    @mark={{resource.mark}}
+                    @tone={{resource.tone}}
+                  />
+                  <span class="resource-detail">{{resource.detail}}</span>
+                  <span class="resource-flag">
+                    {{#if resource.flag}}
+                      <StatusIndicator
+                        @kind={{resource.flag.kind}}
+                        @label={{resource.flag.label}}
+                        data-test-resource-flag
+                      />
+                    {{/if}}
+                  </span>
+                {{else}}
+                  <span class="resource-missing">{{resource.missing}}</span>
+                {{/if}}
+              </li>
+            {{/each}}
+          </ul>
+        </:default>
       </AsyncView>
     </section>
 
-    <section class="card" aria-labelledby="prune-title">
-      <h3 id="prune-title">不要なデータの削除（prune）</h3>
-      <p
-        class="muted"
-      >使われていないイメージとビルドキャッシュを消して、ディスクを空けます。稼働中のアプリには影響しません。</p>
+    <section class="pane" aria-labelledby="docker-title">
+      <div class="pane-header">
+        <h2 class="pane-title" id="docker-title">Docker のディスク使用量</h2>
+        <Button
+          @busy={{this.pruning}}
+          @busyLabel="削除中…"
+          data-test-prune-open
+          {{on "click" this.requestPrune}}
+        >不要なデータを削除…</Button>
+      </div>
 
-      {{#if this.pruneUnavailable}}
-        <FeatureUnavailable @kind={{this.pruneUnavailable}} />
-      {{else}}
-        <form
-          class="form"
-          data-test-prune-form
-          {{on "submit" (preventDefault this.prune)}}
-        >
-          <label class="choice">
+      <div class="pane-notices" aria-live="polite">
+        {{#if this.pruneUnavailable}}
+          <Banner @tone="warning" data-test-prune-unavailable>
+            このサーバーは、不要なデータの削除にまだ対応していません。
+          </Banner>
+        {{else if this.pruneError}}
+          <ErrorMessage @error={{this.pruneError}} />
+        {{else if this.pruned}}
+          <Banner data-test-pruned>不要なデータを削除しました。</Banner>
+        {{/if}}
+        {{#if this.pruneOutput}}
+          <pre
+            class="code-block"
+            aria-label="コマンドの出力"
+            data-test-prune-output
+          >{{this.pruneOutput}}</pre>
+        {{/if}}
+      </div>
+
+      <AsyncView
+        @data={{this.docker}}
+        @errorTitle="Docker のディスク使用量を取得できませんでした"
+      >
+        <:loading>
+          <div
+            class="row-list docker-rows"
+            role="status"
+            aria-label="読み込み中"
+            data-test-docker-loading
+          >
+            {{#each SKELETON_ROWS as |n|}}
+              <div class="row" aria-hidden="true" data-skeleton={{n}}>
+                <span class="skeleton system-skeleton"></span>
+              </div>
+            {{/each}}
+          </div>
+        </:loading>
+
+        <:default as |items|>
+          <RowList
+            class="docker-rows"
+            @label="Docker のディスク使用量"
+            data-test-docker
+          >
+            <:header>
+              <span>種類</span>
+              <span class="docker-number">件数</span>
+              <span class="docker-number">使用量</span>
+              <span class="docker-number">回収可能</span>
+            </:header>
+            <:rows as |Row|>
+              {{#each (dockerRows items) key="type" as |item|}}
+                <Row data-test-docker-item={{item.type}}>
+                  <span class="docker-type">{{dockerLabel item}}</span>
+                  <span class="docker-number">
+                    <span class="cell-label">件数</span>
+                    {{item.count}}
+                  </span>
+                  <span class="docker-number">
+                    <span class="cell-label">使用量</span>
+                    {{formatBytes item.total_bytes}}
+                  </span>
+                  <span class="docker-number docker-reclaimable">
+                    <span class="cell-label">回収可能</span>
+                    {{reclaimable item}}
+                  </span>
+                </Row>
+              {{/each}}
+            </:rows>
+          </RowList>
+          <p class="system-note" data-test-docker-total>
+            合計
+            {{dockerTotal items}}。回収可能は Docker
+            の見積もりです。「不要なデータを削除」で消えるのは、タグのないイメージと、1
+            週間使われていないビルドキャッシュです。
+          </p>
+        </:default>
+      </AsyncView>
+    </section>
+
+    <section class="pane" aria-labelledby="jobs-title">
+      <div class="pane-header">
+        <h2 class="pane-title" id="jobs-title">定期処理</h2>
+      </div>
+
+      <div class="pane-notices" aria-live="polite">
+        <ErrorMessage @error={{this.backupError}} />
+      </div>
+
+      <ul class="box job-rows">
+        <li class="job" data-test-job="backup">
+          <span class="job-name">バックアップ</span>
+          {{#if this.backups.value}}
+            {{#let this.backups.value as |backups|}}
+              <span class="job-state" aria-live="polite" data-test-backup-state>
+                {{#if this.backupHealth}}
+                  <StatusIndicator
+                    @kind={{this.backupHealth.kind}}
+                    @label={{this.backupHealth.label}}
+                    @quiet={{this.backupHealth.quiet}}
+                  />
+                {{/if}}
+              </span>
+              {{#if backups.configured}}
+                <dl class="job-facts">
+                  <div>
+                    <dt>最終成功</dt>
+                    <dd data-test-backup-last-success>
+                      {{#if backups.last_success_at}}
+                        <RelativeTime @time={{backups.last_success_at}} />
+                      {{else}}
+                        <span class="fact-none">まだありません</span>
+                      {{/if}}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>次回</dt>
+                    <dd data-test-backup-next-run>
+                      {{#if backups.next_run_at}}
+                        <TimeUntil @time={{backups.next_run_at}} />
+                      {{else}}
+                        <span class="fact-none">—</span>
+                      {{/if}}
+                    </dd>
+                  </div>
+                </dl>
+                <span class="job-action">
+                  <Button
+                    @size="small"
+                    @busy={{backups.running}}
+                    @busyLabel="実行中…"
+                    @disabled={{this.startingBackup}}
+                    data-test-backup-run
+                    {{on "click" this.runBackup}}
+                  >今すぐ実行</Button>
+                </span>
+                {{#if this.backupHealth.failedRun}}
+                  <p class="job-problem" data-test-backup-error>
+                    <Icon @name="error" />
+                    <span>
+                      直近のエラー:
+                      {{this.backupHealth.failedRun.error}}
+                    </span>
+                  </p>
+                {{/if}}
+              {{else}}
+                <p class="job-note" data-test-backup-unconfigured>
+                  いまは、どのアプリのデータも退避されていません。
+                  <code>/etc/paas/config.toml</code>
+                  の
+                  <code>[storage]</code>
+                  と、restic のパスワードファイル
+                  <code>/etc/paas/restic.key</code>
+                  を置くと有効になります。
+                </p>
+              {{/if}}
+            {{/let}}
+          {{else if this.backupsPending}}
+            <span class="job-state">
+              <span class="skeleton system-skeleton"></span>
+              <span class="visually-hidden">読み込み中</span>
+            </span>
+          {{else if this.backups.unavailable}}
+            <p class="job-note" data-test-backup-unavailable>
+              このサーバーは、バックアップにまだ対応していません。
+            </p>
+          {{else}}
+            <p class="job-problem" data-test-backup-load-error>
+              <Icon @name="error" />
+              <span>
+                状況を取得できませんでした。{{this.backups.errorMessage}}
+              </span>
+            </p>
+            <span class="job-action">
+              <Button @size="small" {{on "click" this.backups.reload}}>
+                再読み込み
+              </Button>
+            </span>
+          {{/if}}
+        </li>
+
+        {{#if this.system.value.log_archive}}
+          {{#let this.system.value.log_archive as |archive|}}
+            <li class="job" data-test-job="log-archive">
+              <span class="job-name">ログ退避</span>
+              {{#let (archiveState archive) as |state|}}
+                <span class="job-state" data-test-archive-state>
+                  <StatusIndicator
+                    @kind={{state.kind}}
+                    @label={{state.label}}
+                    @quiet={{state.quiet}}
+                  />
+                </span>
+              {{/let}}
+              {{#if archive.configured}}
+                <dl class="job-facts">
+                  <div>
+                    <dt>最終成功</dt>
+                    <dd>
+                      {{#if archive.last_success_at}}
+                        <RelativeTime @time={{archive.last_success_at}} />
+                      {{else}}
+                        <span class="fact-none">まだありません</span>
+                      {{/if}}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>次回</dt>
+                    <dd data-test-archive-next-run>
+                      {{#if archive.next_run_at}}
+                        <TimeUntil @time={{archive.next_run_at}} />
+                      {{else}}
+                        <span class="fact-none">—</span>
+                      {{/if}}
+                    </dd>
+                  </div>
+                </dl>
+                {{#if archive.last_error}}
+                  <p class="job-problem" data-test-archive-error>
+                    <Icon @name="error" />
+                    <span>直近のエラー: {{archive.last_error}}</span>
+                  </p>
+                {{/if}}
+              {{else}}
+                <p class="job-note">
+                  オブジェクトストレージが未設定のため、ログはこのホストに 14
+                  日分だけ残ります。
+                </p>
+              {{/if}}
+            </li>
+          {{/let}}
+        {{/if}}
+
+        {{#if this.system.value.caddy}}
+          {{#let this.system.value.caddy as |caddy|}}
+            <li class="job" data-test-job="caddy">
+              <span class="job-name">Caddy への設定投入</span>
+              {{#let (caddyState caddy) as |state|}}
+                <span class="job-state" data-test-caddy-state>
+                  <StatusIndicator
+                    @kind={{state.kind}}
+                    @label={{state.label}}
+                    @quiet={{state.quiet}}
+                  />
+                </span>
+              {{/let}}
+              {{#if caddy.enabled}}
+                <dl class="job-facts">
+                  <div>
+                    <dt>最終投入</dt>
+                    <dd>
+                      {{#if caddy.last_loaded_at}}
+                        <RelativeTime @time={{caddy.last_loaded_at}} />
+                      {{else}}
+                        <span class="fact-none">まだありません</span>
+                      {{/if}}
+                    </dd>
+                  </div>
+                </dl>
+                {{#if caddy.last_error}}
+                  <p class="job-problem" data-test-caddy-error>
+                    <Icon @name="error" />
+                    <span>直近のエラー: {{caddy.last_error}}</span>
+                  </p>
+                {{/if}}
+              {{else}}
+                <p class="job-note">
+                  設定で無効になっているため、経路の設定は Caddy
+                  に投入されません。
+                </p>
+              {{/if}}
+            </li>
+          {{/let}}
+        {{/if}}
+      </ul>
+    </section>
+
+    {{#if this.backups.value.configured}}
+      {{#let (latestRuns this.backups.value) as |runs|}}
+        <section class="pane" aria-labelledby="runs-title">
+          <div class="pane-header">
+            <h2 class="pane-title" id="runs-title">バックアップの実行履歴</h2>
+          </div>
+          {{#if runs.length}}
+            <RowList
+              class="run-rows"
+              @label="バックアップの実行履歴"
+              data-test-backup-runs
+            >
+              <:header>
+                <span>結果</span>
+                <span>開始</span>
+                <span>きっかけ</span>
+                <span>所要時間</span>
+                <span>エラー</span>
+              </:header>
+              <:rows as |Row|>
+                {{#each runs key="id" as |run|}}
+                  <Row data-test-backup-run-row={{run.id}}>
+                    <span class="run-status">
+                      <StatusIndicator
+                        @kind={{runKind run}}
+                        @label={{runLabel run}}
+                        @quiet={{runSucceeded run}}
+                      />
+                    </span>
+                    <span class="run-start">
+                      <span class="cell-label">開始</span>
+                      <RelativeTime @time={{run.started_at}} />
+                    </span>
+                    <span class="run-trigger">
+                      <span class="cell-label">きっかけ</span>
+                      {{triggerLabel run}}
+                    </span>
+                    <span class="run-duration">
+                      <span class="cell-label">所要時間</span>
+                      {{duration run}}
+                    </span>
+                    <span class="run-error">{{run.error}}</span>
+                  </Row>
+                {{/each}}
+              </:rows>
+            </RowList>
+          {{else}}
+            <p class="system-note" data-test-no-runs>
+              まだ実行されていません。最初の定期実行を待つか、上の「今すぐ実行」で取得します。
+            </p>
+          {{/if}}
+        </section>
+      {{/let}}
+    {{/if}}
+
+    {{#if this.system.value}}
+      {{#let this.system.value as |system|}}
+        <section class="pane" aria-labelledby="versions-title">
+          <div class="pane-header">
+            <h2 class="pane-title" id="versions-title">バージョン</h2>
+          </div>
+          <dl class="readout system-versions">
+            <dt>paasd</dt>
+            <dd data-test-paasd-version>{{system.version}}</dd>
+            <dt>Docker</dt>
+            <dd data-test-docker-version>
+              {{#if system.docker_version}}
+                {{system.docker_version}}
+              {{else}}
+                <span class="fact-none">取得できません</span>
+              {{/if}}
+            </dd>
+            <dt>ベースドメイン</dt>
+            <dd><span class="mono">{{system.base_domain}}</span></dd>
+          </dl>
+        </section>
+      {{/let}}
+    {{/if}}
+
+    {{#if this.confirmingPrune}}
+      <ConfirmDialog
+        @title="不要なデータを削除しますか？"
+        @confirmLabel="削除する"
+        @danger={{true}}
+        @busy={{this.pruning}}
+        @onConfirm={{this.prune}}
+        @onCancel={{this.cancelPrune}}
+      >
+        <p>
+          使われていないデータを Docker
+          から消して、ディスクを空けます。稼働中のアプリには影響しません。消したものは戻せませんが、必要になれば次のビルドで作り直されます。
+        </p>
+        <fieldset class="option-group dialog-options">
+          <legend class="visually-hidden">削除するもの</legend>
+          <label class="option">
             <input
               type="checkbox"
               checked={{this.pruneImages}}
+              disabled={{this.pruning}}
               data-test-prune-images
               {{on "change" (setChecked this "pruneImages")}}
             />
-            使われていないイメージ
+            <span class="option-body">
+              <span class="option-label">タグのないイメージ</span>
+              <span class="option-hint">
+                ビルドで置き換えられ、どこからも参照されなくなったイメージです。
+              </span>
+            </span>
           </label>
-          <label class="choice">
+          <label class="option">
             <input
               type="checkbox"
               checked={{this.pruneBuilder}}
+              disabled={{this.pruning}}
               data-test-prune-builder
               {{on "change" (setChecked this "pruneBuilder")}}
             />
-            ビルドキャッシュ
+            <span class="option-body">
+              <span class="option-label">ビルドキャッシュ</span>
+              <span class="option-hint">
+                1 週間使われていないものだけを消します。
+              </span>
+            </span>
           </label>
-          <div class="form-actions">
-            <button
-              type="submit"
-              class="button"
-              disabled={{if this.pruning true this.nothingToPrune}}
-              data-test-prune-submit
-            >{{if this.pruning "実行中…" "prune を実行"}}</button>
-          </div>
-        </form>
-
-        <div aria-live="polite">
-          <ErrorMessage @error={{this.pruneError}} />
-          {{#if this.pruneOutput}}
-            <pre class="code" data-test-prune-output>{{this.pruneOutput}}</pre>
-          {{/if}}
-        </div>
-      {{/if}}
-    </section>
-
-    <section class="card" aria-labelledby="backup-title">
-      <h3 id="backup-title">バックアップ</h3>
-      <AsyncView @data={{this.backups}} as |backups|>
-        {{#if backups.configured}}
-          {{#if backups.warning}}
-            <p class="alert alert-danger" role="alert" data-test-backup-warning>
-              24
-              時間以上バックアップに成功していません。直近の実行結果を確認してください。
-            </p>
-          {{/if}}
-
-          <dl class="definition">
-            <dt>最終成功</dt>
-            <dd data-test-backup-last-success>
-              {{#if backups.last_success_at}}
-                {{formatDateTime backups.last_success_at}}
-                <span class="muted">
-                  <RelativeTime @time={{backups.last_success_at}} />
-                </span>
-              {{else}}
-                <span class="muted">まだ成功していません</span>
-              {{/if}}
-            </dd>
-            <dt>状態</dt>
-            <dd aria-live="polite" data-test-backup-running>
-              {{if backups.running "実行中" "待機中（毎日 03:00 JST に実行）"}}
-            </dd>
-          </dl>
-
-          <div class="form-actions">
-            <button
-              type="button"
-              class="button"
-              disabled={{if this.startingBackup true backups.running}}
-              data-test-backup-run
-              {{on "click" this.runBackup}}
-            >今すぐバックアップ</button>
-          </div>
-
-          <div aria-live="polite">
-            {{#if this.backupStarted}}
-              <p
-                class="notice"
-                data-test-backup-started
-              >バックアップを開始しました。</p>
-            {{/if}}
-            <ErrorMessage @error={{this.backupError}} />
-          </div>
-
-          <h4>直近の実行</h4>
-          {{#if backups.runs.length}}
-            <div class="table-wrap">
-              <table class="table" data-test-backup-runs>
-                <thead>
-                  <tr>
-                    <th scope="col">開始</th>
-                    <th scope="col">きっかけ</th>
-                    <th scope="col">結果</th>
-                    <th scope="col">所要</th>
-                    <th scope="col">エラー</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {{#each backups.runs key="id" as |run|}}
-                    <tr data-test-backup-run-row={{run.id}}>
-                      <td>{{formatDateTime run.started_at}}</td>
-                      <td>{{runTriggerLabel run}}</td>
-                      <td>
-                        <Badge @tone={{runStatusTone run}}>
-                          {{runStatusLabel run}}
-                        </Badge>
-                      </td>
-                      <td>{{formatDuration run.started_at run.finished_at}}</td>
-                      <td>{{run.error}}</td>
-                    </tr>
-                  {{/each}}
-                </tbody>
-              </table>
-            </div>
-          {{else}}
-            <p class="muted">実行履歴はまだありません。</p>
-          {{/if}}
-        {{else}}
-          <FeatureUnavailable @kind="not_configured" />
+        </fieldset>
+        {{#if this.nothingToPrune}}
+          <p role="alert" data-test-prune-nothing>
+            削除するものを 1 つ以上選んでください。
+          </p>
         {{/if}}
-      </AsyncView>
-    </section>
+      </ConfirmDialog>
+    {{/if}}
   </template>
 }

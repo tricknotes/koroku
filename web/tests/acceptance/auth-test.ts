@@ -53,7 +53,14 @@ module('Acceptance | auth', function (hooks) {
     assert.strictEqual(currentURL(), '/login');
     assert
       .dom('[data-test-login-error]')
-      .hasText('このアカウントはログインを許可されていません。');
+      .hasText('このアカウントはログインを許可されていません。')
+      .hasAttribute('role', 'alert');
+    assert
+      .dom('[data-test-login-hint]')
+      .includesText('別のアカウント', 'it says what to do about it');
+    assert
+      .dom('[data-test-login-link]')
+      .exists({ count: 1 }, 'and still offers the one button');
   });
 
   test('the login error is also read from the page URL', async function (assert) {
@@ -63,6 +70,7 @@ module('Acceptance | auth', function (hooks) {
     await visit('/');
 
     assert.dom('[data-test-login-error]').includesText('もう一度やり直して');
+    assert.dom('[data-test-login-hint]').doesNotExist();
   });
 
   test('a 401 from any API call shows the login page', async function (assert) {
@@ -123,11 +131,17 @@ module('Acceptance | auth', function (hooks) {
     assert.strictEqual(currentURL(), '/login');
     assert.dom('[data-test-session-error]').exists();
     assert.dom('[data-test-login-link]').doesNotExist();
+
+    await click('.login button');
+    assert.strictEqual(fakes.browser.reloads, 1);
   });
 
   test('unknown paths render the not-found page', async function (assert) {
     await visit('/nope');
 
-    assert.dom('[data-test-not-found]').exists();
+    assert.dom('[data-test-not-found]').includesText('ページが見つかりません');
+
+    await click('[data-test-back-to-list]');
+    assert.strictEqual(currentURL(), '/', 'its one action leads back');
   });
 });

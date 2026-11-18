@@ -11,6 +11,7 @@ import type {
   Commit,
   ComposeDetection,
   Deployment,
+  DockerUsageItem,
   Domain,
   DomainList,
   EnvVar,
@@ -57,6 +58,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * `details` of an error response as a record. Most errors send an object;
+ * `policy_violation` sends the list of findings, kept under `violations`.
+ */
+function errorDetails(details: unknown): Record<string, unknown> {
+  if (isRecord(details)) return details;
+  if (Array.isArray(details)) return { violations: details };
+  return {};
+}
+
 /** Builds an `ApiError` from an error response body (JSON or not). */
 export function parseErrorBody(status: number, text: string): ApiError {
   try {
@@ -67,7 +78,7 @@ export function parseErrorBody(status: number, text: string): ApiError {
         status,
         typeof error['code'] === 'string' ? error['code'] : 'unknown',
         typeof error['message'] === 'string' ? error['message'] : '',
-        isRecord(error['details']) ? error['details'] : {},
+        errorDetails(error['details']),
       );
     }
   } catch {
@@ -143,6 +154,14 @@ export default class ApiService extends Service {
 
   getSystem(): Promise<SystemInfo> {
     return this.request('GET', '/api/system');
+  }
+
+  async getDockerUsage(): Promise<DockerUsageItem[]> {
+    const { items } = await this.request<{ items: DockerUsageItem[] | null }>(
+      'GET',
+      '/api/system/docker',
+    );
+    return items ?? [];
   }
 
   prune(body: { images: boolean; builder: boolean }): Promise<{

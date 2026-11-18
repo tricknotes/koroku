@@ -17,19 +17,21 @@ import { fileURLToPath } from 'node:url';
 import {
   BASE_DOMAIN,
   COMPOSE,
-  DOCKER_USAGE,
   ENV_VARS,
   REPOS,
   SCENARIOS,
   buildScenario,
   commits,
+  dockerUsage,
   logArchives,
   logLines,
   newApp,
   newDomain,
   services,
   settle,
+  settleBackups,
   snapshots,
+  startBackup,
   startDeployment,
 } from './fixtures.mjs';
 import { deploymentLog } from './deploy-log.mjs';
@@ -71,6 +73,7 @@ function stateOf(name) {
   if (!states.has(name)) states.set(name, buildScenario(name));
   const state = states.get(name);
   settle(state);
+  settleBackups(state);
   return state;
 }
 
@@ -148,10 +151,26 @@ function countPending(state, slug) {
 }
 
 route('GET', '/api/system', ({ state }) => state.system);
-route('GET', '/api/system/docker', () => DOCKER_USAGE);
-route('POST', '/api/system/prune', () => ({
-  output: 'Deleted build cache objects: 61\nTotal reclaimed space: 4.2GB',
-}));
+route('GET', '/api/system/docker', ({ state }) => {
+  if (state.backupsDown) throw new HttpError(500, 'internal');
+  return dockerUsage(state);
+});
+route('POST', '/api/system/prune', async ({ state, body }) => {
+  // Long enough to see the "in progress" state.
+  await new Promise((done) => setTimeout(done, 1500));
+  state.pruned = true;
+  const lines = [];
+  if (body.images !== false) {
+    lines.push('$ docker image prune -f', 'Total reclaimed space: 3.1GB');
+  }
+  if (body.builder !== false) {
+    lines.push(
+      '$ docker builder prune -f --filter until=168h',
+      'Total reclaimed space: 4.2GB',
+    );
+  }
+  return { output: lines.join('\n') + '\n' };
+});
 
 route('GET', '/api/apps', ({ state }) => ({
   apps: [...state.apps.values()].sort((a, b) => a.slug.localeCompare(b.slug)),
@@ -336,34 +355,36 @@ route('GET', '/api/apps/:slug/logs/archives/url', (context) => {
   return { url: `/__mock/download?name=${context.query.get('key') ?? ''}` };
 });
 
-route('GET', '/api/backups', ({ state }) => state.backups);
+route('GET', '/api/backups', ({ state }) => {
+  if (state.backupsDown) throw new HttpError(500, 'internal');
+  return state.backups;
+});
 route('POST', '/api/backups', ({ state }) => {
-  const run = {
-    id: Date.now() % 100000,
-    trigger: 'manual',
-    status: 'succeeded',
-    started_at: new Date().toISOString(),
-    finished_at: new Date().toISOString(),
-    error: '',
-  };
-  state.backups.runs.unshift(run);
-  state.backups.last_success_at = run.finished_at;
-  state.backups.warning = false;
-  return { status: 202, json: run };
+  if (!state.backups.configured) throw new HttpError(503, 'not_configured');
+  if (state.backups.running) throw new HttpError(409, 'busy');
+  return { status: 202, json: startBackup(state) };
 });
 route('GET', '/api/apps/:slug/backups', (context) => {
-  appOf(context);
-  return { snapshots: snapshots() };
+  const { slug } = appOf(context);
+  if (!context.state.backups.configured) {
+    throw new HttpError(503, 'not_configured');
+  }
+  return { snapshots: context.state.snapshots?.get(slug) ?? snapshots() };
 });
-route('POST', '/api/apps/:slug/backups/restore', (context) => {
+route('POST', '/api/apps/:slug/backups/restore', async (context) => {
   appOf(context);
+  // The real restore stops the app, moves data and starts it again.
+  await new Promise((done) => setTimeout(done, 2000));
   return { restored: true };
 });
 route('GET', '/api/apps/:slug/backups/:id/download', () => ({
   text: '-- mock database dump\n',
 }));
 
-route('GET', '/api/repos', () => ({ repos: REPOS }));
+route('GET', '/api/repos', ({ state }) => {
+  if (state.github === false) throw new HttpError(503, 'not_configured');
+  return { repos: REPOS };
+});
 route('GET', '/api/repos/:owner/:repo/branches', () => ({
   branches: [
     { name: 'main', sha: commits()[0].sha },
@@ -477,7 +498,7 @@ async function handleApi(request, response, url, scenario) {
       names.map((name, index) => [name, decodeURIComponent(match[index + 1])]),
     );
     const body = method === 'GET' ? {} : await readBody(request);
-    const result = handler({
+    const result = await handler({
       state: stateOf(scenario),
       params,
       query: url.searchParams,

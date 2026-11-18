@@ -2,7 +2,6 @@ import { module, test } from 'qunit';
 import SettingsForm, {
   LimitRow,
   isValidMemoryLimit,
-  parseList,
 } from 'paas-console/utils/settings-form';
 import { makeApp } from 'paas-console/tests/helpers/fakes';
 
@@ -21,11 +20,7 @@ module('Unit | Utility | settings-form', function () {
   });
 
   test('null collections from the API are treated as empty', function (assert) {
-    const app = makeApp({
-      service_memory_limits: null,
-      backup_exclude_volumes: null,
-      backup_before_deploy: false,
-    });
+    const app = makeApp({ service_memory_limits: null });
 
     assert.deepEqual(new SettingsForm(app).patch(app), {});
   });
@@ -48,29 +43,15 @@ module('Unit | Utility | settings-form', function () {
     assert.deepEqual(form.patch(app).service_memory_limits, {});
   });
 
-  test('backup fields are only sent to a backend that reports them', function (assert) {
-    const before = makeApp();
-    const old = new SettingsForm(before);
-    old.dumpHookService = 'db';
-    old.backupBeforeDeploy = true;
-
-    assert.false(old.hasBackupFields);
-    assert.deepEqual(old.patch(before), {});
-
-    const after = makeApp({ backup_before_deploy: false });
-    const current = new SettingsForm(after);
-    current.dumpHookService = 'db';
-    current.dumpHookCommand = 'pg_dump -U postgres app';
-    current.excludeVolumes = 'pgdata,\n cache';
-    current.backupBeforeDeploy = true;
-
-    assert.true(current.hasBackupFields);
-    assert.deepEqual(current.patch(after), {
-      backup_exclude_volumes: ['pgdata', 'cache'],
-      dump_hook_service: 'db',
-      dump_hook_command: 'pg_dump -U postgres app',
-      backup_before_deploy: true,
+  test('the backup settings are left to their own form', function (assert) {
+    const app = makeApp({
+      backup_exclude_volumes: ['pgdata'],
+      backup_before_deploy: false,
     });
+    const form = new SettingsForm(app);
+    form.environment = 'production';
+
+    assert.deepEqual(form.patch(app), { environment: 'production' });
   });
 
   test('validate checks the port and the memory limits', function (assert) {
@@ -92,29 +73,12 @@ module('Unit | Utility | settings-form', function () {
     assert.deepEqual(form.validate(), {});
   });
 
-  test('validate wants the dump hook as a pair', function (assert) {
-    const form = new SettingsForm(makeApp({ backup_before_deploy: false }));
-
-    form.dumpHookService = 'db';
-    assert.deepEqual(Object.keys(form.validate()), ['dump_hook_command']);
-
-    form.dumpHookService = '';
-    form.dumpHookCommand = 'pg_dump -U postgres app';
-    assert.deepEqual(Object.keys(form.validate()), ['dump_hook_service']);
-
-    form.dumpHookService = 'db';
-    assert.deepEqual(form.validate(), {});
-  });
-
-  test('isValidMemoryLimit and parseList', function (assert) {
+  test('isValidMemoryLimit', function (assert) {
     assert.true(isValidMemoryLimit(''));
     assert.true(isValidMemoryLimit('512m'));
     assert.true(isValidMemoryLimit('1g'));
     assert.false(isValidMemoryLimit('1.5g'));
     assert.false(isValidMemoryLimit('512'));
     assert.false(isValidMemoryLimit('512MB'));
-
-    assert.deepEqual(parseList(''), []);
-    assert.deepEqual(parseList(' a, b ,,c\nd '), ['a', 'b', 'c', 'd']);
   });
 });

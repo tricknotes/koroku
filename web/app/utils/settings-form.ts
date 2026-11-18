@@ -21,18 +21,6 @@ export function isValidMemoryLimit(value: string): boolean {
   return value === '' || MEMORY_PATTERN.test(value);
 }
 
-/** `a, b` or one per line → `['a', 'b']`. */
-export function parseList(text: string): string[] {
-  return text
-    .split(/[\s,]+/)
-    .map((item) => item.trim())
-    .filter((item) => item !== '');
-}
-
-function sameList(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((item, index) => item === b[index]);
-}
-
 function sameRecord(
   a: Record<string, string>,
   b: Record<string, string>,
@@ -44,9 +32,9 @@ function sameRecord(
 }
 
 /**
- * Editable copy of an app's settings. `patch` returns only what differs
- * from the app, because `PATCH` updates just the fields it is sent (and a
- * backend before M5 rejects the backup fields it does not know).
+ * Editable copy of an app's settings (the backup settings have their own
+ * form on the backups tab). `patch` returns only what differs from the app,
+ * because `PATCH` updates just the fields it is sent.
  */
 export default class SettingsForm {
   @tracked defaultBranch: string;
@@ -58,14 +46,6 @@ export default class SettingsForm {
   @tracked relaxPolicy: boolean;
   @tracked memoryLimit: string;
   @tracked limits: LimitRow[];
-
-  @tracked excludeVolumes: string;
-  @tracked dumpHookService: string;
-  @tracked dumpHookCommand: string;
-  @tracked backupBeforeDeploy: boolean;
-
-  /** Whether the backend reports the M5 backup fields at all. */
-  readonly hasBackupFields: boolean;
 
   constructor(app: App) {
     this.defaultBranch = app.default_branch;
@@ -79,12 +59,6 @@ export default class SettingsForm {
     this.limits = Object.entries(app.service_memory_limits ?? {}).map(
       ([service, limit]) => new LimitRow(service, limit),
     );
-
-    this.hasBackupFields = app.backup_before_deploy !== undefined;
-    this.excludeVolumes = (app.backup_exclude_volumes ?? []).join(', ');
-    this.dumpHookService = app.dump_hook_service ?? '';
-    this.dumpHookCommand = app.dump_hook_command ?? '';
-    this.backupBeforeDeploy = app.backup_before_deploy ?? false;
   }
 
   get serviceLimits(): Record<string, string> {
@@ -113,17 +87,6 @@ export default class SettingsForm {
       if (row.service.trim() && (limit === '' || !isValidMemoryLimit(limit))) {
         errors['service_memory_limits'] = memoryHint;
       }
-    }
-    // The dump hook is a pair: both set or both empty.
-    const hookService = this.dumpHookService.trim();
-    const hookCommand = this.dumpHookCommand.trim();
-    if (this.hasBackupFields && hookCommand && !hookService) {
-      errors['dump_hook_service'] =
-        'コマンドを指定するときはサービスも入力してください。';
-    }
-    if (this.hasBackupFields && hookService && !hookCommand) {
-      errors['dump_hook_command'] =
-        'サービスを指定するときはコマンドも入力してください。';
     }
     return errors;
   }
@@ -155,24 +118,6 @@ export default class SettingsForm {
     const limits = this.serviceLimits;
     if (!sameRecord(limits, app.service_memory_limits ?? {})) {
       patch.service_memory_limits = limits;
-    }
-
-    if (this.hasBackupFields) {
-      const exclude = parseList(this.excludeVolumes);
-      if (!sameList(exclude, app.backup_exclude_volumes ?? [])) {
-        patch.backup_exclude_volumes = exclude;
-      }
-      const hookService = this.dumpHookService.trim();
-      if (hookService !== (app.dump_hook_service ?? '')) {
-        patch.dump_hook_service = hookService;
-      }
-      const hookCommand = this.dumpHookCommand.trim();
-      if (hookCommand !== (app.dump_hook_command ?? '')) {
-        patch.dump_hook_command = hookCommand;
-      }
-      if (this.backupBeforeDeploy !== (app.backup_before_deploy ?? false)) {
-        patch.backup_before_deploy = this.backupBeforeDeploy;
-      }
     }
     return patch;
   }

@@ -29,8 +29,10 @@ const DEPLOYMENT = '[data-test-deployment]';
 
 /**
  * name, path, what to wait for, and optionally: viewport, `dark`, `keys`
- * (pressed before the capture, to show keyboard focus), `click`, or
- * `settle` (how long to wait before the capture, in milliseconds).
+ * (pressed before the capture, to show keyboard focus), `click`, `script`
+ * and `then` (see `capture`), `settle` (how long to wait before the capture,
+ * in milliseconds), or `mutates` for a shot that changes what the mock
+ * answers (it is reset afterwards).
  */
 const SHOTS = [
   { name: 'list-healthy', path: '/?scenario=healthy', wait: LIST },
@@ -180,21 +182,9 @@ const SHOTS = [
   },
   // Screens that are not redesigned yet, to check they sit well in the shell.
   {
-    name: 'other-login',
-    path: '/?scenario=login',
-    wait: '[data-test-login-link]',
-    themes: ['light'],
-  },
-  {
     name: 'other-overview',
     path: '/apps/blog?scenario=healthy',
     wait: '[data-test-services]',
-    themes: ['light'],
-  },
-  {
-    name: 'other-system',
-    path: '/system?scenario=warnings',
-    wait: '.card',
     themes: ['light'],
   },
   {
@@ -212,9 +202,321 @@ const SHOTS = [
     wait: DEPLOYMENT,
     click: '[data-test-deploy-submit]',
     settle: 6000,
+    mutates: true,
     themes: ['light'],
   },
 ];
+
+// Backups tab.
+const SNAPSHOT = '[data-test-snapshot]';
+SHOTS.push(
+  {
+    name: 'backups-normal',
+    path: '/apps/blog/backups?scenario=healthy',
+    wait: SNAPSHOT,
+    fullPage: true,
+  },
+  {
+    name: 'backups-problem',
+    path: '/apps/blog/backups?scenario=warnings',
+    wait: SNAPSHOT,
+  },
+  {
+    name: 'backups-running',
+    path: '/apps/shop/backups?scenario=healthy',
+    wait: SNAPSHOT,
+    click: '[data-test-backup-run]',
+    then: '[data-test-backup-run][aria-busy]',
+    mutates: true,
+    themes: ['light'],
+  },
+  {
+    name: 'backups-restore-dialog',
+    path: '/apps/blog/backups?scenario=healthy',
+    wait: SNAPSHOT,
+    click: '[data-test-snapshot-restore]',
+  },
+  {
+    name: 'backups-empty',
+    path: '/apps/notes/backups?scenario=fresh',
+    wait: '[data-test-no-snapshots]',
+    fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'backups-unconfigured',
+    path: '/apps/blog/backups?scenario=unconfigured',
+    wait: '[data-test-backups-unconfigured]',
+    themes: ['light'],
+  },
+  {
+    name: 'backups-error',
+    path: '/apps/blog/backups?scenario=backups-down',
+    wait: '[data-test-error]',
+    themes: ['dark'],
+  },
+  {
+    name: 'backups-normal-phone',
+    path: '/apps/blog/backups?scenario=healthy',
+    wait: SNAPSHOT,
+    ...PHONE,
+    themes: ['light'],
+  },
+  {
+    name: 'backups-problem-phone',
+    path: '/apps/blog/backups?scenario=warnings',
+    wait: SNAPSHOT,
+    ...PHONE,
+    themes: ['dark'],
+  },
+);
+
+// Settings tab.
+const SETTINGS = '[data-test-settings-form]';
+SHOTS.push(
+  {
+    name: 'settings-normal',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    fullPage: true,
+  },
+  {
+    name: 'settings-relaxed',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: SETTINGS,
+    click: '[data-test-field="relax_policy"]',
+    fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'settings-stopped',
+    path: '/apps/wiki/settings?scenario=warnings',
+    wait: SETTINGS,
+    fullPage: true,
+    themes: ['dark'],
+  },
+  {
+    name: 'settings-invalid',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: SETTINGS,
+    script: `(() => {
+      const input = document.querySelector('[data-test-field="memory_limit"]');
+      input.value = '512 MB';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-test-settings-save]').click();
+    })()`,
+    then: '[data-test-field-error]',
+    fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'settings-delete-dialog',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    click: '[data-test-delete]',
+  },
+  {
+    name: 'settings-stop-dialog',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    click: '[data-test-control="stop"]',
+    themes: ['light'],
+  },
+  {
+    name: 'settings-focus',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    keys: tabs(16),
+    themes: ['light'],
+  },
+  {
+    name: 'settings-normal-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    ...PHONE,
+    themes: ['light'],
+  },
+  {
+    name: 'settings-stopped-phone',
+    path: '/apps/wiki/settings?scenario=warnings',
+    wait: SETTINGS,
+    ...PHONE,
+    themes: ['dark'],
+  },
+);
+
+// System screen.
+const RESOURCES = '[data-test-docker-item]';
+SHOTS.push(
+  {
+    name: 'system-normal',
+    path: '/system?scenario=healthy',
+    wait: RESOURCES,
+    fullPage: true,
+  },
+  {
+    name: 'system-problem',
+    path: '/system?scenario=host-trouble',
+    wait: RESOURCES,
+    fullPage: true,
+  },
+  {
+    name: 'system-unconfigured',
+    path: '/system?scenario=unconfigured',
+    wait: RESOURCES,
+    fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'system-partial-error',
+    path: '/system?scenario=backups-down',
+    wait: '[data-test-backup-load-error]',
+    fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'system-error',
+    path: '/system?scenario=error',
+    wait: '[data-test-error]',
+    themes: ['dark'],
+  },
+  {
+    name: 'system-loading',
+    path: '/system?scenario=loading',
+    wait: '[data-test-loading]',
+    themes: ['light'],
+  },
+  {
+    name: 'system-prune-dialog',
+    path: '/system?scenario=host-trouble',
+    wait: RESOURCES,
+    click: '[data-test-prune-open]',
+  },
+  {
+    name: 'system-pruned',
+    path: '/system?scenario=healthy',
+    wait: RESOURCES,
+    script: `(() => {
+      document.querySelector('[data-test-prune-open]').click();
+      setTimeout(
+        () => document.querySelector('[data-test-dialog-confirm]').click(),
+        200,
+      );
+    })()`,
+    then: '[data-test-pruned]',
+    mutates: true,
+    themes: ['light'],
+  },
+  {
+    name: 'system-normal-phone',
+    path: '/system?scenario=healthy',
+    wait: RESOURCES,
+    ...PHONE,
+    themes: ['light'],
+  },
+  {
+    name: 'system-problem-phone',
+    path: '/system?scenario=host-trouble',
+    wait: RESOURCES,
+    ...PHONE,
+    themes: ['dark'],
+  },
+);
+
+// App creation, login, not found.
+const REPOSITORY = '[data-test-field="repo_full_name"]';
+const CHOOSE_REPOSITORY = `(() => {
+  const select = document.querySelector('${REPOSITORY}');
+  select.value = 'octo/blog';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+})()`;
+SHOTS.push(
+  {
+    name: 'new-app-start',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    themes: ['light'],
+  },
+  {
+    name: 'new-app-filled',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: CHOOSE_REPOSITORY,
+    then: '[data-test-submit]',
+    fullPage: true,
+  },
+  {
+    name: 'new-app-invalid',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      ${CHOOSE_REPOSITORY};
+      setTimeout(() => {
+        const slug = document.querySelector('[data-test-field="slug"]');
+        slug.value = 'Blog_1';
+        slug.dispatchEvent(new Event('input', { bubbles: true }));
+        document.querySelector('[data-test-submit]').click();
+      }, 400);
+    })()`,
+    then: '[data-test-field-error]',
+    fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'new-app-no-github',
+    path: '/apps/new?scenario=unconfigured',
+    wait: '[data-test-field="repo_url"]',
+    themes: ['light'],
+  },
+  {
+    name: 'new-app-error',
+    path: '/apps/new?scenario=error',
+    wait: '[data-test-error]',
+    themes: ['dark'],
+  },
+  {
+    name: 'new-app-loading',
+    path: '/apps/new?scenario=loading',
+    wait: '[data-test-loading]',
+    themes: ['light'],
+  },
+  {
+    name: 'new-app-filled-phone',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: CHOOSE_REPOSITORY,
+    then: '[data-test-submit]',
+    ...PHONE,
+    themes: ['light'],
+  },
+  { name: 'login', path: '/?scenario=login', wait: '[data-test-login-link]' },
+  {
+    name: 'login-denied',
+    path: '/?scenario=login&login_error=not_allowed',
+    wait: '[data-test-login-error]',
+  },
+  {
+    name: 'login-denied-phone',
+    path: '/?scenario=login&login_error=not_allowed',
+    wait: '[data-test-login-error]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
+    name: 'login-focus',
+    path: '/?scenario=login',
+    wait: '[data-test-login-link]',
+    keys: tabs(5),
+    themes: ['dark'],
+  },
+  {
+    name: 'not-found',
+    path: '/nowhere?scenario=healthy',
+    wait: '[data-test-not-found]',
+    themes: ['light'],
+  },
+);
 
 function tabs(count) {
   return Array.from({ length: count }, () => 'Tab');
@@ -321,6 +623,18 @@ async function capture(browser, shot, theme) {
       `document.querySelector(${JSON.stringify(shot.click)}).click()`,
     );
   }
+  // `script` drives what a single click cannot (choosing an option, typing);
+  // `then` is what has to be on screen before the capture.
+  if (shot.script) await evaluate(shot.script);
+  if (shot.then) {
+    const expected = JSON.stringify(shot.then);
+    for (let attempt = 0; ; attempt++) {
+      if (await evaluate(`document.querySelector(${expected}) !== null`)) break;
+      if (attempt > 100)
+        throw new Error(`${shot.name}: ${shot.then} not found`);
+      await sleep(100);
+    }
+  }
   for (const key of shot.keys ?? []) {
     const event = { key, code: key, windowsVirtualKeyCode: 9 };
     await page('Input.dispatchKeyEvent', { type: 'keyDown', ...event });
@@ -343,6 +657,9 @@ async function capture(browser, shot, theme) {
   const { data } = await page('Page.captureScreenshot', options);
   const file = join(OUT, `${shot.name}-${theme}.png`);
   await writeFile(file, Buffer.from(data, 'base64'));
+  // A shot that changed the mock's state leaves it as it found it.
+  // eslint-disable-next-line n/no-unsupported-features/node-builtins
+  if (shot.mutates) await fetch(`${ORIGIN}/__mock/reset`);
   await browser.send('Target.closeTarget', { targetId });
   return file;
 }
