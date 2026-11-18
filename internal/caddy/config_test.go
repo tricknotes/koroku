@@ -62,7 +62,16 @@ func goldenInputs() map[string]Input {
 		},
 	}
 
+	// Local development: loopback only, certificates from Caddy's own CA.
+	local := baseInput()
+	local.ConsoleHost = "console.dev.localhost"
+	local.ListenIP = "127.0.0.1"
+	local.InternalCA = true
+	local.ACMECA = "https://acme-staging-v02.api.letsencrypt.org/directory" // ignored
+	local.Apps = []App{{Slug: "blog", HostPort: 20001, Hostnames: []string{"blog.dev.localhost"}}}
+
 	return map[string]Input{
+		"local":            local,
 		"minimal":          minimal,
 		"apps":             apps,
 		"primary_redirect": primary,
@@ -195,7 +204,7 @@ func TestGenerateServesOnlyKnownHosts(t *testing.T) {
 			slices.Sort(want)
 
 			https := cfg.Apps.HTTP.Servers["https"]
-			if !slices.Equal(https.Listen, []string{":443"}) {
+			if !slices.Equal(https.Listen, []string{in.ListenIP + ":443"}) {
 				t.Errorf("https listen = %v", https.Listen)
 			}
 			var got []string
@@ -222,7 +231,7 @@ func TestGenerateServesOnlyKnownHosts(t *testing.T) {
 			}
 
 			plain := cfg.Apps.HTTP.Servers["http"]
-			if !slices.Equal(plain.Listen, []string{":80"}) {
+			if !slices.Equal(plain.Listen, []string{in.ListenIP + ":80"}) {
 				t.Errorf("http listen = %v", plain.Listen)
 			}
 			if len(plain.Routes) != 1 || len(plain.Routes[0].Match) != 0 || plain.Routes[0].Handle[0].StatusCode != 404 {
@@ -347,6 +356,7 @@ func TestGenerateRejectsInvalid(t *testing.T) {
 		"console upstream port":    {with(func(in *Input) { in.ConsoleUpstream = "127.0.0.1:99999" }), "invalid port"},
 		"public admin listen":      {with(func(in *Input) { in.AdminListen = "0.0.0.0:2019" }), "must be a loopback address"},
 		"admin listen all ifaces":  {with(func(in *Input) { in.AdminListen = ":2019" }), "admin listen"},
+		"listen IP not an IP":      {with(func(in *Input) { in.ListenIP = "localhost" }), "listen IP"},
 		"ACME CA not a URL":        {with(func(in *Input) { in.ACMECA = "acme-staging" }), "must be an http(s) URL"},
 		"ACME email":               {with(func(in *Input) { in.ACMEEmail = "nobody" }), "ACME email"},
 		"relative access log dir":  {with(func(in *Input) { in.AccessLogDir = "logs" }), "must be an absolute path"},

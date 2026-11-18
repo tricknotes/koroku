@@ -7,9 +7,14 @@
 #
 #   web     Vite dev server in development mode, with hot reload of the Ember
 #           app. /api and /auth are proxied to koroku.
-#   koroku  The control plane, built from this checkout, with login disabled
-#           and without Caddy. It deploys apps into the local Docker daemon;
-#           a deployed app answers on http://127.0.0.1:<its host port>.
+#   koroku  The control plane, built from this checkout, with login disabled.
+#           It deploys apps into the local Docker daemon.
+#   caddy   The reverse proxy, on 127.0.0.1:80 and :443 only. koroku loads its
+#           configuration as in production, so a deployed app answers on
+#           https://<slug>.dev.localhost and the console on
+#           https://console.dev.localhost. Certificates come from Caddy's own
+#           local CA; import its root certificate into the browser's trust
+#           store (see README.md).
 #
 # After changing Go code: docker compose restart koroku
 #
@@ -40,6 +45,25 @@ services:
   koroku:
     <<: *dev
     command: ["dev/serve.sh"]
+    depends_on:
+      caddy:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2.11.9
+    network_mode: host
+    # The admin API stays on loopback; --resume brings back the routes koroku
+    # loaded last, so restarting Caddy alone does not drop them.
+    command: ["caddy", "run", "--resume", "--config", "/etc/caddy/koroku-initial.json"]
+    volumes:
+      - ./deploy/caddy-initial.json:/etc/caddy/koroku-initial.json:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
 
   web:
     <<: *dev
@@ -64,3 +88,9 @@ volumes:
     name: koroku-dev-go-build
   pnpm:
     name: koroku-dev-pnpm
+  # Caddy's local CA (its root key and certificate) and the issued
+  # certificates. Deleting it makes a new CA, which has to be trusted again.
+  caddy-data:
+    name: koroku-dev-caddy-data
+  caddy-config:
+    name: koroku-dev-caddy-config

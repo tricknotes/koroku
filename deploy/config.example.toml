@@ -46,6 +46,11 @@ acme_ca = "https://acme-staging-v02.api.letsencrypt.org/directory"
 # acme_email = "admin@example.com"
 # One access log per app; the caddy user must be able to write here.
 access_log_dir = "/var/log/caddy/apps"
+# Local development only (see compose.yaml): listen on this address alone
+# instead of every interface, and issue certificates from Caddy's own CA
+# instead of ACME. Leave both unset on a real host.
+# listen_ip = "127.0.0.1"
+# internal_ca = true
 
 [github]
 # The GitHub App used for login and for fetching repositories. Without this

@@ -265,3 +265,31 @@ func TestInsecureNoAuthIsRefusedBehindCaddy(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// TestInsecureNoAuthIsAllowedBehindLoopbackCaddy: the local development
+// setup puts Caddy on 127.0.0.1 only, which keeps the console off the network.
+func TestInsecureNoAuthIsAllowedBehindLoopbackCaddy(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	configText := fmt.Sprintf("base_domain = \"dev.localhost\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\nmaster_key_file = %q\n"+
+		"[caddy]\nadmin_url = \"http://127.0.0.1:1\"\nlisten_ip = \"127.0.0.1\"\ninternal_ca = true\naccess_log_dir = \"\"\n",
+		filepath.Join(dir, "data"), filepath.Join(dir, "master.key"))
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, []string{"--config", configPath, "--insecure-no-auth"}, io.Discard, ready) }()
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("serve: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not start")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("serve: %v", err)
+	}
+}

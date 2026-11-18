@@ -164,6 +164,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 				ACMECA:          cfg.Caddy.ACMECA,
 				ACMEEmail:       cfg.Caddy.ACMEEmail,
 				AccessLogDir:    cfg.Caddy.AccessLogDir,
+				ListenIP:        cfg.Caddy.ListenIP,
+				InternalCA:      cfg.Caddy.InternalCA,
 			},
 			Logger: logger,
 		}
@@ -194,10 +196,11 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	}
 	if *insecureNoAuth {
 		// With Caddy in front the console is reachable from the internet;
-		// without login that would hand out root on the host.
-		if cfg.Caddy.Enabled {
-			return errors.New("--insecure-no-auth is refused while [caddy] enabled = true: " +
-				"it is for local development without Caddy only")
+		// without login that would hand out root on the host. A Caddy that
+		// listens on loopback only (local development) is fine.
+		if cfg.Caddy.Enabled && !cfg.Caddy.LoopbackOnly() {
+			return errors.New("--insecure-no-auth is refused while [caddy] enabled = true, " +
+				"unless [caddy] listen_ip is a loopback address: it is for local development only")
 		}
 		logger.Warn("AUTHENTICATION IS DISABLED (--insecure-no-auth): do not use this on a reachable host")
 	}
