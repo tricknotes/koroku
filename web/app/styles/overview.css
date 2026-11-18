@@ -1,0 +1,341 @@
+/*
+ * Overview tab: the running release, its services and the last deployments
+ * in the main column; domains and backup at the side.
+ */
+
+.overview {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 0 var(--space-8);
+  align-items: start;
+}
+
+.overview-top {
+  grid-column: 1 / -1;
+}
+
+.overview-top > .banner {
+  margin: 0 0 var(--space-6);
+}
+
+.overview-main,
+.overview-side {
+  min-width: 0;
+}
+
+.overview-main .banner {
+  margin: 0;
+}
+
+/* A `.box` (panes.css) with room inside. */
+.overview-panel {
+  margin: 0;
+  padding: var(--space-4);
+}
+
+.overview-quiet,
+.overview-secondary {
+  color: var(--color-text-secondary);
+}
+
+.overview-secondary {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+}
+
+.overview-sha {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.overview-more {
+  font-size: var(--text-sm);
+}
+
+/* Banner about the latest deployment */
+
+.overview-banner-commit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+  align-items: baseline;
+}
+
+.overview-banner-commit > time {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.overview-banner-error {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.overview-top .banner-body > p {
+  margin: 0;
+}
+
+.overview-top .banner-actions {
+  align-self: center;
+}
+
+/* Running release */
+
+.overview-release-message {
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+/* A stopped app: what that means, and the one way out of it. */
+.overview-stopped {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.overview-stopped-hint {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.overview-release-facts {
+  margin-top: var(--space-3);
+}
+
+/* One of the values has a copy button next to it: all share its height. */
+.overview-release-facts .fact > dd {
+  min-height: var(--control-height-sm);
+}
+
+.overview-warning {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  margin: var(--space-3) 0 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+}
+
+.overview-warning > .icon {
+  margin-top: 0.25em;
+  color: var(--color-pending);
+}
+
+/* What a start / stop / restart did */
+
+.overview-feedback > .banner {
+  margin: var(--space-3) 0 0;
+}
+
+.overview-note {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* Services and recent deployments */
+
+.overview-rows .row {
+  min-height: 3.25rem;
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.overview-skeleton {
+  width: 55%;
+}
+
+.overview-services {
+  --row-columns: minmax(0, 1fr) minmax(0, 1.5fr) minmax(0, 0.8fr)
+    minmax(0, 1.4fr);
+}
+
+.overview-service-name {
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-service-state,
+.overview-service-memory,
+.overview-deployment-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.overview-service-state > .overview-secondary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-service-health,
+.overview-service-memory {
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-service-health.is-bad {
+  color: var(--color-failed);
+  font-weight: var(--weight-medium);
+}
+
+.overview-memory-value {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.overview-service-memory.is-high .overview-memory-value {
+  color: var(--color-pending);
+  font-weight: var(--weight-medium);
+}
+
+.overview-memory-meter {
+  max-width: 10rem;
+  margin: 2px 0;
+}
+
+.overview-memory-note {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.overview-deployments {
+  --row-columns: 6.5rem minmax(0, 1fr) auto;
+}
+
+.overview-deployment-line {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.overview-deployment-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-meta {
+  display: flex;
+  gap: 0.5em;
+  align-items: center;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.overview-meta > * + *::before {
+  content: "·";
+  margin-right: 0.5em;
+  color: var(--color-text-tertiary);
+}
+
+.overview-deployment-time {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* Hostnames at the side */
+
+.overview-hostnames {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  list-style: none;
+}
+
+.overview-hostnames > li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.overview-hostname {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+@media (width <= 56rem) {
+  .overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overview-side {
+    margin-top: var(--space-8);
+  }
+
+  .overview-services > .row-list-header {
+    display: none;
+  }
+
+  .overview-services .row {
+    grid-template:
+      "name state" auto
+      "health memory" auto / minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: var(--space-2) var(--space-4);
+    align-items: start;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .overview-service-name {
+    grid-area: name;
+  }
+
+  .overview-service-state {
+    grid-area: state;
+  }
+
+  .overview-service-health {
+    display: flex;
+    flex-direction: column;
+    grid-area: health;
+    gap: 2px;
+  }
+
+  .overview-service-memory {
+    grid-area: memory;
+  }
+
+  .overview-deployments .row {
+    grid-template:
+      "commit commit" auto
+      "state time" auto / minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .overview-deployment-commit {
+    grid-area: commit;
+  }
+
+  .overview-deployment-state {
+    grid-area: state;
+  }
+
+  .overview-deployment-time {
+    grid-area: time;
+  }
+}

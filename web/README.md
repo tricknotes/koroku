@@ -27,9 +27,8 @@ Set `PAASD_URL` to proxy to a different paasd address.
   and follows `color-scheme`. By default that is the OS setting; the theme
   switch in the top bar pins `light` or `dark` with `data-theme` on `<html>`
   and remembers it in `localStorage` (`app/services/theme.ts`).
-- The stylesheets are imported from `app/app.ts` in cascade order.
-  `legacy.css` restyles the screens that are not redesigned yet and shrinks as
-  they move to the shared components.
+- The stylesheets are imported from `app/app.ts` in cascade order: tokens,
+  base, shared components, shell, then one file per screen.
 - Shared components live in `app/components/`: `button`, `badge`,
   `environment-badge`, `status-indicator`, `icon`, `row-list`, `tabs`,
   `form-field`, `confirm-dialog`, `banner`, `empty-state`, `relative-time`,
@@ -78,6 +77,13 @@ The scenario is kept in a cookie, so it stays while navigating; changes made
 in the UI (deploying, adding a domain, ...) are kept in memory until the mock
 restarts or `/__mock/reset` is opened. `MOCK_PORT` changes the port and
 `MOCK_SCENARIO` the default scenario.
+
+For the tabs of the app detail there are also `tab-error` (apps load, but
+everything a tab asks for fails with 500) and `tab-loading` (the same, taking
+a minute). The app `notes` of `fresh` has no variables and no custom domains,
+for the empty states. In `warnings`, the app `shop` has services in trouble (a
+failing health check close to its memory limit, a crashed worker) and `blog`
+a domain that is still waiting for its DNS record.
 
 `mock/screenshots.mjs` takes the reference screenshots with the headless
 Chromium of the development image (light and dark, desktop and 390px wide,

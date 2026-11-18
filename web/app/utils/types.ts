@@ -130,6 +130,9 @@ export interface ServiceStatus {
   state: string;
   status: string;
   health: string;
+  /** Memory in use and its limit (0: unlimited); `null` when unknown. */
+  memory_bytes?: number | null;
+  memory_limit_bytes?: number | null;
 }
 
 export interface EnvVar {

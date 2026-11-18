@@ -29,10 +29,11 @@ const DEPLOYMENT = '[data-test-deployment]';
 
 /**
  * name, path, what to wait for, and optionally: viewport, `dark`, `keys`
- * (pressed before the capture, to show keyboard focus), `click`, `script`
- * and `then` (see `capture`), `settle` (how long to wait before the capture,
- * in milliseconds), or `mutates` for a shot that changes what the mock
- * answers (it is reset afterwards).
+ * (pressed before the capture, to show keyboard focus), `click` / `clicks`
+ * (selectors, clicked in order), `script` and `then` (see `capture`),
+ * `settle` (how long to wait before the capture, in milliseconds), or
+ * `mutates` for a shot that changes what the mock answers (it is reset
+ * afterwards).
  */
 const SHOTS = [
   { name: 'list-healthy', path: '/?scenario=healthy', wait: LIST },
@@ -180,20 +181,7 @@ const SHOTS = [
     wait: '[data-test-app-error]',
     themes: ['light'],
   },
-  // Screens that are not redesigned yet, to check they sit well in the shell.
-  {
-    name: 'other-overview',
-    path: '/apps/blog?scenario=healthy',
-    wait: '[data-test-services]',
-    themes: ['light'],
-  },
-  {
-    name: 'other-domains-phone',
-    path: '/apps/blog/domains?scenario=warnings',
-    wait: '.domain-row',
-    ...PHONE,
-    themes: ['light'],
-  },
+  ...appTabShots(),
   // Last, because it changes the scenario: a deployment started in the UI,
   // a few seconds in, with its log streaming.
   {
@@ -206,6 +194,219 @@ const SHOTS = [
     themes: ['light'],
   },
 ];
+
+/** Overview, environment and domains tabs of the app detail. */
+function appTabShots() {
+  const SERVICES = '[data-test-services]';
+  const ENV = '[data-test-env-row]';
+  const DOMAIN = '[data-test-domain-default]';
+  const PENDING = '[data-test-domain-pending]';
+  // Types into the bulk editor the way a paste would.
+  const badDotenv = [
+    '# pasted from a local file',
+    'RAILS_ENV=production',
+    'this line has no equals sign',
+    '1BAD=value',
+    'RAILS_ENV=staging',
+    'GREETING="hello world"',
+  ].join('\n');
+  const typeBadDotenv = `(() => {
+    const field = document.querySelector('[data-test-env-bulk-text]');
+    field.value = ${JSON.stringify(badDotenv)};
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  })()`;
+
+  return [
+    // Overview
+    {
+      name: 'overview-healthy',
+      path: '/apps/blog?scenario=healthy',
+      wait: SERVICES,
+    },
+    {
+      name: 'overview-healthy-phone',
+      path: '/apps/blog?scenario=healthy',
+      wait: SERVICES,
+      ...PHONE,
+    },
+    {
+      name: 'overview-unhealthy',
+      path: '/apps/shop?scenario=warnings',
+      wait: SERVICES,
+    },
+    {
+      name: 'overview-unhealthy-phone',
+      path: '/apps/shop?scenario=warnings',
+      wait: SERVICES,
+      ...PHONE,
+      themes: ['light'],
+    },
+    {
+      name: 'overview-failed',
+      path: '/apps/shop-staging?scenario=warnings',
+      wait: SERVICES,
+    },
+    {
+      name: 'overview-deploying',
+      path: '/apps/blog-staging?scenario=warnings',
+      wait: SERVICES,
+      themes: ['light'],
+    },
+    {
+      name: 'overview-stopped',
+      path: '/apps/wiki?scenario=warnings',
+      wait: '[data-test-no-services]',
+      themes: ['light'],
+    },
+    {
+      name: 'overview-empty',
+      path: '/apps/notes?scenario=undeployed',
+      wait: '[data-test-overview-empty]',
+    },
+    {
+      name: 'overview-error',
+      path: '/apps/blog?scenario=tab-error',
+      wait: '[data-test-error]',
+      themes: ['light'],
+    },
+    {
+      name: 'overview-loading',
+      path: '/apps/blog?scenario=tab-loading',
+      wait: '[data-test-overview]',
+      themes: ['light'],
+    },
+
+    // Environment variables
+    { name: 'env-masked', path: '/apps/blog/env?scenario=healthy', wait: ENV },
+    {
+      name: 'env-editing',
+      path: '/apps/blog/env?scenario=healthy',
+      wait: ENV,
+      clicks: [
+        '[data-test-env-row]:nth-child(2) [data-test-env-reveal]',
+        '[data-test-env-row]:nth-child(3) [data-test-env-edit]',
+        '[data-test-env-add]',
+      ],
+      script: `(() => {
+        const set = (selector, value) => {
+          const field = document.querySelector(selector);
+          field.value = value;
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        set('[data-test-env-row]:nth-child(3) [data-test-env-value-input]', '1111111111111111111111111111111111111111');
+        set('[data-test-env-row]:nth-child(4) [data-test-env-key-input]', 'MAIL FROM');
+        set('[data-test-env-row]:nth-child(4) [data-test-env-value-input]', 'noreply@example.org');
+      })()`,
+    },
+    {
+      name: 'env-editing-phone',
+      path: '/apps/blog/env?scenario=healthy',
+      wait: ENV,
+      clicks: [
+        '[data-test-env-row]:nth-child(2) [data-test-env-reveal]',
+        '[data-test-env-row]:nth-child(3) [data-test-env-edit]',
+      ],
+      ...PHONE,
+    },
+    {
+      name: 'env-bulk',
+      path: '/apps/blog/env?scenario=healthy',
+      wait: ENV,
+      clicks: ['[data-test-env-bulk]'],
+      themes: ['light'],
+    },
+    {
+      name: 'env-bulk-errors',
+      path: '/apps/blog/env?scenario=healthy',
+      wait: ENV,
+      clicks: ['[data-test-env-bulk]'],
+      script: typeBadDotenv,
+    },
+    {
+      name: 'env-bulk-errors-phone',
+      path: '/apps/blog/env?scenario=healthy',
+      wait: ENV,
+      clicks: ['[data-test-env-bulk]'],
+      script: typeBadDotenv,
+      ...PHONE,
+      themes: ['light'],
+    },
+    {
+      name: 'env-confirm-production',
+      path: '/apps/blog/env?scenario=healthy',
+      wait: ENV,
+      clicks: [
+        '[data-test-env-row]:nth-child(2) [data-test-env-remove]',
+        '[data-test-env-save-deploy]',
+      ],
+      themes: ['light'],
+    },
+    {
+      name: 'env-empty',
+      path: '/apps/notes/env?scenario=fresh',
+      wait: '[data-test-env-empty]',
+    },
+    {
+      name: 'env-error',
+      path: '/apps/blog/env?scenario=tab-error',
+      wait: '[data-test-error]',
+      themes: ['light'],
+    },
+    // Keyboard: Tab into the list until a row action has focus.
+    {
+      name: 'env-focus',
+      path: '/apps/blog/env?scenario=healthy',
+      wait: ENV,
+      keys: tabs(18),
+      themes: ['light'],
+    },
+
+    // Domains
+    {
+      name: 'domains-active',
+      path: '/apps/blog/domains?scenario=healthy',
+      wait: DOMAIN,
+    },
+    {
+      name: 'domains-pending',
+      path: '/apps/blog/domains?scenario=warnings',
+      wait: PENDING,
+    },
+    {
+      name: 'domains-pending-phone',
+      path: '/apps/blog/domains?scenario=warnings',
+      wait: PENDING,
+      ...PHONE,
+    },
+    {
+      name: 'domains-empty',
+      path: '/apps/notes/domains?scenario=fresh',
+      wait: '[data-test-no-domains]',
+    },
+    {
+      name: 'domains-invalid',
+      path: '/apps/blog/domains?scenario=healthy',
+      wait: DOMAIN,
+      clicks: ['[data-test-domain-add]'],
+      themes: ['light'],
+    },
+    {
+      name: 'domains-delete',
+      path: '/apps/blog/domains?scenario=healthy',
+      wait: DOMAIN,
+      clicks: [
+        '[data-test-domain="www.example.org"] [data-test-domain-delete]',
+      ],
+      themes: ['light'],
+    },
+    {
+      name: 'domains-error',
+      path: '/apps/blog/domains?scenario=tab-error',
+      wait: '[data-test-error]',
+      themes: ['light'],
+    },
+  ];
+}
 
 // Backups tab.
 const SNAPSHOT = '[data-test-snapshot]';
@@ -783,10 +984,9 @@ async function capture(browser, shot, theme) {
     if (attempt > 100) throw new Error(`${shot.name}: ${shot.wait} not found`);
     await sleep(100);
   }
-  if (shot.click) {
-    await evaluate(
-      `document.querySelector(${JSON.stringify(shot.click)}).click()`,
-    );
+  for (const target of shot.clicks ?? (shot.click ? [shot.click] : [])) {
+    await evaluate(`document.querySelector(${JSON.stringify(target)}).click()`);
+    await sleep(100);
   }
   // `script` drives what a single click cannot (choosing an option, typing);
   // `then` is what has to be on screen before the capture.

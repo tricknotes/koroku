@@ -1,0 +1,11 @@
+/*
+ * <TabSection> is a pane (panes.css); this is the one thing it adds: the
+ * buttons or the link at the end of the title line.
+ */
+
+.tab-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
