@@ -14,6 +14,7 @@ import './styles/shell.css';
 import './styles/app-list.css';
 import './styles/tab-section.css';
 import './styles/overview.css';
+import './styles/env.css';
 import './styles/legacy.css';
 
 if (macroCondition(isDevelopingApp())) {
