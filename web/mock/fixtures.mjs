@@ -34,6 +34,8 @@ export const SCENARIOS = {
   'backups-down':
     'everything fine, but the backup status and the Docker disk usage cannot be read',
   'volumes-down': 'everything fine, but the volumes of an app cannot be listed',
+  'stale-login':
+    'everything fine, but the login is older than 10 minutes: secrets are hidden and dangerous operations ask to log in again',
 };
 
 function ago(ms) {

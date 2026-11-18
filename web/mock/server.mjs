@@ -214,7 +214,14 @@ route('GET', '/api/apps/:slug/services', (context) => ({
 
 route('GET', '/api/apps/:slug/env', (context) => {
   appOf(context);
-  return { vars: context.state.env?.get(context.params.slug) ?? ENV_VARS };
+  const vars = context.state.env?.get(context.params.slug) ?? ENV_VARS;
+  if (context.scenario === 'stale-login') {
+    return {
+      vars: vars.map(({ key }) => ({ key, value: null })),
+      values_hidden: true,
+    };
+  }
+  return { vars, values_hidden: false };
 });
 route('PUT', '/api/apps/:slug/env', (context) => {
   appOf(context);
@@ -460,16 +467,130 @@ async function readBody(request) {
   }
 }
 
+// Sessions and login history (ARCHITECTURE 10.3). Made-up documentation
+// addresses only.
+const CHROME_MAC =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const SAFARI_IPHONE =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1';
+const FIREFOX_LINUX =
+  'Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0';
+
+function ago(ms) {
+  return new Date(Date.now() - ms).toISOString();
+}
+
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+function sessionsOf(state) {
+  state.sessions ??= [
+    {
+      id: '9f2c41d07a1b3e55',
+      created_at: ago(3 * HOUR),
+      last_seen_at: ago(0),
+      expires_at: ago(3 * HOUR - 7 * DAY),
+      ip: '203.0.113.5',
+      user_agent: CHROME_MAC,
+      current: true,
+    },
+    {
+      id: 'aa00bb11cc22dd33',
+      created_at: ago(2 * DAY),
+      last_seen_at: ago(5 * HOUR),
+      expires_at: ago(2 * DAY - 7 * DAY),
+      ip: '198.51.100.7',
+      user_agent: SAFARI_IPHONE,
+      current: false,
+    },
+    {
+      id: '4e5f60718293a4b5',
+      created_at: ago(5 * DAY),
+      last_seen_at: ago(4 * DAY),
+      expires_at: ago(5 * DAY - 7 * DAY),
+      ip: '192.0.2.88',
+      user_agent: FIREFOX_LINUX,
+      current: false,
+    },
+  ];
+  return state.sessions;
+}
+
+route('GET', '/api/sessions', (context) => ({
+  sessions: sessionsOf(context.state),
+}));
+route('DELETE', '/api/sessions/:id', (context) => {
+  const sessions = sessionsOf(context.state);
+  if (!sessions.some((s) => s.id === context.params.id)) {
+    throw notFound('session_not_found');
+  }
+  context.state.sessions = sessions.filter((s) => s.id !== context.params.id);
+  return { status: 204 };
+});
+route('POST', '/api/sessions/revoke-others', (context) => {
+  const sessions = sessionsOf(context.state);
+  context.state.sessions = sessions.filter((s) => s.current);
+  return { revoked: sessions.length - context.state.sessions.length };
+});
+route('GET', '/api/login-events', () => ({
+  events: [
+    {
+      at: ago(3 * HOUR),
+      outcome: 'succeeded',
+      github_user_id: 1,
+      login: 'octo',
+      ip: '203.0.113.5',
+      user_agent: CHROME_MAC,
+    },
+    {
+      at: ago(26 * HOUR),
+      outcome: 'not_allowed',
+      github_user_id: 9001,
+      login: 'someone-else',
+      ip: '192.0.2.44',
+      user_agent: FIREFOX_LINUX,
+    },
+    {
+      at: ago(2 * DAY),
+      outcome: 'succeeded',
+      github_user_id: 1,
+      login: 'octo',
+      ip: '198.51.100.7',
+      user_agent: SAFARI_IPHONE,
+    },
+  ],
+}));
+
+/** What the API refuses without a recent login (ARCHITECTURE 10.3). */
+const NEEDS_RECENT_LOGIN = [
+  ['DELETE', /^\/api\/apps\/[^/]+$/],
+  ['PUT', /^\/api\/apps\/[^/]+\/env$/],
+  ['POST', /^\/api\/apps\/[^/]+\/backups\/restore$/],
+  ['GET', /^\/api\/apps\/[^/]+\/backups\/[^/]+\/download$/],
+];
+
 async function handleApi(request, response, url, scenario) {
   if (url.pathname === '/api/session') {
     const user = { id: 1, login: 'octo', avatar_url: '' };
+    const reauthUntil =
+      scenario === 'stale-login'
+        ? ago(3 * HOUR - 10 * 60 * 1000)
+        : new Date(Date.now() + 7 * 60 * 1000).toISOString();
     return sendJson(
       response,
       200,
       scenario === 'login'
         ? { authenticated: false }
-        : { authenticated: true, user },
+        : { authenticated: true, user, reauth_until: reauthUntil },
     );
+  }
+  if (
+    scenario === 'stale-login' &&
+    NEEDS_RECENT_LOGIN.some(
+      ([method, path]) => request.method === method && path.test(url.pathname),
+    )
+  ) {
+    throw new HttpError(403, 'reauth_required');
   }
   if (scenario === 'loading') {
     await new Promise((done) => setTimeout(done, SLOW));

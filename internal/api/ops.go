@@ -68,7 +68,7 @@ func (s *Server) handleAppOperation(op func(AppOperator, context.Context, store.
 
 func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.loadApp(w, r)
-	if !ok {
+	if !ok || !s.requireRecentAuth(w, r) {
 		return
 	}
 	removeVolumes := false

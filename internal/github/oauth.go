@@ -13,6 +13,10 @@ type User struct {
 	ID        int64
 	Login     string
 	AvatarURL string
+	// TwoFactor is whether the account has two-factor authentication
+	// enabled, or nil when GitHub did not say (the field is only part of
+	// the "private user" response).
+	TwoFactor *bool
 }
 
 // AuthorizeURL returns the address the browser is sent to in order to start
@@ -83,6 +87,7 @@ func (c *Client) User(ctx context.Context, userToken string) (User, error) {
 		ID        int64  `json:"id"`
 		Login     string `json:"login"`
 		AvatarURL string `json:"avatar_url"`
+		TwoFactor *bool  `json:"two_factor_authentication"`
 	}
 	_, err := c.do(ctx, call{
 		method: http.MethodGet,
@@ -95,5 +100,5 @@ func (c *Client) User(ctx context.Context, userToken string) (User, error) {
 	if resp.ID <= 0 {
 		return User{}, errors.New("github: get authenticated user: response has no user id")
 	}
-	return User{ID: resp.ID, Login: resp.Login, AvatarURL: resp.AvatarURL}, nil
+	return User{ID: resp.ID, Login: resp.Login, AvatarURL: resp.AvatarURL, TwoFactor: resp.TwoFactor}, nil
 }

@@ -827,6 +827,14 @@ input[type="radio"] {
   cursor: pointer;
 }
 
+.menu-item[href] {
+  text-decoration: none;
+}
+
+.menu-item[aria-current="page"] {
+  font-weight: 600;
+}
+
 .menu-item:hover {
   background: var(--color-bg-hover);
 }

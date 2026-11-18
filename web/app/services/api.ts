@@ -15,8 +15,11 @@ import type {
   DockerUsageItem,
   Domain,
   DomainList,
+  EnvList,
   EnvVar,
   LogArchive,
+  LoginEvent,
+  LoginSession,
   LogHistory,
   NewApp,
   Repo,
@@ -137,6 +140,9 @@ export default class ApiService extends Service {
       if (error instanceof ApiError && error.status === 401) {
         this.session.invalidate();
       }
+      if (error instanceof ApiError && error.code === 'reauth_required') {
+        this.session.promptReauth();
+      }
       throw error;
     }
   }
@@ -149,6 +155,29 @@ export default class ApiService extends Service {
 
   logout(): Promise<void> {
     return this.request('POST', '/auth/logout');
+  }
+
+  async listSessions(): Promise<LoginSession[]> {
+    const { sessions } = await this.request<{
+      sessions: LoginSession[] | null;
+    }>('GET', '/api/sessions');
+    return sessions ?? [];
+  }
+
+  deleteSession(id: string): Promise<void> {
+    return this.request('DELETE', `/api/sessions/${seg(id)}`);
+  }
+
+  revokeOtherSessions(): Promise<{ revoked: number }> {
+    return this.request('POST', '/api/sessions/revoke-others');
+  }
+
+  async listLoginEvents(): Promise<LoginEvent[]> {
+    const { events } = await this.request<{ events: LoginEvent[] | null }>(
+      'GET',
+      '/api/login-events',
+    );
+    return events ?? [];
   }
 
   // System
@@ -212,12 +241,16 @@ export default class ApiService extends Service {
 
   // Environment variables
 
-  async getEnv(slug: string): Promise<EnvVar[]> {
-    const { vars } = await this.request<{ vars: EnvVar[] | null }>(
-      'GET',
-      `/api/apps/${seg(slug)}/env`,
-    );
-    return vars ?? [];
+  /** Values come back as `null` without a recent login; they become ''. */
+  async getEnv(slug: string): Promise<EnvList> {
+    const { vars, values_hidden } = await this.request<{
+      vars: { key: string; value: string | null }[] | null;
+      values_hidden?: boolean;
+    }>('GET', `/api/apps/${seg(slug)}/env`);
+    return {
+      vars: (vars ?? []).map((v) => ({ key: v.key, value: v.value ?? '' })),
+      valuesHidden: values_hidden === true,
+    };
   }
 
   async putEnv(slug: string, vars: EnvVar[]): Promise<EnvVar[]> {

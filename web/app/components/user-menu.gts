@@ -2,6 +2,7 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { on } from '@ember/modifier';
 import { guidFor } from '@ember/object/internals';
+import { LinkTo } from '@ember/routing';
 import onDismiss, {
   type DismissReason,
 } from 'koroku-console/modifiers/on-dismiss';
@@ -14,6 +15,8 @@ interface UserMenuSignature {
     user: SessionUser;
     /** Disables "log out" while the request runs. */
     busy?: boolean;
+    /** The security page is the one on screen. */
+    current?: boolean;
     onLogout: () => unknown;
   };
 }
@@ -35,6 +38,10 @@ export default class UserMenu extends Component<UserMenuSignature> {
   toggle = (event: Event) => {
     this.trigger = event.currentTarget as HTMLButtonElement;
     this.open = !this.open;
+  };
+
+  close = () => {
+    this.open = false;
   };
 
   dismiss = (reason: DismissReason) => {
@@ -72,6 +79,13 @@ export default class UserMenu extends Component<UserMenuSignature> {
             <strong>{{@user.login}}</strong>
           </p>
           <hr class="menu-separator" />
+          <LinkTo
+            @route="security"
+            class="menu-item"
+            aria-current={{if @current "page"}}
+            data-test-menu-security
+            {{on "click" this.close}}
+          >セキュリティ</LinkTo>
           <button
             type="button"
             class="menu-item"

@@ -662,3 +662,33 @@ module('Acceptance | environment variables', function (hooks) {
     assert.dom('[data-test-env-key]').hasText('ONLY_ONE');
   });
 });
+
+module(
+  'Acceptance | environment variables without a recent login',
+  function (hooks) {
+    setupApplicationTest(hooks);
+
+    test('only the keys are listed and nothing can be edited', async function (assert) {
+      const fakes = installFakes(this.owner);
+      fakes.api.on('GET', '/api/apps/blog', makeApp()).on('GET', ENV, {
+        vars: [{ key: 'DATABASE_URL', value: null }],
+        values_hidden: true,
+      });
+
+      await visit('/apps/blog/env');
+
+      assert.dom('[data-test-env-hidden]').exists();
+      assert.dom('[data-test-env-key]').hasText('DATABASE_URL');
+      assert.dom('[data-test-env-reveal]').doesNotExist();
+      assert.dom('[data-test-env-edit]').doesNotExist();
+      assert.dom('[data-test-env-add]').doesNotExist();
+      assert.dom('[data-test-env-bulk]').doesNotExist();
+      assert.dom('[data-test-env-save]').doesNotExist();
+
+      await click('[data-test-env-reauth]');
+      assert.deepEqual(fakes.browser.assigned, [
+        '/auth/github/login?return_to=%2Fapps%2Fblog%2Fenv',
+      ]);
+    });
+  },
+);

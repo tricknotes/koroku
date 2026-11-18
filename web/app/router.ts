@@ -18,5 +18,6 @@ Router.map(function () {
     this.route('settings');
   });
   this.route('system');
+  this.route('security');
   this.route('not-found', { path: '/*path' });
 });

@@ -6,6 +6,7 @@ import type RouterService from '@ember/routing/router-service';
 import { pageTitle } from 'ember-page-title';
 import ErrorMessage from 'koroku-console/components/error-message';
 import Icon from 'koroku-console/components/icon';
+import ReauthDialog from 'koroku-console/components/reauth-dialog';
 import ThemeSwitch from 'koroku-console/components/theme-switch';
 import UserMenu from 'koroku-console/components/user-menu';
 import type SessionService from 'koroku-console/services/session';
@@ -38,6 +39,11 @@ export default class ApplicationTemplate extends Component {
 
   get systemCurrent(): 'page' | undefined {
     return this.section === 'system' ? 'page' : undefined;
+  }
+
+  /** The security page lives in the user menu, not the main navigation. */
+  get securityCurrent(): boolean {
+    return this.router.currentRouteName === 'security';
   }
 
   logout = async () => {
@@ -86,6 +92,7 @@ export default class ApplicationTemplate extends Component {
             {{#if this.session.user}}
               <UserMenu
                 @user={{this.session.user}}
+                @current={{this.securityCurrent}}
                 @busy={{this.loggingOut}}
                 @onLogout={{this.logout}}
               />
@@ -99,5 +106,7 @@ export default class ApplicationTemplate extends Component {
       <ErrorMessage @error={{this.logoutError}} />
       {{outlet}}
     </main>
+
+    <ReauthDialog />
   </template>
 }

@@ -434,6 +434,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
+	before := app
 	errs := in.apply(&app, s.cfg.Deploy.AllowFileRepos)
 	if in.Slug != nil && *in.Slug != app.Slug {
 		// The slug names the Compose project, its volumes and the hostname.
@@ -441,6 +442,9 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(errs) > 0 {
 		writeValidationError(w, errs)
+		return
+	}
+	if touchesSafeguards(before, app) && !s.requireRecentAuth(w, r) {
 		return
 	}
 	if err := s.store.UpdateApp(r.Context(), app, s.clock.Now()); err != nil {
@@ -458,6 +462,20 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, j)
+}
+
+// touchesSafeguards reports whether an update touches a setting that guards
+// the app: the environment (production asks for confirmation), the policy
+// check, or the repository the code comes from. Such changes need a recent
+// login (ARCHITECTURE 10.3).
+func touchesSafeguards(before, after store.App) bool {
+	sameRepoID := (before.RepoID == nil) == (after.RepoID == nil) &&
+		(before.RepoID == nil || *before.RepoID == *after.RepoID)
+	return before.Environment != after.Environment ||
+		before.RelaxPolicy != after.RelaxPolicy ||
+		before.RepoFullName != after.RepoFullName ||
+		before.RepoURL != after.RepoURL ||
+		!sameRepoID
 }
 
 // syncRoutes reloads the reverse proxy after a routing-relevant change. A

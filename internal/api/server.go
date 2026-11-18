@@ -128,6 +128,11 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 	})
 
+	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
+	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
+	mux.HandleFunc("POST /api/sessions/revoke-others", s.handleRevokeOtherSessions)
+	mux.HandleFunc("GET /api/login-events", s.handleLoginEvents)
+
 	mux.HandleFunc("GET /api/system", s.handleSystem)
 	mux.HandleFunc("GET /api/system/docker", s.handleDockerUsage)
 	mux.HandleFunc("POST /api/system/prune", s.handlePrune)

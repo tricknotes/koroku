@@ -94,6 +94,10 @@ type GitHub struct {
 	PrivateKeyFile string `toml:"private_key_file"`
 	// AllowedUserID is the numeric ID of the only GitHub user who may log in.
 	AllowedUserID int64 `toml:"allowed_user_id"`
+	// RequireTwoFactor refuses logins unless GitHub reports two-factor
+	// authentication as enabled for the user (ARCHITECTURE 10.3). On by
+	// default; turn it off only if GitHub does not report the status.
+	RequireTwoFactor bool `toml:"require_two_factor"`
 }
 
 // Configured reports whether a GitHub App is set up at all.
@@ -152,7 +156,7 @@ func Default() Config {
 		Listen:        "127.0.0.1:8080",
 		DataDir:       "/var/lib/koroku",
 		MasterKeyFile: "/etc/koroku/master.key",
-		GitHub:        GitHub{PrivateKeyFile: "/etc/koroku/github-app.pem"},
+		GitHub:        GitHub{PrivateKeyFile: "/etc/koroku/github-app.pem", RequireTwoFactor: true},
 		Timezone:      "Asia/Tokyo",
 		Storage:       Storage{Region: "auto"},
 		Logs:          Logs{RetentionDays: 14, ArchiveIntervalHours: 4},

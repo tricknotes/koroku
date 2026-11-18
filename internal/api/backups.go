@@ -163,7 +163,7 @@ func (s *Server) writeBackupError(w http.ResponseWriter, r *http.Request, err er
 
 func (s *Server) handleRestoreVolume(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.loadApp(w, r)
-	if !ok {
+	if !ok || !s.requireRecentAuth(w, r) {
 		return
 	}
 	backups, ok := s.backupService(w)
@@ -192,7 +192,7 @@ func (s *Server) handleRestoreVolume(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDownloadDump(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.loadApp(w, r)
-	if !ok {
+	if !ok || !s.requireRecentAuth(w, r) {
 		return
 	}
 	backups, ok := s.backupService(w)

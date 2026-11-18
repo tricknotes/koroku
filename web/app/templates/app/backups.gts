@@ -21,6 +21,7 @@ import StatusIndicator from 'koroku-console/components/status-indicator';
 import TimeUntil from 'koroku-console/components/time-until';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
+import type SessionService from 'koroku-console/services/session';
 import type AppContext from 'koroku-console/utils/app-context';
 import BackupForm, {
   parseList,
@@ -89,6 +90,7 @@ interface Signature {
 export default class AppBackupsTemplate extends Component<Signature> {
   @service declare api: ApiService;
   @service declare poller: PollerService;
+  @service declare session: SessionService;
 
   overview = new Loadable<BackupOverview>(() => this.api.getBackups());
   snapshots = new Loadable<Snapshot[]>(() => this.api.listSnapshots(this.slug));
@@ -225,6 +227,16 @@ export default class AppBackupsTemplate extends Component<Signature> {
 
   downloadUrl = (snapshot: Snapshot): string =>
     this.api.snapshotDownloadUrl(this.slug, snapshot.id);
+
+  /**
+   * A download is a plain link, so a `reauth_required` answer would land in
+   * a file. Ask for the new login before leaving instead.
+   */
+  checkDownload = (event: Event) => {
+    if (this.session.recentlyAuthenticated) return;
+    event.preventDefault();
+    this.session.promptReauth();
+  };
 
   runNow = async () => {
     if (this.starting || this.running) return;
@@ -514,6 +526,7 @@ export default class AppBackupsTemplate extends Component<Signature> {
                               download
                               aria-label={{downloadLabel snapshot}}
                               data-test-snapshot-download
+                              {{on "click" this.checkDownload}}
                             >ダウンロード</a>
                           {{/if}}
                         </div>

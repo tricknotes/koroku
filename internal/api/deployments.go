@@ -100,6 +100,9 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	if app.Environment == store.EnvironmentProduction && !s.requireRecentAuth(w, r) {
+		return
+	}
 	var in createDeploymentInput
 	if !decodeJSON(w, r, &in) {
 		return

@@ -23,10 +23,19 @@ const (
 	// Cookie names. Over HTTPS they carry the __Host- prefix (see cookieName).
 	sessionCookie = "koroku_session"
 	stateCookie   = "koroku_oauth_state"
+	returnCookie  = "koroku_oauth_return"
 	// SessionLifetime is how long a login lasts. The console has root-level
 	// power over the host, so sessions are short and do not slide.
 	SessionLifetime = 7 * 24 * time.Hour
 	stateLifetime   = 10 * time.Minute
+	// ReauthWindow is how long after a login dangerous operations are
+	// allowed without logging in again (ARCHITECTURE 10.3).
+	ReauthWindow = 10 * time.Minute
+	// touchInterval throttles last-seen updates: the console polls every
+	// few seconds and each update is a database write.
+	touchInterval = time.Minute
+	// maxUserAgent bounds what is stored per session and login event.
+	maxUserAgent = 512
 )
 
 // GitHub is the part of the GitHub App client the API uses.
@@ -55,6 +64,9 @@ type AuthOptions struct {
 	// InsecureNoAuth disables authentication and the Origin check. It is
 	// meant for local development and tests only.
 	InsecureNoAuth bool
+	// RequireTwoFactor refuses logins unless GitHub reports two-factor
+	// authentication as enabled for the user.
+	RequireTwoFactor bool
 }
 
 type sessionKey struct{}
@@ -68,6 +80,57 @@ func sessionFrom(r *http.Request) (store.Session, bool) {
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+// randomID returns a short random identifier that is safe to show.
+func randomID() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+// clientIP returns the address of the browser. koroku listens on loopback
+// behind Caddy, which replaces any X-Forwarded-For a client sends with the
+// address it sees (it trusts no proxies by default), so the header is
+// believed only on connections from loopback and only its last entry.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		if xff := r.Header.Values("X-Forwarded-For"); len(xff) > 0 {
+			parts := strings.Split(xff[len(xff)-1], ",")
+			if fwd := net.ParseIP(strings.TrimSpace(parts[len(parts)-1])); fwd != nil {
+				return fwd.String()
+			}
+		}
+	}
+	return host
+}
+
+// userAgent returns the User-Agent header, cut to a storable length.
+func userAgent(r *http.Request) string {
+	ua := r.UserAgent()
+	if len(ua) > maxUserAgent {
+		ua = strings.ToValidUTF8(ua[:maxUserAgent], "")
+	}
+	return ua
+}
+
+// safeReturnPath accepts only a path on the console itself, so the login
+// cannot be used to redirect to another site.
+func safeReturnPath(p string) string {
+	if !strings.HasPrefix(p, "/") || strings.HasPrefix(p, "//") || strings.ContainsAny(p, "\\\r\n") {
+		return "/"
+	}
+	u, err := url.Parse(p)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return "/"
+	}
+	return p
 }
 
 func randomToken() (string, error) {
@@ -131,7 +194,36 @@ func (s *Server) lookupSession(r *http.Request) (store.Session, bool) {
 	if sess.GitHubUserID != s.auth.AllowedUserID {
 		return store.Session{}, false
 	}
+	if now := s.clock.Now(); now.Sub(sess.LastSeenAt) >= touchInterval {
+		ip, ua := clientIP(r), userAgent(r)
+		if err := s.store.TouchSession(r.Context(), sess.TokenHash, now, ip, ua); err != nil {
+			s.log.Warn("recording session use failed", "error", err)
+		} else {
+			sess.LastSeenAt, sess.IP, sess.UserAgent = now, ip, ua
+		}
+	}
 	return sess, true
+}
+
+// recentlyAuthenticated reports whether the request's session was issued
+// within ReauthWindow. Without authentication there is nothing to repeat.
+func (s *Server) recentlyAuthenticated(r *http.Request) bool {
+	if s.auth.InsecureNoAuth {
+		return true
+	}
+	sess, ok := sessionFrom(r)
+	return ok && s.clock.Now().Sub(sess.CreatedAt) < ReauthWindow
+}
+
+// requireRecentAuth refuses a dangerous operation unless the user logged in
+// within ReauthWindow, so that a stolen session cookie alone cannot delete
+// apps, read secrets or turn off safeguards. It reports whether to go on.
+func (s *Server) requireRecentAuth(w http.ResponseWriter, r *http.Request) bool {
+	if s.recentlyAuthenticated(r) {
+		return true
+	}
+	writeError(w, http.StatusForbidden, "reauth_required", "log in again to do this")
+	return false
 }
 
 func isMutating(method string) bool {
@@ -250,6 +342,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"authenticated": true,
 			"user":          map[string]any{"id": 0, "login": "local", "avatar_url": ""},
+			"reauth_until":  nil,
 		})
 		return
 	}
@@ -261,6 +354,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
 		"user":          map[string]any{"id": sess.GitHubUserID, "login": sess.Login, "avatar_url": sess.AvatarURL},
+		"reauth_until":  sess.CreatedAt.Add(ReauthWindow),
 	})
 }
 
@@ -281,6 +375,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setCookie(w, stateCookie, state, stateLifetime)
+	if back := safeReturnPath(r.URL.Query().Get("return_to")); back != "/" {
+		s.setCookie(w, returnCookie, url.QueryEscape(back), stateLifetime)
+	} else {
+		s.clearCookie(w, returnCookie)
+	}
 	http.Redirect(w, r, s.auth.GitHub.AuthorizeURL(state, s.callbackURL()), http.StatusSeeOther)
 }
 
@@ -328,7 +427,18 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.auth.AllowedUserID == 0 || user.ID != s.auth.AllowedUserID {
 		s.log.Warn("login rejected: not the allowed user", "github_user_id", user.ID, "login", user.Login)
-		loginErrorRedirect(w, r, "not_allowed")
+		s.recordLogin(ctx, r, user, store.LoginNotAllowed)
+		loginErrorRedirect(w, r, store.LoginNotAllowed)
+		return
+	}
+	if s.auth.RequireTwoFactor && (user.TwoFactor == nil || !*user.TwoFactor) {
+		outcome := store.LoginTwoFactorRequired
+		if user.TwoFactor == nil {
+			outcome = store.LoginTwoFactorUnknown
+		}
+		s.log.Warn("login rejected: two-factor authentication not confirmed", "login", user.Login, "reason", outcome)
+		s.recordLogin(ctx, r, user, outcome)
+		loginErrorRedirect(w, r, outcome)
 		return
 	}
 
@@ -337,25 +447,64 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	sessionID, err := randomID()
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	now := s.clock.Now()
 	if err := s.store.DeleteExpiredSessions(ctx, now); err != nil {
 		s.log.Warn("removing expired sessions failed", "error", err)
 	}
+	// Logging in again (to confirm a dangerous operation) replaces the
+	// browser's session instead of piling up a new one each time.
+	if old, err := r.Cookie(s.cookieName(sessionCookie)); err == nil && old.Value != "" {
+		if err := s.store.DeleteSession(ctx, hashToken(old.Value)); err != nil {
+			s.log.Warn("removing the previous session failed", "error", err)
+		}
+	}
 	err = s.store.CreateSession(ctx, store.Session{
 		TokenHash:    hashToken(sessionToken),
+		ID:           sessionID,
 		GitHubUserID: user.ID,
 		Login:        user.Login,
 		AvatarURL:    user.AvatarURL,
 		CreatedAt:    now,
 		ExpiresAt:    now.Add(SessionLifetime),
+		IP:           clientIP(r),
+		UserAgent:    userAgent(r),
 	})
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
+	s.recordLogin(ctx, r, user, store.LoginSucceeded)
 	s.setCookie(w, sessionCookie, sessionToken, SessionLifetime)
 	s.log.Info("login succeeded", "login", user.Login)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	back := "/"
+	if c, err := r.Cookie(s.cookieName(returnCookie)); err == nil {
+		if p, err := url.QueryUnescape(c.Value); err == nil {
+			back = safeReturnPath(p)
+		}
+	}
+	s.clearCookie(w, returnCookie)
+	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// recordLogin adds a login attempt of a known GitHub user to the history.
+// A failure to record does not change the outcome of the login.
+func (s *Server) recordLogin(ctx context.Context, r *http.Request, user github.User, outcome string) {
+	err := s.store.AddLoginEvent(ctx, store.LoginEvent{
+		At:           s.clock.Now(),
+		Outcome:      outcome,
+		GitHubUserID: user.ID,
+		Login:        user.Login,
+		IP:           clientIP(r),
+		UserAgent:    userAgent(r),
+	})
+	if err != nil {
+		s.log.Warn("recording the login failed", "error", err)
+	}
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
