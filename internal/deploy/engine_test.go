@@ -1006,6 +1006,37 @@ func TestRouterFailureRollsBack(t *testing.T) {
 	}
 }
 
+// TestDeployLogStartsEmpty: when the database is recreated but the data
+// directory is kept, deployment IDs start over and a log file of an earlier
+// deployment with the same ID may still exist. Its lines must not appear in
+// the new deployment's log.
+func TestDeployLogStartsEmpty(t *testing.T) {
+	h := newHarness(t, nil)
+	h.createApp("blog")
+	h.start()
+
+	// The next deployment gets ID 1 in the fresh database.
+	stale := h.engine.LogPath("blog", 1)
+	if err := os.MkdirAll(filepath.Dir(stale), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("Policy violation: left over from an earlier database\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d := h.deploy("blog", shaA)
+	if d.ID != 1 || d.Status != store.StatusSucceeded {
+		t.Fatalf("deployment = %+v", d)
+	}
+	got := h.log("blog", d.ID)
+	if strings.Contains(got, "left over") {
+		t.Errorf("the log contains a stale line:\n%s", got)
+	}
+	if !strings.HasPrefix(got, "Queued deployment of "+shaA) {
+		t.Errorf("the log does not start with the queued line:\n%s", got)
+	}
+}
+
 func TestDeploySetsDesiredStateRunning(t *testing.T) {
 	h := newHarness(t, nil)
 	app := h.createApp("blog")
