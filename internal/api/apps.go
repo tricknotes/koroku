@@ -49,6 +49,8 @@ type appJSON struct {
 	DumpHookCommand      string            `json:"dump_hook_command"`
 	BackupBeforeDeploy   bool              `json:"backup_before_deploy"`
 	URL                  string            `json:"url"`
+	PrimaryURL           string            `json:"primary_url"`
+	PendingDomains       int               `json:"pending_domains"`
 	CurrentDeployment    *deploymentJSON   `json:"current_deployment"`
 	LatestDeployment     *deploymentJSON   `json:"latest_deployment"`
 	CreatedAt            time.Time         `json:"created_at"`
@@ -78,6 +80,21 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
 		CreatedAt:            app.CreatedAt,
 		UpdatedAt:            app.UpdatedAt,
+	}
+	// The primary URL and the number of domains waiting for DNS let the app
+	// list render without one domain request per app.
+	out.PrimaryURL = out.URL
+	domainList, err := s.store.ListDomains(r.Context(), app.ID)
+	if err != nil {
+		return appJSON{}, err
+	}
+	for _, d := range domainList {
+		switch {
+		case d.Status == store.DomainPending:
+			out.PendingDomains++
+		case d.IsPrimary:
+			out.PrimaryURL = "https://" + d.Hostname
+		}
 	}
 	if app.CurrentDeploymentID != nil {
 		d, err := s.store.GetDeployment(r.Context(), *app.CurrentDeploymentID)

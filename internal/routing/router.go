@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/tricknotes/koroku/internal/caddy"
 	"github.com/tricknotes/koroku/internal/store"
@@ -36,6 +37,36 @@ type Router struct {
 	mu     sync.Mutex
 	loaded bool
 	last   [sha256.Size]byte
+
+	statusMu     sync.Mutex
+	lastLoadedAt *time.Time
+	lastError    string
+}
+
+// Status describes the last attempt to load the configuration into Caddy.
+type Status struct {
+	// LastLoadedAt is when a load last succeeded; nil if none has yet.
+	LastLoadedAt *time.Time
+	// LastError explains the most recent attempt if it failed.
+	LastError string
+}
+
+// Status reports the outcome of the most recent sync.
+func (r *Router) Status() Status {
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
+	return Status{LastLoadedAt: r.lastLoadedAt, LastError: r.lastError}
+}
+
+func (r *Router) recordResult(err error) {
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
+	if err != nil {
+		r.lastError = err.Error()
+		return
+	}
+	now := time.Now().UTC()
+	r.lastLoadedAt, r.lastError = &now, ""
 }
 
 // Build renders the Caddy configuration for the current database content.
@@ -101,6 +132,7 @@ func (r *Router) sync(ctx context.Context, force bool) error {
 	defer r.mu.Unlock()
 	config, err := r.Build(ctx)
 	if err != nil {
+		r.recordResult(err)
 		return err
 	}
 	sum := sha256.Sum256(config)
@@ -110,8 +142,11 @@ func (r *Router) sync(ctx context.Context, force bool) error {
 	if err := r.Loader.Load(ctx, config); err != nil {
 		// Whatever Caddy holds now is unknown; load again next time.
 		r.loaded = false
-		return fmt.Errorf("load caddy config: %w", err)
+		err = fmt.Errorf("load caddy config: %w", err)
+		r.recordResult(err)
+		return err
 	}
+	r.recordResult(nil)
 	changed := !r.loaded || sum != r.last
 	r.loaded, r.last = true, sum
 	if r.Logger != nil && changed {

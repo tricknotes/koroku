@@ -328,13 +328,13 @@ func TestParseComposePS(t *testing.T) {
 `
 	want := []ServiceStatus{
 		{Name: "db", State: "exited", Status: "Exited (1) 3 minutes ago"},
-		{Name: "web", State: "running", Status: "Up 2 hours (healthy)", Health: "healthy"},
+		{Name: "web", State: "running", Status: "Up 2 hours (healthy)", Health: "healthy", container: "paas-blog-web-1"},
 	}
 	got, err := parseComposePS([]byte(lines))
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("JSON lines: %+v, %v", got, err)
 	}
-	array := `[{"Service":"web","State":"running","Status":"Up 2 hours (healthy)","Health":"healthy"},{"Service":"db","State":"exited","Status":"Exited (1) 3 minutes ago","Health":""}]`
+	array := `[{"Name":"paas-blog-web-1","Service":"web","State":"running","Status":"Up 2 hours (healthy)","Health":"healthy"},{"Service":"db","State":"exited","Status":"Exited (1) 3 minutes ago","Health":""}]`
 	got, err = parseComposePS([]byte(array))
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("JSON array: %+v, %v", got, err)
@@ -357,7 +357,17 @@ func TestServicesAndPrune(t *testing.T) {
 		joined := strings.Join(cmd.Args, " ")
 		switch {
 		case strings.HasSuffix(joined, "ps --all --format json"):
-			return `{"Service":"web","State":"running","Status":"Up 5 seconds","Health":""}` + "\n", nil
+			return `{"Name":"paas-blog-web-1","Service":"web","State":"running","Status":"Up 5 seconds","Health":""}` + "\n" +
+				`{"Name":"paas-blog-job-1","Service":"job","State":"exited","Status":"Exited (0)","Health":""}` + "\n", nil
+		case joined == "stats --no-stream --format json paas-blog-web-1":
+			return `{"Name":"paas-blog-web-1","MemUsage":"26.02MiB / 512MiB","CPUPerc":"0.00%"}` + "\n", nil
+		case joined == "system df --format json":
+			return `{"Active":"8","Reclaimable":"28.32GB (69%)","Size":"40.97GB","TotalCount":"68","Type":"Images"}
+{"Active":"3","Reclaimable":"8.998MB (99%)","Size":"8.998MB","TotalCount":"8","Type":"Containers"}
+{"Active":"6","Reclaimable":"0B (0%)","Size":"17.52GB","TotalCount":"59","Type":"Local Volumes"}
+{"Active":"0","Reclaimable":"41.52GB","Size":"65.75GB","TotalCount":"663","Type":"Build Cache"}
+{"Active":"0","Reclaimable":"1GB","Size":"1GB","TotalCount":"1","Type":"Something New"}
+`, nil
 		case joined == "image prune -f":
 			return "Total reclaimed space: 12MB\n", nil
 		case joined == "builder prune -f --filter until=168h":
@@ -366,8 +376,27 @@ func TestServicesAndPrune(t *testing.T) {
 		return "", errors.New("unexpected command: " + joined)
 	}
 	services, err := h.engine.Services(context.Background(), app)
-	if err != nil || len(services) != 1 || services[0].Name != "web" || services[0].State != "running" {
-		t.Errorf("Services = %+v, %v", services, err)
+	if err != nil || len(services) != 2 || services[1].Name != "web" || services[1].State != "running" {
+		t.Fatalf("Services = %+v, %v", services, err)
+	}
+	// Memory comes from docker stats, for running containers only.
+	web, job := services[1], services[0]
+	if web.MemoryBytes == nil || *web.MemoryBytes != 27283947 || web.MemoryLimitBytes == nil || *web.MemoryLimitBytes != 512<<20 {
+		t.Errorf("web memory = %v / %v", web.MemoryBytes, web.MemoryLimitBytes)
+	}
+	if job.MemoryBytes != nil || job.MemoryLimitBytes != nil {
+		t.Errorf("a stopped container has no memory figures: %+v", job)
+	}
+
+	usage, err := h.engine.DockerDiskUsage(context.Background())
+	wantUsage := []DiskUsageItem{
+		{Type: "images", TotalBytes: 40970000000, ReclaimableBytes: 28320000000, Count: 68},
+		{Type: "containers", TotalBytes: 8998000, ReclaimableBytes: 8998000, Count: 8},
+		{Type: "volumes", TotalBytes: 17520000000, ReclaimableBytes: 0, Count: 59},
+		{Type: "build_cache", TotalBytes: 65750000000, ReclaimableBytes: 41520000000, Count: 663},
+	}
+	if err != nil || !reflect.DeepEqual(usage, wantUsage) {
+		t.Errorf("DockerDiskUsage = %+v, %v", usage, err)
 	}
 
 	result, err := h.engine.Prune(context.Background(), true, true)
@@ -385,5 +414,18 @@ func TestServicesAndPrune(t *testing.T) {
 	}
 	if calls := h.runner.Calls(); len(calls) != 1 || strings.Join(calls[0].Args, " ") != "image prune -f" {
 		t.Errorf("calls = %v", calls)
+	}
+}
+
+func TestParseDockerSize(t *testing.T) {
+	cases := map[string]int64{
+		"0B": 0, "512B": 512, "1kB": 1000, "8.998MB": 8998000, "1.5GB": 1500000000,
+		"26.02MiB": 27283947, "7.413GiB": 7959648141, "2TiB": 2 << 40,
+		"": 0, "N/A": 0, "-1MB": 0, "12": 0, "  3MB ": 3000000,
+	}
+	for in, want := range cases {
+		if got := parseDockerSize(in); got != want {
+			t.Errorf("parseDockerSize(%q) = %d, want %d", in, got, want)
+		}
 	}
 }

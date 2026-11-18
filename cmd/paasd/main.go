@@ -233,6 +233,10 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		checker.Router = router
 		deployOpts.Router = router
 		apiOpts.Router = router
+		apiOpts.RouteStatus = func() api.RouteStatus {
+			status := router.Status()
+			return api.RouteStatus{LastLoadedAt: status.LastLoadedAt, LastError: status.LastError}
+		}
 	}
 	engine := deploy.New(deployOpts)
 	apiOpts.Deployer = engine
