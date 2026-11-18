@@ -204,6 +204,10 @@ func TestIntegrationVolumeBackupAndRestore(t *testing.T) {
 	if len(snaps) != 1 || snaps[0].Kind != KindVolume || snaps[0].Target != "uploads" || len(snaps[0].ID) != 8 {
 		t.Fatalf("snapshots after the first run = %+v", snaps)
 	}
+	// The size is what the files of the volume add up to.
+	if want := int64(len("<h1>blog</h1>") + len("first post")); snaps[0].Size != want {
+		t.Errorf("snapshot size = %d, want %d", snaps[0].Size, want)
+	}
 	if other := s.snapshots(App{Slug: "shop", Project: "paas-shop"}); len(other) != 0 {
 		t.Errorf("an app without volumes has snapshots: %+v", other)
 	}
@@ -302,8 +306,8 @@ func TestIntegrationDumpRoundTrip(t *testing.T) {
 		t.Fatalf("BackupApp: %v (%+v)", err, res)
 	}
 	snaps := s.snapshots(app)
-	if len(snaps) != 1 || snaps[0].Kind != KindDump || snaps[0].Target != "db" {
-		t.Fatalf("snapshots = %+v", snaps)
+	if len(snaps) != 1 || snaps[0].Kind != KindDump || snaps[0].Target != "db" || snaps[0].Size != int64(len(dump)) {
+		t.Fatalf("snapshots = %+v, want one dump of %d bytes", snaps, len(dump))
 	}
 	if !strings.HasPrefix(res.Targets[0].SnapshotID, snaps[0].ID) {
 		t.Errorf("reported snapshot %s, listed %s", res.Targets[0].SnapshotID, snaps[0].ID)

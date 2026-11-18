@@ -337,6 +337,10 @@ type Snapshot struct {
 	Kind Kind      `json:"kind"`
 	// Target is the volume name or the dump hook service.
 	Target string `json:"target"`
+	// Size is the number of bytes the backup read: the size of the volume's
+	// files or of the dump, before deduplication and compression. It is 0
+	// when restic did not record it.
+	Size int64 `json:"size"`
 }
 
 // record is a snapshot as restic reports it.
@@ -346,6 +350,12 @@ type record struct {
 	Time    time.Time `json:"time"`
 	Paths   []string  `json:"paths"`
 	Tags    []string  `json:"tags"`
+	// Summary is written by restic 0.17 and newer.
+	Summary *recordSummary `json:"summary,omitempty"`
+}
+
+type recordSummary struct {
+	Bytes int64 `json:"total_bytes_processed"`
 }
 
 func (r record) tag(prefix string) string {
@@ -374,7 +384,11 @@ func (r record) snapshot() Snapshot {
 	if id == "" && len(r.ID) >= 8 {
 		id = r.ID[:8]
 	}
-	return Snapshot{ID: id, Time: r.Time.UTC(), Kind: r.kind(), Target: r.target()}
+	s := Snapshot{ID: id, Time: r.Time.UTC(), Kind: r.kind(), Target: r.target()}
+	if r.Summary != nil {
+		s.Size = r.Summary.Bytes
+	}
+	return s
 }
 
 // records lists the snapshots carrying tag, newest first. A repository that

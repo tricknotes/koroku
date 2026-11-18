@@ -259,6 +259,7 @@ func TestSnapshotsListsNewestFirst(t *testing.T) {
 	older := e.host.addRecord(day(16), "/data", "app:blog", "kind:volume", "target:uploads")
 	newest := e.host.addRecord(day(18), "/blog-db.dump", "app:blog", "kind:dump", "target:db")
 	middle := e.host.addRecord(day(17), "/data", "app:blog", "kind:volume", "target:uploads")
+	e.host.records[len(e.host.records)-1].Summary = &recordSummary{Bytes: 4096}
 	e.host.addRecord(day(18), "/data", "app:blog", "kind:other")               // no target, unknown kind
 	e.host.addRecord(day(18), "/data", "app:blog2", "kind:volume", "target:x") // another app with a similar slug
 	e.host.addRecord(day(18), "/stage", "system", "kind:system")
@@ -269,7 +270,7 @@ func TestSnapshotsListsNewestFirst(t *testing.T) {
 	}
 	want := []Snapshot{
 		{ID: newest.ShortID, Time: day(18), Kind: KindDump, Target: "db"},
-		{ID: middle.ShortID, Time: day(17), Kind: KindVolume, Target: "uploads"},
+		{ID: middle.ShortID, Time: day(17), Kind: KindVolume, Target: "uploads", Size: 4096},
 		{ID: older.ShortID, Time: day(16), Kind: KindVolume, Target: "uploads"},
 	}
 	if len(got) != len(want) {
