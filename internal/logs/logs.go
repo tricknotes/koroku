@@ -96,7 +96,7 @@ type Options struct {
 	// Default 16 KiB, at most MaxLineBytesLimit.
 	MaxLineBytes int
 	// SubscriberBuffer is the channel capacity of a live subscriber.
-	// Default 256.
+	// Default 1024: a burst larger than that outruns the subscriber.
 	SubscriberBuffer int
 
 	// ReconcileInterval is how often Apps is consulted. Default 15s.
@@ -164,7 +164,7 @@ func New(opts Options) (*Collector, error) {
 		log:              opts.Logger,
 		retentionDays:    orDefault(opts.RetentionDays, 14),
 		maxLine:          orDefault(opts.MaxLineBytes, 16<<10),
-		subscriberBuffer: orDefault(opts.SubscriberBuffer, 256),
+		subscriberBuffer: orDefault(opts.SubscriberBuffer, 1024),
 		reconcileEvery:   orDefault(opts.ReconcileInterval, 15*time.Second),
 		restartDelay:     orDefault(opts.RestartDelay, 2*time.Second),
 		maxRestartDelay:  orDefault(opts.MaxRestartDelay, 15*time.Second),
