@@ -27,9 +27,8 @@ Set `PAASD_URL` to proxy to a different paasd address.
   and follows `color-scheme`. By default that is the OS setting; the theme
   switch in the top bar pins `light` or `dark` with `data-theme` on `<html>`
   and remembers it in `localStorage` (`app/services/theme.ts`).
-- The stylesheets are imported from `app/app.ts` in cascade order.
-  `legacy.css` restyles the screens that are not redesigned yet and shrinks as
-  they move to the shared components.
+- The stylesheets are imported from `app/app.ts` in cascade order: tokens,
+  base, shared components, shell, then one file per screen.
 - Shared components live in `app/components/`: `button`, `badge`,
   `environment-badge`, `status-indicator`, `icon`, `row-list`, `tabs`,
   `form-field`, `confirm-dialog`, `banner`, `empty-state`, `relative-time`,
@@ -96,3 +95,23 @@ bin/dev sh -c 'cd web && pnpm build && node mock/screenshots.mjs'
 
 The image has Noto Sans CJK for Japanese text; a real browser uses the system
 fonts named in `--font-sans`.
+
+### Log screen
+
+The log tab (`/apps/<slug>/logs`) keeps its filters in the URL, which is also
+how the mock and the screenshots reach its states:
+
+| Query                         | Shows                                                                        |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| (none)                        | the live tail: the newest lines, followed as they arrive                     |
+| `period=15m\|1h\|24h\|7d`     | a search over what the host keeps (14 days), for a span ending now           |
+| `period=custom&from=...&to=…` | a search over a range; `from` / `to` are `datetime-local` values read as JST |
+| `period=archive`              | the archive list (object storage), for what is older than the host keeps     |
+| `service=web`, `q=error`      | one service (`_access` is the access log of the reverse proxy); a keyword    |
+
+`mock/logs.mjs` generates the log as a function of time, so the tail, a search
+and its next page agree with each other. It adds scenarios that change only the
+log endpoints: `logs-empty` (nothing logged, nothing archived), `logs-error`
+(the log endpoints answer 500), `logs-loading` (searches take a minute) and
+`logs-no-storage` (object storage is not configured). Example:
+`/apps/blog/logs?scenario=logs-no-storage&period=archive`.

@@ -378,6 +378,19 @@
   margin-top: var(--space-3);
 }
 
+/* Feature unavailable: stands in for a part the server cannot offer. */
+
+.placeholder {
+  padding: var(--space-8) var(--space-4);
+  border: 1px dashed var(--color-border-hover);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.placeholder-title {
+  font-weight: var(--weight-semibold);
+}
+
 /* Tabs */
 
 .tabs {

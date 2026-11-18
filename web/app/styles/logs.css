@@ -1,0 +1,582 @@
+/*
+ * Log screen: a toolbar, the monospace log list with the detail of the
+ * selected row docked under it, a status line, and the archive list.
+ */
+
+/*
+ * Full-size layout. This is the one tab that uses the whole window below
+ * the app header and the tabs: on its route the app detail makes
+ * `.app-detail-body` a column that fills the rest of the window (see
+ * app-detail.css), and the log screen takes all of it as one panel.
+ */
+
+.logs-page {
+  /* Space between the panel's edge and what is inside it. */
+  --logs-gutter: var(--space-4);
+
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 16rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+/* Toolbar */
+
+.logs-toolbar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  padding: var(--space-2) var(--logs-gutter);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.logs-filters {
+  display: flex;
+  flex: 1 1 28rem;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.logs-filters > .logs-select {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 16rem;
+}
+
+.logs-filters > .logs-keyword {
+  flex: 1 1 12rem;
+  width: auto;
+  max-width: 24rem;
+}
+
+.logs-toggles {
+  display: flex;
+  flex: none;
+  gap: var(--space-3);
+  align-items: center;
+  margin-left: auto;
+}
+
+.logs-range {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  font-size: var(--text-sm);
+}
+
+.logs-range-field {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.logs-range-field > label {
+  flex: none;
+  color: var(--color-text-secondary);
+}
+
+.logs-range-field > input {
+  width: auto;
+}
+
+.logs-range-field > input.is-invalid {
+  border-color: var(--color-failed);
+}
+
+.logs-range-note {
+  color: var(--color-text-secondary);
+}
+
+/* A button that reads as a link inside a sentence. */
+.logs-link {
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+/* Switch (toggle-switch component) */
+
+.switch {
+  display: inline-flex;
+  flex: none;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: var(--control-height);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.switch-track {
+  position: relative;
+  flex: none;
+  width: 1.75rem;
+  height: 1rem;
+  border-radius: var(--radius-full);
+  background: var(--color-border-strong);
+  transition: background-color var(--duration-fast);
+}
+
+.switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: var(--radius-full);
+  background: var(--color-bg);
+  transition: transform var(--duration-fast);
+}
+
+.switch[aria-checked="true"] > .switch-track {
+  background: var(--color-solid);
+}
+
+.switch[aria-checked="true"] .switch-knob {
+  transform: translateX(0.75rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch-track,
+  .switch-knob {
+    transition: none;
+  }
+}
+
+/* Body: the list (or what stands in for it) above the detail. */
+
+.logs-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.logs-body > .banner {
+  flex: none;
+  margin: var(--space-3) var(--logs-gutter);
+}
+
+.logs-placeholder {
+  display: flex;
+  flex: 1;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: var(--space-8) var(--space-4);
+  color: var(--color-text-secondary);
+}
+
+.logs-empty {
+  flex: 1;
+  justify-content: center;
+}
+
+/* Log list */
+
+.log-stream {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.log-viewport {
+  /* Time column: `11/18 12:34:56` and the space that follows it. */
+  --log-time-width: 15ch;
+  --log-indent: calc(var(--log-time-width) + 1ch);
+
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-2) 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.log-viewport:focus-visible {
+  outline-offset: calc(var(--focus-ring-width) * -1);
+}
+
+.log-stream.has-service > .log-viewport {
+  --log-indent: calc(
+    var(--log-time-width) + var(--log-service-width, 8ch) + 3ch
+  );
+}
+
+.log-rows {
+  min-width: 100%;
+}
+
+/* Without wrapping every row is as wide as the longest one. */
+.log-stream:not(.is-wrapped) .log-rows {
+  width: max-content;
+}
+
+/*
+ * A row is plain inline text (time, service, message) with a hanging
+ * indent, so wrapped lines start under the message and a selection copies
+ * as one line per row.
+ */
+.log-row {
+  padding: 1px var(--logs-gutter) 1px
+    calc(var(--logs-gutter) + var(--log-indent));
+  text-indent: calc(var(--log-indent) * -1);
+  cursor: pointer;
+}
+
+.log-row:hover {
+  background: var(--color-bg-hover);
+}
+
+.log-row[aria-selected="true"] {
+  background: var(--color-accent-bg);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.log-time,
+.log-service {
+  display: inline-block;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  text-indent: 0;
+  text-overflow: ellipsis;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.log-time {
+  width: var(--log-time-width);
+}
+
+.log-service {
+  width: calc(var(--log-service-width, 8ch) + 1ch);
+}
+
+.log-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.log-stream:not(.is-wrapped) .log-text {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.log-match {
+  background: var(--color-pending-bg);
+  box-shadow: inset 0 -1px 0 var(--color-pending);
+  color: var(--color-text);
+}
+
+/* The way back to the newest row, floating over the end of the list. */
+.log-resume {
+  position: absolute;
+  bottom: var(--space-4);
+  left: 50%;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-md);
+  transform: translateX(-50%);
+}
+
+.log-resume-count {
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Detail of the selected row */
+
+.log-detail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  max-height: 45%;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+}
+
+.log-detail-header {
+  display: flex;
+  flex: none;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--logs-gutter) 0;
+}
+
+.log-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-6);
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.log-detail-meta > div {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.log-detail-meta dt {
+  color: var(--color-text-secondary);
+}
+
+.log-detail-meta dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.log-detail-actions {
+  display: flex;
+  flex: none;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.log-detail-text {
+  min-height: 3rem;
+  margin: 0;
+  padding: var(--space-2) var(--logs-gutter) var(--space-4);
+  overflow: auto;
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.log-detail-text:focus-visible {
+  outline-offset: calc(var(--focus-ring-width) * -1);
+}
+
+/* Status line */
+
+.logs-status {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  align-items: center;
+  min-height: 2.25rem;
+  padding: var(--space-1) var(--logs-gutter);
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.logs-state {
+  display: inline-flex;
+  gap: 0.4em;
+  align-items: center;
+}
+
+.is-receiving > .icon {
+  color: var(--color-running);
+}
+
+.logs-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.logs-truncated {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  margin-left: auto;
+  color: var(--color-text);
+}
+
+.logs-truncated-text {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.logs-truncated-text > .icon {
+  margin-top: 0.15em;
+  color: var(--color-deploying);
+  font-size: var(--text-base);
+}
+
+/* Archive list */
+
+.log-archives {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-5) var(--logs-gutter) var(--space-8);
+  overflow: auto;
+}
+
+.log-archives-inner {
+  max-width: var(--content-width);
+  margin: 0 auto;
+}
+
+.log-archives-inner > .banner {
+  margin-top: 0;
+}
+
+.log-archives-lead {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-secondary);
+}
+
+.log-archives-table td {
+  vertical-align: middle;
+}
+
+.log-archives-table .log-archives-size {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.log-archives-service {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.log-archives-more {
+  margin: var(--space-4) 0 0;
+  text-align: center;
+}
+
+@media (width <= 40rem) {
+  .logs-page {
+    --logs-gutter: var(--space-3);
+  }
+
+  .logs-filters > .logs-select {
+    flex: 1 1 8rem;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .logs-filters > .logs-keyword {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .logs-toggles {
+    margin-left: 0;
+  }
+
+  .logs-range-field {
+    flex: 1 1 100%;
+  }
+
+  .logs-range-field > input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* The message gets the whole width, under the time and the service. */
+  .log-row {
+    padding: var(--space-1) var(--logs-gutter);
+    text-indent: 0;
+  }
+
+  .log-text {
+    display: block;
+  }
+
+  .logs-truncated {
+    margin-left: 0;
+  }
+
+  .log-archives {
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-6);
+  }
+
+  /*
+   * Four columns do not fit: each archive becomes a small block (time
+   * above service and size, the button beside them) and the column
+   * headings, which no longer line up with anything, are hidden.
+   */
+  .log-archives-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .log-archives-table,
+  .log-archives-table tbody {
+    display: block;
+  }
+
+  .log-archives-table tbody tr {
+    display: grid;
+    grid-template-areas:
+      "time time action"
+      "service size action";
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 0 var(--space-3);
+    align-items: center;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .log-archives-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .log-archives-table tbody td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+
+  .log-archives-table .log-archives-time {
+    grid-area: time;
+  }
+
+  .log-archives-table .log-archives-service {
+    grid-area: service;
+    color: var(--color-text-secondary);
+  }
+
+  .log-archives-table .log-archives-size {
+    grid-area: size;
+    color: var(--color-text-secondary);
+    text-align: left;
+  }
+
+  .log-archives-table .table-actions {
+    grid-area: action;
+  }
+}
