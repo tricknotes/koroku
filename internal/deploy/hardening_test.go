@@ -77,7 +77,9 @@ func TestRollbackRevalidatesThePreviousRelease(t *testing.T) {
 	h.onCompose = func(_ context.Context, sub string, _ runner.Cmd) error {
 		if sub == "up" {
 			upCalls++
-			go h.tamper()
+			// The hook runs without the harness lock held, so this is
+			// safe, and it must be done before the rollback's check runs.
+			h.tamper()
 			return &runner.ExitError{Cmd: "docker", Code: 1}
 		}
 		return nil
