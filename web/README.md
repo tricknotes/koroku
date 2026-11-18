@@ -66,6 +66,18 @@ in the UI (deploying, adding a domain, ...) are kept in memory until the mock
 restarts or `/__mock/reset` is opened. `MOCK_PORT` changes the port and
 `MOCK_SCENARIO` the default scenario.
 
+Three more scenarios exist for the tabs of the app detail (overview,
+environment variables, domains):
+
+- `fresh`: one app, `notes`, that was never deployed. It has no variables and
+  no custom domains, and backups are not configured (the empty states).
+- `tab-error`: apps load, but everything a tab asks for fails with 500.
+- `tab-loading`: apps load, but everything a tab asks for takes a minute.
+
+In `warnings`, the app `shop` has services in trouble (a failing health check
+close to its memory limit, a crashed worker) and `blog` a domain that is still
+waiting for its DNS record.
+
 `mock/screenshots.mjs` takes the reference screenshots with the headless
 Chromium of the development image (light and dark, desktop and 390px wide,
 the empty / error / loading states, keyboard focus) and writes them to

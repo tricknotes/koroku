@@ -19,7 +19,11 @@ export const SCENARIOS = {
   warnings:
     'a deployment in progress, a failed one, a stopped app, a pending domain, disk above the limit, stale backup',
   empty: 'no apps yet',
+  fresh:
+    'one app that was never deployed: no variables, no custom domains, backups not configured',
   error: 'every API call fails with 500',
+  'tab-error': 'apps load, everything a tab asks for fails with 500',
+  'tab-loading': 'apps load, everything a tab asks for takes a minute',
   loading: 'API calls take a minute to answer',
   login: 'not logged in',
 };
@@ -174,13 +178,16 @@ function scenario(apps, extra = {}) {
     const list = [];
     if (latest && latest !== current) list.push(latest);
     if (current) list.push(current);
-    list.push(
-      ...history(
-        slug,
-        ['Update dependencies', 'Tidy up the footer', 'Initial import'],
-        4 * DAY,
-      ),
-    );
+    // An app that was never deployed has no history either.
+    if (list.length > 0) {
+      list.push(
+        ...history(
+          slug,
+          ['Update dependencies', 'Tidy up the footer', 'Initial import'],
+          4 * DAY,
+        ),
+      );
+    }
     state.deployments.set(slug, list);
   }
   return state;
@@ -295,6 +302,7 @@ export function buildScenario(name) {
   switch (name) {
     case 'warnings':
       return scenario(warningApps(), {
+        services: new Map([['shop', troubledServices()]]),
         system: system({
           disk: {
             total_bytes: 100 * GB,
@@ -323,6 +331,19 @@ export function buildScenario(name) {
       });
     case 'empty':
       return scenario([]);
+    case 'fresh':
+      return scenario(
+        [{ app: app('notes', { created_at: ago(5 * MINUTE) }) }],
+        {
+          env: new Map([['notes', []]]),
+          backups: backups({
+            configured: false,
+            last_success_at: null,
+            next_run_at: null,
+            runs: [],
+          }),
+        },
+      );
     default:
       return scenario(healthyApps());
   }
@@ -439,6 +460,47 @@ export function services(target) {
       health: '',
       memory_bytes: 0.18 * GB,
       memory_limit_bytes: 0.5 * GB,
+    },
+  ];
+}
+
+/**
+ * Services with something wrong: a failing health check close to the memory
+ * limit, a worker that crashed and a one-shot job that ended normally.
+ */
+function troubledServices() {
+  return [
+    {
+      name: 'web',
+      state: 'running',
+      status: 'Up 2 days (unhealthy)',
+      health: 'unhealthy',
+      memory_bytes: 0.47 * GB,
+      memory_limit_bytes: 0.5 * GB,
+    },
+    {
+      name: 'db',
+      state: 'running',
+      status: 'Up 2 days (healthy)',
+      health: 'healthy',
+      memory_bytes: 0.42 * GB,
+      memory_limit_bytes: 1 * GB,
+    },
+    {
+      name: 'worker',
+      state: 'exited',
+      status: 'Exited (137) 4 minutes ago',
+      health: '',
+      memory_bytes: null,
+      memory_limit_bytes: null,
+    },
+    {
+      name: 'migrate',
+      state: 'exited',
+      status: 'Exited (0) 2 days ago',
+      health: '',
+      memory_bytes: null,
+      memory_limit_bytes: null,
     },
   ];
 }
