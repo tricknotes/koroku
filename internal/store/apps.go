@@ -48,9 +48,14 @@ type App struct {
 	RelaxPolicy         bool
 	MemoryLimit         string
 	ServiceMemoryLimits map[string]string
-	CurrentDeploymentID *int64
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	// Backup settings (ARCHITECTURE 10.2).
+	BackupExcludeVolumes []string
+	DumpHookService      string
+	DumpHookCommand      string
+	BackupBeforeDeploy   bool
+	CurrentDeploymentID  *int64
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // CloneURL is the URL git fetches from.
@@ -70,7 +75,8 @@ func (a App) ProjectName() string { return "paas-" + a.Slug }
 
 const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 	web_service, web_port, host_port, healthcheck_path, desired_state, environment,
-	relax_policy, memory_limit, service_memory_limits, current_deployment_id, created_at, updated_at`
+	relax_policy, memory_limit, service_memory_limits, current_deployment_id, created_at, updated_at,
+	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -78,16 +84,18 @@ type rowScanner interface {
 
 func scanApp(row rowScanner) (App, error) {
 	var (
-		a          App
-		repoID     sql.NullInt64
-		currentID  sql.NullInt64
-		limitsJSON string
-		created    int64
-		updated    int64
+		a           App
+		repoID      sql.NullInt64
+		currentID   sql.NullInt64
+		limitsJSON  string
+		excludeJSON string
+		created     int64
+		updated     int64
 	)
 	err := row.Scan(&a.ID, &a.Slug, &repoID, &a.RepoFullName, &a.RepoURL, &a.DefaultBranch, &a.ComposePath,
 		&a.WebService, &a.WebPort, &a.HostPort, &a.HealthcheckPath, &a.DesiredState, &a.Environment,
-		&a.RelaxPolicy, &a.MemoryLimit, &limitsJSON, &currentID, &created, &updated)
+		&a.RelaxPolicy, &a.MemoryLimit, &limitsJSON, &currentID, &created, &updated,
+		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -106,9 +114,26 @@ func scanApp(row rowScanner) (App, error) {
 			return App{}, fmt.Errorf("decode service_memory_limits of app %s: %w", a.Slug, err)
 		}
 	}
+	a.BackupExcludeVolumes = []string{}
+	if excludeJSON != "" {
+		if err := json.Unmarshal([]byte(excludeJSON), &a.BackupExcludeVolumes); err != nil {
+			return App{}, fmt.Errorf("decode backup_exclude_volumes of app %s: %w", a.Slug, err)
+		}
+	}
 	a.CreatedAt = fromMillis(created)
 	a.UpdatedAt = fromMillis(updated)
 	return a, nil
+}
+
+func encodeStrings(values []string) (string, error) {
+	if values == nil {
+		values = []string{}
+	}
+	b, err := json.Marshal(values)
+	if err != nil {
+		return "", fmt.Errorf("encode string list: %w", err)
+	}
+	return string(b), nil
 }
 
 func encodeLimits(limits map[string]string) (string, error) {
@@ -133,6 +158,10 @@ func nullInt(v *int64) sql.NullInt64 {
 // [portStart, portEnd]. ID, HostPort and timestamps of the argument are ignored.
 func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, now time.Time) (App, error) {
 	limits, err := encodeLimits(app.ServiceMemoryLimits)
+	if err != nil {
+		return App{}, err
+	}
+	exclude, err := encodeStrings(app.BackupExcludeVolumes)
 	if err != nil {
 		return App{}, err
 	}
@@ -163,11 +192,13 @@ func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, 
 	res, err := tx.ExecContext(ctx, `INSERT INTO apps (
 			slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 			web_service, web_port, host_port, healthcheck_path, desired_state, environment,
-			relax_policy, memory_limit, service_memory_limits, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			relax_policy, memory_limit, service_memory_limits, created_at, updated_at,
+			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
-		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now))
+		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now),
+		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -253,14 +284,20 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	exclude, err := encodeStrings(app.BackupExcludeVolumes)
+	if err != nil {
+		return err
+	}
 	res, err := s.db.ExecContext(ctx, `UPDATE apps SET
 			repo_id = ?, repo_full_name = ?, repo_url = ?, default_branch = ?, compose_path = ?,
 			web_service = ?, web_port = ?, healthcheck_path = ?, environment = ?,
-			relax_policy = ?, memory_limit = ?, service_memory_limits = ?, updated_at = ?
+			relax_policy = ?, memory_limit = ?, service_memory_limits = ?, updated_at = ?,
+			backup_exclude_volumes = ?, dump_hook_service = ?, dump_hook_command = ?, backup_before_deploy = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
-		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), app.ID)
+		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now),
+		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}

@@ -42,6 +42,8 @@ type Options struct {
 	Domains DomainChecker
 	// Auth configures login and request protection.
 	Auth AuthOptions
+	// Ops runs start/stop/restart/delete and host cleanup.
+	Ops AppOperator
 }
 
 // Server routes HTTP requests.
@@ -60,6 +62,7 @@ type Server struct {
 	router   Router
 	domains  DomainChecker
 	auth     AuthOptions
+	ops      AppOperator
 }
 
 // New builds a Server.
@@ -86,6 +89,7 @@ func New(opts Options) *Server {
 		router:   opts.Router,
 		domains:  opts.Domains,
 		auth:     opts.Auth,
+		ops:      opts.Ops,
 	}
 }
 
@@ -101,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	mux.HandleFunc("GET /api/system", s.handleSystem)
+	mux.HandleFunc("POST /api/system/prune", s.handlePrune)
 
 	mux.HandleFunc("GET /api/repos", s.handleListRepos)
 	mux.HandleFunc("GET /api/repos/{owner}/{repo}/branches", s.handleListBranches)
@@ -111,6 +116,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/apps", s.handleCreateApp)
 	mux.HandleFunc("GET /api/apps/{slug}", s.handleGetApp)
 	mux.HandleFunc("PATCH /api/apps/{slug}", s.handleUpdateApp)
+	mux.HandleFunc("DELETE /api/apps/{slug}", s.handleDeleteApp)
+	mux.HandleFunc("POST /api/apps/{slug}/start", s.handleAppOperation(AppOperator.Start))
+	mux.HandleFunc("POST /api/apps/{slug}/stop", s.handleAppOperation(AppOperator.Stop))
+	mux.HandleFunc("POST /api/apps/{slug}/restart", s.handleAppOperation(AppOperator.Restart))
+	mux.HandleFunc("GET /api/apps/{slug}/services", s.handleListServices)
 	mux.HandleFunc("GET /api/apps/{slug}/env", s.handleGetEnv)
 	mux.HandleFunc("PUT /api/apps/{slug}/env", s.handlePutEnv)
 	mux.HandleFunc("GET /api/apps/{slug}/deployments", s.handleListDeployments)

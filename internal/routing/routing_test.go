@@ -354,6 +354,30 @@ func (cancelingResolver) LookupIPAddr(ctx context.Context, _ string) ([]net.IPAd
 	return nil, ctx.Err()
 }
 
+func TestRunReloadsRoutesEvenWhenUnchanged(t *testing.T) {
+	st := newStore(t)
+	loader := &fakeLoader{}
+	checker := newChecker(st, fakeResolver{}, newRouter(st, loader))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		checker.Run(ctx, 5*time.Millisecond)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && loader.count() < 3 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	// Nothing changed in the database, yet the configuration is sent again:
+	// that is what brings routes back after Caddy restarted on its own.
+	if loader.count() < 3 {
+		t.Errorf("loads = %d, want repeated loads", loader.count())
+	}
+}
+
 func TestRunChecksPeriodically(t *testing.T) {
 	st := newStore(t)
 	app := createApp(t, st, "blog")

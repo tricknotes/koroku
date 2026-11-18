@@ -45,11 +45,13 @@ func newTestServer(t *testing.T, mutate func(*Options)) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fake := &fakeDeployer{store: st, logDir: t.TempDir()}
 	opts := Options{
 		Auth:     AuthOptions{InsecureNoAuth: true},
 		Clock:    clock.NewFake(time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC)),
 		Box:      box,
-		Deployer: &fakeDeployer{store: st, logDir: t.TempDir()},
+		Deployer: fake,
+		Ops:      fake,
 		Refs:     fakeRefs{"main": testSHA},
 		Config:   cfg,
 		Store:    st,

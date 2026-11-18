@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,46 +30,54 @@ var (
 var reservedSlugs = map[string]bool{"console": true, "www": true, "api": true}
 
 type appJSON struct {
-	Slug                string            `json:"slug"`
-	RepoFullName        string            `json:"repo_full_name"`
-	RepoURL             string            `json:"repo_url"`
-	DefaultBranch       string            `json:"default_branch"`
-	ComposePath         string            `json:"compose_path"`
-	WebService          string            `json:"web_service"`
-	WebPort             int               `json:"web_port"`
-	HostPort            int               `json:"host_port"`
-	HealthcheckPath     string            `json:"healthcheck_path"`
-	DesiredState        string            `json:"desired_state"`
-	Environment         string            `json:"environment"`
-	RelaxPolicy         bool              `json:"relax_policy"`
-	MemoryLimit         string            `json:"memory_limit"`
-	ServiceMemoryLimits map[string]string `json:"service_memory_limits"`
-	URL                 string            `json:"url"`
-	CurrentDeployment   *deploymentJSON   `json:"current_deployment"`
-	LatestDeployment    *deploymentJSON   `json:"latest_deployment"`
-	CreatedAt           time.Time         `json:"created_at"`
-	UpdatedAt           time.Time         `json:"updated_at"`
+	Slug                 string            `json:"slug"`
+	RepoFullName         string            `json:"repo_full_name"`
+	RepoURL              string            `json:"repo_url"`
+	DefaultBranch        string            `json:"default_branch"`
+	ComposePath          string            `json:"compose_path"`
+	WebService           string            `json:"web_service"`
+	WebPort              int               `json:"web_port"`
+	HostPort             int               `json:"host_port"`
+	HealthcheckPath      string            `json:"healthcheck_path"`
+	DesiredState         string            `json:"desired_state"`
+	Environment          string            `json:"environment"`
+	RelaxPolicy          bool              `json:"relax_policy"`
+	MemoryLimit          string            `json:"memory_limit"`
+	ServiceMemoryLimits  map[string]string `json:"service_memory_limits"`
+	BackupExcludeVolumes []string          `json:"backup_exclude_volumes"`
+	DumpHookService      string            `json:"dump_hook_service"`
+	DumpHookCommand      string            `json:"dump_hook_command"`
+	BackupBeforeDeploy   bool              `json:"backup_before_deploy"`
+	URL                  string            `json:"url"`
+	CurrentDeployment    *deploymentJSON   `json:"current_deployment"`
+	LatestDeployment     *deploymentJSON   `json:"latest_deployment"`
+	CreatedAt            time.Time         `json:"created_at"`
+	UpdatedAt            time.Time         `json:"updated_at"`
 }
 
 func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 	out := appJSON{
-		Slug:                app.Slug,
-		RepoFullName:        app.RepoFullName,
-		RepoURL:             app.RepoURL,
-		DefaultBranch:       app.DefaultBranch,
-		ComposePath:         app.ComposePath,
-		WebService:          app.WebService,
-		WebPort:             app.WebPort,
-		HostPort:            app.HostPort,
-		HealthcheckPath:     app.HealthcheckPath,
-		DesiredState:        app.DesiredState,
-		Environment:         app.Environment,
-		RelaxPolicy:         app.RelaxPolicy,
-		MemoryLimit:         app.MemoryLimit,
-		ServiceMemoryLimits: app.ServiceMemoryLimits,
-		URL:                 "https://" + app.Slug + "." + s.cfg.BaseDomain,
-		CreatedAt:           app.CreatedAt,
-		UpdatedAt:           app.UpdatedAt,
+		Slug:                 app.Slug,
+		RepoFullName:         app.RepoFullName,
+		RepoURL:              app.RepoURL,
+		DefaultBranch:        app.DefaultBranch,
+		ComposePath:          app.ComposePath,
+		WebService:           app.WebService,
+		WebPort:              app.WebPort,
+		HostPort:             app.HostPort,
+		HealthcheckPath:      app.HealthcheckPath,
+		DesiredState:         app.DesiredState,
+		Environment:          app.Environment,
+		RelaxPolicy:          app.RelaxPolicy,
+		MemoryLimit:          app.MemoryLimit,
+		ServiceMemoryLimits:  app.ServiceMemoryLimits,
+		BackupExcludeVolumes: app.BackupExcludeVolumes,
+		DumpHookService:      app.DumpHookService,
+		DumpHookCommand:      app.DumpHookCommand,
+		BackupBeforeDeploy:   app.BackupBeforeDeploy,
+		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
+		CreatedAt:            app.CreatedAt,
+		UpdatedAt:            app.UpdatedAt,
 	}
 	if app.CurrentDeploymentID != nil {
 		d, err := s.store.GetDeployment(r.Context(), *app.CurrentDeploymentID)
@@ -94,19 +103,23 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 // appInput is the body of POST and PATCH /api/apps. Pointers distinguish
 // "not sent" from zero values so that PATCH can update single fields.
 type appInput struct {
-	Slug                *string            `json:"slug"`
-	RepoFullName        *string            `json:"repo_full_name"`
-	RepoURL             *string            `json:"repo_url"`
-	RepoID              *int64             `json:"repo_id"`
-	DefaultBranch       *string            `json:"default_branch"`
-	ComposePath         *string            `json:"compose_path"`
-	WebService          *string            `json:"web_service"`
-	WebPort             *int               `json:"web_port"`
-	HealthcheckPath     *string            `json:"healthcheck_path"`
-	Environment         *string            `json:"environment"`
-	RelaxPolicy         *bool              `json:"relax_policy"`
-	MemoryLimit         *string            `json:"memory_limit"`
-	ServiceMemoryLimits *map[string]string `json:"service_memory_limits"`
+	Slug                 *string            `json:"slug"`
+	RepoFullName         *string            `json:"repo_full_name"`
+	RepoURL              *string            `json:"repo_url"`
+	RepoID               *int64             `json:"repo_id"`
+	DefaultBranch        *string            `json:"default_branch"`
+	ComposePath          *string            `json:"compose_path"`
+	WebService           *string            `json:"web_service"`
+	WebPort              *int               `json:"web_port"`
+	HealthcheckPath      *string            `json:"healthcheck_path"`
+	Environment          *string            `json:"environment"`
+	RelaxPolicy          *bool              `json:"relax_policy"`
+	MemoryLimit          *string            `json:"memory_limit"`
+	ServiceMemoryLimits  *map[string]string `json:"service_memory_limits"`
+	BackupExcludeVolumes *[]string          `json:"backup_exclude_volumes"`
+	DumpHookService      *string            `json:"dump_hook_service"`
+	DumpHookCommand      *string            `json:"dump_hook_command"`
+	BackupBeforeDeploy   *bool              `json:"backup_before_deploy"`
 }
 
 // fieldErrors collects validation problems keyed by JSON field name.
@@ -161,6 +174,24 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 		}
 	}
 
+	if in.BackupExcludeVolumes != nil {
+		app.BackupExcludeVolumes = []string{}
+		for _, name := range *in.BackupExcludeVolumes {
+			if name = strings.TrimSpace(name); name != "" && !slices.Contains(app.BackupExcludeVolumes, name) {
+				app.BackupExcludeVolumes = append(app.BackupExcludeVolumes, name)
+			}
+		}
+	}
+	if in.DumpHookService != nil {
+		app.DumpHookService = strings.TrimSpace(*in.DumpHookService)
+	}
+	if in.DumpHookCommand != nil {
+		app.DumpHookCommand = strings.TrimSpace(*in.DumpHookCommand)
+	}
+	if in.BackupBeforeDeploy != nil {
+		app.BackupBeforeDeploy = *in.BackupBeforeDeploy
+	}
+
 	if app.RepoFullName == "" && app.RepoURL == "" {
 		errs.add("repo_full_name", "a repository is required (repo_full_name or repo_url)")
 	}
@@ -202,6 +233,22 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 		} else if !memoryPattern.MatchString(limit) {
 			errs.add("service_memory_limits", fmt.Sprintf("limit of %s must be a number with an optional unit (b, k, m, g)", name))
 		}
+	}
+	for _, name := range app.BackupExcludeVolumes {
+		if !servicePattern.MatchString(name) {
+			errs.add("backup_exclude_volumes", fmt.Sprintf("%q is not a valid volume name", truncateForError(name)))
+		}
+	}
+	switch {
+	case app.DumpHookService == "" && app.DumpHookCommand == "":
+	case app.DumpHookService == "":
+		errs.add("dump_hook_service", "is required when a dump command is set")
+	case app.DumpHookCommand == "":
+		errs.add("dump_hook_command", "is required when a dump service is set")
+	case !servicePattern.MatchString(app.DumpHookService):
+		errs.add("dump_hook_service", "is not a valid service name")
+	case len(app.DumpHookCommand) > 1000 || strings.ContainsAny(app.DumpHookCommand, "\n\r\x00"):
+		errs.add("dump_hook_command", "must be a single line of at most 1000 characters")
 	}
 	return errs
 }

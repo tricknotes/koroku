@@ -164,6 +164,18 @@ func (s *Store) ListDeployments(ctx context.Context, appID int64, limit int) ([]
 	return out, nil
 }
 
+// HasActiveDeployment reports whether the app has a queued or running deployment.
+func (s *Store) HasActiveDeployment(ctx context.Context, appID int64) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM deployments WHERE app_id = ? AND status IN (?, ?)`,
+		appID, StatusQueued, StatusRunning).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("check active deployments: %w", err)
+	}
+	return n > 0, nil
+}
+
 // NextQueuedDeployment returns the oldest queued deployment, or ErrNotFound.
 func (s *Store) NextQueuedDeployment(ctx context.Context) (Deployment, error) {
 	return scanDeployment(s.db.QueryRowContext(ctx,

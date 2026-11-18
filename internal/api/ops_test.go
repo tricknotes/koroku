@@ -1,0 +1,178 @@
+package api
+
+import (
+	"errors"
+	"net/http"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/tricknotes/koroku/internal/deploy"
+)
+
+func newOpsServer(t *testing.T) (http.Handler, *fakeDeployer) {
+	t.Helper()
+	srv := newTestServer(t, nil)
+	fake := srv.ops.(*fakeDeployer)
+	h := srv.Handler()
+	createApp(t, h, "blog")
+	return h, fake
+}
+
+func TestStartStopRestart(t *testing.T) {
+	h, fake := newOpsServer(t)
+
+	stopped := request(t, h, http.MethodPost, "/api/apps/blog/stop", "")
+	if stopped.Code != http.StatusOK {
+		t.Fatalf("stop: %d %s", stopped.Code, stopped.Body)
+	}
+	if app := decode[appJSON](t, stopped); app.DesiredState != "stopped" {
+		t.Errorf("the response must show the new state: %+v", app)
+	}
+	started := decode[appJSON](t, request(t, h, http.MethodPost, "/api/apps/blog/start", ""))
+	if started.DesiredState != "running" {
+		t.Errorf("app = %+v", started)
+	}
+	if rec := request(t, h, http.MethodPost, "/api/apps/blog/restart", ""); rec.Code != http.StatusOK {
+		t.Errorf("restart: %d %s", rec.Code, rec.Body)
+	}
+	if !slices.Equal(fake.ops, []string{"stop:blog", "start:blog", "restart:blog"}) {
+		t.Errorf("ops = %v", fake.ops)
+	}
+	if rec := request(t, h, http.MethodPost, "/api/apps/missing/stop", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("missing app: %d", rec.Code)
+	}
+	if rec := request(t, h, http.MethodGet, "/api/apps/blog/stop", ""); rec.Code == http.StatusOK {
+		t.Error("operations must not be triggered by GET")
+	}
+}
+
+func TestOperationErrors(t *testing.T) {
+	h, fake := newOpsServer(t)
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{deploy.ErrBusy, http.StatusConflict, "busy"},
+		{deploy.ErrNotDeployed, http.StatusConflict, "not_deployed"},
+		{errors.New("docker compose stop: exit status 1: secret-detail"), http.StatusInternalServerError, "internal"},
+	}
+	for _, tc := range cases {
+		fake.opErr = tc.err
+		for _, target := range []string{"/api/apps/blog/start", "/api/apps/blog/stop", "/api/apps/blog/restart"} {
+			rec := request(t, h, http.MethodPost, target, "")
+			if rec.Code != tc.status || !strings.Contains(rec.Body.String(), tc.code) {
+				t.Errorf("%s with %v: %d %s", target, tc.err, rec.Code, rec.Body)
+			}
+			if strings.Contains(rec.Body.String(), "secret-detail") {
+				t.Errorf("internals leaked: %s", rec.Body)
+			}
+		}
+		if rec := request(t, h, http.MethodDelete, "/api/apps/blog", ""); rec.Code != tc.status {
+			t.Errorf("delete with %v: %d", tc.err, rec.Code)
+		}
+	}
+}
+
+func TestDeleteApp(t *testing.T) {
+	h, fake := newOpsServer(t)
+	createApp(t, h, "shop")
+	createApp(t, h, "wiki")
+
+	if rec := request(t, h, http.MethodDelete, "/api/apps/blog?volumes=yes", ""); rec.Code != http.StatusBadRequest {
+		t.Errorf("ambiguous volumes value: %d", rec.Code)
+	}
+	if rec := request(t, h, http.MethodDelete, "/api/apps/blog", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
+	}
+	if rec := request(t, h, http.MethodDelete, "/api/apps/shop?volumes=true", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete with volumes: %d %s", rec.Code, rec.Body)
+	}
+	if rec := request(t, h, http.MethodDelete, "/api/apps/wiki?volumes=false", ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete with volumes=false: %d", rec.Code)
+	}
+	want := []string{"delete(volumes=false):blog", "delete(volumes=true):shop", "delete(volumes=false):wiki"}
+	if !slices.Equal(fake.ops, want) {
+		t.Errorf("ops = %v", fake.ops)
+	}
+	if rec := request(t, h, http.MethodGet, "/api/apps/blog", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("deleted app still served: %d", rec.Code)
+	}
+	if rec := request(t, h, http.MethodDelete, "/api/apps/blog", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("second delete: %d", rec.Code)
+	}
+}
+
+func TestListServices(t *testing.T) {
+	h, fake := newOpsServer(t)
+	empty := request(t, h, http.MethodGet, "/api/apps/blog/services", "")
+	if strings.TrimSpace(empty.Body.String()) != `{"services":[]}` {
+		t.Errorf("no containers: %s", empty.Body)
+	}
+	fake.services = []deploy.ServiceStatus{
+		{Name: "db", State: "running", Status: "Up 2 hours (healthy)", Health: "healthy"},
+		{Name: "web", State: "restarting", Status: "Restarting (1) 3 seconds ago"},
+	}
+	rec := request(t, h, http.MethodGet, "/api/apps/blog/services", "")
+	want := `{"services":[{"name":"db","state":"running","status":"Up 2 hours (healthy)","health":"healthy"},{"name":"web","state":"restarting","status":"Restarting (1) 3 seconds ago","health":""}]}`
+	if strings.TrimSpace(rec.Body.String()) != want {
+		t.Errorf("services = %s", rec.Body)
+	}
+}
+
+func TestPrune(t *testing.T) {
+	h, fake := newOpsServer(t)
+	rec := request(t, h, http.MethodPost, "/api/system/prune", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Total reclaimed space") {
+		t.Fatalf("prune: %d %s", rec.Code, rec.Body)
+	}
+	request(t, h, http.MethodPost, "/api/system/prune", `{"builder": false}`)
+	request(t, h, http.MethodPost, "/api/system/prune", `{"images": false, "builder": true}`)
+	want := []string{"prune(images=true,builder=true)", "prune(images=true,builder=false)", "prune(images=false,builder=true)"}
+	if !slices.Equal(fake.ops, want) {
+		t.Errorf("ops = %v", fake.ops)
+	}
+	fake.opErr = errors.New("builder prune: exit status 1")
+	failed := request(t, h, http.MethodPost, "/api/system/prune", "")
+	if failed.Code != http.StatusInternalServerError || !strings.Contains(failed.Body.String(), "prune_failed") {
+		t.Errorf("failed prune: %d %s", failed.Code, failed.Body)
+	}
+}
+
+func TestBackupSettingsOnApp(t *testing.T) {
+	h, _ := newOpsServer(t)
+	app := decode[appJSON](t, request(t, h, http.MethodGet, "/api/apps/blog", ""))
+	if app.BackupExcludeVolumes == nil || len(app.BackupExcludeVolumes) != 0 || app.BackupBeforeDeploy || app.DumpHookService != "" {
+		t.Errorf("defaults = %+v", app)
+	}
+
+	rec := request(t, h, http.MethodPatch, "/api/apps/blog",
+		`{"backup_exclude_volumes": ["pgdata", " pgdata ", ""], "dump_hook_service": "db", "dump_hook_command": "pg_dump -U postgres app", "backup_before_deploy": true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch: %d %s", rec.Code, rec.Body)
+	}
+	app = decode[appJSON](t, rec)
+	if !slices.Equal(app.BackupExcludeVolumes, []string{"pgdata"}) || app.DumpHookService != "db" ||
+		app.DumpHookCommand != "pg_dump -U postgres app" || !app.BackupBeforeDeploy {
+		t.Errorf("app = %+v", app)
+	}
+
+	for name, body := range map[string]string{
+		"command without service": `{"dump_hook_service": ""}`,
+		"service without command": `{"dump_hook_command": ""}`,
+		"multi-line command":      `{"dump_hook_command": "pg_dump\nrm -rf /"}`,
+		"bad volume name":         `{"backup_exclude_volumes": ["../etc"]}`,
+		"bad service name":        `{"dump_hook_service": "d b"}`,
+	} {
+		rec := request(t, h, http.MethodPatch, "/api/apps/blog", body)
+		if rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	// Clearing the hook takes both fields.
+	cleared := decode[appJSON](t, request(t, h, http.MethodPatch, "/api/apps/blog", `{"dump_hook_service": "", "dump_hook_command": ""}`))
+	if cleared.DumpHookService != "" || cleared.DumpHookCommand != "" {
+		t.Errorf("app = %+v", cleared)
+	}
+}
