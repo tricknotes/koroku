@@ -25,7 +25,7 @@ Nov 18, 2026 · @tricknotes
 
 | 項目 | 決定 | 理由 |
 | --- | --- | --- |
-| 実行基盤 | さくらの VPS 1 台（Ubuntu 24.04、x86_64）。Docker Engine + Compose v2.24.4 以上 | ご回答どおり。override で使う `!override` タグの要件（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)） |
+| 実行基盤 | さくらの VPS 1 台（Ubuntu 24.04、x86_64）。Docker Engine + Compose v2.30 以上 | ご回答どおり。override で使う `!override` タグ（2.24.4 以上）と、ポリシー検査で使う `config --no-env-resolution`（2.30 以上、6 章）の要件（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)） |
 | コントロールプレーン | Go 製シングルバイナリ `paasd`。systemd でホストに直置き、SQLite | 常駐メモリが小さく、配布と更新がファイル 1 つ。詳細は 4 章 |
 | フロントエンド | Ember SPA。ビルド成果物を `paasd` に埋め込んで配信 | ご希望どおり。配信用の別プロセスが不要 |
 | リバースプロキシ | Caddy。ホストに直置きし、admin API で設定を投入 | ホスト名を渡すだけで証明書の取得と更新まで自動（[Automatic HTTPS](https://caddyserver.com/docs/automatic-https)） |

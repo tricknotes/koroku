@@ -20,7 +20,7 @@ set -Eeuo pipefail
 # --- Settings ---------------------------------------------------------------
 
 # Compose merges the generated override with !override and !reset.
-readonly MIN_COMPOSE_VERSION=2.24.4
+readonly MIN_COMPOSE_VERSION=2.30.0
 # The generated Caddy configuration uses stream_close_delay.
 readonly MIN_CADDY_VERSION=2.7.0
 # restic comes from the official release, pinned by checksum (the reason is in
