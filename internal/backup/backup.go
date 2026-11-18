@@ -100,6 +100,12 @@ type Recorder interface {
 }
 
 // AppController stops and starts an app around a volume restore.
+//
+// Start is only called after Stop succeeded. When Stop returns an error
+// (for example because a deployment is in progress) nothing has been touched
+// and the restore ends with that error, wrapped; Stop must then have left the
+// app running. An implementation that wants an app that was already stopped
+// to stay stopped can remember that in Stop and make Start a no-op.
 type AppController interface {
 	Stop(ctx context.Context, app App) error
 	Start(ctx context.Context, app App) error
