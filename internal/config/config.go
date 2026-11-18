@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +32,24 @@ type Config struct {
 	MasterKeyFile string `toml:"master_key_file"`
 
 	Deploy Deploy `toml:"deploy"`
+	Caddy  Caddy  `toml:"caddy"`
+}
+
+// Caddy holds reverse proxy settings.
+type Caddy struct {
+	// Enabled makes paasd load its generated configuration into Caddy.
+	// Turn it off for local development without Caddy.
+	Enabled bool `toml:"enabled"`
+	// AdminURL is the Caddy admin API. It must be a loopback address.
+	AdminURL string `toml:"admin_url"`
+	// ACMECA overrides the ACME directory, for example with the Let's
+	// Encrypt staging endpoint while the setup is being tested.
+	ACMECA string `toml:"acme_ca"`
+	// ACMEEmail is the optional contact address of the ACME account.
+	ACMEEmail string `toml:"acme_email"`
+	// AccessLogDir receives one access log per app (<slug>.log). Caddy
+	// writes there, so its user needs write access. Empty disables them.
+	AccessLogDir string `toml:"access_log_dir"`
 }
 
 // Deploy holds deploy engine settings.
@@ -55,6 +74,11 @@ func Default() Config {
 		Listen:        "127.0.0.1:8080",
 		DataDir:       "/var/lib/paas",
 		MasterKeyFile: "/etc/paas/master.key",
+		Caddy: Caddy{
+			Enabled:      true,
+			AdminURL:     "http://127.0.0.1:2019",
+			AccessLogDir: "/var/log/caddy/apps",
+		},
 		Deploy: Deploy{
 			DefaultMemoryLimit:    "512m",
 			DiskUsageLimitPercent: 85,
@@ -120,10 +144,44 @@ func (c Config) Validate() error {
 	if s, e := c.Deploy.PortRangeStart, c.Deploy.PortRangeEnd; s < 1024 || e > 65535 || s > e {
 		errs = append(errs, fmt.Errorf("deploy port range %d-%d is invalid", s, e))
 	}
+	if c.Caddy.Enabled {
+		if host, err := adminHost(c.Caddy.AdminURL); err != nil {
+			errs = append(errs, fmt.Errorf("caddy.admin_url %q: %w", c.Caddy.AdminURL, err))
+		} else if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			// The admin API is unauthenticated and can rewrite the whole proxy.
+			errs = append(errs, fmt.Errorf("caddy.admin_url %q must be a loopback address", c.Caddy.AdminURL))
+		}
+		if c.Caddy.AccessLogDir != "" && !filepath.IsAbs(c.Caddy.AccessLogDir) {
+			errs = append(errs, fmt.Errorf("caddy.access_log_dir %q must be an absolute path", c.Caddy.AccessLogDir))
+		}
+		if c.Caddy.ACMECA != "" && !strings.HasPrefix(c.Caddy.ACMECA, "https://") {
+			errs = append(errs, fmt.Errorf("caddy.acme_ca %q must be an https URL", c.Caddy.ACMECA))
+		}
+	}
 	if c.Deploy.DefaultMemoryLimit == "" {
 		errs = append(errs, errors.New("deploy.default_memory_limit is required"))
 	}
 	return errors.Join(errs...)
+}
+
+func adminHost(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", errors.New("not a valid URL")
+	}
+	if u.Scheme != "http" || u.Hostname() == "" {
+		return "", errors.New("want http://host:port")
+	}
+	return u.Hostname(), nil
+}
+
+// AdminListen is the host:port form of the Caddy admin address.
+func (c Caddy) AdminListen() string {
+	u, err := url.Parse(c.AdminURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }
 
 // DBPath is the location of the SQLite database.
