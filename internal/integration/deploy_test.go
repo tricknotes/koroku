@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -111,6 +112,8 @@ func newEnv(t *testing.T) *env {
 		Refs:     deploy.GitRefResolver{Fetcher: fetcher},
 		// Authentication is covered by the API unit tests.
 		Auth: api.AuthOptions{InsecureNoAuth: true},
+		// Errors behind a 500 show up in the test's output.
+		Logger: slog.New(slog.NewTextHandler(t.Output(), nil)),
 	})
 	server := httptest.NewServer(srv.Handler())
 
