@@ -1,0 +1,71 @@
+# systemd unit for paasd, installed by deploy/provision.sh to
+# /etc/systemd/system/paasd.service. docs/OPERATIONS.md explains the choices.
+
+[Unit]
+Description=paasd, the control plane of the personal PaaS
+# Wants, not Requires: paasd retries Docker and Caddy on its own, and a
+# restart of either must not take the control plane down with it.
+Wants=network-online.target docker.service caddy.service
+After=network-online.target docker.service caddy.service
+
+[Service]
+Type=simple
+# paasd drives the Docker daemon, which makes it equivalent to root whatever
+# user it runs as. It also reads volume data of any owner for backups and
+# keeps its secrets in root-only directories, so it runs as root.
+User=root
+# The docker CLI reads registry logins from $HOME/.docker (private images
+# need "docker login" on the host), git reads $HOME/.gitconfig and restic
+# keeps its cache in $HOME/.cache.
+Environment=HOME=/root
+ExecStart=/usr/local/bin/paasd serve --config /etc/paas/config.toml
+Restart=on-failure
+RestartSec=10
+
+# --- Stopping -------------------------------------------------------------
+# App containers belong to the Docker daemon and live in its control groups,
+# so no KillMode can touch them: stopping or restarting paasd never stops an
+# app. Only helper processes live in this unit's control group: docker
+# compose (up, build, pull, logs, exec), git and restic.
+#
+# mixed: SIGTERM goes to paasd alone. It marks a deployment in flight as
+# failed (interrupted) and ends its helpers itself. Whatever is still alive
+# once paasd has exited gets SIGKILL, so no "docker compose up" can outlive
+# the service and race with the worker of the next start. Containers that
+# an interrupted "up" already created or started stay as they are; the next
+# deployment of that app converges them.
+KillMode=mixed
+# paasd waits up to 10 s for HTTP requests and 45 s for the deploy worker.
+TimeoutStopSec=90
+
+# The kernel killing one helper (a restic or git process that ran out of
+# memory) must not stop the whole unit; paasd records the failed command.
+OOMPolicy=continue
+
+# --- Hardening ------------------------------------------------------------
+# Deliberately short. Access to the Docker socket already allows anything on
+# this host, so these settings guard against accidents rather than against a
+# compromised paasd. Each one is inherited by docker compose, git and restic,
+# and none of them sets up a mount namespace or restricts the file system.
+# docs/OPERATIONS.md lists the settings that were left out and why.
+
+# No process of this unit can gain privileges through setuid binaries or
+# file capabilities. Everything here already runs as root.
+NoNewPrivileges=yes
+# Sockets: unix (Docker socket), IPv4/IPv6 (GitHub, object storage, Caddy
+# admin API, app health checks) and netlink (address lookup in libc).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Containers and their namespaces are created by the Docker daemon, never by
+# paasd or the docker CLI.
+RestrictNamespaces=yes
+# Every helper is a native x86-64 binary.
+SystemCallArchitectures=native
+LockPersonality=yes
+RestrictRealtime=yes
+# Capabilities nothing here needs: loading kernel modules, rebooting, setting
+# the clock, raw I/O ports. Everything else stays, because restoring a volume
+# must be able to reproduce any owner, mode and device node.
+CapabilityBoundingSet=~CAP_SYS_MODULE CAP_SYS_BOOT CAP_SYS_TIME CAP_SYS_RAWIO
+
+[Install]
+WantedBy=multi-user.target
