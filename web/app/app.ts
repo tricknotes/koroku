@@ -12,6 +12,7 @@ import './styles/base.css';
 import './styles/components.css';
 import './styles/shell.css';
 import './styles/app-list.css';
+import './styles/panes.css';
 import './styles/legacy.css';
 
 if (macroCondition(isDevelopingApp())) {
