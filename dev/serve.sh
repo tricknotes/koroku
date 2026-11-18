@@ -10,6 +10,14 @@ root=$(pwd)
 state="$root/data/dev"
 config="$state/config.toml"
 
+# data/ holds local state inside the module. A go.mod makes it a module of
+# its own, which keeps `go test ./...` from walking into it (volume restores
+# leave directories there that only root or the app's users can read).
+mkdir -p "$root/data"
+if [ ! -f "$root/data/go.mod" ]; then
+    printf '%s\n' '// Local state of dev/serve.sh, kept out of the koroku module.' 'module koroku.local/data' >"$root/data/go.mod"
+fi
+
 if [ ! -f "$config" ]; then
     mkdir -p "$state"
     # The configuration may hold credentials later; koroku insists on 0600.
