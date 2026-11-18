@@ -340,7 +340,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | `apps` | `id`, `slug`（一意）, `repo_id`, `repo_full_name`, `default_branch`, `compose_path`, `web_service`, `web_port`, `host_port`（一意）, `healthcheck_path`, `desired_state`（running / stopped）, `relax_policy`, `current_deployment_id` |
 | `env_vars` | `app_id`, `key`, `value_encrypted`（`app_id` + `key` で一意） |
 | `deployments` | `id`, `app_id`, `ref`, `commit_sha`, `commit_message`, `status`, `error`, `queued_at`, `started_at`, `finished_at` |
-| `sessions` | `token_hash`, `github_user_id`, `expires_at` |
+| `sessions` | `token_hash`, `id`, `github_user_id`, `expires_at`, `last_seen_at`, `ip`, `user_agent`（10.3） |
 
 **API（すべてセッション Cookie 必須、`/auth/*` を除く）**
 
@@ -400,7 +400,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 **セキュリティ**
 
 - **信頼モデル**: デプロイするのは自分のリポジトリだけ。他人のコードを動かす前提の隔離（gVisor 等）は持たない。
-- **認証**: GitHub ログイン後、ユーザー ID が `config.toml` の許可 ID と一致した場合のみセッションを発行する。Cookie は `HttpOnly`、`Secure`、`SameSite=Lax`。変更系 API は `Origin` ヘッダーを検証する。
+- **認証**: GitHub ログイン後、ユーザー ID が `config.toml` の許可 ID と一致した場合のみセッションを発行する。Cookie は `HttpOnly`、`Secure`、`SameSite=Lax`。変更系 API は `Origin` ヘッダーを検証する。GitHub の 2 段階認証の必須化、危険な操作の前の再ログイン、セッションの一覧とログイン履歴は 10.3。
 - **待受**: `koroku` と Caddy admin API は 127.0.0.1 のみ。外部公開は 22、80、443。
 - **残っている前提（脆弱性調査、2026-11-18）**: ポリシー検査は「自分のリポジトリを誤って危険な構成でデプロイしない」ための検査で、悪意あるリポジトリを安全に動かす隔離ではない。「検査を緩める」フラグを立てたアプリには、上の保護の多くが効かない（フラグは 1 つで、項目ごとには選べない）。Caddy の admin API は認証なしの TCP（ループバック）なので、ホストのネットワークに入れたコンテナからは設定を書き換えられる。ログのマスクは環境変数の値そのものとの一致だけで、3 文字未満の値や、base64 などに変換された値は隠せない。
 - **ポート公開の抑止**: Docker が publish したポートの通信は ufw の設定を通らずに届く（[Packet filtering and firewalls](https://docs.docker.com/network/packet-filtering-firewalls/)）。ufw に頼らず、6 章の override で全サービスの `ports` を消すか 127.0.0.1 に限定する。
@@ -510,6 +510,36 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 実装は M5。受け入れシナリオに「バックアップ取得 → volume を空にする → リストアでデータが戻る」と「4 時間以上前のログが R2 にあり UI からダウンロードできる」を加える。
 
+### 10.3 ログインの強化（2026-11-19）
+
+本番運用を前にして、管理 UI の認証を 3 点強めた。許可ユーザー以外がログインできないことは M3 から変わらない。ここで扱うのは「許可ユーザーの GitHub アカウントか、koroku のセッション Cookie が盗まれた場合」の被害を小さくすることと、盗まれたことに気づけるようにすること。管理 UI をネットワークの段階で閉じる案（Tailscale、クライアント証明書など）は別に検討する。
+
+**GitHub の 2 段階認証を必須にする**
+
+- ログイン時の `GET /user` の応答の `two_factor_authentication` が `true` のときだけセッションを発行する。`false` なら `two_factor_required` で拒否する。
+- この項目は GitHub のドキュメントでは「private user の応答」にだけあり、GitHub App のユーザーアクセストークンで返るかは書かれていない。項目がない応答は `two_factor_unknown` で拒否する（確かめられないものを通さない）。返らないと実機で分かった場合に締め出されないよう、`[github] require_two_factor = false` で検査を外せる。既定は `true`。外したときは起動時に警告をログに出す。
+- 拒否したログインも、GitHub のユーザー ID が分かっているのでログイン履歴に残す（下記）。
+
+**危険な操作の前に再ログインを求める（step-up）**
+
+- セッションの発行（ログイン）から 10 分以内でなければ、次の操作を `403 reauth_required` で断る。UI は再ログインの案内を出し、GitHub のログインを経て元の画面に戻す。
+  - アプリの削除
+  - 本番アプリ（`environment = production`）のデプロイ
+  - 環境変数の保存と、値の表示（下記）
+  - volume のリストアと、DB ダンプのダウンロード
+  - アプリ設定のうち、`environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）の変更。本番の確認ダイアログを外す、ポリシー検査を外す、別のコードを動かす、のいずれかにつながるため
+- 環境変数の `GET` は、10 分を過ぎていても断らず、値を `null` にして `values_hidden: true` を返す。キーの一覧は見られるようにして、タブそのものは使えるようにするため。
+- 再ログインは通常のログインと同じ流れで、新しいセッションを発行する。同じブラウザーの古いセッションはそのとき消す。戻り先は `GET /auth/github/login?return_to=<パス>` で渡し、state と同じく短命の Cookie に入れる。`/` で始まり `//` や `\` を含まないパスだけを受け付ける（外部サイトへのリダイレクトに使われないように）。
+- 限界: GitHub にログインしたままのブラウザーでは、再ログインはパスワードを聞かれずに終わる。防げるのは「Cookie だけが盗まれて別の場所で使われる」場合で、本人のブラウザーそのものを使われる場合は防げない。GitHub の OAuth には OpenID Connect の `max_age` に当たるものがない。
+- 再ログインを求めない操作: 作成、staging のデプロイ、起動制御、ドメイン、バックアップの実行、prune。どれも取り消せるか、データを外へ出さないため。
+
+**セッションの一覧と失効、ログイン履歴**
+
+- `sessions` に `id`（画面と API で使う識別子。乱数 8 バイトの 16 進。Cookie のハッシュは外に出さない）、`last_seen_at`、`ip`、`user_agent` を足す。`last_seen_at` は 1 分以上たっていれば更新する（ポーリングのたびに書き込まないため）。
+- クライアントの IP: `koroku` はループバックで待ち受け、Caddy を経由して届く。接続元がループバックのときだけ `X-Forwarded-For` の最後の値を使う。Caddy は既定でクライアントから来た `X-Forwarded-For` を信用せず、接続元の IP で置き換えるので、偽装できない。User-Agent は 512 バイトで切る。
+- `login_events` テーブル: 時刻、結果（`succeeded`、`not_allowed`、`two_factor_required`、`two_factor_unknown`）、GitHub のユーザー ID と login、IP、User-Agent。GitHub のユーザーが分かったものだけを残し、state の不一致や GitHub の失敗は残さない。誰でも起こせて、記録が溢れるだけなので。新しい 200 件を残して古いものを消す。
+- 画面: ユーザーメニューから「セキュリティ」を開き、セッションの一覧（このセッションを示す、個別に終了、ほかをすべて終了）と、ログイン履歴を見る。
+
 ## 11. 実装フェーズ（Claude Code 向け）
 
 > この章は初版の計画。独自ドメイン・ログ・バックアップを含む最新のマイルストーンと受け入れシナリオは、リポジトリ直下の `CLAUDE.md` を正とする。
@@ -556,6 +586,10 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
   - まだどこにもデプロイしていないので、今ならパス、Compose プロジェクト名、イメージタグの移行が要らない。旧名のパスや Cookie を読む互換処理も入れない。
 
 **契約時の注意**: さくらの VPS は Linux カーネル脆弱性への対応で一部の受付を止めている。2026-11-13 追記時点で、大阪リージョンの Linux 通常容量プランの新規申し込みと、スケールアップが停止中（[対応状況](https://vps.sakura.ad.jp/contents/info/202610-pendingapply/)）。東京か石狩で、後から上げられない前提で最初から 4GB プランを選ぶ。構築直後にカーネルを更新する。
+
+**実機での確認が要るもの（2026-11-19）**
+
+- GitHub App のユーザーアクセストークンで `GET /user` に `two_factor_authentication` が含まれるか（10.3）。含まれなければ `[github] require_two_factor = false` にして、この節に結果を書く。
 
 **残り**
 

@@ -23,7 +23,21 @@ type envBody struct {
 	Vars []envVarJSON `json:"vars"`
 }
 
+// envListJSON is the response shape. Value is nil when values are hidden.
+type envListJSON struct {
+	Vars []envVarOutJSON `json:"vars"`
+	// ValuesHidden is true when the session is too old to see secrets
+	// (ARCHITECTURE 10.3); the keys are still listed.
+	ValuesHidden bool `json:"values_hidden"`
+}
+
+type envVarOutJSON struct {
+	Key   string  `json:"key"`
+	Value *string `json:"value"`
+}
+
 // handleGetEnv returns the decrypted variables. The UI masks them by default.
+// Without a recent login only the keys are returned.
 func (s *Server) handleGetEnv(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.loadApp(w, r)
 	if !ok {
@@ -34,14 +48,19 @@ func (s *Server) handleGetEnv(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	out := envBody{Vars: make([]envVarJSON, 0, len(rows))}
+	out := envListJSON{Vars: make([]envVarOutJSON, 0, len(rows)), ValuesHidden: !s.recentlyAuthenticated(r)}
 	for _, row := range rows {
+		if out.ValuesHidden {
+			out.Vars = append(out.Vars, envVarOutJSON{Key: row.Key})
+			continue
+		}
 		plain, err := s.box.Open(row.ValueEncrypted, secrets.EnvVarContext(app.ID, row.Key))
 		if err != nil {
 			s.internalError(w, r, fmt.Errorf("env var %s of app %s: %w", row.Key, app.Slug, err))
 			return
 		}
-		out.Vars = append(out.Vars, envVarJSON{Key: row.Key, Value: string(plain)})
+		value := string(plain)
+		out.Vars = append(out.Vars, envVarOutJSON{Key: row.Key, Value: &value})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -50,7 +69,7 @@ func (s *Server) handleGetEnv(w http.ResponseWriter, r *http.Request) {
 // with the next deployment.
 func (s *Server) handlePutEnv(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.loadApp(w, r)
-	if !ok {
+	if !ok || !s.requireRecentAuth(w, r) {
 		return
 	}
 	var in envBody

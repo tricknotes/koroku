@@ -92,6 +92,7 @@ sudo ./deploy/provision.sh ./koroku
 | `[github] app_id`、`client_id`、`client_secret` | GitHub App の値。権限は Contents と Metadata の Read-only、callback は `https://<console_host>/auth/github/callback` |
 | `[github] private_key_file` | `/etc/koroku/github-app.pem` |
 | `[github] allowed_user_id` | ログインを許可する GitHub ユーザーの数値 ID（1 件） |
+| `[github] require_two_factor` | 既定 `true`。GitHub の 2 段階認証が有効なアカウントでなければログインさせない。ログインが `two_factor_unknown` で断られる（GitHub が状態を返さない）ときだけ `false` にする（ARCHITECTURE 10.3） |
 | `[storage] endpoint`、`region`、`bucket`、`access_key_id`、`secret_access_key` | オブジェクトストレージ（R2 なら endpoint は `https://<アカウント ID>.r2.cloudflarestorage.com`、region は `auto`）。バケットは先に作っておく（`koroku` も restic もバケットは作らない）。このセクションがないと、ログは VPS 内にだけ残り、バックアップは無効になる |
 | `[backup] restic_password_file` | `/etc/koroku/restic.key`（0600）。中身は自分で決めたパスワード 1 行。ファイルがない、または他人が読める権限だとバックアップは無効になる |
 | `[backup] hour`、`timezone` | 日次バックアップの時刻（既定は `Asia/Tokyo` の 3 時） |

@@ -102,7 +102,7 @@ func newAuthServer(t *testing.T, gh *fakeGitHub) (*Server, *clock.Fake) {
 	clk := clock.NewFake(time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC))
 	srv := newTestServer(t, func(o *Options) {
 		o.Clock = clk
-		o.Auth = AuthOptions{AllowedUserID: 42, ConsoleURL: consoleURL}
+		o.Auth = AuthOptions{AllowedUserID: 42, ConsoleURL: consoleURL, RequireTwoFactor: true}
 		if gh != nil {
 			o.Auth.GitHub = gh
 		}
@@ -110,11 +110,13 @@ func newAuthServer(t *testing.T, gh *fakeGitHub) (*Server, *clock.Fake) {
 	return srv, clk
 }
 
+var twoFactorOn = true
+
 func defaultGitHub() *fakeGitHub {
 	return &fakeGitHub{
 		codes: map[string]string{"code-owner": "token-owner", "code-stranger": "token-stranger"},
 		users: map[string]github.User{
-			"token-owner":    {ID: 42, Login: "octo", AvatarURL: "https://example.com/octo.png"},
+			"token-owner":    {ID: 42, Login: "octo", AvatarURL: "https://example.com/octo.png", TwoFactor: &twoFactorOn},
 			"token-stranger": {ID: 7, Login: "stranger"},
 		},
 	}
@@ -228,7 +230,7 @@ func TestLoginAsAllowedUser(t *testing.T) {
 	}
 
 	session := b.do(http.MethodGet, "/api/session", "", nil)
-	want := `{"authenticated":true,"user":{"avatar_url":"https://example.com/octo.png","id":42,"login":"octo"}}`
+	want := `{"authenticated":true,"reauth_until":"2026-11-18T03:10:00Z","user":{"avatar_url":"https://example.com/octo.png","id":42,"login":"octo"}}`
 	if strings.TrimSpace(session.Body.String()) != want {
 		t.Errorf("session = %s", session.Body)
 	}

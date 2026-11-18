@@ -140,6 +140,13 @@ allowed_user_id = 42
 	if !cfg.GitHub.Configured() || cfg.GitHub.AllowedUserID != 42 || cfg.ConsoleURL != "http://localhost:8080" {
 		t.Errorf("config = %+v / %q", cfg.GitHub, cfg.ConsoleURL)
 	}
+	if !cfg.GitHub.RequireTwoFactor {
+		t.Error("two-factor authentication must be required by default")
+	}
+	cfg, err = Parse(full + "require_two_factor = false\n")
+	if err != nil || cfg.GitHub.RequireTwoFactor {
+		t.Errorf("require_two_factor = false: %v, %+v", err, cfg.GitHub)
+	}
 
 	// A partly filled section is rejected instead of half-working.
 	for name, text := range map[string]string{

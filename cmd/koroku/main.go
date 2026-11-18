@@ -228,9 +228,10 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		Box:     box,
 		Domains: checker,
 		Auth: api.AuthOptions{
-			AllowedUserID:  cfg.GitHub.AllowedUserID,
-			ConsoleURL:     cfg.ConsoleURL,
-			InsecureNoAuth: *insecureNoAuth,
+			AllowedUserID:    cfg.GitHub.AllowedUserID,
+			RequireTwoFactor: cfg.GitHub.RequireTwoFactor,
+			ConsoleURL:       cfg.ConsoleURL,
+			InsecureNoAuth:   *insecureNoAuth,
 		},
 	}
 
@@ -295,6 +296,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		gitRefs.Tokens = tokens
 		apiOpts.Refs = deploy.GitHubRefResolver{Client: gh, Fallback: gitRefs}
 		apiOpts.Auth.GitHub = gh
+		if !cfg.GitHub.RequireTwoFactor {
+			logger.Warn("github.require_two_factor is off: logins are accepted without two-factor authentication")
+		}
 	}
 	// Assign the interfaces only when there is a router: a nil *Router
 	// stored in an interface would not compare equal to nil.

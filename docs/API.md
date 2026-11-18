@@ -23,6 +23,7 @@
 | 400 | `invalid_json`、`invalid_limit` など | リクエストの形が不正 |
 | 401 | `unauthenticated` | 未ログイン（M3 以降、`/auth/*` と `GET /api/session` 以外のすべて） |
 | 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない（M3） |
+| 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
 | 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found` | 対象がない |
 | 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
@@ -30,14 +31,22 @@
 | 500 | `internal` | サーバー側の失敗（詳細はサーバーログ） |
 | 503 | `not_configured` | その機能に必要な設定（GitHub App、オブジェクトストレージなど）がない |
 
-## セッション（M3）
+## セッション（M3、強化は 2026-11-19）
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/session` | 常に 200。`{"authenticated": true, "user": {"id": 1, "login": "octo", "avatar_url": "https://..."}}` か `{"authenticated": false}` |
-| `GET /auth/github/login` | GitHub の認可画面へリダイレクト（ページ遷移で開く） |
-| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `/` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（許可ユーザーではない）、`state_mismatch`、`github_error`、`not_configured`（GitHub App が未設定） |
+| `GET /api/session` | 常に 200。`{"authenticated": true, "user": {"id": 1, "login": "octo", "avatar_url": "https://..."}, "reauth_until": "2026-11-19T03:10:00Z"}` か `{"authenticated": false}`。`reauth_until` は再ログインなしで危険な操作ができる期限（ログインから 10 分。`--insecure-no-auth` では `null`） |
+| `GET /auth/github/login?return_to=/apps/blog/env` | GitHub の認可画面へリダイレクト（ページ遷移で開く）。`return_to` はログイン後に戻るパス（省略時は `/`）。`/` で始まらないもの、`//` や `\` を含むものは無視して `/` に戻す |
+| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（許可ユーザーではない）、`two_factor_required`（GitHub の 2 段階認証が無効）、`two_factor_unknown`（GitHub が 2 段階認証の状態を返さなかった）、`state_mismatch`、`github_error`、`not_configured`（GitHub App が未設定） |
 | `POST /auth/logout` | 204。セッションを破棄 |
+| `GET /api/sessions` | 有効なセッションの一覧（新しい順）。`{"sessions": [{"id": "9f2c41d07a1b3e55", "created_at": "...", "last_seen_at": "...", "expires_at": "...", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ...", "current": true}]}`。`last_seen_at` は 1 分単位の目安 |
+| `DELETE /api/sessions/{id}` | 204。そのセッションを終了する（自分のセッションを指定するとログアウトと同じ）。なければ `404 session_not_found` |
+| `POST /api/sessions/revoke-others` | 自分以外のセッションをすべて終了する。200 で `{"revoked": 2}` |
+| `GET /api/login-events` | ログイン履歴（新しい順、最大 50 件）。`{"events": [{"at": "...", "outcome": "succeeded", "github_user_id": 1, "login": "octo", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ..."}]}`。`outcome` は `succeeded` / `not_allowed` / `two_factor_required` / `two_factor_unknown` |
+
+`--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
+
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、volume のリストア、DB ダンプのダウンロード、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## システム（M0、prune は M5）
 
@@ -147,8 +156,8 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/apps/{slug}/env` | `{"vars": [{"key": "RAILS_ENV", "value": "production"}]}`（key 順。値は平文で返るので、UI は既定でマスク表示する） |
-| `PUT /api/apps/{slug}/env` | 同じ形で全件を置き換える。200 で保存後の一覧。反映は次のデプロイから |
+| `GET /api/apps/{slug}/env` | `{"vars": [{"key": "RAILS_ENV", "value": "production"}], "values_hidden": false}`（key 順。値は平文で返るので、UI は既定でマスク表示する）。直近 10 分以内のログインでなければ、値をすべて `null` にして `values_hidden: true` を返す |
+| `PUT /api/apps/{slug}/env` | 同じ形（`vars` だけ）で全件を置き換える。200 で保存後の一覧。反映は次のデプロイから。直近 10 分以内のログインでなければ `403 reauth_required` |
 
 key は英字かアンダースコアで始まる英数字とアンダースコア。重複は 422。
 
