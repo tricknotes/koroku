@@ -47,6 +47,7 @@ docker compose up
 - 証明書の警告を消すには、Caddy の CA のルート証明書をブラウザ側の OS に信頼させます。取り出しは `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt data/dev/caddy-root.crt`。WSL2 で Windows のブラウザから開く場合は、Windows 側で `certutil -user -addstore Root <root.crt のパス>` を実行します（確認ダイアログが出ます）。CA は volume `koroku-dev-caddy-data` にあり、消すと作り直されるので、入れ直しが必要です。
 - 既存の `data/dev/config.toml` は上書きされません。以前に作ったものは `[caddy]` を [dev/serve.sh](dev/serve.sh) が書き出す内容に合わせてください（`enabled = false` にすれば Caddy なしで動き、アプリには `http://127.0.0.1:<ホストポート>` で届きます）。
 - バックアップは本番と同じく日次 03:00 JST に走り、システム画面から手動でも実行できます。restic のパスワードは初回に [dev/serve.sh](dev/serve.sh) が `data/dev/restic.key` に作ります。消すと既存のバックアップが読めなくなるので、やり直すときは volume `koroku-dev-s3-data` も消してください。
+- ログの退避は、ローカルでは 1 時間ごと（毎時 10 分）に走ります（本番は 4 時間ごと）。`koroku` は起動時に、終わった時間枠までをすぐ退避するので、`docker compose restart koroku` のあと、アプリ詳細の「ログ」タブで過去ログの一覧とダウンロードを試せます。ダウンロードの URL は `http://127.0.0.1:9000/...` の presigned URL で、Windows のブラウザからも開けます。
 - アプリの volume のバックアップとリストアは、Docker が volume を置くディレクトリを `koroku` のコンテナから直接読み書きします。`docker info -f '{{.DockerRootDir}}'` が `/var/lib/docker` でない環境（snap 版の Docker など）では、リポジトリ直下の `.env`（git の管理外）に `KOROKU_DOCKER_ROOT=<その値>` を書いてください。Docker Desktop では volume が VM の中にあるので、volume のバックアップは失敗します（基盤のバックアップとログの退避は動きます）。
 - GitHub App を設定していないので、アプリ作成では「URL を直接指定」で public リポジトリの URL を入れます。手元のクローンを `file:///...` で指定することもできます（リポジトリのあるディレクトリの配下に限る。コンテナからはそこしか見えません）。
 - Go のコードを変えたら `docker compose restart koroku` でビルドし直します。

@@ -57,6 +57,13 @@ secret_access_key = "koroku-dev-secret"
 
 [backup]
 restic_password_file = "$state/restic.key"
+
+[logs]
+# Archive every hour, the shortest interval, instead of every 4 hours. koroku
+# archives the windows that have ended when it starts, so after a restart
+# (docker compose restart koroku) the logs up to the last hh:10 are in the
+# storage service and can be downloaded from the console.
+archive_interval_hours = 1
 EOF
     )
     echo "dev/serve.sh: wrote $config" >&2
