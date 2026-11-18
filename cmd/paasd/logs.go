@@ -117,7 +117,8 @@ func (a *appLogs) ArchiveStatus() api.LogArchiveStatus {
 		return api.LogArchiveStatus{}
 	}
 	status := a.archiver.Status()
-	out := api.LogArchiveStatus{Configured: true, LastError: status.LastError}
+	next := a.archiver.NextRun()
+	out := api.LogArchiveStatus{Configured: true, LastError: status.LastError, NextRunAt: &next}
 	if !status.LastSuccess.IsZero() {
 		last := status.LastSuccess
 		out.LastSuccessAt = &last

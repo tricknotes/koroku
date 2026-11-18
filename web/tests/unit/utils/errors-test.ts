@@ -4,6 +4,7 @@ import {
   errorMessage,
   fieldErrors,
   loginErrorMessage,
+  policyViolations,
   unavailability,
 } from 'paas-console/utils/errors';
 
@@ -21,6 +22,107 @@ module('Unit | Utility | errors', function () {
       errorMessage(new ApiError(0, 'network_error', '')),
       'サーバーに接続できませんでした。',
     );
+  });
+
+  test('every code the API can answer with has its own message', function (assert) {
+    // The codes written by internal/api (and the client's own
+    // `network_error`). A code without a message falls back to the generic
+    // text plus the server's English one.
+    const codes = [
+      'invalid_json',
+      'invalid_limit',
+      'invalid_volumes',
+      'body_too_large',
+      'unsupported_media_type',
+      'method_not_allowed',
+      'unauthenticated',
+      'forbidden_origin',
+      'forbidden_host',
+      'not_found',
+      'app_not_found',
+      'deployment_not_found',
+      'domain_not_found',
+      'snapshot_not_found',
+      'repo_not_found',
+      'slug_taken',
+      'no_free_port',
+      'not_cancelable',
+      'hostname_taken',
+      'busy',
+      'not_deployed',
+      'validation_failed',
+      'policy_violation',
+      'file_too_large',
+      'ref_unresolvable',
+      'disk_full',
+      'internal',
+      'prune_failed',
+      'not_configured',
+      'github_rate_limited',
+      'github_error',
+      'network_error',
+    ];
+    const seen = new Set<string>();
+    for (const code of codes) {
+      const message = errorMessage(new ApiError(400, code, 'english text'));
+      assert.false(
+        message.startsWith('エラーが発生しました'),
+        `${code} has a message of its own`,
+      );
+      assert.false(message.includes('english text'), `${code} is translated`);
+      seen.add(message);
+    }
+    assert.strictEqual(seen.size, codes.length, 'no two codes share a text');
+  });
+
+  test('errorMessage explains the hardening refusals', function (assert) {
+    assert.true(
+      errorMessage(new ApiError(415, 'unsupported_media_type', '')).includes(
+        'Content-Type',
+      ),
+    );
+    assert.true(
+      errorMessage(new ApiError(403, 'forbidden_host', '')).includes(
+        'localhost',
+      ),
+    );
+    assert.true(
+      errorMessage(new ApiError(422, 'policy_violation', '')).includes(
+        '再デプロイ',
+      ),
+    );
+  });
+
+  test('policyViolations lists the findings of a policy violation', function (assert) {
+    const error = new ApiError(422, 'policy_violation', 'no longer passes', {
+      violations: [
+        {
+          service: 'web',
+          rule: 'privileged',
+          message: 'privileged containers are not allowed',
+          relaxable: true,
+        },
+        { service: '', rule: 'ports', message: 'a port is published' },
+        { service: 'db' },
+        'not an object',
+      ],
+    });
+
+    assert.deepEqual(policyViolations(error), [
+      'web: privileged containers are not allowed',
+      'a port is published',
+    ]);
+    assert.deepEqual(
+      policyViolations(new ApiError(422, 'policy_violation', '')),
+      [],
+    );
+    assert.deepEqual(
+      policyViolations(
+        new ApiError(422, 'validation_failed', '', { violations: [] }),
+      ),
+      [],
+    );
+    assert.deepEqual(policyViolations(new Error('boom')), []);
   });
 
   test('errorMessage adds the numbers of a full disk', function (assert) {

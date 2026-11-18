@@ -1,0 +1,37 @@
+/* Settings tab: the app's settings, start and restart, the danger zone. */
+
+.limit-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.limit-row {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) minmax(0, 8rem) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.limit-row > .button {
+  justify-self: start;
+}
+
+.settings-operations {
+  margin-top: var(--space-12);
+}
+
+/* The choice inside the delete confirmation. */
+.dialog-option {
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--color-text);
+}
+
+@media (width <= 30rem) {
+  .limit-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 6rem) auto;
+  }
+}

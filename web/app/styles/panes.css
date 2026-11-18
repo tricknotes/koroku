@@ -1,0 +1,454 @@
+/*
+ * Layout pieces shared by the screens that are made of titled parts and
+ * forms: the backups and settings tabs, the system screen and app creation.
+ */
+
+/* Pane: one titled part of a screen. */
+
+.pane {
+  margin-top: var(--space-10);
+}
+
+.pane:first-child,
+.page-header + .pane,
+.pane-notices + .pane {
+  margin-top: 0;
+}
+
+.pane-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--control-height);
+  margin-bottom: var(--space-3);
+}
+
+.pane-title {
+  font-size: var(--text-md);
+}
+
+.pane-description {
+  max-width: 44rem;
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+}
+
+.pane-header + .pane-description {
+  margin-top: calc(var(--space-2) * -1);
+}
+
+/* A stack of banners. It takes no room while it holds none. */
+.pane-notices > * {
+  margin: 0 0 var(--space-4);
+}
+
+/* A plain bordered block. */
+.box {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+/* Facts: a few labelled figures side by side. */
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-10);
+  margin: 0;
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.fact > dt {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.fact > dd {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: 1.25rem;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.fact-none {
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-regular);
+}
+
+/* Meter: a thin bar for "how full". */
+
+.meter-bar {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--gray-300);
+}
+
+.meter-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--gray-800);
+}
+
+.meter-bar.is-warn > .meter-bar-fill {
+  background: var(--color-pending);
+}
+
+.meter-bar.is-danger > .meter-bar-fill {
+  background: var(--color-failed);
+}
+
+/* The threshold: a tick across the bar. */
+.meter-bar-mark {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--color-text);
+}
+
+/* Form group: a titled set of fields, title beside the fields when wide. */
+
+.form-group {
+  display: grid;
+  grid-template-columns: minmax(0, 17rem) minmax(0, 36rem);
+  gap: var(--space-4) var(--space-12);
+  padding: var(--space-8) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.form-group:first-child {
+  padding-top: var(--space-2);
+  border-top: 0;
+}
+
+.form-group-title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+
+.form-group-description {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.form-group-body {
+  min-width: 0;
+}
+
+.form-group-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* Fields side by side while there is room. */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0 var(--space-4);
+  align-items: start;
+}
+
+/* A field that takes two columns of the grid. */
+.form-grid > .field-wide {
+  grid-column: span 2;
+}
+
+/* A short value (a branch, a memory limit) does not need the full width. */
+.field-narrow > input {
+  max-width: 16rem;
+}
+
+/* The reason sits under the control; the control itself is outlined too. */
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: var(--color-failed);
+}
+
+.form-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--color-border);
+}
+
+.form-status {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.form-saved {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  color: var(--color-text);
+}
+
+.form-saved > .icon {
+  color: var(--color-running);
+}
+
+.form-problems {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+  color: var(--color-failed);
+  font-size: var(--text-sm);
+}
+
+/* A value the form shows but cannot change. */
+.readout {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-base);
+}
+
+.readout > dt {
+  color: var(--color-text-secondary);
+}
+
+.readout > dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.readout-note {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* Option: a checkbox or radio button with a label and an explanation. */
+
+.option-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.option-group > legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.option {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.option > input {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0.15rem 0 0;
+}
+
+.option-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.option-label {
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.option-hint {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.option:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+/* A command or a few lines of output. */
+.code-block {
+  margin: var(--space-2) 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Disclosure: help that is only needed now and then. */
+
+.disclosure {
+  margin-top: var(--space-4);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+}
+
+.disclosure > summary {
+  width: fit-content;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.disclosure > :not(summary) {
+  max-width: 44rem;
+}
+
+/*
+ * Destructive actions. A quiet red button for one that sits in a list or
+ * opens a confirmation; the solid `.button-danger` stays for the final
+ * "do it" inside the dialog and for the one that deletes the app.
+ */
+
+.button-danger-outline {
+  border-color: var(--color-failed-border);
+  color: var(--color-danger);
+}
+
+.button-danger-outline:hover,
+.button-danger-outline:active {
+  border-color: var(--color-danger);
+  background: var(--color-failed-bg);
+}
+
+.button-danger-outline:disabled:hover {
+  border-color: var(--color-failed-border);
+  background: var(--color-bg);
+}
+
+/*
+ * Action rows: operations on the thing the screen is about, one per row,
+ * each with what it does and its button.
+ */
+
+.action-rows {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  list-style: none;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4);
+}
+
+.action-row + .action-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.action-row-text {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.action-row-title {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+}
+
+.action-row-description {
+  margin: 2px 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/* Danger zone: what cannot be undone, fenced off at the end of a screen. */
+
+.danger-zone {
+  margin-top: var(--space-16);
+}
+
+.danger-zone-title {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-md);
+}
+
+.danger-zone-title > .icon {
+  color: var(--color-danger);
+}
+
+.danger-zone .action-rows {
+  border-color: var(--color-danger);
+}
+
+.danger-zone .action-row + .action-row {
+  border-top-color: var(--color-failed-border);
+}
+
+@media (width <= 48rem) {
+  .pane {
+    margin-top: var(--space-8);
+  }
+
+  .facts {
+    gap: var(--space-3) var(--space-6);
+  }
+
+  .form-group {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+    padding: var(--space-6) 0;
+  }
+
+  .form-grid > .field-wide {
+    grid-column: auto;
+  }
+
+  .danger-zone {
+    margin-top: var(--space-12);
+  }
+}
+
+@media (width <= 30rem) {
+  .action-row > .button {
+    width: 100%;
+  }
+}

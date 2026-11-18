@@ -23,6 +23,13 @@ export const SCENARIOS = {
   error: 'every API call fails with 500',
   loading: 'API calls take a minute to answer',
   login: 'not logged in',
+  'host-trouble':
+    'warnings, plus a failing log archive and a Caddy that refuses its configuration',
+  unconfigured:
+    'a bare host: no object storage (no backups, no log archive), no GitHub App, Caddy disabled, no swap',
+  fresh: 'one app deployed a moment ago; no backup has run yet',
+  'backups-down':
+    'everything fine, but the backup status and the Docker disk usage cannot be read',
 };
 
 function ago(ms) {
@@ -120,11 +127,13 @@ function system(overrides = {}) {
     disk: { total_bytes: 100 * GB, used_bytes: 41.3 * GB, used_percent: 41.3 },
     memory: { total_bytes: 4 * GB, available_bytes: 1.7 * GB },
     docker_version: '29.8.0',
+    swap: { total_bytes: 2 * GB, used_bytes: 0.21 * GB },
     disk_limit_percent: 85,
     log_archive: {
       configured: true,
       last_success_at: ago(1 * HOUR + 12 * MINUTE),
       last_error: '',
+      next_run_at: new Date(Date.now() + 2 * HOUR + 48 * MINUTE).toISOString(),
     },
     caddy: { enabled: true, last_loaded_at: ago(3 * HOUR), last_error: '' },
     ...overrides,
@@ -324,6 +333,75 @@ export function buildScenario(name) {
       });
     case 'empty':
       return scenario([]);
+    case 'host-trouble': {
+      const state = buildScenario('warnings');
+      state.system.swap = { total_bytes: 2 * GB, used_bytes: 1.6 * GB };
+      state.system.log_archive = {
+        configured: true,
+        last_success_at: ago(9 * HOUR),
+        last_error:
+          'put logs/blog/web/2026/11/18/04.log.gz: 403 Forbidden: access denied',
+        next_run_at: new Date(Date.now() + 40 * MINUTE).toISOString(),
+      };
+      state.system.caddy = {
+        enabled: true,
+        last_loaded_at: ago(2 * DAY),
+        last_error:
+          'load caddy config: dial tcp 127.0.0.1:2019: connect: connection refused',
+      };
+      return state;
+    }
+    case 'backups-down':
+      return scenario(healthyApps(), { backupsDown: true });
+    case 'unconfigured':
+      return scenario(healthyApps(), {
+        system: system({
+          swap: null,
+          log_archive: {
+            configured: false,
+            last_success_at: null,
+            last_error: '',
+            next_run_at: null,
+          },
+          caddy: { enabled: false, last_loaded_at: null, last_error: '' },
+        }),
+        backups: {
+          configured: false,
+          running: false,
+          last_success_at: null,
+          warning: false,
+          next_run_at: null,
+          runs: [],
+        },
+        github: false,
+      });
+    case 'fresh': {
+      const first = deployment('notes', 'Initial import', 4 * MINUTE);
+      const state = scenario(
+        [
+          {
+            app: app('notes', {
+              host_port: 20000,
+              repo_full_name: 'octo/notes',
+              service_memory_limits: {},
+              backup_exclude_volumes: [],
+              dump_hook_service: '',
+              dump_hook_command: '',
+              current_deployment: first,
+              latest_deployment: first,
+              created_at: ago(6 * MINUTE),
+              updated_at: ago(4 * MINUTE),
+            }),
+          },
+        ],
+        {
+          backups: backups({ last_success_at: null, warning: true, runs: [] }),
+          snapshots: new Map([['notes', []]]),
+        },
+      );
+      state.deployments.set('notes', [first]);
+      return state;
+    }
     case 'undeployed': {
       const state = scenario([]);
       const fresh = app('notes', { host_port: 20000, created_at: ago(MINUTE) });
@@ -406,6 +484,52 @@ export const ENV_VARS = [
   { key: 'RAILS_ENV', value: 'production' },
   { key: 'SECRET_KEY_BASE', value: '0000000000000000000000000000000000000000' },
 ];
+
+/** Starts a backup that the mock finishes by itself a little later. */
+export function startBackup(state) {
+  const run = {
+    id: Date.now() % 100000,
+    trigger: 'manual',
+    status: 'running',
+    started_at: ago(0),
+    finished_at: null,
+    error: '',
+    mockFinishAt: Date.now() + 8 * 1000,
+  };
+  state.backups.runs.unshift(run);
+  state.backups.running = true;
+  return run;
+}
+
+/** Finishes a backup started through the mock once its time is up. */
+export function settleBackups(state) {
+  for (const run of state.backups.runs ?? []) {
+    if (!run.mockFinishAt || run.mockFinishAt > Date.now()) continue;
+    delete run.mockFinishAt;
+    run.status = 'succeeded';
+    run.finished_at = new Date().toISOString();
+    state.backups.running = false;
+    state.backups.last_success_at = run.finished_at;
+    state.backups.warning = false;
+    // The run leaves a snapshot behind for every app that had none.
+    for (const list of state.snapshots?.values() ?? []) {
+      if (list.length === 0) list.push(...snapshots().slice(0, 2));
+    }
+  }
+}
+
+/** Docker disk usage; after a prune nothing is left to reclaim. */
+export function dockerUsage(state) {
+  if (!state.pruned) return DOCKER_USAGE;
+  return {
+    items: DOCKER_USAGE.items.map((item) => ({
+      ...item,
+      total_bytes: item.total_bytes - item.reclaimable_bytes,
+      reclaimable_bytes: 0,
+      count: item.type === 'build_cache' ? 0 : item.count,
+    })),
+  };
+}
 
 export function snapshots() {
   return [0, 1, 2].flatMap((n) => [

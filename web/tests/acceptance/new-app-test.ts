@@ -9,6 +9,10 @@ import {
   type Fakes,
 } from 'paas-console/tests/helpers/fakes';
 
+function fieldError(name: string): string {
+  return `[data-test-field-group="${name}"] [data-test-field-error]`;
+}
+
 module('Acceptance | create app', function (hooks) {
   setupApplicationTest(hooks);
 
@@ -107,12 +111,8 @@ module('Acceptance | create app', function (hooks) {
     await click('[data-test-submit]');
 
     assert.strictEqual(currentURL(), '/apps/new');
-    assert
-      .dom('[data-test-field-error="web_port"]')
-      .hasText('must be between 1 and 65535');
-    assert
-      .dom('[data-test-field-error="healthcheck_path"]')
-      .hasText('must start with /');
+    assert.dom(fieldError('web_port')).hasText('must be between 1 and 65535');
+    assert.dom(fieldError('healthcheck_path')).hasText('must start with /');
     assert
       .dom('[data-test-field="web_port"]')
       .hasAttribute('aria-invalid', 'true');
@@ -130,7 +130,7 @@ module('Acceptance | create app', function (hooks) {
     await click('[data-test-submit]');
 
     assert
-      .dom('[data-test-field-error="slug"]')
+      .dom(fieldError('slug'))
       .hasText('この slug はすでに使われています。');
   });
 
@@ -141,8 +141,8 @@ module('Acceptance | create app', function (hooks) {
     await fillIn('[data-test-field="web_port"]', '70000');
     await click('[data-test-submit]');
 
-    assert.dom('[data-test-field-error="slug"]').exists();
-    assert.dom('[data-test-field-error="web_port"]').exists();
+    assert.dom(fieldError('slug')).exists();
+    assert.dom(fieldError('web_port')).exists();
     assert.deepEqual(fakes.api.callsTo('POST', '/api/apps'), []);
 
     // `/apps/new` is the create page itself.
@@ -150,7 +150,7 @@ module('Acceptance | create app', function (hooks) {
     await fillIn('[data-test-field="web_port"]', '3000');
     await click('[data-test-submit]');
 
-    assert.dom('[data-test-field-error="slug"]').includesText('使えません');
+    assert.dom(fieldError('slug')).includesText('使えません');
     assert.deepEqual(fakes.api.callsTo('POST', '/api/apps'), []);
   });
 
@@ -202,6 +202,74 @@ module('Acceptance | create app', function (hooks) {
     });
   });
 
+  test('nothing can be submitted before a repository is chosen', async function (assert) {
+    await visit('/apps/new');
+
+    assert.dom('[data-test-field="repo_full_name"]').hasValue('');
+    assert.dom('[data-test-submit]').doesNotExist();
+    assert.dom('[data-test-field="slug"]').doesNotExist();
+
+    await click('[data-test-cancel]');
+    assert.strictEqual(currentURL(), '/');
+  });
+
+  test('a failing repository list offers a retry', async function (assert) {
+    fakes.api.fail('GET', '/api/repos', 502, 'github_error');
+
+    await visit('/apps/new');
+
+    assert
+      .dom('[data-test-error]')
+      .includesText('リポジトリの一覧を取得できませんでした')
+      .includesText('GitHub との通信に失敗しました');
+    assert.dom('[data-test-field="repo_full_name"]').doesNotExist();
+
+    fakes.api.on('GET', '/api/repos', {
+      repos: [
+        {
+          id: 1,
+          full_name: 'octo/blog',
+          private: true,
+          default_branch: 'main',
+        },
+      ],
+    });
+    await click('[data-test-error] button');
+
+    assert.dom('[data-test-field="repo_full_name"]').exists();
+    assert.dom('[data-test-error]').doesNotExist();
+  });
+
+  test('a failing or empty compose detection is explained', async function (assert) {
+    fakes.api.fail(
+      'GET',
+      '/api/repos/octo/blog/compose',
+      404,
+      'repo_not_found',
+    );
+
+    await visit('/apps/new');
+    await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
+
+    assert
+      .dom('[data-test-compose-error]')
+      .includesText('Compose ファイルを検出できませんでした');
+    assert
+      .dom('input[data-test-field="web_service"]')
+      .exists('service and port can still be typed in');
+
+    fakes.api.on('GET', '/api/repos/octo/Docs.Site/compose', {
+      files: [],
+      path: '',
+      services: [],
+    });
+    await fillIn('[data-test-field="repo_full_name"]', 'octo/Docs.Site');
+
+    assert.dom('[data-test-compose-error]').doesNotExist();
+    assert.dom('[data-test-compose-missing]').includesText('見つかりません');
+    assert.dom('[data-test-compose-manual]').exists();
+  });
+
   test('without the GitHub App a repository URL is asked for', async function (assert) {
     fakes.api
       .fail('GET', '/api/repos', 503, 'not_configured')
@@ -212,7 +280,10 @@ module('Acceptance | create app', function (hooks) {
 
     await visit('/apps/new');
 
-    assert.dom('[data-test-unavailable="not_configured"]').exists();
+    assert
+      .dom('[data-test-unavailable="not_configured"]')
+      .includesText('GitHub 連携がこのサーバーに設定されていない');
+    assert.dom('[data-test-field="repo_full_name"]').doesNotExist();
 
     await fillIn(
       '[data-test-field="repo_url"]',
