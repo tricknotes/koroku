@@ -144,10 +144,18 @@ function plan(entry, context) {
     step(
       'check',
       `Checking ${url}`,
+      // What paasd really writes here: nothing while it polls, then the
+      // last output of the containers (docker compose logs --tail 30).
       [
-        `GET ${context.healthPath} returned 500 Internal Server Error`,
-        `GET ${context.healthPath} returned 500 Internal Server Error`,
-        `health check did not pass within 1m0s (last result: 500 Internal Server Error)`,
+        'Last output of the containers:',
+        'db-1   | LOG:  database system is ready to accept connections',
+        'web-1  | => Booting Puma',
+        'web-1  | => Rails 8.1.2 application starting in production',
+        'web-1  | Puma starting in single mode...',
+        'web-1  | * Listening on http://0.0.0.0:3000',
+        `web-1  | Started GET "${context.healthPath}" for 172.18.0.1`,
+        "web-1  | NameError (undefined local variable or method 'payment_gateway' for an instance of CheckoutController)",
+        `web-1  | Completed 500 Internal Server Error in 12ms`,
       ],
       3 * SECOND * scale,
     );

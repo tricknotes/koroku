@@ -177,6 +177,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	}
 	live := e.invocation(app, d.ID, composeFile, true)
 	if err := e.up(ctx, live, releaseDir, log); err != nil {
+		e.logContainerOutput(ctx, app, log)
 		return true, fmt.Errorf("start containers: %w", err)
 	}
 
@@ -192,6 +193,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	url := fmt.Sprintf("http://127.0.0.1:%d%s", app.HostPort, app.HealthcheckPath)
 	log.Step(StepCheck, "Checking %s", url)
 	if err := e.opts.Health.Wait(ctx, url, e.opts.HealthTimeout); err != nil {
+		e.logContainerOutput(ctx, app, log)
 		return true, err
 	}
 	log.Printf("The app is answering.")
@@ -296,6 +298,30 @@ func (e *Engine) compose(ctx context.Context, inv compose.Invocation, dir string
 func (e *Engine) up(ctx context.Context, inv compose.Invocation, dir string, log *deployLog) error {
 	wait := strconv.Itoa(int(e.opts.WaitTimeout / time.Second))
 	return e.compose(ctx, inv, dir, log, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)
+}
+
+// containerOutputLines is how many lines of each container are copied into
+// the deploy log when the new release does not come up.
+const containerOutputLines = 30
+
+// logContainerOutput copies the last output of the app's containers into the
+// deploy log. It is called when the new release failed to start or to
+// answer, before the rollback replaces those containers: what they printed
+// is usually the reason, and afterwards it is only in the app's own logs.
+// The output passes the deploy log's masking like everything else. Problems
+// are noted in the log and otherwise ignored: the deployment failed already.
+func (e *Engine) logContainerOutput(ctx context.Context, app store.App, log *deployLog) {
+	if ctx.Err() != nil {
+		return // canceled or shutting down: nobody is waiting for the reason
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	log.Printf("Last output of the containers:")
+	inv := compose.Invocation{ProjectName: app.ProjectName()}
+	tail := strconv.Itoa(containerOutputLines)
+	if err := e.compose(ctx, inv, "", log, "logs", "--no-color", "--tail", tail); err != nil {
+		log.Printf("Reading the container output failed: %v", err)
+	}
 }
 
 // rollback brings the previous successful release back up after a failed

@@ -287,7 +287,10 @@ function warningApps() {
     'shop-staging',
     'Move checkout to the new payment API',
     12 * MINUTE,
-    { status: 'failed', error: 'health check failed: GET /up returned 500' },
+    {
+      status: 'failed',
+      error: 'health check did not pass within 1m0s (last result: HTTP 500)',
+    },
   );
 
   const wiki = deployment('wiki', 'Archive the 2025 pages', 21 * DAY);

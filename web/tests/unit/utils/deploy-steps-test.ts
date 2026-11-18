@@ -385,6 +385,9 @@ module('Unit | Utility | deploy-steps', function () {
       'container blog-web-1 exited with code 1',
       'dial tcp 127.0.0.1:20000: connect: connection refused',
       'Rollback failed: exit status 1',
+      "web-1  | NameError (undefined local variable or method 'gateway')",
+      'web-1  | java.lang.IllegalStateException: no data source',
+      'web-1  | fatal: could not connect to the database',
     ]) {
       assert.true(isErrorLine(line), line);
     }
@@ -392,6 +395,8 @@ module('Unit | Utility | deploy-steps', function () {
       '#7 [web 5/7] RUN bundle install',
       ' Container paas-blog-web-1  Started',
       'GET /up returned 200 OK',
+      'web-1  | Loaded the terrorism-free word list',
+      'Last output of the containers:',
       'exited with code 0',
     ]) {
       assert.false(isErrorLine(line), line);

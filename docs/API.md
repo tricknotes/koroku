@@ -188,6 +188,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | 行 | 意味 |
 | --- | --- |
 | `==> <時刻> failed Deployment failed: <理由>` / `Deployment canceled: <理由>` | 直前の手順で失敗（またはキャンセル）した。`start` より前なら稼働中のコンテナには触れていない |
+| `Last output of the containers:` | `start` か `check` の手順で失敗したとき、その手順の末尾に入る。続く行は `docker compose logs --tail 30` の出力（`web-1  | ...`）。読めなかったときは `Reading the container output failed: ...` |
 | `==> <時刻> rollback Rolling back to deployment #<id>` | 直前の成功リリースへ戻し始めた |
 | `Rolled back: deployment #<id> is running again.` | 戻し終えた |
 | `Rollback failed: ...` / `Rollback is not possible: ...` | 戻せなかった |

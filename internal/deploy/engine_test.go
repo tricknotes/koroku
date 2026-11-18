@@ -543,9 +543,10 @@ func TestFailedStartRollsBackToPreviousRelease(t *testing.T) {
 	}
 
 	// The previous release was brought back with its own files and environment.
-	// The previous release is validated again, started, and the failed
-	// release's image is removed.
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "config", "up", "image rm paas-blog-web:r2"}) {
+	// The output of the failed containers is read, then the previous
+	// release is validated again and started, and the failed release's
+	// image is removed.
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "config", "up", "image rm paas-blog-web:r2"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	rollback := h.lastCall("up")
@@ -588,9 +589,10 @@ func TestFailedHealthCheckRollsBack(t *testing.T) {
 	if second.Status != store.StatusFailed || !strings.Contains(second.Error, "HTTP 502") {
 		t.Fatalf("second deployment = %+v", second)
 	}
-	// The previous release is validated again, started, and the failed
-	// release's image is removed.
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "config", "up", "image rm paas-blog-web:r2"}) {
+	// The output of the failed containers is read, then the previous
+	// release is validated again and started, and the failed release's
+	// image is removed.
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "config", "up", "image rm paas-blog-web:r2"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	if !strings.Contains(h.log("blog", second.ID), fmt.Sprintf("Rolling back to deployment #%d", first.ID)) {
@@ -613,7 +615,7 @@ func TestFailedFirstDeployRemovesContainers(t *testing.T) {
 	if d.Status != store.StatusFailed {
 		t.Fatalf("deployment = %+v", d)
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "down", "image rm paas-blog-web:r1"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "down", "image rm paas-blog-web:r1"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	down := h.lastCall("down")
