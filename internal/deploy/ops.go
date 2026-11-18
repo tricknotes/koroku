@@ -424,18 +424,44 @@ type DiskUsageItem struct {
 	Count            int    `json:"count"`
 }
 
+// dfAttempts and dfRetryDelay bound the retries of `docker system df`.
+var (
+	dfAttempts   = 3
+	dfRetryDelay = 250 * time.Millisecond
+)
+
 // DockerDiskUsage reports how much disk Docker uses (`docker system df`).
 // The command walks every image and volume, so it can take seconds.
+//
+// With the containerd image store (the default of new Docker installs), df
+// fails when a container or image it is walking is removed meanwhile, for
+// example by a deployment: "rw layer snapshot not found for container ..."
+// or "content digest sha256:...: not found". Such a failure is retried a
+// few times; other errors are returned at once.
 func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	out, err := runner.Output(ctx, e.opts.Runner, runner.Cmd{
-		Name: "docker", Args: []string{"system", "df", "--format", "json"},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("docker system df: %w", err)
+	var err error
+	for attempt := 1; ; attempt++ {
+		var out []byte
+		out, err = runner.Output(ctx, e.opts.Runner, runner.Cmd{
+			Name: "docker", Args: []string{"system", "df", "--format", "json"},
+		})
+		if err == nil {
+			return parseSystemDF(out)
+		}
+		if attempt == dfAttempts || !strings.Contains(err.Error(), "not found") {
+			break
+		}
+		timer := time.NewTimer(time.Duration(attempt) * dfRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, fmt.Errorf("docker system df: %w", err)
+		case <-timer.C:
+		}
 	}
-	return parseSystemDF(out)
+	return nil, fmt.Errorf("docker system df: %w", err)
 }
 
 var diskUsageTypes = map[string]string{
