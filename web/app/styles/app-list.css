@@ -1,0 +1,227 @@
+/* App list screen: host status line, attention banner, one row per app. */
+
+/* Host status and banners: one stack above the list. */
+.app-list-top {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.app-list-top > * {
+  margin: 0;
+}
+
+.host-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-8);
+  align-items: center;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+}
+
+.host-status-item {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.host-status dt {
+  color: var(--color-text-secondary);
+}
+
+.host-status dd {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-medium);
+}
+
+.host-status-item.is-warn dd {
+  color: var(--color-pending);
+}
+
+.host-status-item.is-danger dd {
+  color: var(--color-failed);
+}
+
+.host-status-item.is-unknown dd {
+  color: var(--color-text-secondary);
+  font-weight: var(--weight-regular);
+}
+
+.host-status .skeleton {
+  width: 3.5rem;
+}
+
+.app-rows {
+  --row-columns: 7.5rem minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.5fr) 4.25rem;
+}
+
+.app-cell-name,
+.app-cell-commit,
+.app-cell-deploy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-name-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.app-name {
+  overflow: hidden;
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-url,
+.app-meta {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.app-url {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-commit-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-meta {
+  display: flex;
+  gap: 0.5em;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.app-meta > * {
+  flex: none;
+}
+
+.app-meta > time::before {
+  content: "·";
+  margin-right: 0.5em;
+  color: var(--color-text-tertiary);
+}
+
+.app-meta > .app-commit-message {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.app-sha {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.app-none {
+  color: var(--color-text-secondary);
+}
+
+.app-cell-open {
+  justify-self: end;
+}
+
+/* Column names: read out in every layout, visible only when stacked. */
+.cell-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.app-rows .skeleton-wide {
+  width: 70%;
+}
+
+.app-rows .skeleton-narrow {
+  width: 40%;
+}
+
+.app-rows .skeleton-fixed {
+  width: 4rem;
+}
+
+@media (width <= 56rem) {
+  .host-status {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3) var(--space-4);
+  }
+
+  .host-status-item {
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+  }
+
+  .app-rows > .row-list-header {
+    display: none;
+  }
+
+  /* Stacked: identity and state first, then the two commits, with "open"
+     in the bottom corner. */
+  .app-rows .row {
+    grid-template:
+      "name state" auto
+      "commit commit" auto
+      "deploy open" auto / minmax(0, 1fr) auto;
+    gap: var(--space-3);
+    align-items: start;
+    padding: var(--space-4);
+  }
+
+  .app-cell-state {
+    grid-area: state;
+    justify-self: end;
+    padding-top: 2px;
+  }
+
+  .app-cell-name {
+    grid-area: name;
+  }
+
+  .app-cell-commit {
+    grid-area: commit;
+  }
+
+  .app-cell-deploy {
+    grid-area: deploy;
+  }
+
+  .app-cell-open {
+    grid-area: open;
+    align-self: end;
+  }
+
+  .cell-label {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+  }
+}

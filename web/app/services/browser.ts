@@ -1,8 +1,9 @@
 import Service from '@ember/service';
 
 /**
- * Page-level navigation that leaves the SPA (downloads, full reloads), kept
- * behind a service so tests can observe it instead of leaving the test page.
+ * Things only the browser can do for the page: navigation that leaves the
+ * SPA (downloads, full reloads) and the clipboard. Kept behind a service so
+ * tests can observe them instead of leaving the test page.
  */
 export default class BrowserService extends Service {
   /** Query string of the page as it was loaded (`?login_error=...`). */
@@ -16,6 +17,11 @@ export default class BrowserService extends Service {
 
   reload(): void {
     window.location.reload();
+  }
+
+  /** Puts text on the clipboard; rejects when the browser refuses. */
+  async copy(text: string): Promise<void> {
+    await navigator.clipboard.writeText(text);
   }
 }
 

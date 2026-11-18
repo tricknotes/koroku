@@ -1,7 +1,6 @@
 import Service, { service } from '@ember/service';
 import { tracked } from '@glimmer/tracking';
 import type RouterService from '@ember/routing/router-service';
-import { ApiError } from 'paas-console/utils/errors';
 import type { SessionUser } from 'paas-console/utils/types';
 import type ApiService from './api';
 
@@ -31,13 +30,6 @@ export default class SessionService extends Service {
       this.authenticated = session.authenticated;
       this.user = session.authenticated ? (session.user ?? null) : null;
     } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        // A backend without the login feature (before M3) has no session
-        // endpoint and does not protect its API either: show the console.
-        this.authenticated = true;
-        this.user = null;
-        return;
-      }
       this.pending = null;
       this.loadError = error;
     }

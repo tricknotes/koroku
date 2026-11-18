@@ -1,15 +1,32 @@
-import type { TOC } from '@ember/component/template-only';
-import { formatDateTime, relativeTime } from 'paas-console/utils/format';
+import Component from '@glimmer/component';
+import { service } from '@ember/service';
+import type ClockService from 'paas-console/services/clock';
+import { formatDateTimeJst, relativeTime } from 'paas-console/utils/format';
 
-/** `<time>` showing "3 分前" with the absolute time as its tooltip. */
-const RelativeTime: TOC<{
+interface RelativeTimeSignature {
+  Element: HTMLTimeElement;
   Args: { time: string | null | undefined };
-}> = <template>
-  {{#if @time}}
-    <time datetime={{@time}} title={{formatDateTime @time}}>
-      {{relativeTime @time}}
-    </time>
-  {{/if}}
-</template>;
+}
 
-export default RelativeTime;
+/**
+ * `<time>` showing "3 分前", with the absolute time (JST) on hover. It
+ * follows the clock, so it stays right on a page that is left open. Renders
+ * nothing without a time.
+ */
+export default class RelativeTime extends Component<RelativeTimeSignature> {
+  @service declare clock: ClockService;
+
+  get text(): string {
+    return relativeTime(this.args.time, this.clock.now);
+  }
+
+  <template>
+    {{#if @time}}
+      <time
+        datetime={{@time}}
+        title={{formatDateTimeJst @time}}
+        ...attributes
+      >{{this.text}}</time>
+    {{/if}}
+  </template>
+}

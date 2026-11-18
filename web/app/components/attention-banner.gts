@@ -1,0 +1,103 @@
+import type { TOC } from '@ember/component/template-only';
+import { LinkTo } from '@ember/routing';
+import type { AttentionItem } from 'paas-console/utils/attention';
+import { formatPercent } from 'paas-console/utils/format';
+import Banner from './banner';
+import RelativeTime from './relative-time';
+
+/** One line of the banner: what is wrong and where to deal with it. */
+interface Line {
+  key: string;
+  kind: AttentionItem['kind'];
+  /** The app the line is about; empty for the host. */
+  subject: string;
+  text: string;
+  /** A point in time added as a sentence of its own ("最終成功: 2 日前"). */
+  time?: string | null;
+  route: string;
+  models: string[];
+  link: string;
+}
+
+function line(item: AttentionItem): Line {
+  switch (item.kind) {
+    case 'disk':
+      return {
+        key: 'disk',
+        kind: item.kind,
+        subject: '',
+        text: `ディスク使用率が ${formatPercent(item.usedPercent)} です（上限 ${formatPercent(item.limitPercent)}）。下回るまでデプロイを受け付けません。`,
+        route: 'system',
+        models: [],
+        link: 'システムを確認',
+      };
+    case 'backup':
+      return {
+        key: 'backup',
+        kind: item.kind,
+        subject: '',
+        text: 'バックアップが 24 時間以上成功していません。',
+        time: item.lastSuccessAt,
+        route: 'system',
+        models: [],
+        link: 'システムを確認',
+      };
+    case 'deployment':
+      return {
+        key: `deployment:${item.slug}`,
+        kind: item.kind,
+        subject: item.slug,
+        text: 'の直近のデプロイが失敗したままです。',
+        route: 'app.deploy',
+        models: [item.slug],
+        link: 'デプロイを確認',
+      };
+    case 'domains':
+      return {
+        key: `domains:${item.slug}`,
+        kind: item.kind,
+        subject: item.slug,
+        text: `に確認待ちのドメインが ${item.count} 件あります。`,
+        route: 'app.domains',
+        models: [item.slug],
+        link: 'ドメインを確認',
+      };
+  }
+}
+
+function lines(items: AttentionItem[]): Line[] {
+  return items.map(line);
+}
+
+/**
+ * The warning shown above the app list while something needs the owner's
+ * attention, one line per item with a link to where it is dealt with.
+ * Render it only when there are items: a healthy host shows no banner.
+ */
+const AttentionBanner: TOC<{
+  Args: { items: AttentionItem[] };
+}> = <template>
+  <Banner
+    @tone="warning"
+    @title="対応が必要な項目が {{@items.length}} 件あります"
+    data-test-attention
+  >
+    <ul class="banner-list">
+      {{#each (lines @items) key="key" as |item|}}
+        <li data-test-attention-item={{item.key}}>
+          {{#if item.subject}}<strong>{{item.subject}}</strong>
+          {{/if}}{{item.text}}
+          {{#if item.time}}
+            <span>最終成功:
+              <RelativeTime @time={{item.time}} /></span>
+          {{/if}}
+          <LinkTo @route={{item.route}} @models={{item.models}}>
+            {{item.link}}
+          </LinkTo>
+        </li>
+      {{/each}}
+    </ul>
+  </Banner>
+</template>;
+
+export default AttentionBanner;

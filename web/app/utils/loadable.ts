@@ -14,6 +14,11 @@ export default class Loadable<T> {
   @tracked error: unknown = null;
   @tracked loading = false;
   @tracked loaded = false;
+  /**
+   * The value on screen is older than it looks: the latest quiet refresh
+   * failed and the previous value was kept.
+   */
+  @tracked stale = false;
 
   private sequence = 0;
 
@@ -32,9 +37,13 @@ export default class Loadable<T> {
       this.value = value;
       this.error = null;
       this.loaded = true;
+      this.stale = false;
     } catch (error) {
       if (sequence !== this.sequence) return;
-      if (options.quiet && this.loaded) return;
+      if (options.quiet && this.loaded) {
+        this.stale = true;
+        return;
+      }
       this.error = error;
     } finally {
       if (sequence === this.sequence) this.loading = false;
@@ -50,6 +59,7 @@ export default class Loadable<T> {
     this.error = null;
     this.loaded = true;
     this.loading = false;
+    this.stale = false;
   }
 
   get unavailable(): Unavailability | null {

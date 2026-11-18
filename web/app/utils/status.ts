@@ -12,6 +12,22 @@ export type AppState =
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'muted';
 
+/**
+ * The five states every screen speaks in. Each has one colour, one icon and
+ * one default label (`<StatusIndicator>`); what an app, a deployment or a
+ * domain is doing is always mapped onto one of them.
+ */
+export type StatusKind =
+  'running' | 'deploying' | 'failed' | 'stopped' | 'pending';
+
+export const STATUS_LABELS: Record<StatusKind, string> = {
+  running: '稼働中',
+  deploying: 'デプロイ中',
+  failed: '失敗',
+  stopped: '停止',
+  pending: '確認待ち',
+};
+
 type AppLike = Pick<
   App,
   'desired_state' | 'current_deployment' | 'latest_deployment'
@@ -38,18 +54,36 @@ export function deriveAppState(app: AppLike): AppState {
 }
 
 export const APP_STATE_LABELS: Record<AppState, string> = {
-  deploying: 'デプロイ中',
-  failed: '直近のデプロイに失敗',
+  deploying: STATUS_LABELS.deploying,
+  failed: STATUS_LABELS.failed,
   undeployed: '未デプロイ',
-  stopped: '停止中',
-  running: '稼働中',
+  stopped: STATUS_LABELS.stopped,
+  running: STATUS_LABELS.running,
+};
+
+export const APP_STATE_KINDS: Record<AppState, StatusKind> = {
+  deploying: 'deploying',
+  failed: 'failed',
+  undeployed: 'stopped',
+  stopped: 'stopped',
+  running: 'running',
+};
+
+/** What the short label leaves out, shown as a tooltip. */
+export const APP_STATE_HINTS: Record<AppState, string> = {
+  deploying: 'デプロイを実行しています。',
+  failed:
+    '直近のデプロイに失敗しました。以前のリリースがあれば、それが応答し続けています。',
+  undeployed: 'まだ一度もデプロイされていません。',
+  stopped: '停止中です。アクセスには 503 のページが返ります。',
+  running: '稼働中です。',
 };
 
 export const APP_STATE_TONES: Record<AppState, Tone> = {
   deploying: 'info',
   failed: 'danger',
   undeployed: 'muted',
-  stopped: 'warn',
+  stopped: 'muted',
   running: 'ok',
 };
 
@@ -59,6 +93,14 @@ export const DEPLOYMENT_STATUS_LABELS: Record<DeploymentStatus, string> = {
   succeeded: '成功',
   failed: '失敗',
   canceled: 'キャンセル',
+};
+
+export const DEPLOYMENT_STATUS_KINDS: Record<DeploymentStatus, StatusKind> = {
+  queued: 'deploying',
+  running: 'deploying',
+  succeeded: 'running',
+  failed: 'failed',
+  canceled: 'stopped',
 };
 
 export const DEPLOYMENT_STATUS_TONES: Record<DeploymentStatus, Tone> = {
@@ -77,6 +119,11 @@ export const ENVIRONMENT_LABELS: Record<Environment, string> = {
 export const DOMAIN_STATUS_LABELS: Record<Domain['status'], string> = {
   pending: '確認待ち',
   active: '有効',
+};
+
+export const DOMAIN_STATUS_KINDS: Record<Domain['status'], StatusKind> = {
+  pending: 'pending',
+  active: 'running',
 };
 
 export const DOMAIN_STATUS_TONES: Record<Domain['status'], Tone> = {

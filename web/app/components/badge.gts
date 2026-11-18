@@ -1,7 +1,11 @@
 import type { TOC } from '@ember/component/template-only';
 import type { Tone } from 'paas-console/utils/status';
 
-/** Small coloured label for a state. The text carries the meaning. */
+/**
+ * Small label for a category or a count. The text carries the meaning; the
+ * tone only supports it. For the state of an app, deployment or domain use
+ * `<StatusIndicator>`, and `<EnvironmentBadge>` for production / staging.
+ */
 const Badge: TOC<{
   Element: HTMLSpanElement;
   Args: { tone?: Tone };

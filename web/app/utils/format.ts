@@ -26,6 +26,28 @@ export function formatDateTime(iso: string | null | undefined): string {
   return `${formatDate(date)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+const JST = new Intl.DateTimeFormat('ja-JP', {
+  timeZone: 'Asia/Tokyo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+/**
+ * `2026/11/18 12:34 JST`, whatever the browser's time zone: the absolute
+ * time behind a relative one. The host runs on JST, and so do its schedules.
+ */
+export function formatDateTimeJst(iso: string | null | undefined): string {
+  const date = parse(iso);
+  if (!date) return '';
+  const parts: Record<string, string> = {};
+  for (const part of JST.formatToParts(date)) parts[part.type] = part.value;
+  return `${parts['year']}/${parts['month']}/${parts['day']} ${parts['hour']}:${parts['minute']} JST`;
+}
+
 /** `12:34:56` in the browser's time zone, for log lines. */
 export function formatClock(iso: string | null | undefined): string {
   const date = parse(iso);
@@ -96,6 +118,16 @@ export function shortSha(sha: string | null | undefined): string {
 /** First line of a commit message. */
 export function firstLine(text: string | null | undefined): string {
   return (text ?? '').split('\n', 1)[0] ?? '';
+}
+
+/** `www.example.org` from `https://www.example.org`; other text as is. */
+export function hostOf(url: string | null | undefined): string {
+  if (!url) return '';
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
