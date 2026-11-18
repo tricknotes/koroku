@@ -40,13 +40,16 @@ jobs:
       # The "go" target of dev/Dockerfile: no Chromium, fonts or Node.js,
       # which the Go tests do not use and which took most of the image build.
       KOROKU_DEV_TARGET: go
-      # The Go module and build caches live in a host directory instead of
-      # named volumes, so that actions/cache can carry them between runs.
-      KOROKU_DEV_CACHE: ${{ github.workspace }}/../koroku-dev-cache
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
+      # The Go module and build caches live in a host directory instead of
+      # named volumes, so that actions/cache can carry them between runs.
+      # (actions/cache refuses paths with "..", and the runner context is
+      # not available in job-level env, hence the step.)
+      - name: Choose the cache directory
+        run: echo "KOROKU_DEV_CACHE=$RUNNER_TEMP/koroku-dev-cache" >> "$GITHUB_ENV"
       - name: Restore the Go caches
         uses: actions/cache@v6.1.0
         with:
