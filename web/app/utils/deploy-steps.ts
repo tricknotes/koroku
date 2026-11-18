@@ -332,8 +332,13 @@ export function parseDeployLog(
 const ERROR_LINE =
   /\b(error|errors|fatal|panic|failed|failure|denied|refused|unhealthy|cannot|can't|unable to|not found|no such|timed out|timeout|violation|exited with code [1-9]\d*|exit code:? [1-9]\d*|returned (4|5)\d\d)\b|-> (4|5)\d\d\b/i;
 
+// Exception class names as most runtimes print them (NameError,
+// java.lang.IllegalStateException): "error" inside a word, which the
+// pattern above leaves alone on purpose.
+const EXCEPTION_NAME = /[A-Za-z](Error|Exception)\b/;
+
 export function isErrorLine(line: string): boolean {
-  return ERROR_LINE.test(line);
+  return ERROR_LINE.test(line) || EXCEPTION_NAME.test(line);
 }
 
 export interface LogSegment {
