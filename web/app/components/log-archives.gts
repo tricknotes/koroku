@@ -130,11 +130,9 @@ export default class LogArchives extends Component<LogArchivesSignature> {
               {{LOCAL_RETENTION_DAYS}}
               日分です。それより前のログは、圧縮ファイル（gzip）としてダウンロードできます。
               {{#if this.nextRun}}
-                <span data-test-archives-next>
-                  次回の退避は
-                  <TimeUntil @time={{this.nextRun}} />
-                  です。
-                </span>
+                <span data-test-archives-next>次回の退避は<TimeUntil
+                    @time={{this.nextRun}}
+                  />です。</span>
               {{/if}}
             </p>
 
