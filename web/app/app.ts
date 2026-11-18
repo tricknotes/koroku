@@ -16,6 +16,7 @@ import './styles/panes.css';
 import './styles/backups.css';
 import './styles/settings.css';
 import './styles/system.css';
+import './styles/new-app.css';
 import './styles/legacy.css';
 
 if (macroCondition(isDevelopingApp())) {

@@ -1,0 +1,58 @@
+/* App creation, and the two pages outside the console: login, not found. */
+
+/* "Still working on it": a spinner and a line of text. */
+.new-app-progress {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-secondary);
+}
+
+.new-app .banner {
+  margin-top: 0;
+}
+
+/* Login: one narrow column, one button. */
+
+.login {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: stretch;
+  max-width: 22rem;
+  margin: var(--space-16) auto 0;
+  text-align: center;
+}
+
+.login > * {
+  margin: 0;
+}
+
+.login-logo {
+  align-self: center;
+  font-size: 2rem;
+}
+
+.login-title {
+  font-size: var(--text-lg);
+}
+
+.login-lead {
+  color: var(--color-text-secondary);
+  line-height: var(--leading-relaxed);
+}
+
+.login .banner {
+  text-align: left;
+}
+
+.login-button {
+  min-height: 2.5rem;
+}
+
+@media (width <= 40rem) {
+  .login {
+    margin-top: var(--space-10);
+  }
+}
