@@ -89,6 +89,46 @@ const SHOTS = [
     click: '[data-test-user-menu]',
     themes: ['light'],
   },
+  // Security: sessions, login history and the re-login prompt.
+  {
+    name: 'security',
+    path: '/security?scenario=healthy',
+    wait: '[data-test-sessions]',
+  },
+  {
+    name: 'security-phone',
+    path: '/security?scenario=healthy',
+    wait: '[data-test-sessions]',
+    ...PHONE,
+  },
+  {
+    name: 'security-stale',
+    path: '/security?scenario=stale-login',
+    wait: '[data-test-sessions]',
+    themes: ['light'],
+  },
+  {
+    name: 'security-revoke-confirm',
+    path: '/security?scenario=healthy',
+    wait: '[data-test-sessions]',
+    click: '[data-test-revoke-others]',
+    themes: ['light'],
+  },
+  {
+    name: 'security-reauth-dialog',
+    path: '/apps/blog/backups?scenario=stale-login',
+    wait: '[data-test-snapshot-download]',
+    click: '[data-test-snapshot-download]',
+  },
+  {
+    name: 'security-reauth-dialog-phone',
+    path: '/apps/blog/backups?scenario=stale-login',
+    wait: '[data-test-snapshot-download]',
+    click: '[data-test-snapshot-download]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
   {
     name: 'shell-user-menu-phone',
     path: '/?scenario=healthy',
@@ -278,6 +318,19 @@ function appTabShots() {
 
     // Environment variables
     { name: 'env-masked', path: '/apps/blog/env?scenario=healthy', wait: ENV },
+    // Without a recent login: keys only, and a way to log in again.
+    {
+      name: 'env-hidden',
+      path: '/apps/blog/env?scenario=stale-login',
+      wait: '[data-test-env-hidden]',
+    },
+    {
+      name: 'env-hidden-phone',
+      path: '/apps/blog/env?scenario=stale-login',
+      wait: '[data-test-env-hidden]',
+      ...PHONE,
+      themes: ['light'],
+    },
     {
       name: 'env-editing',
       path: '/apps/blog/env?scenario=healthy',

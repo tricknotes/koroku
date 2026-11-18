@@ -9,6 +9,36 @@ export interface SessionUser {
 export interface SessionResponse {
   authenticated: boolean;
   user?: SessionUser;
+  /**
+   * Until when dangerous operations work without logging in again. `null`
+   * (or absent) when the server does not ask for it (development mode).
+   */
+  reauth_until?: string | null;
+}
+
+/** A browser logged in as the user (`GET /api/sessions`). */
+export interface LoginSession {
+  id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  ip: string;
+  user_agent: string;
+  /** The session of the browser that asked. */
+  current: boolean;
+}
+
+export type LoginOutcome =
+  'succeeded' | 'not_allowed' | 'two_factor_required' | 'two_factor_unknown';
+
+/** One login attempt by a known GitHub user (`GET /api/login-events`). */
+export interface LoginEvent {
+  at: string;
+  outcome: LoginOutcome;
+  github_user_id: number;
+  login: string;
+  ip: string;
+  user_agent: string;
 }
 
 export interface SystemInfo {
@@ -138,6 +168,13 @@ export interface ServiceStatus {
 export interface EnvVar {
   key: string;
   value: string;
+}
+
+/** `GET /api/apps/{slug}/env`, with hidden values turned into ''. */
+export interface EnvList {
+  vars: EnvVar[];
+  /** The session is too old to see values: only the keys are real. */
+  valuesHidden: boolean;
 }
 
 export interface Repo {

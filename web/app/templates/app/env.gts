@@ -18,6 +18,7 @@ import Icon from 'koroku-console/components/icon';
 import RowList from 'koroku-console/components/row-list';
 import TabSection from 'koroku-console/components/tab-section';
 import type ApiService from 'koroku-console/services/api';
+import type SessionService from 'koroku-console/services/session';
 import type AppContext from 'koroku-console/utils/app-context';
 import { preventDefault, setValue } from 'koroku-console/utils/dom';
 import {
@@ -110,13 +111,21 @@ interface Signature {
 
 export default class AppEnvTemplate extends Component<Signature> {
   @service declare api: ApiService;
+  @service declare session: SessionService;
 
   /** Every (re)load starts the editor over from what is saved. */
   vars = new Loadable<EnvVar[]>(async () => {
-    const vars = await this.api.getEnv(this.slug);
+    const { vars, valuesHidden } = await this.api.getEnv(this.slug);
+    this.hidden = valuesHidden;
     this.reset(vars);
     return vars;
   });
+
+  /**
+   * The login is too old to see values (ARCHITECTURE 10.3): only the keys
+   * are listed, and nothing can be edited until the user logs in again.
+   */
+  @tracked hidden = false;
 
   @tracked rows: EnvRow[] = [];
   /** The table, or one text field in `.env` format. */
@@ -248,8 +257,11 @@ export default class AppEnvTemplate extends Component<Signature> {
 
   /** Nothing saved and nothing typed: the empty state holds the one action. */
   get showFooter(): boolean {
+    if (this.hidden) return false;
     return this.isBulk || this.rows.length > 0 || this.dirty;
   }
+
+  reauthenticate = () => this.session.reauthenticate();
 
   get cannotSave(): boolean {
     return this.busy || this.invalid || !this.dirty;
@@ -417,7 +429,9 @@ export default class AppEnvTemplate extends Component<Signature> {
   <template>
     <TabSection @title="環境変数" data-test-env>
       <:actions>
-        {{#if this.vars.loaded}}
+        {{#if this.hidden}}
+          {{! Nothing to reveal or edit until the user logs in again. }}
+        {{else if this.vars.loaded}}
           {{#if this.isBulk}}
             <Button
               @size="small"
@@ -448,6 +462,28 @@ export default class AppEnvTemplate extends Component<Signature> {
           コンテナに渡す環境変数です。変更は保存しただけでは反映されず、<strong
           >次のデプロイで反映されます</strong>。
         </p>
+
+        {{#if this.hidden}}
+          <div class="pane-notices">
+            <Banner
+              @tone="warning"
+              @title="値の表示と編集には再ログインが必要です"
+              data-test-env-hidden
+            >
+              <:default>
+                秘密の値を守るため、直近 10
+                分以内にログインしていない間は、キーだけを表示しています。
+              </:default>
+              <:actions>
+                <Button
+                  @size="small"
+                  data-test-env-reauth
+                  {{on "click" this.reauthenticate}}
+                >GitHub で再ログイン</Button>
+              </:actions>
+            </Banner>
+          </div>
+        {{/if}}
 
         <AsyncView
           @data={{this.vars}}
@@ -608,38 +644,44 @@ export default class AppEnvTemplate extends Component<Signature> {
                         </div>
 
                         <div class="env-var-actions">
-                          {{#unless row.editing}}
-                            <button
-                              type="button"
-                              class="button button-ghost button-icon"
-                              aria-pressed={{if row.revealed "true" "false"}}
-                              aria-label="{{row.key}} の値を表示"
-                              title={{if row.revealed "値を隠す" "値を表示"}}
-                              data-test-env-reveal
-                              {{on "click" (fn this.toggleReveal row)}}
-                            >
-                              <Icon @name={{if row.revealed "eye-off" "eye"}} />
-                            </button>
-                            <CopyButton
-                              @text={{row.value}}
-                              @label="{{row.key}} の値"
-                            />
-                          {{/unless}}
-                          <Button
-                            @variant="ghost"
-                            @size="small"
-                            aria-label="{{row.key}}
+                          {{#if this.hidden}}
+                            {{! Keys only: no value to show, copy or edit. }}
+                          {{else}}
+                            {{#unless row.editing}}
+                              <button
+                                type="button"
+                                class="button button-ghost button-icon"
+                                aria-pressed={{if row.revealed "true" "false"}}
+                                aria-label="{{row.key}} の値を表示"
+                                title={{if row.revealed "値を隠す" "値を表示"}}
+                                data-test-env-reveal
+                                {{on "click" (fn this.toggleReveal row)}}
+                              >
+                                <Icon
+                                  @name={{if row.revealed "eye-off" "eye"}}
+                                />
+                              </button>
+                              <CopyButton
+                                @text={{row.value}}
+                                @label="{{row.key}} の値"
+                              />
+                            {{/unless}}
+                            <Button
+                              @variant="ghost"
+                              @size="small"
+                              aria-label="{{row.key}}
                               {{if row.editing 'の編集を完了' 'を編集'}}"
-                            data-test-env-edit
-                            {{on "click" (fn this.toggleEdit row)}}
-                          >{{if row.editing "完了" "編集"}}</Button>
-                          <Button
-                            @variant="ghost"
-                            @size="small"
-                            aria-label="{{row.key}} を削除"
-                            data-test-env-remove
-                            {{on "click" (fn this.remove row)}}
-                          >削除</Button>
+                              data-test-env-edit
+                              {{on "click" (fn this.toggleEdit row)}}
+                            >{{if row.editing "完了" "編集"}}</Button>
+                            <Button
+                              @variant="ghost"
+                              @size="small"
+                              aria-label="{{row.key}} を削除"
+                              data-test-env-remove
+                              {{on "click" (fn this.remove row)}}
+                            >削除</Button>
+                          {{/if}}
                         </div>
                       </Row>
                     {{/let}}
@@ -647,11 +689,13 @@ export default class AppEnvTemplate extends Component<Signature> {
                 </:rows>
               </RowList>
 
-              <div class="env-add">
-                <Button data-test-env-add {{on "click" this.add}}>
-                  変数を追加
-                </Button>
-              </div>
+              {{#unless this.hidden}}
+                <div class="env-add">
+                  <Button data-test-env-add {{on "click" this.add}}>
+                    変数を追加
+                  </Button>
+                </div>
+              {{/unless}}
             {{else}}
               <div class="row-list" data-test-env-empty>
                 <EmptyState
