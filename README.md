@@ -30,15 +30,31 @@ bin/dev
 ### ローカルで動かす
 
 ```sh
-cp deploy/config.example.toml config.toml   # listen と data_dir を手元向けに書き換え、[caddy] は enabled = false にする
-bin/dev make web                             # Ember をビルドして web/dist に出力
-bin/dev go run ./cmd/paasd serve --config config.toml --insecure-no-auth
-curl http://127.0.0.1:8080/api/system
+docker compose up
 ```
 
-`--insecure-no-auth` はログインを外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。`[caddy] enabled = true` のままでは起動を拒否します。`curl` で変更系の API を叩くときは `-H 'Content-Type: application/json'` を付けます。
+リポジトリのルートで実行し、<http://localhost:4200> を開きます。[compose.yaml](compose.yaml) は開発専用で、次の 2 つを起動します。
 
-フロントエンドだけを開発するときは `bin/dev sh -c 'cd web && pnpm start'` で Vite の開発サーバーを起動します。`/api` と `/auth` は `127.0.0.1:8080` の `paasd` に転送されます。
+| サービス | 内容 |
+| --- | --- |
+| `web` | Vite の開発サーバー（development モード）。Ember アプリのソースを変えるとホットリロードされる。`/api` と `/auth` は `paasd` に転送する |
+| `paasd` | このチェックアウトからビルドしたコントロールプレーン。ログインなし（`--insecure-no-auth`）、Caddy なしで `127.0.0.1:8080` で待ち受ける |
+
+- アプリは手元の Docker にデプロイされます。Caddy を使わないので、デプロイしたアプリには `http://127.0.0.1:<割り当てられたホストポート>` で届きます（画面に出る `<slug>.dev.localhost` の URL は開けません）。
+- GitHub App を設定していないので、アプリ作成では「URL を直接指定」で public リポジトリの URL を入れます。手元のクローンを `file:///...` で指定することもできます（リポジトリのあるディレクトリの配下に限る。コンテナからはそこしか見えません）。
+- Go のコードを変えたら `docker compose restart paasd` でビルドし直します。
+- 設定と状態は `data/dev/`（git の管理外）に置きます。設定ファイル `data/dev/config.toml` は初回に [dev/serve.sh](dev/serve.sh) が書き出し、以後は上書きしません。ログ退避やバックアップを試すときはここに `[storage]` などを足します。`data/dev/` を消すと最初からやり直せます。
+- 別のバックエンドに向けるときは `PAASD_URL=http://127.0.0.1:<port> docker compose up web` とします。
+- `bin/dev` が先にキャッシュ用の volume を作っていると、Compose が「volume already exists but was not created by Docker Compose」と警告しますが、同じキャッシュを共有しているだけで害はありません。
+
+`--insecure-no-auth` はログインを外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。ループバックのホスト名でしか応答せず、`[caddy] enabled = true` のままでは起動を拒否します。`curl` で変更系の API を叩くときは `-H 'Content-Type: application/json'` を付けます。
+
+Compose を使わずに動かすこともできます。
+
+```sh
+bin/dev dev/serve.sh                                   # paasd（設定は data/dev/config.toml）
+bin/dev sh -c 'cd web && pnpm start --port 4200'       # Vite の開発サーバー
+```
 
 ### 配布用バイナリ
 
@@ -54,6 +70,6 @@ bin/dev make build    # フロントエンド込みの bin/paasd（linux/amd64�
 | `internal/` | API、デプロイ、Compose、Caddy、GitHub、ストアなどの各パッケージ |
 | `web/` | Ember アプリ（管理 UI） |
 | `deploy/` | 設定例、プロビジョニング |
-| `dev/`、`bin/dev` | 開発用の Docker イメージと、その中でコマンドを実行するラッパー |
+| `dev/`、`bin/dev`、`compose.yaml` | 開発用の Docker イメージ、その中でコマンドを実行するラッパー、手元で動かすための Compose 設定 |
 | `docs/` | 設計資料 |
 | `testdata/` | サンプル Compose、golden file |

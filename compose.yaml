@@ -1,0 +1,66 @@
+# Local development environment (not a way to run paasd in production; see
+# docs/OPERATIONS.md for that).
+#
+#   docker compose up
+#
+# then open http://localhost:4200. Run it from the repository root.
+#
+#   web    Vite dev server in development mode, with hot reload of the Ember
+#          app. /api and /auth are proxied to paasd.
+#   paasd  The control plane, built from this checkout, with login disabled
+#          and without Caddy. It deploys apps into the local Docker daemon;
+#          a deployed app answers on http://127.0.0.1:<its host port>.
+#
+# After changing Go code: docker compose restart paasd
+#
+# Both services run in the image of dev/Dockerfile (the same one bin/dev
+# uses) and share its caches. Like bin/dev they use the host network and the
+# host's Docker socket, and mount the checkout at its host path: the apps
+# paasd deploys are started by the host's daemon, which resolves paths on the
+# host. State lives in data/dev/ (ignored by git); delete it to start over.
+
+name: paasd-dev
+
+x-dev: &dev
+  image: paasd-dev:compose
+  build: ./dev
+  init: true
+  network_mode: host
+  working_dir: ${PWD}
+  # Drops from root to the owner of the checkout before running the command.
+  entrypoint: ["dev/compose-entrypoint.sh"]
+  volumes:
+    - ${PWD}:${PWD}
+    - /var/run/docker.sock:/var/run/docker.sock
+    - go:/cache/go
+    - go-build:/cache/go-build
+    - pnpm:/cache/pnpm-store
+
+services:
+  paasd:
+    <<: *dev
+    command: ["dev/serve.sh"]
+
+  web:
+    <<: *dev
+    command:
+      - sh
+      - -c
+      - >-
+        cd web &&
+        pnpm install --frozen-lockfile &&
+        exec pnpm exec vite --mode development --host 127.0.0.1 --port 4200 --strictPort
+    environment:
+      # Point this at another backend to develop against it, for example the
+      # mock API of web/mock/server.mjs.
+      PAASD_URL: ${PAASD_URL:-http://127.0.0.1:8080}
+
+# The caches bin/dev uses. When bin/dev created them first, Compose warns that
+# they were "not created by Docker Compose"; sharing them is intended.
+volumes:
+  go:
+    name: paasd-dev-go
+  go-build:
+    name: paasd-dev-go-build
+  pnpm:
+    name: paasd-dev-pnpm
