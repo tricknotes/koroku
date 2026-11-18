@@ -264,4 +264,22 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
 | `POST /api/apps/{slug}/backups/restore` | ボディ `{"snapshot_id": "4bba301e"}`。volume のスナップショットをリストアする（アプリ停止 → 現在の中身を退避 → 復元 → 起動）。完了まで待って 200 で `{"restored": true}` |
 | `GET /api/apps/{slug}/backups/{snapshot_id}/download` | ダンプのスナップショットをファイルとしてダウンロード（`Content-Disposition: attachment`） |
 
-バックアップが未設定（`[storage]` か restic のパスワードファイルがない）のとき、`GET /api/backups` は `configured: false` で応答し、それ以外は `503 not_configured`。そのアプリのものでないスナップショットや、種別が合わないスナップショット（volume のリストアにダンプを指定するなど）は `404 snapshot_not_found`。リストアはアプリを停止・起動するので、デプロイ中は `409 busy`。
+`GET /api/apps/{slug}/volumes`: そのアプリの named volume の一覧（ARCHITECTURE 9.1）。バックアップの対象を選ぶために使う。
+
+```json
+{
+  "volumes": [
+    { "name": "pgdata", "excluded": true, "exists": true },
+    { "name": "uploads", "excluded": false, "exists": true }
+  ]
+}
+```
+
+- `name` は Compose ファイルに書いた volume 名（`paas-blog_pgdata` ではなく `pgdata`）。`backup_exclude_volumes` とスナップショットの `target` と同じ文字列。名前順。
+- 一覧は、アプリの Compose プロジェクトの named volume のうち Docker に実在するもの（バックアップが取る volume と同じ列挙。`external` の volume は含まない）。`excluded` は `backup_exclude_volumes` に入っていれば true。
+- `backup_exclude_volumes` にあるが実在しない名前も `exists: false`、`excluded: true` で含める（UI から対象へ戻せるように）。
+- 一度もデプロイしていないアプリは volume がないので `{"volumes": []}`（除外リストに名前があれば、それだけが `exists: false` で並ぶ）。
+- volume の大きさは返さない（求めるのが重いため）。
+- バックアップが未設定でも応答する。アプリがなければ `404 app_not_found`、Docker に問い合わせられなければ `500 internal`。
+
+バックアップが未設定（`[storage]` か restic のパスワードファイルがない）のとき、`GET /api/backups` は `configured: false` で応答し、`GET /api/apps/{slug}/volumes` は通常どおり応答し、それ以外は `503 not_configured`。そのアプリのものでないスナップショットや、種別が合わないスナップショット（volume のリストアにダンプを指定するなど）は `404 snapshot_not_found`。リストアはアプリを停止・起動するので、デプロイ中は `409 busy`。
