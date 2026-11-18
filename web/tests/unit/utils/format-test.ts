@@ -2,8 +2,6 @@ import { module, test } from 'qunit';
 import {
   firstLine,
   formatBytes,
-  formatClock,
-  formatDateTime,
   formatDateTimeJst,
   formatDuration,
   formatPercent,
@@ -11,7 +9,6 @@ import {
   isFullSha,
   isValidEnvKey,
   isValidSlug,
-  localInputToIso,
   relativeTime,
   shortSha,
   suggestSlug,
@@ -37,15 +34,6 @@ module('Unit | Utility | format', function () {
       /^2026\/0[67]\/\d\d$/.test(relativeTime('2026-07-01T00:00:00Z', NOW)),
       'older than 30 days falls back to the date',
     );
-  });
-
-  test('formatDateTime and formatClock use the local time zone', function (assert) {
-    const local = new Date(2026, 10, 18, 9, 5, 7).toISOString();
-
-    assert.strictEqual(formatDateTime(local), '2026/11/18 09:05');
-    assert.strictEqual(formatClock(local), '09:05:07');
-    assert.strictEqual(formatDateTime(null), '');
-    assert.strictEqual(formatClock(''), '');
   });
 
   test('formatDateTimeJst is JST whatever the local time zone', function (assert) {
@@ -154,14 +142,5 @@ module('Unit | Utility | format', function () {
     assert.false(isValidEnvKey('1BAD'));
     assert.false(isValidEnvKey('WITH-DASH'));
     assert.false(isValidEnvKey(''));
-  });
-
-  test('localInputToIso', function (assert) {
-    assert.strictEqual(localInputToIso(''), '');
-    assert.strictEqual(localInputToIso('garbage'), '');
-    assert.strictEqual(
-      localInputToIso('2026-11-17T00:00'),
-      new Date(2026, 10, 17, 0, 0).toISOString(),
-    );
   });
 });

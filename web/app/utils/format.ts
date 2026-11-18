@@ -19,13 +19,6 @@ function formatDate(date: Date): string {
   return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())}`;
 }
 
-/** `2026/11/18 12:34` in the browser's time zone; empty for a missing time. */
-export function formatDateTime(iso: string | null | undefined): string {
-  const date = parse(iso);
-  if (!date) return '';
-  return `${formatDate(date)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 const JST = new Intl.DateTimeFormat('ja-JP', {
   timeZone: 'Asia/Tokyo',
   year: 'numeric',
@@ -46,13 +39,6 @@ export function formatDateTimeJst(iso: string | null | undefined): string {
   const parts: Record<string, string> = {};
   for (const part of JST.formatToParts(date)) parts[part.type] = part.value;
   return `${parts['year']}/${parts['month']}/${parts['day']} ${parts['hour']}:${parts['minute']} JST`;
-}
-
-/** `12:34:56` in the browser's time zone, for log lines. */
-export function formatClock(iso: string | null | undefined): string {
-  const date = parse(iso);
-  if (!date) return '';
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 /** `3 分前` style distance from `now`; falls back to the date after 30 days. */
@@ -161,11 +147,4 @@ const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function isValidEnvKey(key: string): boolean {
   return ENV_KEY_PATTERN.test(key);
-}
-
-/** `datetime-local` input value → RFC 3339 (UTC); empty stays empty. */
-export function localInputToIso(value: string): string {
-  if (!value) return '';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
