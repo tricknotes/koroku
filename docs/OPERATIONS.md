@@ -92,7 +92,10 @@ sudo ./deploy/provision.sh ./paasd
 | `[github] app_id`、`client_id`、`client_secret` | GitHub App の値。権限は Contents と Metadata の Read-only、callback は `https://<console_host>/auth/github/callback` |
 | `[github] private_key_file` | `/etc/paas/github-app.pem` |
 | `[github] allowed_user_id` | ログインを許可する GitHub ユーザーの数値 ID（1 件） |
-| オブジェクトストレージ（R2）と restic | endpoint、バケット名、Access Key ID、Secret Access Key、restic のパスワードファイルの場所。キー名は `config.example.toml` に従う |
+| `[storage] endpoint`、`region`、`bucket`、`access_key_id`、`secret_access_key` | オブジェクトストレージ（R2 なら endpoint は `https://<アカウント ID>.r2.cloudflarestorage.com`、region は `auto`）。バケットは先に作っておく（`paasd` も restic もバケットは作らない）。このセクションがないと、ログは VPS 内にだけ残り、バックアップは無効になる |
+| `[backup] restic_password_file` | `/etc/paas/restic.key`（0600）。中身は自分で決めたパスワード 1 行。ファイルがない、または他人が読める権限だとバックアップは無効になる |
+| `[backup] hour`、`timezone` | 日次バックアップの時刻（既定は `Asia/Tokyo` の 3 時） |
+| `[logs] retention_days`、`archive_interval_hours` | ログのローカル保持日数（既定 14）と退避の間隔（既定 4 時間） |
 
 `[github]` を書かないと誰もログインできない（API は 401 を返す）。`paasd serve --insecure-no-auth` は開発機専用で、unit ファイルには書かない。
 
@@ -218,8 +221,11 @@ journalctl -u paasd -n 50 --no-pager
 ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で控えたもの（restic のパスワード、R2 の接続情報）と、`paasd` のバイナリ。
 
 1. 新しい VPS を用意し、3 章のとおりにプロビジョニングする。この時点の `config.toml` は例の値なので、`paasd` は起動していない。
-2. `paasd restore-system` で、基盤のバックアップ（`paas.db` と `/etc/paas`）を戻す。R2 の接続情報と restic のパスワードはまだホストにないので、コマンドに渡す。渡し方は `paasd restore-system -h` を参照。
-3. 戻ってきた `/etc/paas/config.toml` の `public_ip` を新しい VPS の IP に書き換える。`master.key` が戻っていることを確かめる（これが元の鍵でないと、保存済みの環境変数を復号できない）。
+2. 復元に必要な最小限の設定を新しいホストに置く。`/etc/paas/config.toml` に `base_domain` と `[storage]`（7 章で控えた接続情報）を書き、`/etc/paas/restic.key`（0600）に restic のパスワードを書く。
+3. `sudo paasd restore-system` を実行する（`--config` の既定は `/etc/paas/config.toml`）。最新の基盤スナップショットから、`paas.db` を `/var/lib/paas/` に、`/etc/paas` にあったファイル（`master.key`、`github-app.pem` など）を `/etc/paas/` に戻す。
+   - 既にあるファイルは上書きしない。手で書いた `config.toml` と `restic.key` は残り、バックアップにあった版は隣に `<名前>.restored-<時刻>` として置かれる。`config.toml` は `.restored-` の版を元に、`public_ip` を新しい VPS の IP に直して使う。
+   - `paas.db` が既にあるホストでは実行を拒否する（新しいホスト用のコマンドのため）。`--force` を付けると既存のファイルを `<名前>.before-restore-<時刻>` に退避してから置き換える。`--snapshot <ID>` で最新以外のスナップショットを選べる。
+   - `master.key` が戻っていることを確かめる（これが元の鍵でないと、保存済みの環境変数を復号できない）。
 4. `sudo systemctl restart paasd` で起動し、管理 UI にログインする。DNS を切り替える前に確かめたいときは、手元の `hosts` に `console.<base_domain>` を新しい IP で書く。
 5. 各アプリを再デプロイし、volume をスナップショットからリストアする。DB はダンプをダウンロードして流し込む。
 6. DNS（`*.<base_domain>` と独自ドメインの A レコード）を新しい IP に向ける。証明書は Caddy が取り直す。
@@ -268,4 +274,4 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 - [ ] **SSH のポート検出**: `sshd -T` が待受ポートを返すこと（22 番以外にしている場合）。
 - [ ] **`bin/dev make build` のバイナリ**: 通し実行で使ったのは、フロントエンドを含めずにビルドしたバイナリ。
 - [ ] **restic 0.19.1 とバックアップ機能の組み合わせ**: バックアップの実装が入ってから、実際の R2 バケットで `backup`、`restore <snapshot>:<subpath>`、`forget --prune`、`check` を確かめる。
-- [ ] **復旧手順（11 章）**: `paasd restore-system` はこの文書を書いた時点でまだ実装されていない。引数、R2 と restic の `config.toml` のキー名、手順の細部は、実装に合わせて書き直す。
+- [ ] **復旧手順（11 章）**: `paasd restore-system` は、S3 互換サーバー（MinIO）と本物の restic を使った結合テストで「バックアップ → 別ディレクトリを新ホストに見立てて復元 → 復元した DB にアプリが入っている」まで確認した。実際の R2 と、新しい VPS での一連の手順（再デプロイ、volume のリストア、DNS の切り替え）は未確認。

@@ -10,4 +10,6 @@ echo boot >> /data/boots
   echo "tricky=${TRICKY:-}"
   echo "boots=$(wc -l < /data/boots)"
 } > /www/index.html
+# One line on stdout so the log collector has something to pick up.
+echo "booted version=$(cat /app/VERSION)"
 exec httpd -f -p 8080 -h /www

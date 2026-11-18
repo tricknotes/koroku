@@ -110,3 +110,41 @@ func TestSchemaConstraints(t *testing.T) {
 		t.Error("invalid desired_state must be rejected")
 	}
 }
+
+func TestVacuumInto(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	s, err := Open(ctx, filepath.Join(dir, "paas.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO apps (slug, web_port, host_port, created_at, updated_at) VALUES ('demo', 3000, 20000, 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	copyPath := filepath.Join(dir, "copy.db")
+	if err := s.VacuumInto(ctx, copyPath); err != nil {
+		t.Fatalf("VacuumInto: %v", err)
+	}
+	// The copy is a complete database of its own.
+	restored, err := Open(ctx, copyPath)
+	if err != nil {
+		t.Fatalf("open the copy: %v", err)
+	}
+	defer func() { _ = restored.Close() }()
+	var slug string
+	if err := restored.db.QueryRowContext(ctx, `SELECT slug FROM apps`).Scan(&slug); err != nil || slug != "demo" {
+		t.Errorf("copy content: %q, %v", slug, err)
+	}
+	version, _ := restored.SchemaVersion(ctx)
+	want, _ := s.SchemaVersion(ctx)
+	if version != want {
+		t.Errorf("schema version of the copy = %d, want %d", version, want)
+	}
+	// An existing destination is never overwritten.
+	if err := s.VacuumInto(ctx, copyPath); err == nil {
+		t.Error("VacuumInto must refuse an existing file")
+	}
+}
