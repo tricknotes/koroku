@@ -1,0 +1,105 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestRunVersionAndUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"version"}, &stdout, &stderr); err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if strings.TrimSpace(stdout.String()) != version {
+		t.Errorf("version output = %q", stdout.String())
+	}
+	if err := run(context.Background(), nil, &stdout, &stderr); err == nil {
+		t.Error("expected an error without a command")
+	}
+	if err := run(context.Background(), []string{"bogus"}, &stdout, &stderr); err == nil {
+		t.Error("expected an error for an unknown command")
+	}
+	if !strings.Contains(stderr.String(), "Usage: paasd") {
+		t.Errorf("usage not printed: %q", stderr.String())
+	}
+}
+
+func TestServeRejectsMissingConfig(t *testing.T) {
+	err := serve(context.Background(), []string{"--config", filepath.Join(t.TempDir(), "none.toml")}, io.Discard, nil)
+	if err == nil || !strings.Contains(err.Error(), "read config") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// TestServeAnswersSystemEndpoint is the M0 completion check: `paasd serve`
+// starts from a config file and GET /api/system responds.
+func TestServeAnswersSystemEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	configPath := filepath.Join(dir, "config.toml")
+	configText := fmt.Sprintf("base_domain = \"dev.example.com\"\nlisten = \"127.0.0.1:0\"\ndata_dir = %q\n", dataDir)
+	if err := os.WriteFile(configPath, []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan string, 1)
+	done := make(chan error, 1)
+	go func() { done <- serve(ctx, []string{"--config", configPath}, io.Discard, ready) }()
+
+	var addr string
+	select {
+	case addr = <-ready:
+	case err := <-done:
+		t.Fatalf("serve exited early: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not become ready")
+	}
+
+	resp, err := http.Get("http://" + addr + "/api/system")
+	if err != nil {
+		t.Fatalf("GET /api/system: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var body struct {
+		Version    string `json:"version"`
+		BaseDomain string `json:"base_domain"`
+		Disk       *struct {
+			TotalBytes uint64 `json:"total_bytes"`
+		} `json:"disk"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Version != version || body.BaseDomain != "dev.example.com" {
+		t.Errorf("unexpected body: %+v", body)
+	}
+	if body.Disk == nil || body.Disk.TotalBytes == 0 {
+		t.Errorf("disk usage missing: %+v", body.Disk)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "paas.db")); err != nil {
+		t.Errorf("database was not created: %v", err)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("serve returned %v after shutdown", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("serve did not shut down")
+	}
+}
