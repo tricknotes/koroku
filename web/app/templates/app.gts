@@ -1,4 +1,5 @@
 import type { TOC } from '@ember/component/template-only';
+import { array } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import { pageTitle } from 'ember-page-title';
 import Badge from 'paas-console/components/badge';
@@ -95,7 +96,12 @@ const AppTemplate: TOC<{
       >設定</LinkTo>
     </nav>
 
-    {{outlet}}
+    {{! Going straight from one app to another keeps the same routes, and
+        Ember would keep the tab's component (and what it loaded for the
+        previous app). Keying on the context gives each app a fresh tab. }}
+    {{#each (array @model) key="@identity"}}
+      {{outlet}}
+    {{/each}}
   {{else}}
     <section class="card" data-test-app-error>
       <h2>{{@model.slug}}</h2>

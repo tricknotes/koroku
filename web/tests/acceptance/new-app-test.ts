@@ -144,6 +144,14 @@ module('Acceptance | create app', function (hooks) {
     assert.dom('[data-test-field-error="slug"]').exists();
     assert.dom('[data-test-field-error="web_port"]').exists();
     assert.deepEqual(fakes.api.callsTo('POST', '/api/apps'), []);
+
+    // `/apps/new` is the create page itself.
+    await fillIn('[data-test-field="slug"]', 'new');
+    await fillIn('[data-test-field="web_port"]', '3000');
+    await click('[data-test-submit]');
+
+    assert.dom('[data-test-field-error="slug"]').includesText('使えません');
+    assert.deepEqual(fakes.api.callsTo('POST', '/api/apps'), []);
   });
 
   test('service and port are typed by hand when none could be read', async function (assert) {

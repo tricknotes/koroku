@@ -137,4 +137,22 @@ module('Acceptance | environment variables', function (hooks) {
     assert.dom('[data-test-env-row]').exists({ count: 3 });
     assert.dom('[data-test-env-saved]').doesNotExist();
   });
+
+  test('moving straight to another app shows that app', async function (assert) {
+    fakes.api
+      .on('GET', '/api/apps/docs', makeApp({ slug: 'docs' }))
+      .on('GET', '/api/apps/docs/env', {
+        vars: [{ key: 'ONLY_ONE', value: 'x' }],
+      });
+
+    await visit('/apps/blog/env');
+    assert.dom('[data-test-env-row]').exists({ count: 2 });
+
+    // As with the browser's history: same route, different app.
+    await visit('/apps/docs/env');
+
+    assert.dom('[data-test-app-title]').hasText('docs');
+    assert.dom('[data-test-env-row]').exists({ count: 1 });
+    assert.dom('[data-test-env-key]').hasValue('ONLY_ONE');
+  });
 });

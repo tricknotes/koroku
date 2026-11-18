@@ -185,6 +185,9 @@ export default class NewAppTemplate extends Component {
     if (!isValidSlug(this.slug)) {
       errors['slug'] =
         '英小文字で始まる英小文字・数字・ハイフン 40 文字以内で入力してください。';
+    } else if (this.slug === 'new') {
+      // `/apps/new` is this page, so an app of that name could not be opened.
+      errors['slug'] = 'この slug は使えません。別の名前にしてください。';
     }
     const port = Number(this.webPort);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
