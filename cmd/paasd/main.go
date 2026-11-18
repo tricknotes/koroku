@@ -16,8 +16,12 @@ import (
 	"time"
 
 	"github.com/tricknotes/koroku/internal/api"
+	"github.com/tricknotes/koroku/internal/clock"
 	"github.com/tricknotes/koroku/internal/config"
+	"github.com/tricknotes/koroku/internal/deploy"
+	"github.com/tricknotes/koroku/internal/gitrepo"
 	"github.com/tricknotes/koroku/internal/runner"
+	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
 	"github.com/tricknotes/koroku/internal/system"
 	"github.com/tricknotes/koroku/web"
@@ -89,15 +93,53 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	}
 	defer func() { _ = st.Close() }()
 
+	key, created, err := secrets.LoadOrCreateKey(cfg.MasterKeyFile)
+	if err != nil {
+		return err
+	}
+	if created {
+		logger.Warn("generated a new master key; back it up, env vars cannot be decrypted without it",
+			"path", cfg.MasterKeyFile)
+	}
+	box, err := secrets.NewBox(key)
+	if err != nil {
+		return err
+	}
+
 	run := runner.Exec{}
-	srv := api.New(api.Options{
-		Config:  cfg,
-		Store:   st,
-		System:  system.Host{DataDir: cfg.DataDir, Runner: run},
-		Web:     web.Dist(),
-		Logger:  logger,
-		Version: version,
+	clk := clock.System{}
+	prober := system.Host{DataDir: cfg.DataDir, Runner: run}
+	fetcher := gitrepo.Fetcher{Runner: run, AllowFileURLs: cfg.Deploy.AllowFileRepos}
+	engine := deploy.New(deploy.Options{
+		Store:            st,
+		Runner:           run,
+		Clock:            clk,
+		Box:              box,
+		System:           prober,
+		Fetcher:          fetcher,
+		Logger:           logger,
+		AppsDir:          cfg.AppsDir(),
+		DefaultMemory:    cfg.Deploy.DefaultMemoryLimit,
+		DiskLimitPercent: cfg.Deploy.DiskUsageLimitPercent,
+		PruneImages:      cfg.Deploy.PruneImages,
 	})
+	srv := api.New(api.Options{
+		Config:   cfg,
+		Store:    st,
+		System:   prober,
+		Web:      web.Dist(),
+		Logger:   logger,
+		Version:  version,
+		Clock:    clk,
+		Box:      box,
+		Deployer: engine,
+		Refs:     deploy.GitRefResolver{Fetcher: fetcher},
+	})
+
+	// The worker stops when ctx is canceled; a running deployment is then
+	// recorded as interrupted.
+	workerDone := make(chan error, 1)
+	go func() { workerDone <- engine.Run(ctx) }()
 
 	listener, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
@@ -119,13 +161,24 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	select {
 	case err := <-serveErr:
 		return fmt.Errorf("http server: %w", err)
+	case err := <-workerDone:
+		if err != nil {
+			return fmt.Errorf("deploy worker: %w", err)
+		}
 	case <-ctx.Done():
 	}
 	logger.Info("paasd shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+	// Log streams stay open for as long as a client listens; do not wait
+	// for them beyond the grace period.
+	if err := httpServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("shutdown: %w", err)
+	}
+	select {
+	case <-workerDone:
+	case <-time.After(45 * time.Second):
+		logger.Warn("the deploy worker did not stop in time")
 	}
 	return nil
 }
