@@ -175,13 +175,6 @@ func toMillis(t time.Time) int64 { return t.UnixMilli() }
 
 func fromMillis(ms int64) time.Time { return time.UnixMilli(ms).UTC() }
 
-func nullMillis(t *time.Time) sql.NullInt64 {
-	if t == nil {
-		return sql.NullInt64{}
-	}
-	return sql.NullInt64{Int64: toMillis(*t), Valid: true}
-}
-
 func fromNullMillis(v sql.NullInt64) *time.Time {
 	if !v.Valid {
 		return nil
