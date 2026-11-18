@@ -117,6 +117,9 @@ type Engine struct {
 
 	// locks serializes deployments and manual operations per app.
 	locks appLocks
+
+	// finishTimeout bounds the database writes that record a result.
+	finishTimeout time.Duration
 }
 
 // New builds an Engine. Call Run to start the worker.
@@ -126,6 +129,8 @@ func New(opts Options) *Engine {
 		opts:    opts,
 		wake:    make(chan struct{}, 1),
 		cancels: map[int64]context.CancelCauseFunc{},
+
+		finishTimeout: 30 * time.Second,
 	}
 }
 
@@ -344,14 +349,19 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 		return
 	}
 
-	// Finishing must work even while paasd is shutting down.
-	finishCtx, cancelFinish := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancelFinish()
+	// Recording the result must work even while paasd is shutting down, so
+	// it gets its own context. The context is created when it is needed: a
+	// timeout started here would already have expired after a long deploy.
+	finish := func(status, message string) error {
+		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.finishTimeout)
+		defer cancel()
+		return e.opts.Store.FinishDeployment(finishCtx, d.ID, status, message, e.opts.Clock.Now())
+	}
 
 	app, err := e.opts.Store.GetAppByID(ctx, d.AppID)
 	if err != nil {
 		logger.Error("loading the app failed", "error", err)
-		_ = e.opts.Store.FinishDeployment(finishCtx, d.ID, store.StatusFailed, "the app could not be loaded", e.opts.Clock.Now())
+		_ = finish(store.StatusFailed, "the app could not be loaded")
 		return
 	}
 	logger = logger.With("app", app.Slug)
@@ -360,7 +370,7 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 	log, err := openDeployLog(e.LogPath(app.Slug, d.ID), masker)
 	if err != nil {
 		logger.Error("opening the deploy log failed", "error", err)
-		_ = e.opts.Store.FinishDeployment(finishCtx, d.ID, store.StatusFailed, "the deploy log could not be opened", e.opts.Clock.Now())
+		_ = finish(store.StatusFailed, "the deploy log could not be opened")
 		return
 	}
 	defer log.Close()
@@ -387,7 +397,7 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 		}
 	}
 
-	if err := e.opts.Store.FinishDeployment(finishCtx, d.ID, status, message, e.opts.Clock.Now()); err != nil {
+	if err := finish(status, message); err != nil {
 		logger.Error("recording the deployment result failed", "error", err)
 		return
 	}
@@ -396,7 +406,9 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 	if status == store.StatusSucceeded {
 		log.Step("Deployment succeeded")
 		if app.DesiredState != store.DesiredRunning {
-			_ = e.opts.Store.SetAppDesiredState(finishCtx, app.ID, store.DesiredRunning, e.opts.Clock.Now())
+			stateCtx, cancelState := context.WithTimeout(context.WithoutCancel(ctx), e.finishTimeout)
+			_ = e.opts.Store.SetAppDesiredState(stateCtx, app.ID, store.DesiredRunning, e.opts.Clock.Now())
+			cancelState()
 		}
 		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 		defer cancelCleanup()
