@@ -52,6 +52,33 @@
 
 `disk`、`memory` は取得できなければ `null`、`docker_version` は空文字。
 
+UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
+
+```json
+{
+  "disk_limit_percent": 85,
+  "log_archive": { "configured": true, "last_success_at": "2026-11-18T03:10:05Z", "last_error": "" },
+  "caddy": { "enabled": true, "last_loaded_at": "2026-11-18T03:00:02Z", "last_error": "" }
+}
+```
+
+- `disk_limit_percent` を超えるとデプロイが拒否される。UI はこの値で警告を出す。
+- `log_archive.last_success_at` はログ退避が最後に成功した時刻（まだなければ `null`）。オブジェクトストレージが未設定なら `configured: false`。
+- `caddy.last_loaded_at` は Caddy へ設定を最後に投入できた時刻、`last_error` は直近の投入が失敗していればその理由（成功していれば空文字）。`[caddy] enabled = false` なら `enabled: false`。
+
+`GET /api/system/docker`: Docker のディスク使用量。
+
+```json
+{
+  "items": [
+    { "type": "images", "total_bytes": 5368709120, "reclaimable_bytes": 1073741824, "count": 12 },
+    { "type": "containers", "total_bytes": 1048576, "reclaimable_bytes": 0, "count": 6 },
+    { "type": "volumes", "total_bytes": 2147483648, "reclaimable_bytes": 0, "count": 4 },
+    { "type": "build_cache", "total_bytes": 3221225472, "reclaimable_bytes": 3221225472, "count": 58 }
+  ]
+}
+```
+
 `POST /api/system/prune`（M5）: ボディ `{"images": true, "builder": true}`（省略時は両方）。200 で `{"output": "..."}`（コマンド出力の要約）。 コマンドが失敗したら `500 prune_failed`（`details.output` にそこまでの出力）。
 
 ## アプリ（M1、起動制御と削除は M5）
@@ -75,6 +102,8 @@
   "memory_limit": "",
   "service_memory_limits": { "db": "1g" },
   "url": "https://blog.dev.example.com",
+  "primary_url": "https://www.example.org",
+  "pending_domains": 0,
   "current_deployment": null,
   "latest_deployment": null,
   "created_at": "2026-11-18T03:00:00Z",
@@ -82,6 +111,7 @@
 }
 ```
 
+- `primary_url` はプライマリドメインがあればその URL、なければ `url` と同じ。`pending_domains` は検証待ちの独自ドメインの数（どちらも UI 再設計で追加）。
 - `desired_state` は `running` / `stopped`、`environment` は `production` / `staging`。
 - `current_deployment` は稼働中の（最後に成功した）デプロイ、`latest_deployment` は最新のデプロイ。どちらも「デプロイ」の形か `null`。
 - `compose_path` が空なら自動検出（`compose.yaml`、`compose.yml`、`docker-compose.yml`、`docker-compose.yaml` の順）。
@@ -96,7 +126,7 @@
 | `PATCH /api/apps/{slug}` | 送ったフィールドだけ更新。200 でアプリ |
 | `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204 |
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ） |
-| `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字 |
+| `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）と `memory_limit_bytes`（上限。無制限なら 0）も付く。取得できなければどちらも `null` |
 
 ## 環境変数（M1）
 
@@ -135,6 +165,8 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | `GET /api/deployments/{id}` | デプロイ |
 | `POST /api/deployments/{id}/cancel` | 202 でその時点のデプロイ。実行中のものは非同期に止まる。終了済みは `409 not_cancelable` |
 | `GET /api/deployments/{id}/logs` | デプロイログの SSE（下記）。`?format=text` を付けると、その時点までの全文を `text/plain` で返す |
+
+**手順の見出し行**: デプロイログのうち `==> ` で始まる行は手順の区切りで、`==> <RFC 3339 の時刻> <キー> <表題>` の形をしている（例: `==> 2026-11-18T03:00:01Z build Building images`）。キーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done`、失敗時は `failed`（表題に最終状態と理由）と `rollback`。UI はこの行でログを手順に分け、次の見出しまでをその手順の所要時間とする。ビルドも pull も不要なアプリではその手順の行は出ない。
 
 **デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。
 
@@ -198,9 +230,9 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/backups` | 全体の状況。`{"configured": true, "running": false, "last_success_at": "2026-11-18T18:00:40Z", "warning": false, "runs": [{"id": 12, "trigger": "scheduled", "status": "succeeded", "started_at": "...", "finished_at": "...", "error": ""}]}`。`warning` は 24 時間以上成功がないとき true。`trigger` は `scheduled` / `manual` / `pre_deploy`、`status` は `running` / `succeeded` / `failed` |
+| `GET /api/backups` | 全体の状況。`{"configured": true, "running": false, "last_success_at": "2026-11-18T18:00:40Z", "warning": false, "runs": [{"id": 12, "trigger": "scheduled", "status": "succeeded", "started_at": "...", "finished_at": "...", "error": ""}]}`。`warning` は 24 時間以上成功がないとき true。`next_run_at` は次回の定期実行の予定時刻（未設定なら `null`）。`trigger` は `scheduled` / `manual` / `pre_deploy`、`status` は `running` / `succeeded` / `failed` |
 | `POST /api/backups` | 手動実行。202 で実行（`runs` の 1 件と同じ形）。実行中なら `409 busy` |
-| `GET /api/apps/{slug}/backups` | そのアプリのスナップショット。`{"snapshots": [{"id": "4bba301e", "time": "2026-11-18T18:00:12Z", "kind": "volume", "target": "pgdata"}]}`。`kind` は `volume` / `dump`、`target` は volume 名かダンプフックのサービス名 |
+| `GET /api/apps/{slug}/backups` | そのアプリのスナップショット。`{"snapshots": [{"id": "4bba301e", "time": "2026-11-18T18:00:12Z", "kind": "volume", "target": "pgdata"}]}`。`kind` は `volume` / `dump`、`target` は volume 名かダンプフックのサービス名。`size_bytes` は restic が記録していればその処理量、なければ `null` |
 | `POST /api/apps/{slug}/backups/restore` | ボディ `{"snapshot_id": "4bba301e"}`。volume のスナップショットをリストアする（アプリ停止 → 現在の中身を退避 → 復元 → 起動）。完了まで待って 200 で `{"restored": true}` |
 | `GET /api/apps/{slug}/backups/{snapshot_id}/download` | ダンプのスナップショットをファイルとしてダウンロード（`Content-Disposition: attachment`） |
 
