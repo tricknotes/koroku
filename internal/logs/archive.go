@@ -197,6 +197,12 @@ func (a *Archiver) NextWindowEnd(t time.Time) time.Time {
 	return nextDay
 }
 
+// NextRun returns when the next scheduled run of Run starts: the first point
+// of the archive grid after the current time.
+func (a *Archiver) NextRun() time.Time {
+	return a.NextWindowEnd(a.c.clk.Now())
+}
+
 // Run archives at every point of the grid until ctx is done. It starts with
 // the window that ended last, which catches up after a restart; that is safe
 // because a window is never uploaded twice. A run that failed is repeated

@@ -20,6 +20,9 @@ type LogArchiveStatus struct {
 	Configured    bool       `json:"configured"`
 	LastSuccessAt *time.Time `json:"last_success_at"`
 	LastError     string     `json:"last_error"`
+	// NextRunAt is when the next scheduled archive run starts; nil when
+	// archiving is not configured.
+	NextRunAt *time.Time `json:"next_run_at"`
 }
 
 // HostInspector reports Docker disk usage.
