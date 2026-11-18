@@ -343,9 +343,6 @@ func (f *composeFollow) once(ctx context.Context) (bool, error) {
 	w := &followWriter{f: f, started: time.Now()}
 	w.since, w.all, w.seen = f.res.begin()
 	w.sp = splitter{max: f.c.maxLine + composePrefixRoom, emit: w.line}
-	if err := f.openFill(w.since); err != nil {
-		return false, err
-	}
 
 	args := []string{"compose", "-p", f.app.Project, "logs", "--follow", "--timestamps", "--no-color"}
 	if !w.all {
@@ -393,8 +390,10 @@ func (f *composeFollow) readMarker() (open bool, floor time.Time, err error) {
 	return true, floor, nil
 }
 
-// openFill records, before a stream starts at since, that its backlog is
-// outstanding. A stream that is open already keeps its older start.
+// openFill records, before the first line of a stream that started at since
+// is written, that its backlog is outstanding. A stream that is open already
+// keeps its older start. A stream that writes nothing needs no record: it
+// does not move the newest entry.
 func (f *composeFollow) openFill(since time.Time) error {
 	if f.res.open {
 		return nil
@@ -457,6 +456,10 @@ type followWriter struct {
 
 	started   time.Time
 	lastWrite time.Time
+	// live is set once the backlog is over; marked once the resume marker
+	// was written for this run.
+	live   bool
+	marked bool
 
 	batch []Line
 	keys  []uint64
@@ -473,7 +476,8 @@ func (w *followWriter) Write(p []byte) (int, error) {
 	// The backlog comes in one burst. Output after a pause, or long after
 	// the start, is live.
 	now := time.Now()
-	if !w.lastWrite.IsZero() && (now.Sub(w.lastWrite) >= w.f.c.settleIdle || now.Sub(w.started) >= w.f.c.settleMax) {
+	if !w.live && !w.lastWrite.IsZero() && (now.Sub(w.lastWrite) >= w.f.c.settleIdle || now.Sub(w.started) >= w.f.c.settleMax) {
+		w.live = true
 		w.f.settle()
 	}
 	w.lastWrite = now
@@ -519,6 +523,12 @@ func (w *followWriter) line(raw []byte, truncated bool) {
 func (w *followWriter) commit() error {
 	if len(w.batch) == 0 {
 		return nil
+	}
+	if !w.live && !w.marked {
+		if err := w.f.openFill(w.since); err != nil {
+			return err
+		}
+		w.marked = true
 	}
 	if err := w.f.c.write(w.f.app.Slug, w.batch); err != nil {
 		return err

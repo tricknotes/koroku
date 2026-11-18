@@ -6,6 +6,7 @@
 //
 //	<slug>/<service>/YYYY-MM-DD.log      lines of one day, appended as they arrive
 //	<slug>/<service>/YYYY-MM-DD.log.gz   the same, once the day is over
+//	<slug>/.resume                       present while a restart must not trust the newest entry
 //	.archive-state.json                  what the Archiver already uploaded
 //
 // Every entry is one line: a UTC timestamp with nanoseconds, a space and the

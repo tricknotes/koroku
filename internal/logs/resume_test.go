@@ -1,7 +1,9 @@
 package logs
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +45,22 @@ func TestCollectLargeBurstIsNotDuplicatedOnResume(t *testing.T) {
 		}
 	}
 	wantSince(t, fake.Calls()[0], burst[n-1].ts.Add(-resumeOverlap))
+}
+
+// An app without containers makes the follow command end at once, over and
+// over. That must not touch the disk.
+func TestCollectWritesNothingForSilentApp(t *testing.T) {
+	fake := &runner.Fake{Handler: func(context.Context, runner.Cmd) (string, error) {
+		return "\r\x1b[Kweb-1 exited with code 0\n", nil
+	}}
+	f := newFixture(t, func(o *Options) { o.Runner = fake; o.Apps = oneApp(blog) })
+	stop := f.startRun()
+	waitFor(t, "a few runs of the follow command", func() bool { return len(fake.Calls()) >= 4 })
+	stop()
+	wantStrings(t, "log directory", fileNames(t, f.dir), nil)
+	if logged := f.logs.String(); strings.Contains(logged, "level=WARN") || strings.Contains(logged, "level=ERROR") {
+		t.Errorf("a stopped app caused log messages:\n%s", logged)
+	}
 }
 
 func TestResumeRemembersOnlyWhatAStreamCanRepeat(t *testing.T) {
