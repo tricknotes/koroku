@@ -16,6 +16,7 @@ import {
   installFakes,
   makeApp,
   makeDeployment,
+  makeSystem,
   type FakeCall,
   type FakeStream,
   type Fakes,
@@ -757,6 +758,32 @@ module('Acceptance | logs', function (hooks) {
         .dom('[data-test-log-archives] [data-test-error]')
         .includesText('サーバーでエラーが発生しました');
       assert.deepEqual(fakes.browser.assigned, []);
+      assert
+        .dom('[data-test-archives-next]')
+        .doesNotExist('nothing is said about a schedule the host did not tell');
+    });
+
+    test('it says when the next archive run is due, when the host tells', async function (assert) {
+      const next = new Date(Date.now() + 3 * 60 * 60 * 1000 + 60 * 1000);
+      fakes.api.on(
+        'GET',
+        '/api/system',
+        makeSystem({
+          log_archive: {
+            configured: true,
+            last_success_at: '2026-11-18T03:10:05Z',
+            last_error: '',
+            next_run_at: next.toISOString(),
+          },
+        }),
+      );
+      await visit('/apps/blog/logs?period=archive');
+
+      assert.dom('[data-test-archive]').exists();
+      assert
+        .dom('[data-test-archives-next]')
+        .includesText('次回の退避は')
+        .includesText('3 時間後');
     });
 
     test('a long list is shown a page at a time', async function (assert) {

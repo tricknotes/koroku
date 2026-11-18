@@ -3,20 +3,22 @@ import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { fn } from '@ember/helper';
 import { on } from '@ember/modifier';
+import type Owner from '@ember/owner';
 import type ApiService from 'paas-console/services/api';
 import type BrowserService from 'paas-console/services/browser';
 import { formatBytes, formatDateTimeJst } from 'paas-console/utils/format';
-import type Loadable from 'paas-console/utils/loadable';
+import Loadable from 'paas-console/utils/loadable';
 import {
   LOCAL_RETENTION_DAYS,
   formatCount,
   serviceLabel,
 } from 'paas-console/utils/logs';
-import type { LogArchive } from 'paas-console/utils/types';
+import type { LogArchive, SystemInfo } from 'paas-console/utils/types';
 import Banner from './banner';
 import Button from './button';
 import EmptyState from './empty-state';
 import ErrorMessage from './error-message';
+import TimeUntil from './time-until';
 
 /** Rows added per "show more": a year of archives is thousands of files. */
 const PAGE = 100;
@@ -48,9 +50,21 @@ export default class LogArchives extends Component<LogArchivesSignature> {
   @service declare api: ApiService;
   @service declare browser: BrowserService;
 
+  /** Only for when the next archive run is due; the list works without. */
+  system = new Loadable<SystemInfo>(() => this.api.getSystem());
+
   @tracked shown = PAGE;
   @tracked downloading: string | null = null;
   @tracked downloadError: unknown = null;
+
+  constructor(owner: Owner, args: LogArchivesSignature['Args']) {
+    super(owner, args);
+    void this.system.load();
+  }
+
+  get nextRun(): string | null {
+    return this.system.value?.log_archive?.next_run_at ?? null;
+  }
 
   get all(): LogArchive[] {
     return this.args.archives.value ?? [];
@@ -115,6 +129,13 @@ export default class LogArchives extends Component<LogArchivesSignature> {
               サーバーに残るのは直近
               {{LOCAL_RETENTION_DAYS}}
               日分です。それより前のログは、圧縮ファイル（gzip）としてダウンロードできます。
+              {{#if this.nextRun}}
+                <span data-test-archives-next>
+                  次回の退避は
+                  <TimeUntil @time={{this.nextRun}} />
+                  です。
+                </span>
+              {{/if}}
             </p>
 
             <div aria-live="polite">
