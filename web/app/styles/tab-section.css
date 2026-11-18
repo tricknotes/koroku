@@ -1,0 +1,52 @@
+/* Tab section: one titled block of an app detail tab (<TabSection>). */
+
+.tab-section {
+  min-width: 0;
+  margin-bottom: var(--space-8);
+}
+
+.tab-section-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--control-height-sm);
+  margin-bottom: var(--space-3);
+}
+
+.tab-section-title {
+  font-size: var(--text-base);
+  letter-spacing: 0;
+}
+
+.tab-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* One line under the title on what the section is for. */
+.tab-section-hint {
+  max-width: 44rem;
+  margin: calc(var(--space-2) * -1) 0 var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/*
+ * A destructive action inside a row: red, but not a solid block on every
+ * line. The confirmation it opens carries the solid red button.
+ */
+.button-quiet-danger {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-danger);
+}
+
+.button-quiet-danger:hover {
+  border-color: var(--color-failed-border);
+  background: var(--color-failed-bg);
+}
