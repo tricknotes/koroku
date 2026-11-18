@@ -16,9 +16,12 @@ export default defineConfig({
     }),
   ],
   server: {
+    // paasd compares the Origin of a request with its Host header, so the
+    // proxy has to pass the Host the browser used (a bare target string
+    // would rewrite it to the target's).
     proxy: {
-      '/api': apiTarget,
-      '/auth': apiTarget,
+      '/api': { target: apiTarget, changeOrigin: false },
+      '/auth': { target: apiTarget, changeOrigin: false },
     },
   },
 });

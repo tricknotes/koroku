@@ -1,0 +1,48 @@
+#!/bin/sh
+# Runs paasd for local development (the paasd service of compose.yaml).
+#
+# Writes a development configuration on first use, builds the binary from
+# the checkout and runs it with login disabled. Run it from the repository
+# root, inside the development container.
+set -eu
+
+root=$(pwd)
+state="$root/data/dev"
+config="$state/config.toml"
+
+if [ ! -f "$config" ]; then
+    mkdir -p "$state"
+    # The configuration may hold credentials later; paasd insists on 0600.
+    (
+        umask 077
+        cat >"$config" <<EOF
+# Development configuration, written by dev/serve.sh. Edit freely; it is not
+# overwritten. See deploy/config.example.toml for every setting.
+base_domain = "dev.localhost"
+listen = "127.0.0.1:8080"
+data_dir = "$state/var"
+master_key_file = "$state/master.key"
+timezone = "Asia/Tokyo"
+
+[deploy]
+# Lets an app use a file:// repository URL, for example a local clone.
+allow_file_repos = true
+
+[caddy]
+# No reverse proxy: apps answer on their host port only.
+enabled = false
+EOF
+    )
+    echo "dev/serve.sh: wrote $config" >&2
+fi
+
+# The frontend is served by the Vite dev server, but the binary embeds
+# web/dist, so the directory has to exist.
+mkdir -p web/dist
+[ -n "$(ls -A web/dist)" ] || touch web/dist/.keep
+
+# A linked worktree's VCS metadata is not always reachable from here.
+bin=/tmp/paasd-dev
+go build -buildvcs=false -o "$bin" ./cmd/paasd
+
+exec "$bin" serve --config "$config" --insecure-no-auth
