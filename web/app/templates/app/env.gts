@@ -13,6 +13,7 @@ import Button, { buttonClass } from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import CopyButton from 'koroku-console/components/copy-button';
 import EmptyState from 'koroku-console/components/empty-state';
+import EnvRequirementsPanel from 'koroku-console/components/env-requirements-panel';
 import ErrorMessage from 'koroku-console/components/error-message';
 import Icon from 'koroku-console/components/icon';
 import RowList from 'koroku-console/components/row-list';
@@ -26,6 +27,7 @@ import {
   parseDotenv,
   type DotenvResult,
 } from 'koroku-console/utils/dotenv';
+import { unlistedKeys } from 'koroku-console/utils/env-requirements';
 import { errorMessage, fieldErrors } from 'koroku-console/utils/errors';
 import { isValidEnvKey, shortSha } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
@@ -33,6 +35,7 @@ import type {
   Deployment,
   EnvList,
   EnvPending,
+  EnvRequirements,
   EnvVar,
 } from 'koroku-console/utils/types';
 
@@ -72,15 +75,17 @@ class EnvRow {
    */
   focus: 'key' | 'value' | null;
 
-  constructor(saved: EnvVar | null) {
+  constructor(saved: EnvVar | null, draftKey = '') {
     this.key = saved?.key ?? '';
     this.value = saved?.value ?? '';
     this.pending = saved?.pending ?? null;
     this.fresh = saved === null;
     this.editing = this.fresh;
-    this.draftKey = this.key;
+    this.draftKey = draftKey || this.key;
     this.draftValue = this.value;
-    this.focus = this.fresh ? 'key' : null;
+    // A key given up front (added from the repository's list) leaves only
+    // the value to type.
+    this.focus = this.fresh ? (draftKey ? 'value' : 'key') : null;
   }
 
   get focusKey(): boolean {
@@ -161,6 +166,15 @@ export default class AppEnvTemplate extends Component<Signature> {
   });
 
   /**
+   * What the repository needs at the head of the deploy branch
+   * (ARCHITECTURE 9.4). Compared with the rows on screen, so saving a
+   * variable needs no new request.
+   */
+  requirements = new Loadable<EnvRequirements>(() =>
+    this.api.getEnvRequirements(this.slug),
+  );
+
+  /**
    * The login is too old to see values (ARCHITECTURE 10.3): only the keys
    * are listed, and nothing can be edited until the user logs in again.
    */
@@ -192,6 +206,7 @@ export default class AppEnvTemplate extends Component<Signature> {
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
     void this.list.load();
+    void this.requirements.load();
   }
 
   get slug(): string {
@@ -228,6 +243,18 @@ export default class AppEnvTemplate extends Component<Signature> {
       .filter((row) => !row.fresh)
       .map((row) => ({ key: row.key, value: row.value }));
   }
+
+  get savedKeys(): string[] {
+    return this.rows.filter((row) => !row.fresh).map((row) => row.key);
+  }
+
+  /** Saved keys a `.env.example` no longer lists. */
+  get unlisted(): Set<string> {
+    return new Set(unlistedKeys(this.requirements.value, this.savedKeys));
+  }
+
+  isUnlisted = (row: EnvRow): boolean =>
+    !row.fresh && this.unlisted.has(row.key);
 
   get isBulk(): boolean {
     return this.mode === 'bulk';
@@ -303,6 +330,10 @@ export default class AppEnvTemplate extends Component<Signature> {
     return saved.length > 0 && saved.every((row) => row.revealed);
   }
 
+  get canAddFromRepo(): boolean {
+    return !this.hidden && !this.isBulk;
+  }
+
   get hasSavedRows(): boolean {
     return this.rows.some((row) => !row.fresh);
   }
@@ -348,6 +379,16 @@ export default class AppEnvTemplate extends Component<Signature> {
 
   add = () => {
     this.rows = [...this.rows, new EnvRow(null)];
+  };
+
+  /** Opens a new row for a key the repository asks for. */
+  addKey = (key: string) => {
+    const open = this.rows.find((row) => row.fresh && row.trimmedKey === key);
+    if (open) {
+      document.getElementById(`${open.id}-value`)?.focus();
+      return;
+    }
+    this.rows = [...this.rows, new EnvRow(null, key)];
   };
 
   edit = (row: EnvRow) => {
@@ -642,6 +683,16 @@ export default class AppEnvTemplate extends Component<Signature> {
             {{/if}}
           </div>
 
+          {{#unless this.isBulk}}
+            <EnvRequirementsPanel
+              @slug={{this.slug}}
+              @requirements={{this.requirements}}
+              @savedKeys={{this.savedKeys}}
+              @canAdd={{this.canAddFromRepo}}
+              @onAdd={{this.addKey}}
+            />
+          {{/unless}}
+
           {{#if this.isBulk}}
             <form
               class="env-bulk"
@@ -765,6 +816,12 @@ export default class AppEnvTemplate extends Component<Signature> {
                               <Badge data-test-env-pending>
                                 {{row.pendingLabel}}
                               </Badge>
+                            {{/if}}
+                            {{#if (this.isUnlisted row)}}
+                              <Badge
+                                title="リポジトリの .env.example に書かれていない変数です"
+                                data-test-env-unlisted
+                              >例にない</Badge>
                             {{/if}}
                           </span>
                         {{/if}}

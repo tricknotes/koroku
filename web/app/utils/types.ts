@@ -156,6 +156,10 @@ export interface App {
   dump_hook_service?: string;
   dump_hook_command?: string;
   backup_before_deploy?: boolean;
+  /** Where the variables the repository needs are read (ARCHITECTURE 9.4). */
+  env_source?: EnvSource;
+  /** The `.env.example` path in `dotenv` mode; '' for the default. */
+  env_example_path?: string;
 }
 
 export interface AppPatch {
@@ -172,6 +176,8 @@ export interface AppPatch {
   dump_hook_service?: string;
   dump_hook_command?: string;
   backup_before_deploy?: boolean;
+  env_source?: EnvSource;
+  env_example_path?: string;
 }
 
 export interface NewApp {
@@ -215,6 +221,48 @@ export interface EnvList {
   compared: boolean;
   /** The session is too old to see values: only the keys are real. */
   valuesHidden: boolean;
+}
+
+/**
+ * Where the console reads the variables a repository needs: the Compose
+ * file's `${VAR}` references, a `.env.example` file, or nowhere.
+ */
+export type EnvSource = 'compose' | 'dotenv' | 'off';
+
+/** Why the requirements could not be read. */
+export type EnvRequirementsReason =
+  | 'file_not_found'
+  | 'repo_unavailable'
+  | 'unsupported_repo'
+  | 'not_configured'
+  | 'ref_not_found'
+  | 'too_large'
+  | 'rate_limited'
+  | 'github_error';
+
+export interface EnvRequirement {
+  key: string;
+  /** Must be set (`${VAR:?}`, `${VAR}` without a default, any `.env.example` key). */
+  required: boolean;
+  /** The Compose default (`${VAR:-x}`), `null` when there is none. */
+  default: string | null;
+  description: string;
+  /** A variable with this key is saved. */
+  set: boolean;
+}
+
+/** `GET /api/apps/{slug}/env/requirements`. */
+export interface EnvRequirements {
+  source: EnvSource;
+  status: 'ok' | 'off' | 'unavailable';
+  reason: EnvRequirementsReason | '';
+  ref: string;
+  commit_sha: string;
+  /** The file that was read (or looked for); '' when none was found. */
+  path: string;
+  variables: EnvRequirement[];
+  /** Saved keys the repository does not mention. */
+  unlisted: string[];
 }
 
 export interface Repo {

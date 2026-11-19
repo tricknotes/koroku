@@ -28,7 +28,7 @@ import {
   APP_STATE_LABELS,
   deriveAppState,
 } from 'koroku-console/utils/status';
-import type { App, Environment } from 'koroku-console/utils/types';
+import type { App, EnvSource, Environment } from 'koroku-console/utils/types';
 
 const KNOWN_FIELDS = new Set([
   'default_branch',
@@ -39,6 +39,8 @@ const KNOWN_FIELDS = new Set([
   'environment',
   'memory_limit',
   'service_memory_limits',
+  'env_source',
+  'env_example_path',
 ]);
 
 type ControlAction = 'start' | 'stop' | 'restart';
@@ -52,6 +54,14 @@ const CONTROL_DONE: Record<ControlAction, string> = {
 function isChecked(current: Environment, value: Environment): boolean {
   return current === value;
 }
+
+function isSource(current: EnvSource, value: EnvSource): boolean {
+  return current === value;
+}
+
+const VAR_PLAIN = '${VAR}';
+const VAR_REQUIRED = '${VAR:?説明}';
+const VAR_OPTIONAL = '${VAR:-既定値}';
 
 function isBusy(current: ControlAction | null, action: ControlAction): boolean {
   return current === action;
@@ -139,6 +149,10 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   setEnvironment = (event: Event) => {
     this.form.environment = inputValue(event) as Environment;
+  };
+
+  setEnvSource = (event: Event) => {
+    this.form.envSource = inputValue(event) as EnvSource;
   };
 
   addLimit = () => {
@@ -441,6 +455,95 @@ export default class AppSettingsTemplate extends Component<Signature> {
               </span>
             </label>
           </fieldset>
+        </div>
+      </div>
+
+      <div class="form-group" data-test-env-source-group>
+        <div>
+          <h2 class="form-group-title">必要な環境変数の照合</h2>
+          <p class="form-group-description">
+            リポジトリが必要とする環境変数を読み、環境変数の画面とデプロイの前に、未設定のものを知らせます。デプロイは止めません。
+          </p>
+        </div>
+        <div class="form-group-body">
+          <fieldset class="option-group">
+            <legend class="visually-hidden">照合元</legend>
+            <label class="option">
+              <input
+                type="radio"
+                name="env_source"
+                value="compose"
+                checked={{isSource this.form.envSource "compose"}}
+                data-test-env-source-option="compose"
+                {{on "change" this.setEnvSource}}
+              />
+              <span class="option-body">
+                <span class="option-label">Compose ファイルの
+                  <code>{{VAR_PLAIN}}</code>（推奨）</span>
+                <span class="option-hint">
+                  <code>{{VAR_REQUIRED}}</code>
+                  と既定値のない参照は必須、<code>{{VAR_OPTIONAL}}</code>
+                  は任意として扱います。アプリのコードだけが読む変数は対象外です。
+                </span>
+              </span>
+            </label>
+            <label class="option">
+              <input
+                type="radio"
+                name="env_source"
+                value="dotenv"
+                checked={{isSource this.form.envSource "dotenv"}}
+                data-test-env-source-option="dotenv"
+                {{on "change" this.setEnvSource}}
+              />
+              <span class="option-body">
+                <span class="option-label">.env.example</span>
+                <span class="option-hint">
+                  書かれたキーをすべて必須として扱い、直前のコメントを説明として表示します。
+                </span>
+              </span>
+            </label>
+            <label class="option">
+              <input
+                type="radio"
+                name="env_source"
+                value="off"
+                checked={{isSource this.form.envSource "off"}}
+                data-test-env-source-option="off"
+                {{on "change" this.setEnvSource}}
+              />
+              <span class="option-body">
+                <span class="option-label">照合しない</span>
+              </span>
+            </label>
+          </fieldset>
+          {{#if (isSource this.form.envSource "dotenv")}}
+            <FormField
+              class="field-wide"
+              @label=".env.example のパス"
+              @hint="空ならリポジトリ直下の .env.example を読みます。"
+              @error={{this.errors.env_example_path}}
+              data-test-field-group="env_example_path"
+              as |field|
+            >
+              <input
+                id={{field.id}}
+                type="text"
+                class="mono"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder=".env.example"
+                value={{this.form.envExamplePath}}
+                aria-describedby={{field.describedBy}}
+                aria-invalid={{field.invalid}}
+                data-test-field="env_example_path"
+                {{on "input" (setValue this.form "envExamplePath")}}
+              />
+            </FormField>
+          {{/if}}
+          {{#if this.errors.env_source}}
+            <p class="field-error">{{this.errors.env_source}}</p>
+          {{/if}}
         </div>
       </div>
 

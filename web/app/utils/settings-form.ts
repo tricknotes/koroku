@@ -1,5 +1,10 @@
 import { tracked } from '@glimmer/tracking';
-import type { App, AppPatch, Environment } from 'koroku-console/utils/types';
+import type {
+  App,
+  AppPatch,
+  EnvSource,
+  Environment,
+} from 'koroku-console/utils/types';
 
 let nextLimitId = 0;
 
@@ -46,6 +51,8 @@ export default class SettingsForm {
   @tracked relaxPolicy: boolean;
   @tracked memoryLimit: string;
   @tracked limits: LimitRow[];
+  @tracked envSource: EnvSource;
+  @tracked envExamplePath: string;
 
   constructor(app: App) {
     this.defaultBranch = app.default_branch;
@@ -59,6 +66,8 @@ export default class SettingsForm {
     this.limits = Object.entries(app.service_memory_limits ?? {}).map(
       ([service, limit]) => new LimitRow(service, limit),
     );
+    this.envSource = app.env_source ?? 'compose';
+    this.envExamplePath = app.env_example_path ?? '';
   }
 
   get serviceLimits(): Record<string, string> {
@@ -118,6 +127,13 @@ export default class SettingsForm {
     const limits = this.serviceLimits;
     if (!sameRecord(limits, app.service_memory_limits ?? {})) {
       patch.service_memory_limits = limits;
+    }
+    if (this.envSource !== (app.env_source ?? 'compose')) {
+      patch.env_source = this.envSource;
+    }
+    const envExamplePath = this.envExamplePath.trim();
+    if (envExamplePath !== (app.env_example_path ?? '')) {
+      patch.env_example_path = envExamplePath;
     }
     return patch;
   }
