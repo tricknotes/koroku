@@ -101,6 +101,11 @@ export default class EnvRequirementsPanel extends Component<Signature> {
     return this.value ? sourceFile(this.value) : '';
   }
 
+  /** A real path is code; the generic name is prose. */
+  get hasPath(): boolean {
+    return Boolean(this.value?.path);
+  }
+
   get isDotenv(): boolean {
     return this.value?.source === 'dotenv';
   }
@@ -138,7 +143,7 @@ export default class EnvRequirementsPanel extends Component<Signature> {
           <span>
             {{this.where}}
             の
-            <span class="mono">{{this.file}}</span>
+            <span class={{if this.hasPath "mono"}}>{{this.file}}</span>
             と照合できませんでした。{{this.reason}}
             <LinkTo @route="app.settings" @model={{@slug}}>照合元の設定</LinkTo>
           </span>
@@ -153,7 +158,7 @@ export default class EnvRequirementsPanel extends Component<Signature> {
             <p class="env-reqs-source">
               {{this.where}}
               の
-              <span class="mono">{{this.file}}</span>
+              <span class={{if this.hasPath "mono"}}>{{this.file}}</span>
               {{#if this.isDotenv}}
                 に書かれた変数と照合しています。
               {{else}}
@@ -199,7 +204,7 @@ export default class EnvRequirementsPanel extends Component<Signature> {
             <span>
               {{this.where}}
               の
-              <span class="mono">{{this.file}}</span>
+              <span class={{if this.hasPath "mono"}}>{{this.file}}</span>
               が必要とする
               {{this.total}}
               件の変数は、すべて設定済みです。
@@ -211,7 +216,7 @@ export default class EnvRequirementsPanel extends Component<Signature> {
             <span>
               {{this.where}}
               の
-              <span class="mono">{{this.file}}</span>
+              <span class={{if this.hasPath "mono"}}>{{this.file}}</span>
               {{#if this.isDotenv}}
                 に変数は書かれていません。
               {{else}}
@@ -225,7 +230,7 @@ export default class EnvRequirementsPanel extends Component<Signature> {
           <p class="env-reqs-quiet" data-test-env-reqs-unlisted>
             <Icon @name="info" />
             <span>
-              <span class="mono">{{this.file}}</span>
+              <span class={{if this.hasPath "mono"}}>{{this.file}}</span>
               にない変数:
               <span class="mono">{{this.unlistedText}}</span>。
               アプリが使わなくなった変数なら削除できます。

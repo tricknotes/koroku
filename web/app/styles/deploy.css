@@ -585,6 +585,19 @@ div.step-header {
     margin-left: 0;
   }
 
+  /* The link goes under the text instead of squeezing it. */
+  .deploy-env-warning > .banner {
+    flex-wrap: wrap;
+  }
+
+  .deploy-env-warning .banner-body {
+    flex-basis: calc(100% - 2.5rem);
+  }
+
+  .deploy-env-warning .banner-actions {
+    margin-left: calc(var(--text-md) + var(--space-3));
+  }
+
   /* The step's own title gives way; name, state and duration stay. */
   .step-title {
     visibility: hidden;
