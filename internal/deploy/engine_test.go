@@ -100,6 +100,9 @@ type harness struct {
 	buildOutput string
 	// onFetch lets a test add files to the checkout, as a repository would.
 	onFetch func(dir string) error
+	// dockerOutput answers docker commands other than compose (ps,
+	// network ...); ok=false falls back to an empty success.
+	dockerOutput func(args []string) (out string, ok bool, err error)
 }
 
 const defaultRepoServices = `{
@@ -177,8 +180,13 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 	case "docker":
 		sub, merged := composeSubcommand(cmd.Args)
 		h.mu.Lock()
-		hook, services, buildOutput := h.onCompose, h.repoServices, h.buildOutput
+		hook, services, buildOutput, dockerOutput := h.onCompose, h.repoServices, h.buildOutput, h.dockerOutput
 		h.mu.Unlock()
+		if dockerOutput != nil && cmd.Args[0] != "compose" {
+			if out, ok, err := dockerOutput(cmd.Args); ok {
+				return out, err
+			}
+		}
 		if hook != nil {
 			if err := hook(ctx, sub, cmd); err != nil {
 				return "", err

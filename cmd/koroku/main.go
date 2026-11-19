@@ -347,6 +347,11 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 
 	engine := deploy.New(deployOpts)
 	controller.engine = engine
+	// Before the worker starts: group networks must exist and only the
+	// containers the database allows may be on them (ARCHITECTURE 6.1).
+	if err := engine.ReconcileGroups(ctx); err != nil {
+		logger.Error("reconciling the group networks failed", "error", err)
+	}
 	if backups != nil {
 		go func() {
 			if err := backups.scheduler.Run(ctx); err != nil && ctx.Err() == nil {
