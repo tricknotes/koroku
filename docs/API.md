@@ -46,7 +46,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、volume のリストア、DB ダンプのダウンロード、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## システム（M0、prune は M5）
 
@@ -156,8 +156,27 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/apps/{slug}/env` | `{"vars": [{"key": "RAILS_ENV", "value": "production"}], "values_hidden": false}`（key 順。値は平文で返るので、UI は既定でマスク表示する）。直近 10 分以内のログインでなければ、値をすべて `null` にして `values_hidden: true` を返す |
-| `PUT /api/apps/{slug}/env` | 同じ形（`vars` だけ）で全件を置き換える。200 で保存後の一覧。反映は次のデプロイから。直近 10 分以内のログインでなければ `403 reauth_required` |
+| `GET /api/apps/{slug}/env` | 下の形（`vars` は key 順。値は平文で返るので、UI は既定でマスク表示する）。直近 10 分以内のログインでなければ、値をすべて `null` にして `values_hidden: true` を返す |
+| `PUT /api/apps/{slug}/env` | `{"vars": [{"key": "...", "value": "..."}]}` で全件を置き換える。200 で保存後の一覧（`GET` と同じ形） |
+| `PUT /api/apps/{slug}/env/{key}` | 1 件を追加または変更する。本文は `{"value": "..."}`。名前を変えるときは `{"key": "NEW_KEY"}` を足す（`value` を省くと値はそのまま）。名前の変更は 1 つのトランザクションで行う。200 で保存後の一覧。名前を変える元がなければ `404 env_var_not_found`、変えた先がすでにあれば `409 env_var_exists`。追加・変更で `value` がなければ 422 |
+| `DELETE /api/apps/{slug}/env/{key}` | 1 件を削除する。200 で保存後の一覧。なければ `404 env_var_not_found` |
+
+```json
+{
+  "vars": [
+    {"key": "DATABASE_URL", "value": "postgres://...", "pending": null},
+    {"key": "MAIL_FROM", "value": "noreply@example.com", "pending": "added"},
+    {"key": "SECRET_KEY_BASE", "value": "...", "pending": "changed"}
+  ],
+  "removed": ["OLD_FLAG"],
+  "compared": true,
+  "values_hidden": false
+}
+```
+
+- 保存しただけでは反映されず、次のデプロイから効く。`pending` は稼働中のリリース（`current_deployment`）と比べた差で、`added` は稼働中にないキー、`changed` は値が違うキー、`null` は同じ。`removed` は削除したがまだ稼働中のリリースにあるキー（key 順）。
+- 稼働中のリリースがないか、比べるための記録がない古いリリースが稼働中なら `compared: false` で、`pending` はすべて `null`、`removed` は空（ARCHITECTURE 9.2）。
+- 変更系はすべて、直近 10 分以内のログインでなければ `403 reauth_required`。
 
 key は英字かアンダースコアで始まる英数字とアンダースコア。重複は 422。
 

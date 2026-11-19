@@ -5,7 +5,9 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -21,7 +23,14 @@ const KeySize = 32
 // Box encrypts and decrypts values with AES-256-GCM.
 type Box struct {
 	aead cipher.AEAD
+	// fingerprintKey keys the HMAC of Fingerprint. It is derived from the
+	// master key so that fingerprints cannot be brute-forced without it.
+	fingerprintKey []byte
 }
+
+// fingerprintLabel derives the fingerprint key from the master key. Changing
+// it makes every recorded fingerprint differ (ARCHITECTURE 9.2).
+const fingerprintLabel = "koroku env fingerprint v1"
 
 // NewBox builds a Box from a 32-byte key.
 func NewBox(key []byte) (*Box, error) {
@@ -36,7 +45,22 @@ func NewBox(key []byte) (*Box, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init GCM: %w", err)
 	}
-	return &Box{aead: aead}, nil
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(fingerprintLabel))
+	return &Box{aead: aead, fingerprintKey: mac.Sum(nil)}, nil
+}
+
+// Fingerprint returns a short keyed digest of a value. Two fingerprints are
+// equal exactly when owner and value are (barring collisions), and the value
+// cannot be recovered from one without the master key. It lets the console
+// tell which variables differ from the running release without storing the
+// values a second time.
+func (b *Box) Fingerprint(associated string, value []byte) string {
+	mac := hmac.New(sha256.New, b.fingerprintKey)
+	mac.Write([]byte(associated))
+	mac.Write([]byte{0})
+	mac.Write(value)
+	return hex.EncodeToString(mac.Sum(nil)[:16])
 }
 
 // Seal encrypts plaintext. The associated data binds the ciphertext to its

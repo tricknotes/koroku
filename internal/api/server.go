@@ -153,6 +153,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/apps/{slug}/services", s.handleListServices)
 	mux.HandleFunc("GET /api/apps/{slug}/env", s.handleGetEnv)
 	mux.HandleFunc("PUT /api/apps/{slug}/env", s.handlePutEnv)
+	mux.HandleFunc("PUT /api/apps/{slug}/env/{key}", s.handlePutEnvVar)
+	mux.HandleFunc("DELETE /api/apps/{slug}/env/{key}", s.handleDeleteEnvVar)
 	mux.HandleFunc("GET /api/apps/{slug}/deployments", s.handleListDeployments)
 	mux.HandleFunc("POST /api/apps/{slug}/deployments", s.handleCreateDeployment)
 

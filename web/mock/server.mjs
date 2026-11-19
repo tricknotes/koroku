@@ -212,22 +212,85 @@ route('GET', '/api/apps/:slug/services', (context) => ({
     services(appOf(context)),
 }));
 
-route('GET', '/api/apps/:slug/env', (context) => {
-  appOf(context);
-  const vars = context.state.env?.get(context.params.slug) ?? ENV_VARS;
-  if (context.scenario === 'stale-login') {
-    return {
-      vars: vars.map(({ key }) => ({ key, value: null })),
-      values_hidden: true,
-    };
-  }
-  return { vars, values_hidden: false };
-});
+function savedEnv(context) {
+  return context.state.env?.get(context.params.slug) ?? ENV_VARS;
+}
+
+function storeEnv(context, vars) {
+  context.state.env ??= new Map();
+  context.state.env.set(
+    context.params.slug,
+    [...vars].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+  );
+}
+
+/** The API's answer: the saved variables and how they differ from the release. */
+function envList(context) {
+  const app = appOf(context);
+  const vars = savedEnv(context);
+  const deployed = app.current_deployment
+    ? (context.state.deployedEnv?.get(app.slug) ?? ENV_VARS)
+    : null;
+  const running = new Map((deployed ?? []).map((v) => [v.key, v.value]));
+  const hidden = context.scenario === 'stale-login';
+  return {
+    vars: vars.map(({ key, value }) => ({
+      key,
+      value: hidden ? null : value,
+      pending: !deployed
+        ? null
+        : !running.has(key)
+          ? 'added'
+          : running.get(key) !== value
+            ? 'changed'
+            : null,
+    })),
+    removed: deployed
+      ? [...running.keys()].filter((key) => !vars.some((v) => v.key === key))
+      : [],
+    compared: Boolean(deployed),
+    values_hidden: hidden,
+  };
+}
+
+route('GET', '/api/apps/:slug/env', envList);
 route('PUT', '/api/apps/:slug/env', (context) => {
   appOf(context);
-  context.state.env ??= new Map();
-  context.state.env.set(context.params.slug, context.body.vars ?? []);
-  return { vars: context.body.vars ?? [] };
+  storeEnv(context, context.body.vars ?? []);
+  return envList(context);
+});
+route('PUT', '/api/apps/:slug/env/:key', (context) => {
+  appOf(context);
+  const from = decodeURIComponent(context.params.key);
+  const key = context.body.key ?? from;
+  const vars = savedEnv(context);
+  const current = vars.find((v) => v.key === from);
+  if (key !== from) {
+    if (!current) throw notFound('env_var_not_found');
+    if (vars.some((v) => v.key === key)) {
+      throw new HttpError(409, 'env_var_exists');
+    }
+  }
+  const value = context.body.value ?? current?.value;
+  if (value === undefined) {
+    throw new HttpError(422, 'validation_failed', { value: 'is required' });
+  }
+  storeEnv(context, [
+    ...vars.filter((v) => v.key !== from && v.key !== key),
+    { key, value },
+  ]);
+  return envList(context);
+});
+route('DELETE', '/api/apps/:slug/env/:key', (context) => {
+  appOf(context);
+  const key = decodeURIComponent(context.params.key);
+  const vars = savedEnv(context);
+  if (!vars.some((v) => v.key === key)) throw notFound('env_var_not_found');
+  storeEnv(
+    context,
+    vars.filter((v) => v.key !== key),
+  );
+  return envList(context);
 });
 
 route('GET', '/api/apps/:slug/deployments', (context) => ({
@@ -564,7 +627,8 @@ route('GET', '/api/login-events', () => ({
 /** What the API refuses without a recent login (ARCHITECTURE 10.3). */
 const NEEDS_RECENT_LOGIN = [
   ['DELETE', /^\/api\/apps\/[^/]+$/],
-  ['PUT', /^\/api\/apps\/[^/]+\/env$/],
+  ['PUT', /^\/api\/apps\/[^/]+\/env(\/[^/]+)?$/],
+  ['DELETE', /^\/api\/apps\/[^/]+\/env\/[^/]+$/],
   ['POST', /^\/api\/apps\/[^/]+\/backups\/restore$/],
   ['GET', /^\/api\/apps\/[^/]+\/backups\/[^/]+\/download$/],
 ];

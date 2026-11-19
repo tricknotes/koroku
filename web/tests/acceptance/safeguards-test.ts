@@ -68,6 +68,18 @@ module('Acceptance | safeguards', function (hooks) {
     state = serveConsole(fakes);
   });
 
+  /** The saved variables differ from the running release. */
+  function pendingEnv(): void {
+    fakes.api.on('GET', `${APP}/env`, () => ({
+      vars: state.env.map((v, i) => ({
+        ...v,
+        pending: i === 0 ? 'changed' : null,
+      })),
+      removed: [],
+      compared: true,
+    }));
+  }
+
   function production(): void {
     state.app = { ...state.app, environment: 'production' };
   }
@@ -157,7 +169,7 @@ module('Acceptance | safeguards', function (hooks) {
     test('production: every way to deploy asks first', async function (assert) {
       production();
       fakes.api.on('POST', DEPLOYMENTS, queued());
-      fakes.api.on('PUT', `${APP}/env`, { vars: [] });
+      pendingEnv();
 
       await visit('/apps/blog/deploy');
       await click('[data-test-deploy-submit]');
@@ -169,14 +181,8 @@ module('Acceptance | safeguards', function (hooks) {
       await click('[data-test-dialog-cancel]');
 
       await visit('/apps/blog/env');
-      await click('[data-test-env-row]:nth-child(2) [data-test-env-remove]');
-      await click('[data-test-env-save-deploy]');
-      assert.dom('[data-test-dialog]').exists('save and redeploy');
-      await click('[data-test-dialog-cancel]');
-
-      await click('[data-test-env-save]');
       await click('[data-test-env-redeploy]');
-      assert.dom('[data-test-dialog]').exists('redeploy after saving');
+      assert.dom('[data-test-dialog]').exists('undeployed variables');
       await click('[data-test-dialog-cancel]');
 
       assert.strictEqual(
@@ -212,45 +218,64 @@ module('Acceptance | safeguards', function (hooks) {
   });
 
   module('environment variables', function () {
-    test('saving locks every way to save or discard until it is stored', async function (assert) {
-      const held = fakes.api.hold('PUT', `${APP}/env`);
+    const ROW = '[data-test-env-row]:nth-child(2)';
+
+    test('saving a row locks it until the variable is stored', async function (assert) {
+      const held = fakes.api.hold('PUT', `${APP}/env/RAILS_ENV`);
       await visit('/apps/blog/env');
-      await click('[data-test-env-row]:nth-child(2) [data-test-env-remove]');
+      await click(`${ROW} [data-test-env-edit]`);
+      await fillIn(`${ROW} [data-test-env-value-input]`, 'staging');
 
-      const saving = click('[data-test-env-save]');
-      await waitUntil(() => find('[data-test-env-save][aria-busy]'));
+      const saving = click(`${ROW} [data-test-env-save]`);
+      await waitUntil(() => find(`${ROW} [data-test-env-save][aria-busy]`));
 
-      assert.dom('[data-test-env-save]').isDisabled().hasText('保存中…');
-      assert.dom('[data-test-env-save-deploy]').isDisabled();
-      assert.dom('[data-test-env-discard]').isDisabled();
-      (find('[data-test-env-form]') as HTMLFormElement).requestSubmit();
+      assert.dom(`${ROW} [data-test-env-save]`).isDisabled().hasText('保存中…');
+      assert.dom(`${ROW} [data-test-env-cancel]`).isDisabled();
+      assert.dom(`${ROW} [data-test-env-value-input]`).isDisabled();
+      (find(`${ROW} [data-test-env-save]`) as HTMLButtonElement).click();
 
-      held.release({ vars: [state.env[0]] });
+      held.release({
+        vars: [state.env[0], { key: 'RAILS_ENV', value: 'staging' }],
+      });
       await saving;
 
-      assert.strictEqual(sent('PUT', `${APP}/env`), 1, 'one save');
+      assert.strictEqual(sent('PUT', `${APP}/env/RAILS_ENV`), 1, 'one save');
       assert.strictEqual(sent('POST', DEPLOYMENTS), 0);
-      assert.dom('[data-test-env-saved]').exists();
+      assert.dom(`${ROW} [data-test-env-value-input]`).doesNotExist();
     });
 
-    test('production: save and redeploy stays in the dialog through both requests', async function (assert) {
+    test('deleting a row cannot be sent twice', async function (assert) {
+      const held = fakes.api.hold('DELETE', `${APP}/env/RAILS_ENV`);
+      await visit('/apps/blog/env');
+      await click(`${ROW} [data-test-env-remove]`);
+
+      const removing = click(`${ROW} [data-test-env-remove-confirm]`);
+      await waitUntil(() =>
+        find(`${ROW} [data-test-env-remove-confirm][aria-busy]`),
+      );
+
+      assert.dom(`${ROW} [data-test-env-remove-confirm]`).isDisabled();
+      assert.dom(`${ROW} [data-test-env-remove-cancel]`).isDisabled();
+      (
+        find(`${ROW} [data-test-env-remove-confirm]`) as HTMLButtonElement
+      ).click();
+
+      held.release({ vars: [state.env[0]] });
+      await removing;
+
+      assert.strictEqual(sent('DELETE', `${APP}/env/RAILS_ENV`), 1);
+      assert.dom('[data-test-env-row]').exists({ count: 1 });
+    });
+
+    test('production: redeploying stays in the dialog until the deployment starts', async function (assert) {
       production();
-      const save = fakes.api.hold('PUT', `${APP}/env`);
+      pendingEnv();
       const deploy = fakes.api.hold('POST', DEPLOYMENTS);
       await visit('/apps/blog/env');
-      await click('[data-test-env-row]:nth-child(2) [data-test-env-remove]');
-      await click('[data-test-env-save-deploy]');
+      await click('[data-test-env-redeploy]');
 
       const confirming = click('[data-test-dialog-confirm]');
-      await waitUntil(() => sent('PUT', `${APP}/env`) === 1);
       await waitUntil(() => find('[data-test-dialog-confirm][aria-busy]'));
-
-      assertDialogBusy(assert, 'while saving');
-      hammerDialog();
-      assert.strictEqual(sent('POST', DEPLOYMENTS), 0, 'not before the save');
-
-      save.release({ vars: [state.env[0]] });
-      await waitUntil(() => sent('POST', DEPLOYMENTS) === 1);
 
       assertDialogBusy(assert, 'while the deployment starts');
       hammerDialog();
@@ -258,7 +283,6 @@ module('Acceptance | safeguards', function (hooks) {
       deploy.release(queued());
       await confirming;
 
-      assert.strictEqual(sent('PUT', `${APP}/env`), 1);
       assert.strictEqual(sent('POST', DEPLOYMENTS), 1);
       assert.deepEqual(fakes.api.callsTo('POST', DEPLOYMENTS)[0]?.body, {
         sha: SHA_A,

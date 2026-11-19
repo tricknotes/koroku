@@ -29,14 +29,16 @@ import {
 import { errorMessage, fieldErrors } from 'koroku-console/utils/errors';
 import { isValidEnvKey, shortSha } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
-import type { Deployment, EnvVar } from 'koroku-console/utils/types';
+import type {
+  Deployment,
+  EnvList,
+  EnvPending,
+  EnvVar,
+} from 'koroku-console/utils/types';
 
-/** How a row differs from what is saved. */
-type RowStatus = 'added' | 'changed';
-
-const ROW_STATUS_LABELS: Record<RowStatus, string> = {
-  added: '新規',
-  changed: '変更',
+const PENDING_LABELS: Record<EnvPending, string> = {
+  added: '未反映（追加）',
+  changed: '未反映（変更）',
 };
 
 /** What stands in for a hidden value: the same for every length. */
@@ -44,25 +46,41 @@ const MASK = '••••••••';
 
 let nextRowId = 0;
 
+/**
+ * One variable on screen. `key` and `value` are what is saved; while the
+ * row is being edited the drafts hold what is typed, and only "保存" sends
+ * them. A fresh row is one being added: nothing of it is saved yet.
+ */
 class EnvRow {
   readonly id = `env-${nextRowId++}`;
   @tracked key: string;
   @tracked value: string;
+  @tracked pending: EnvPending | null;
+  @tracked fresh: boolean;
+  @tracked editing: boolean;
+  @tracked draftKey: string;
+  @tracked draftValue: string;
   /** The value is shown as text. Until then it is not in the DOM at all. */
   @tracked revealed = false;
-  /** Key and value are form controls. */
-  @tracked editing: boolean;
+  /** Asking whether to delete, in place of the row's actions. */
+  @tracked confirmingRemove = false;
+  @tracked working: 'save' | 'remove' | null = null;
+  @tracked error: unknown = null;
   /**
    * The field that takes the focus when the row turns into a form: the key
    * of a row added just now, the value of one that is being changed.
    */
   focus: 'key' | 'value' | null;
 
-  constructor(key: string, value: string, fresh = false) {
-    this.key = key;
-    this.value = value;
-    this.editing = fresh;
-    this.focus = fresh ? 'key' : null;
+  constructor(saved: EnvVar | null) {
+    this.key = saved?.key ?? '';
+    this.value = saved?.value ?? '';
+    this.pending = saved?.pending ?? null;
+    this.fresh = saved === null;
+    this.editing = this.fresh;
+    this.draftKey = this.key;
+    this.draftValue = this.value;
+    this.focus = this.fresh ? 'key' : null;
   }
 
   get focusKey(): boolean {
@@ -73,28 +91,50 @@ class EnvRow {
     return this.focus === 'value';
   }
 
-  get blank(): boolean {
-    return this.key.trim() === '' && this.value === '';
+  get trimmedKey(): string {
+    return this.draftKey.trim();
+  }
+
+  /** The drafts differ from what is saved. */
+  get changed(): boolean {
+    if (this.fresh) return this.trimmedKey !== '';
+    return this.trimmedKey !== this.key || this.draftValue !== this.value;
   }
 
   get valueRows(): number {
-    return Math.min(8, this.value.split('\n').length);
+    return Math.min(8, this.draftValue.split('\n').length);
   }
-}
 
-/** What changed between the saved variables and the ones on screen. */
-interface Changes {
-  added: number;
-  changed: number;
-  removed: number;
+  get pendingLabel(): string {
+    return this.pending ? PENDING_LABELS[this.pending] : '';
+  }
+
+  get errorText(): string {
+    return this.error ? errorMessage(this.error) : '';
+  }
+
+  get errorLines(): string[] {
+    return Object.entries(fieldErrors(this.error)).map(
+      ([name, reason]) => `${name}: ${reason}`,
+    );
+  }
 }
 
 function serialize(vars: EnvVar[]): string {
   return JSON.stringify(vars.map((v) => [v.key, v.value]));
 }
 
-function statusLabel(status: RowStatus): string {
-  return ROW_STATUS_LABELS[status];
+/** `追加 1 件・変更 2 件`: counts only, never keys or values. */
+function countSummary(counts: {
+  added: number;
+  changed: number;
+  removed: number;
+}): string {
+  const parts: string[] = [];
+  if (counts.added) parts.push(`追加 ${counts.added} 件`);
+  if (counts.changed) parts.push(`変更 ${counts.changed} 件`);
+  if (counts.removed) parts.push(`削除 ${counts.removed} 件`);
+  return parts.join('・');
 }
 
 /** Moves the focus to a control when it is rendered, if asked to. */
@@ -113,12 +153,11 @@ export default class AppEnvTemplate extends Component<Signature> {
   @service declare api: ApiService;
   @service declare session: SessionService;
 
-  /** Every (re)load starts the editor over from what is saved. */
-  vars = new Loadable<EnvVar[]>(async () => {
-    const { vars, valuesHidden } = await this.api.getEnv(this.slug);
-    this.hidden = valuesHidden;
-    this.reset(vars);
-    return vars;
+  /** Every (re)load starts over from what is saved. */
+  list = new Loadable<EnvList>(async () => {
+    const list = await this.api.getEnv(this.slug);
+    this.apply(list, true);
+    return list;
   });
 
   /**
@@ -126,37 +165,68 @@ export default class AppEnvTemplate extends Component<Signature> {
    * are listed, and nothing can be edited until the user logs in again.
    */
   @tracked hidden = false;
+  /** Keys deleted since the running release was deployed. */
+  @tracked removed: string[] = [];
+  /** The saved variables could be compared with the running release. */
+  @tracked compared = false;
 
   @tracked rows: EnvRow[] = [];
   /** The table, or one text field in `.env` format. */
   @tracked mode: 'table' | 'bulk' = 'table';
   @tracked bulkText = '';
+  @tracked bulkSaving = false;
+  @tracked bulkError: unknown = null;
+  /** The `.env` text replaced everything just now. */
+  @tracked bulkSaved = false;
 
-  @tracked working: 'save' | 'redeploy' | null = null;
-  @tracked saved = false;
-  @tracked error: unknown = null;
-  @tracked serverErrors: Record<string, string> = {};
-  /** The deployment started by "save and redeploy". */
+  @tracked redeploying = false;
+  /** The deployment started from the "not deployed yet" banner. */
   @tracked redeployed: Deployment | null = null;
   @tracked deployError: unknown = null;
-  /** A production app asks before it redeploys; this is what it will do. */
-  @tracked confirming: 'save-and-redeploy' | 'redeploy' | null = null;
+  /** A production app asks before it redeploys. */
+  @tracked confirming = false;
 
-  @tracked private original: EnvVar[] = [];
+  /** Read out by screen readers after a row is saved or deleted. */
+  @tracked announcement = '';
 
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
-    void this.vars.load();
+    void this.list.load();
   }
 
   get slug(): string {
     return this.args.model.slug;
   }
 
-  private reset(vars: EnvVar[]): void {
-    this.original = vars;
-    this.rows = vars.map((v) => new EnvRow(v.key, v.value));
-    this.bulkText = formatDotenv(vars);
+  /**
+   * Takes in what the server answered. Rows being edited keep their drafts,
+   * and rows being added stay at the end; everything else follows the
+   * server, in its order.
+   */
+  private apply(list: EnvList, reset = false): void {
+    this.hidden = list.valuesHidden;
+    this.removed = list.removed;
+    this.compared = list.compared;
+    if (reset) {
+      this.rows = list.vars.map((v) => new EnvRow(v));
+      return;
+    }
+    const byKey = new Map(
+      this.rows.filter((row) => !row.fresh).map((row) => [row.key, row]),
+    );
+    const saved = list.vars.map((v) => {
+      const row = byKey.get(v.key) ?? new EnvRow(v);
+      row.value = v.value;
+      row.pending = v.pending ?? null;
+      return row;
+    });
+    this.rows = [...saved, ...this.rows.filter((row) => row.fresh)];
+  }
+
+  get savedVars(): EnvVar[] {
+    return this.rows
+      .filter((row) => !row.fresh)
+      .map((row) => ({ key: row.key, value: row.value }));
   }
 
   get isBulk(): boolean {
@@ -171,112 +241,57 @@ export default class AppEnvTemplate extends Component<Signature> {
     return Math.min(24, Math.max(8, this.bulkText.split('\n').length + 1));
   }
 
-  /** What would be sent: rows left completely empty are ignored. */
-  get current(): EnvVar[] {
-    if (this.isBulk) return this.parsed.vars;
-    return this.rows
-      .filter((row) => !row.blank)
-      .map((row) => ({ key: row.key.trim(), value: row.value }));
+  get bulkInvalid(): boolean {
+    return this.parsed.issues.length > 0;
   }
 
-  get dirty(): boolean {
-    return serialize(this.current) !== serialize(this.original);
+  get bulkDirty(): boolean {
+    return serialize(this.parsed.vars) !== serialize(this.savedVars);
   }
 
-  private get savedValues(): Map<string, string> {
-    return new Map(this.original.map((v) => [v.key, v.value]));
+  get cannotSaveBulk(): boolean {
+    return this.bulkSaving || this.bulkInvalid || !this.bulkDirty;
   }
 
-  get changes(): Changes {
-    const saved = this.savedValues;
-    const changes: Changes = { added: 0, changed: 0, removed: 0 };
-    const keys = new Set<string>();
-    for (const { key, value } of this.current) {
-      keys.add(key);
-      if (!saved.has(key)) changes.added++;
-      else if (saved.get(key) !== value) changes.changed++;
-    }
-    for (const key of saved.keys()) {
-      if (!keys.has(key)) changes.removed++;
-    }
-    return changes;
+  get bulkErrorLines(): string[] {
+    return Object.entries(fieldErrors(this.bulkError)).map(
+      ([name, reason]) => `${name}: ${reason}`,
+    );
   }
 
-  /** `追加 1 件・変更 2 件`: counts only, never keys or values. */
-  get changeSummary(): string {
-    const { added, changed, removed } = this.changes;
-    const parts: string[] = [];
-    if (added) parts.push(`追加 ${added} 件`);
-    if (changed) parts.push(`変更 ${changed} 件`);
-    if (removed) parts.push(`削除 ${removed} 件`);
-    return parts.join('・');
+  /** The `.env` editor replaces everything, so no row may be half edited. */
+  get anyEditing(): boolean {
+    return this.rows.some((row) => row.editing || row.confirmingRemove);
   }
 
-  /** Row id → how the row differs from the saved variables. */
-  get rowStatuses(): Record<string, RowStatus> {
-    const saved = this.savedValues;
-    const statuses: Record<string, RowStatus> = {};
+  get pendingCounts(): { added: number; changed: number; removed: number } {
+    const counts = { added: 0, changed: 0, removed: this.removed.length };
     for (const row of this.rows) {
-      if (row.blank) continue;
-      const key = row.key.trim();
-      if (!saved.has(key)) statuses[row.id] = 'added';
-      else if (saved.get(key) !== row.value) statuses[row.id] = 'changed';
+      if (row.fresh) continue;
+      if (row.pending === 'added') counts.added++;
+      else if (row.pending === 'changed') counts.changed++;
     }
-    return statuses;
+    return counts;
   }
 
-  /** Row id → problem with its key (the API's rules, checked up front). */
-  get keyErrors(): Record<string, string> {
-    const errors: Record<string, string> = {};
-    const seen = new Set<string>();
-    for (const row of this.rows) {
-      if (row.blank) continue;
-      const key = row.key.trim();
-      if (key === '') {
-        errors[row.id] = 'キーを入力してください。';
-      } else if (!isValidEnvKey(key)) {
-        errors[row.id] =
-          '英字かアンダースコアで始まる英数字とアンダースコアだけが使えます。';
-      } else if (seen.has(key)) {
-        errors[row.id] = 'キーが重複しています。';
-      }
-      seen.add(key);
-    }
-    return errors;
+  get pendingSummary(): string {
+    return countSummary(this.pendingCounts);
   }
 
-  get invalid(): boolean {
-    return this.isBulk
-      ? this.parsed.issues.length > 0
-      : Object.keys(this.keyErrors).length > 0;
+  /** Saved changes the running release does not have yet. */
+  get hasPending(): boolean {
+    return this.compared && this.pendingSummary !== '';
   }
 
-  get busy(): boolean {
-    return this.working !== null;
-  }
-
-  /** Nothing saved and nothing typed: the empty state holds the one action. */
-  get showFooter(): boolean {
-    if (this.hidden) return false;
-    return this.isBulk || this.rows.length > 0 || this.dirty;
+  get removedKeys(): string {
+    return this.removed.join('、');
   }
 
   reauthenticate = () => this.session.reauthenticate();
 
-  get cannotSave(): boolean {
-    return this.busy || this.invalid || !this.dirty;
-  }
-
   /** There is a running release to deploy again. */
   get canRedeploy(): boolean {
     return this.args.model.app.current_deployment !== null;
-  }
-
-  /** Middle of the confirmation sentence: what happens before the deploy. */
-  get confirmLead(): string {
-    return this.confirming === 'save-and-redeploy'
-      ? 'の環境変数を保存して、稼働中のコミット'
-      : 'で、稼働中のコミット';
   }
 
   get runningSha(): string {
@@ -284,36 +299,151 @@ export default class AppEnvTemplate extends Component<Signature> {
   }
 
   get allRevealed(): boolean {
-    return this.rows.length > 0 && this.rows.every((row) => row.revealed);
+    const saved = this.rows.filter((row) => !row.fresh);
+    return saved.length > 0 && saved.every((row) => row.revealed);
   }
 
-  get serverErrorLines(): string[] {
-    return Object.entries(this.serverErrors).map(
-      ([name, reason]) => `${name}: ${reason}`,
-    );
+  get hasSavedRows(): boolean {
+    return this.rows.some((row) => !row.fresh);
   }
 
   get deployErrorMessage(): string {
     return this.deployError ? errorMessage(this.deployError) : '';
   }
 
-  add = () => {
-    this.rows = [...this.rows, new EnvRow('', '', true)];
-    this.touch();
+  /** Problem with the key a row is about to save (the API's rules). */
+  keyErrorOf = (row: EnvRow): string | undefined => {
+    if (!row.editing) return undefined;
+    const key = row.trimmedKey;
+    if (key === '') return undefined;
+    if (!isValidEnvKey(key)) {
+      return '英字かアンダースコアで始まる英数字とアンダースコアだけが使えます。';
+    }
+    const taken = this.rows.some(
+      (other) =>
+        other !== row &&
+        (other.fresh ? other.trimmedKey === key : other.key === key),
+    );
+    return taken ? 'キーが重複しています。' : undefined;
   };
 
-  remove = (row: EnvRow) => {
-    this.rows = this.rows.filter((r) => r !== row);
-    this.touch();
+  canSave = (row: EnvRow): boolean =>
+    row.working === null &&
+    row.trimmedKey !== '' &&
+    row.changed &&
+    this.keyErrorOf(row) === undefined;
+
+  cannotSave = (row: EnvRow): boolean => !this.canSave(row);
+
+  isSaving = (row: EnvRow): boolean => row.working === 'save';
+
+  isRemoving = (row: EnvRow): boolean => row.working === 'remove';
+
+  /** A change makes the last result (saved, redeployed) a thing of the past. */
+  private touch(): void {
+    this.bulkSaved = false;
+    this.redeployed = null;
+    this.deployError = null;
+  }
+
+  add = () => {
+    this.rows = [...this.rows, new EnvRow(null)];
+  };
+
+  edit = (row: EnvRow) => {
+    row.draftKey = row.key;
+    row.draftValue = row.value;
+    row.error = null;
+    row.focus = 'value';
+    row.editing = true;
+  };
+
+  cancel = (row: EnvRow) => {
+    if (row.working) return;
+    if (row.fresh) {
+      this.rows = this.rows.filter((r) => r !== row);
+      return;
+    }
+    row.editing = false;
+    row.error = null;
+    row.draftKey = row.key;
+    row.draftValue = row.value;
+  };
+
+  save = async (row: EnvRow) => {
+    if (!this.canSave(row)) return;
+    const key = row.trimmedKey;
+    const value = row.draftValue;
+    const change: { key?: string; value: string } = { value };
+    if (!row.fresh && key !== row.key) change.key = key;
+    row.working = 'save';
+    row.error = null;
+    try {
+      const list = await this.api.putEnvVar(
+        this.slug,
+        row.fresh ? key : row.key,
+        change,
+      );
+      row.key = key;
+      row.value = value;
+      row.fresh = false;
+      row.editing = false;
+      row.revealed = false;
+      this.apply(list);
+      this.touch();
+      this.announcement = `${key} を保存しました。次のデプロイで反映されます。`;
+    } catch (error) {
+      row.error = error;
+    } finally {
+      row.working = null;
+    }
+  };
+
+  /** Enter saves from the key; Ctrl/⌘+Enter from the (multi-line) value. */
+  keydown = (row: EnvRow, field: 'key' | 'value', event: KeyboardEvent) => {
+    if (event.isComposing) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancel(row);
+    } else if (
+      event.key === 'Enter' &&
+      (field === 'key' || event.ctrlKey || event.metaKey)
+    ) {
+      event.preventDefault();
+      void this.save(row);
+    }
+  };
+
+  askRemove = (row: EnvRow) => {
+    row.error = null;
+    row.confirmingRemove = true;
+  };
+
+  cancelRemove = (row: EnvRow) => {
+    if (row.working) return;
+    row.confirmingRemove = false;
+    row.error = null;
+  };
+
+  remove = async (row: EnvRow) => {
+    if (row.working) return;
+    row.working = 'remove';
+    row.error = null;
+    try {
+      const list = await this.api.deleteEnvVar(this.slug, row.key);
+      this.rows = this.rows.filter((r) => r !== row);
+      this.apply(list);
+      this.touch();
+      this.announcement = `${row.key} を削除しました。次のデプロイで反映されます。`;
+    } catch (error) {
+      row.error = error;
+    } finally {
+      row.working = null;
+    }
   };
 
   toggleReveal = (row: EnvRow) => {
     row.revealed = !row.revealed;
-  };
-
-  toggleEdit = (row: EnvRow) => {
-    row.focus = 'value';
-    row.editing = !row.editing;
   };
 
   toggleAll = () => {
@@ -321,126 +451,84 @@ export default class AppEnvTemplate extends Component<Signature> {
     for (const row of this.rows) row.revealed = reveal;
   };
 
-  /** An edit makes the last result (saved, redeployed) a thing of the past. */
-  touch = () => {
-    this.saved = false;
-    this.redeployed = null;
-    this.deployError = null;
-  };
-
   enterBulk = () => {
-    this.bulkText = formatDotenv(this.current);
+    if (this.anyEditing) return;
+    this.bulkText = formatDotenv(this.savedVars);
+    this.bulkError = null;
+    this.bulkSaved = false;
     this.mode = 'bulk';
   };
 
   leaveBulk = () => {
-    if (this.invalid) return;
-    this.rows = this.parsed.vars.map((v) => new EnvRow(v.key, v.value));
+    if (this.bulkSaving) return;
+    this.bulkError = null;
     this.mode = 'table';
   };
 
-  discard = () => {
-    this.reset(this.original);
-    this.error = null;
-    this.serverErrors = {};
-  };
-
-  save = async () => {
-    if (this.cannotSave) return;
-    this.working = 'save';
-    await this.put();
-    this.working = null;
-  };
-
-  /** Stores the variables; resolves to whether that worked. */
-  private async put(): Promise<boolean> {
-    this.saved = false;
-    this.redeployed = null;
-    this.deployError = null;
-    this.error = null;
-    this.serverErrors = {};
+  saveBulk = async () => {
+    if (this.cannotSaveBulk) return;
+    this.bulkSaving = true;
+    this.bulkError = null;
     try {
-      const saved = await this.api.putEnv(this.slug, this.current);
-      this.vars.set(saved);
-      this.reset(saved);
-      this.saved = true;
-      return true;
+      const list = await this.api.putEnv(this.slug, this.parsed.vars);
+      this.list.set(list);
+      this.apply(list, true);
+      this.touch();
+      this.bulkSaved = true;
+      this.mode = 'table';
     } catch (error) {
-      this.error = error;
-      this.serverErrors = fieldErrors(error);
-      return false;
+      this.bulkError = error;
+    } finally {
+      this.bulkSaving = false;
     }
-  }
+  };
 
-  /** Deploys the running commit again, so it starts with the new values. */
+  /** Deploys the running commit again, so it starts with the saved values. */
   private async deployRunning(): Promise<void> {
     const running = this.args.model.app.current_deployment;
     if (!running) return;
+    this.redeploying = true;
     this.deployError = null;
     try {
       const body: { ref?: string; sha: string } = { sha: running.commit_sha };
       if (running.ref) body.ref = running.ref;
       this.redeployed = await this.api.createDeployment(this.slug, body);
+      this.bulkSaved = false;
       await this.args.model.reload();
     } catch (error) {
       this.deployError = error;
+    } finally {
+      this.redeploying = false;
     }
   }
 
   /** Production apps go through the confirmation dialog first. */
-  private request(action: 'save-and-redeploy' | 'redeploy'): void {
-    if (this.args.model.isProduction) {
-      this.confirming = action;
-    } else {
-      void this.run(action);
-    }
-  }
-
-  requestSaveAndRedeploy = () => {
-    if (!this.cannotSave) this.request('save-and-redeploy');
-  };
-
   requestRedeploy = () => {
-    if (!this.busy) this.request('redeploy');
+    if (this.redeploying) return;
+    if (this.args.model.isProduction) {
+      this.confirming = true;
+    } else {
+      void this.deployRunning();
+    }
   };
-
-  private async run(action: 'save-and-redeploy' | 'redeploy'): Promise<void> {
-    this.working = 'redeploy';
-    const stored = action === 'redeploy' || (await this.put());
-    if (stored) await this.deployRunning();
-    this.working = null;
-  }
 
   confirm = async () => {
-    if (this.confirming) await this.run(this.confirming);
-    this.confirming = null;
+    await this.deployRunning();
+    this.confirming = false;
   };
 
   cancelConfirm = () => {
-    this.confirming = null;
+    this.confirming = false;
   };
-
-  isWorking = (kind: 'save' | 'redeploy'): boolean => this.working === kind;
-
-  statusOf = (row: EnvRow): RowStatus | undefined => this.rowStatuses[row.id];
-
-  keyErrorOf = (row: EnvRow): string | undefined => this.keyErrors[row.id];
 
   <template>
     <TabSection @title="環境変数" data-test-env>
       <:actions>
         {{#if this.hidden}}
           {{! Nothing to reveal or edit until the user logs in again. }}
-        {{else if this.vars.loaded}}
-          {{#if this.isBulk}}
-            <Button
-              @size="small"
-              @disabled={{this.invalid}}
-              data-test-env-table
-              {{on "click" this.leaveBulk}}
-            >表に戻る</Button>
-          {{else}}
-            {{#if this.rows.length}}
+        {{else if this.list.loaded}}
+          {{#unless this.isBulk}}
+            {{#if this.hasSavedRows}}
               <Button
                 @size="small"
                 aria-pressed={{if this.allRevealed "true" "false"}}
@@ -450,16 +538,22 @@ export default class AppEnvTemplate extends Component<Signature> {
             {{/if}}
             <Button
               @size="small"
+              @disabled={{this.anyEditing}}
+              title={{if
+                this.anyEditing
+                "編集中の行を保存するか取り消してから使えます"
+              }}
               data-test-env-bulk
               {{on "click" this.enterBulk}}
             >.env 形式で編集</Button>
-          {{/if}}
+          {{/unless}}
         {{/if}}
       </:actions>
 
       <:default>
         <p class="pane-description" data-test-env-notice>
-          コンテナに渡す環境変数です。変更は保存しただけでは反映されず、<strong
+          コンテナに渡す環境変数です。1
+          件ずつ保存できます。保存しただけでは反映されず、<strong
           >次のデプロイで反映されます</strong>。
         </p>
 
@@ -486,331 +580,378 @@ export default class AppEnvTemplate extends Component<Signature> {
         {{/if}}
 
         <AsyncView
-          @data={{this.vars}}
+          @data={{this.list}}
           @errorTitle="環境変数を取得できませんでした"
         >
-          <form
-            class="env-form"
-            autocomplete="off"
-            novalidate
-            data-test-env-form
-            {{on "submit" (preventDefault this.save)}}
-            {{on "input" this.touch}}
-          >
-            {{#if this.isBulk}}
-              <div class="env-bulk">
-                <label class="field-label" for="env-bulk-text">
-                  .env 形式
-                </label>
-                <textarea
-                  id="env-bulk-text"
-                  class="mono env-bulk-text"
-                  rows={{this.bulkRows}}
-                  spellcheck="false"
-                  autocapitalize="off"
-                  autocomplete="off"
-                  wrap="off"
-                  value={{this.bulkText}}
-                  aria-invalid={{if this.invalid "true"}}
-                  aria-describedby="env-bulk-hint env-bulk-issues"
-                  data-test-env-bulk-text
-                  {{on "input" (setValue this "bulkText")}}
-                ></textarea>
-                <p class="field-hint" id="env-bulk-hint">
-                  1 行に 1 つ、<code>KEY=VALUE</code>
-                  の形で書きます。<code>#</code>
-                  で始まる行と空行は無視されます。空白や改行を含む値は引用符で囲みます。値はそのまま表示されています。
-                </p>
-                <div id="env-bulk-issues" aria-live="polite">
-                  {{#if this.parsed.issues.length}}
-                    <ul class="env-issues" data-test-env-issues>
-                      {{#each this.parsed.issues key="line" as |issue|}}
-                        <li data-test-env-issue={{issue.line}}>
-                          <Icon @name="error" />
-                          <span class="env-issue-line">{{issue.line}}
-                            行目</span>
-                          <span>{{issue.message}}</span>
-                        </li>
-                      {{/each}}
-                    </ul>
+          <div class="env-feedback" aria-live="polite">
+            {{#if this.redeployed}}
+              <Banner @tone="info" data-test-env-redeployed>
+                <:default>
+                  再デプロイを開始しました。完了すると保存した値で動きます。
+                </:default>
+                <:actions>
+                  <LinkTo
+                    @route="app.deploy"
+                    @model={{this.slug}}
+                    class={{buttonClass "default" "small"}}
+                  >進行状況を見る</LinkTo>
+                </:actions>
+              </Banner>
+            {{else if this.hasPending}}
+              <Banner
+                @tone="info"
+                @title="未反映の変更があります"
+                data-test-env-pending-banner
+              >
+                <:default>
+                  <span data-test-env-pending-summary>
+                    {{this.pendingSummary}}
+                  </span>
+                  が稼働中のアプリにまだ反映されていません。
+                  {{#if this.removed.length}}
+                    <span class="env-removed" data-test-env-removed>
+                      削除したキー:
+                      <span class="mono">{{this.removedKeys}}</span>
+                    </span>
                   {{/if}}
-                </div>
-              </div>
-            {{else if this.rows.length}}
-              <RowList class="env-vars" @label="環境変数" data-test-env-list>
-                <:header>
-                  <span>キー</span>
-                  <span>値</span>
-                </:header>
-                <:rows as |Row|>
-                  {{#each this.rows key="id" as |row|}}
-                    {{#let
-                      (this.statusOf row) (this.keyErrorOf row)
-                      as |status keyError|
-                    }}
-                      <Row
-                        class={{if row.editing "is-editing"}}
-                        data-test-env-row
-                        data-status={{status}}
-                      >
-                        <div class="env-var-key">
-                          {{#if row.editing}}
-                            <label
-                              class="visually-hidden"
-                              for="{{row.id}}-key"
-                            >キー</label>
-                            <input
-                              id="{{row.id}}-key"
-                              type="text"
-                              class="mono"
-                              placeholder="KEY"
-                              spellcheck="false"
-                              autocapitalize="off"
-                              autocomplete="off"
-                              value={{row.key}}
-                              aria-invalid={{if keyError "true"}}
-                              aria-describedby={{if
-                                keyError
-                                (concat row.id "-key-error")
-                              }}
-                              data-test-env-key-input
-                              {{on "input" (setValue row "key")}}
-                              {{focusWhen row.focusKey}}
-                            />
-                          {{else}}
-                            <span class="env-var-name-line">
-                              <span class="visually-hidden">キー</span>
-                              <span class="env-var-name" data-test-env-key>
-                                {{row.key}}
-                              </span>
-                              {{#if status}}
-                                <Badge data-test-env-status>
-                                  {{statusLabel status}}
-                                </Badge>
-                              {{/if}}
-                            </span>
-                          {{/if}}
-                          {{#if keyError}}
-                            <p
-                              class="field-error"
-                              id="{{row.id}}-key-error"
-                              data-test-env-key-error
-                            >{{keyError}}</p>
-                          {{/if}}
-                        </div>
-
-                        <div class="env-var-value">
-                          {{#if row.editing}}
-                            <label
-                              class="visually-hidden"
-                              for="{{row.id}}-value"
-                            >値</label>
-                            <textarea
-                              id="{{row.id}}-value"
-                              class="mono"
-                              rows={{row.valueRows}}
-                              spellcheck="false"
-                              autocapitalize="off"
-                              autocomplete="off"
-                              value={{row.value}}
-                              data-test-env-value-input
-                              {{on "input" (setValue row "value")}}
-                              {{focusWhen row.focusValue}}
-                            ></textarea>
-                          {{else if row.revealed}}
-                            <span class="visually-hidden">値</span>
-                            {{#if row.value}}
-                              {{! No white space around the value: it is
-                                  shown as written, line breaks included. }}
-                              <span
-                                class="env-var-text"
-                                data-test-env-value
-                              >{{row.value}}</span>
-                            {{else}}
-                              <span class="env-var-empty" data-test-env-value>
-                                （空）
-                              </span>
-                            {{/if}}
-                          {{else}}
-                            <span
-                              class="env-var-masked"
-                              aria-hidden="true"
-                              data-test-env-masked
-                            >{{MASK}}</span>
-                            <span class="visually-hidden">
-                              値は隠されています
-                            </span>
-                          {{/if}}
-                        </div>
-
-                        <div class="env-var-actions">
-                          {{#if this.hidden}}
-                            {{! Keys only: no value to show, copy or edit. }}
-                          {{else}}
-                            {{#unless row.editing}}
-                              <button
-                                type="button"
-                                class="button button-ghost button-icon"
-                                aria-pressed={{if row.revealed "true" "false"}}
-                                aria-label="{{row.key}} の値を表示"
-                                title={{if row.revealed "値を隠す" "値を表示"}}
-                                data-test-env-reveal
-                                {{on "click" (fn this.toggleReveal row)}}
-                              >
-                                <Icon
-                                  @name={{if row.revealed "eye-off" "eye"}}
-                                />
-                              </button>
-                              <CopyButton
-                                @text={{row.value}}
-                                @label="{{row.key}} の値"
-                              />
-                            {{/unless}}
-                            <Button
-                              @variant="ghost"
-                              @size="small"
-                              aria-label="{{row.key}}
-                              {{if row.editing 'の編集を完了' 'を編集'}}"
-                              data-test-env-edit
-                              {{on "click" (fn this.toggleEdit row)}}
-                            >{{if row.editing "完了" "編集"}}</Button>
-                            <Button
-                              @variant="ghost"
-                              @size="small"
-                              aria-label="{{row.key}} を削除"
-                              data-test-env-remove
-                              {{on "click" (fn this.remove row)}}
-                            >削除</Button>
-                          {{/if}}
-                        </div>
-                      </Row>
-                    {{/let}}
-                  {{/each}}
-                </:rows>
-              </RowList>
-
-              {{#unless this.hidden}}
-                <div class="env-add">
-                  <Button data-test-env-add {{on "click" this.add}}>
-                    変数を追加
-                  </Button>
-                </div>
-              {{/unless}}
-            {{else}}
-              <div class="row-list" data-test-env-empty>
-                <EmptyState
-                  @title="環境変数はまだありません"
-                  @description="コンテナに渡す設定や秘密の値をここで管理します。まとめて登録するときは「.env 形式で編集」に貼り付けます。"
-                >
-                  <:action>
+                </:default>
+                <:actions>
+                  {{#if this.canRedeploy}}
                     <Button
-                      @variant={{if this.showFooter "default" "primary"}}
-                      data-test-env-add
-                      {{on "click" this.add}}
-                    >変数を追加</Button>
-                  </:action>
-                </EmptyState>
-              </div>
+                      @size="small"
+                      @variant="primary"
+                      @busy={{this.redeploying}}
+                      @busyLabel="実行中…"
+                      data-test-env-redeploy
+                      {{on "click" this.requestRedeploy}}
+                    >再デプロイ</Button>
+                  {{/if}}
+                </:actions>
+              </Banner>
+            {{else if this.bulkSaved}}
+              <Banner @tone="info" data-test-env-saved>
+                保存しました。次のデプロイで反映されます。
+              </Banner>
             {{/if}}
+            {{#if this.deployError}}
+              <Banner
+                @tone="error"
+                @title="再デプロイを開始できませんでした"
+                data-test-env-deploy-error
+              >{{this.deployErrorMessage}}</Banner>
+            {{/if}}
+          </div>
 
-            {{#if this.showFooter}}
-              {{! The same footer as the settings form: the ways to save,
-                  then what there is to save. }}
+          {{#if this.isBulk}}
+            <form
+              class="env-bulk"
+              autocomplete="off"
+              novalidate
+              data-test-env-bulk-form
+              {{on "submit" (preventDefault this.saveBulk)}}
+            >
+              <label class="field-label" for="env-bulk-text">
+                .env 形式
+              </label>
+              <textarea
+                id="env-bulk-text"
+                class="mono env-bulk-text"
+                rows={{this.bulkRows}}
+                spellcheck="false"
+                autocapitalize="off"
+                autocomplete="off"
+                wrap="off"
+                value={{this.bulkText}}
+                aria-invalid={{if this.bulkInvalid "true"}}
+                aria-describedby="env-bulk-hint env-bulk-issues"
+                data-test-env-bulk-text
+                {{on "input" (setValue this "bulkText")}}
+              ></textarea>
+              <p class="field-hint" id="env-bulk-hint">
+                1 行に 1 つ、<code>KEY=VALUE</code>
+                の形で書きます。<code>#</code>
+                で始まる行と空行は無視されます。空白や改行を含む値は引用符で囲みます。値はそのまま表示されています。<strong
+                >保存すると、ここに書いた内容で全体を置き換えます</strong>。
+              </p>
+              <div id="env-bulk-issues" aria-live="polite">
+                {{#if this.parsed.issues.length}}
+                  <ul class="env-issues" data-test-env-issues>
+                    {{#each this.parsed.issues key="line" as |issue|}}
+                      <li data-test-env-issue={{issue.line}}>
+                        <Icon @name="error" />
+                        <span class="env-issue-line">{{issue.line}}
+                          行目</span>
+                        <span>{{issue.message}}</span>
+                      </li>
+                    {{/each}}
+                  </ul>
+                {{/if}}
+              </div>
               <div class="form-footer env-footer">
                 <Button
                   @type="submit"
                   @variant="primary"
-                  @disabled={{this.cannotSave}}
-                  @busy={{this.isWorking "save"}}
+                  @disabled={{this.cannotSaveBulk}}
+                  @busy={{this.bulkSaving}}
                   @busyLabel="保存中…"
-                  data-test-env-save
-                >保存</Button>
-                {{#if this.canRedeploy}}
-                  <Button
-                    @disabled={{this.cannotSave}}
-                    @busy={{this.isWorking "redeploy"}}
-                    @busyLabel="実行中…"
-                    data-test-env-save-deploy
-                    {{on "click" this.requestSaveAndRedeploy}}
-                  >保存して再デプロイ</Button>
-                {{/if}}
-                {{#if this.dirty}}
-                  <Button
-                    @variant="ghost"
-                    @disabled={{this.busy}}
-                    data-test-env-discard
-                    {{on "click" this.discard}}
-                  >変更を破棄</Button>
-                {{/if}}
-                <p class="form-status" aria-live="polite">
-                  {{#if this.dirty}}
-                    <span class="env-dirty" data-test-env-dirty>
-                      <span class="env-dirty-mark" aria-hidden="true"></span>
-                      未保存の変更があります（{{this.changeSummary}}）
-                    </span>
-                  {{else}}
-                    <span data-test-env-unchanged>変更はありません。</span>
-                  {{/if}}
-                </p>
+                  data-test-env-bulk-save
+                >すべて置き換えて保存</Button>
+                <Button
+                  @variant="ghost"
+                  @disabled={{this.bulkSaving}}
+                  data-test-env-bulk-cancel
+                  {{on "click" this.leaveBulk}}
+                >キャンセル</Button>
               </div>
-            {{/if}}
-
-            <div class="env-feedback" aria-live="polite">
-              {{#if this.redeployed}}
-                <Banner @tone="info" data-test-env-redeployed>
-                  <:default>
-                    {{#if this.saved}}
-                      保存して、再デプロイを開始しました。
-                    {{else}}
-                      再デプロイを開始しました。
-                    {{/if}}
-                    完了すると新しい値で動きます。
-                  </:default>
-                  <:actions>
-                    <LinkTo
-                      @route="app.deploy"
-                      @model={{this.slug}}
-                      class={{buttonClass "default" "small"}}
-                    >進行状況を見る</LinkTo>
-                  </:actions>
-                </Banner>
-              {{else if this.saved}}
-                <Banner @tone="info" data-test-env-saved>
-                  <:default
-                  >保存しました。次のデプロイで反映されます。</:default>
-                  <:actions>
-                    {{#if this.canRedeploy}}
-                      <Button
-                        @size="small"
-                        @busy={{this.isWorking "redeploy"}}
-                        @busyLabel="実行中…"
-                        data-test-env-redeploy
-                        {{on "click" this.requestRedeploy}}
-                      >今すぐ再デプロイ</Button>
-                    {{/if}}
-                  </:actions>
-                </Banner>
-              {{/if}}
-              {{#if this.deployError}}
-                <Banner
-                  @tone="error"
-                  @title="再デプロイを開始できませんでした"
-                  data-test-env-deploy-error
-                >{{this.deployErrorMessage}}</Banner>
-              {{/if}}
-              <ErrorMessage @error={{this.error}} />
-              {{#if this.serverErrorLines.length}}
+              <ErrorMessage @error={{this.bulkError}} />
+              {{#if this.bulkErrorLines.length}}
                 <ul
                   class="form-problems env-problems"
-                  data-test-env-server-errors
+                  data-test-env-bulk-errors
                 >
-                  {{#each this.serverErrorLines as |line|}}
+                  {{#each this.bulkErrorLines as |line|}}
                     <li>{{line}}</li>
                   {{/each}}
                 </ul>
               {{/if}}
+            </form>
+          {{else if this.rows.length}}
+            <RowList class="env-vars" @label="環境変数" data-test-env-list>
+              <:header>
+                <span>キー</span>
+                <span>値</span>
+              </:header>
+              <:rows as |Row|>
+                {{#each this.rows key="id" as |row|}}
+                  {{#let (this.keyErrorOf row) as |keyError|}}
+                    <Row
+                      class={{if row.editing "is-editing"}}
+                      data-test-env-row
+                      data-pending={{row.pending}}
+                    >
+                      <div class="env-var-key">
+                        {{#if row.editing}}
+                          <label
+                            class="visually-hidden"
+                            for="{{row.id}}-key"
+                          >キー</label>
+                          <input
+                            id="{{row.id}}-key"
+                            type="text"
+                            class="mono"
+                            placeholder="KEY"
+                            spellcheck="false"
+                            autocapitalize="off"
+                            autocomplete="off"
+                            value={{row.draftKey}}
+                            disabled={{if row.working true}}
+                            aria-invalid={{if keyError "true"}}
+                            aria-describedby={{if
+                              keyError
+                              (concat row.id "-key-error")
+                            }}
+                            data-test-env-key-input
+                            {{on "input" (setValue row "draftKey")}}
+                            {{on "keydown" (fn this.keydown row "key")}}
+                            {{focusWhen row.focusKey}}
+                          />
+                        {{else}}
+                          <span class="env-var-name-line">
+                            <span class="visually-hidden">キー</span>
+                            <span class="env-var-name" data-test-env-key>
+                              {{row.key}}
+                            </span>
+                            {{#if row.pending}}
+                              <Badge data-test-env-pending>
+                                {{row.pendingLabel}}
+                              </Badge>
+                            {{/if}}
+                          </span>
+                        {{/if}}
+                        {{#if keyError}}
+                          <p
+                            class="field-error"
+                            id="{{row.id}}-key-error"
+                            data-test-env-key-error
+                          >{{keyError}}</p>
+                        {{/if}}
+                      </div>
+
+                      <div class="env-var-value">
+                        {{#if row.editing}}
+                          <label
+                            class="visually-hidden"
+                            for="{{row.id}}-value"
+                          >値</label>
+                          <textarea
+                            id="{{row.id}}-value"
+                            class="mono"
+                            rows={{row.valueRows}}
+                            spellcheck="false"
+                            autocapitalize="off"
+                            autocomplete="off"
+                            value={{row.draftValue}}
+                            disabled={{if row.working true}}
+                            aria-describedby="{{row.id}}-hint"
+                            data-test-env-value-input
+                            {{on "input" (setValue row "draftValue")}}
+                            {{on "keydown" (fn this.keydown row "value")}}
+                            {{focusWhen row.focusValue}}
+                          ></textarea>
+                          <p
+                            class="field-hint env-row-hint"
+                            id="{{row.id}}-hint"
+                          >
+                            Ctrl+Enter（⌘+Enter）で保存、Esc で取り消し
+                          </p>
+                        {{else if row.revealed}}
+                          <span class="visually-hidden">値</span>
+                          {{#if row.value}}
+                            {{! No white space around the value: it is
+                                shown as written, line breaks included. }}
+                            <span
+                              class="env-var-text"
+                              data-test-env-value
+                            >{{row.value}}</span>
+                          {{else}}
+                            <span class="env-var-empty" data-test-env-value>
+                              （空）
+                            </span>
+                          {{/if}}
+                        {{else}}
+                          <span
+                            class="env-var-masked"
+                            aria-hidden="true"
+                            data-test-env-masked
+                          >{{MASK}}</span>
+                          <span class="visually-hidden">
+                            値は隠されています
+                          </span>
+                        {{/if}}
+                      </div>
+
+                      <div class="env-var-actions">
+                        {{#if this.hidden}}
+                          {{! Keys only: no value to show, copy or edit. }}
+                        {{else if row.confirmingRemove}}
+                          <span class="env-confirm-text">削除しますか？</span>
+                          <Button
+                            @variant="danger"
+                            @size="small"
+                            @busy={{this.isRemoving row}}
+                            @busyLabel="削除中…"
+                            aria-label="{{row.key}} を削除する"
+                            data-test-env-remove-confirm
+                            {{on "click" (fn this.remove row)}}
+                          >削除する</Button>
+                          <Button
+                            @variant="ghost"
+                            @size="small"
+                            @disabled={{if row.working true}}
+                            data-test-env-remove-cancel
+                            {{on "click" (fn this.cancelRemove row)}}
+                          >キャンセル</Button>
+                        {{else if row.editing}}
+                          <Button
+                            @variant="primary"
+                            @size="small"
+                            @disabled={{this.cannotSave row}}
+                            @busy={{this.isSaving row}}
+                            @busyLabel="保存中…"
+                            aria-label={{if
+                              row.fresh
+                              "追加する変数を保存"
+                              (concat row.key " を保存")
+                            }}
+                            data-test-env-save
+                            {{on "click" (fn this.save row)}}
+                          >保存</Button>
+                          <Button
+                            @variant="ghost"
+                            @size="small"
+                            @disabled={{if row.working true}}
+                            aria-label={{if
+                              row.fresh
+                              "変数の追加を取り消す"
+                              (concat row.key " の編集を取り消す")
+                            }}
+                            data-test-env-cancel
+                            {{on "click" (fn this.cancel row)}}
+                          >キャンセル</Button>
+                        {{else}}
+                          <button
+                            type="button"
+                            class="button button-ghost button-icon"
+                            aria-pressed={{if row.revealed "true" "false"}}
+                            aria-label="{{row.key}} の値を表示"
+                            title={{if row.revealed "値を隠す" "値を表示"}}
+                            data-test-env-reveal
+                            {{on "click" (fn this.toggleReveal row)}}
+                          >
+                            <Icon @name={{if row.revealed "eye-off" "eye"}} />
+                          </button>
+                          <CopyButton
+                            @text={{row.value}}
+                            @label="{{row.key}} の値"
+                          />
+                          <Button
+                            @variant="ghost"
+                            @size="small"
+                            aria-label="{{row.key}} を編集"
+                            data-test-env-edit
+                            {{on "click" (fn this.edit row)}}
+                          >編集</Button>
+                          <Button
+                            @variant="ghost"
+                            @size="small"
+                            aria-label="{{row.key}} を削除"
+                            data-test-env-remove
+                            {{on "click" (fn this.askRemove row)}}
+                          >削除</Button>
+                        {{/if}}
+                      </div>
+
+                      {{#if row.error}}
+                        <div class="env-row-error" data-test-env-row-error>
+                          <p class="field-error">{{row.errorText}}</p>
+                          {{#each row.errorLines as |line|}}
+                            <p class="field-error">{{line}}</p>
+                          {{/each}}
+                        </div>
+                      {{/if}}
+                    </Row>
+                  {{/let}}
+                {{/each}}
+              </:rows>
+            </RowList>
+
+            {{#unless this.hidden}}
+              <div class="env-add">
+                <Button data-test-env-add {{on "click" this.add}}>
+                  変数を追加
+                </Button>
+              </div>
+            {{/unless}}
+          {{else}}
+            <div class="row-list" data-test-env-empty>
+              <EmptyState
+                @title="環境変数はまだありません"
+                @description="コンテナに渡す設定や秘密の値をここで管理します。まとめて登録するときは「.env 形式で編集」に貼り付けます。"
+              >
+                <:action>
+                  <Button
+                    @variant="primary"
+                    data-test-env-add
+                    {{on "click" this.add}}
+                  >変数を追加</Button>
+                </:action>
+              </EmptyState>
             </div>
-          </form>
+          {{/if}}
+
+          <p class="visually-hidden" aria-live="polite" data-test-env-announce>
+            {{this.announcement}}
+          </p>
         </AsyncView>
       </:default>
     </TabSection>
@@ -819,15 +960,15 @@ export default class AppEnvTemplate extends Component<Signature> {
       <ConfirmDialog
         @title="本番アプリを再デプロイしますか？"
         @confirmLabel="再デプロイする"
-        @busy={{this.busy}}
+        @busy={{this.redeploying}}
         @onConfirm={{this.confirm}}
         @onCancel={{this.cancelConfirm}}
       >
         <p>本番アプリ
           <strong>{{this.slug}}</strong>
-          {{this.confirmLead}}
+          で、稼働中のコミット
           <strong data-test-dialog-target>{{this.runningSha}}</strong>
-          を再デプロイします。</p>
+          を保存済みの環境変数で再デプロイします。</p>
         <p
         >コンテナの入れ替えで数秒の断があります。起動に失敗した場合は、直前のリリースに以前の環境変数で戻ります。</p>
       </ConfirmDialog>

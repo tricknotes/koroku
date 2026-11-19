@@ -438,6 +438,13 @@ func TestDeploySucceeds(t *testing.T) {
 		t.Errorf("current deployment = %v", got.CurrentDeploymentID)
 	}
 
+	// The release records what it runs with, as fingerprints only.
+	fingerprints, ok, err := h.store.DeploymentEnvFingerprints(context.Background(), d.ID)
+	if err != nil || !ok || len(fingerprints) != 2 ||
+		fingerprints["RAILS_ENV"] != h.box.Fingerprint(secrets.EnvVarContext(app.ID, "RAILS_ENV"), []byte("production")) {
+		t.Errorf("env fingerprints = %v, %v, %v", fingerprints, ok, err)
+	}
+
 	// Secrets never reach the log.
 	log := h.log("blog", d.ID)
 	if strings.Contains(log, "s3cr3t-password") {

@@ -100,7 +100,7 @@ module('Acceptance | accessibility', function (hooks) {
     assert.deepEqual(accessibilityProblems(), []);
   });
 
-  test('environment variables: revealed, being edited, and as .env text', async function (assert) {
+  test('environment variables: revealed, being edited, being deleted, and as .env text', async function (assert) {
     await visit('/apps/blog/env');
     await click('[data-test-env-row]:nth-child(1) [data-test-env-reveal]');
     await click('[data-test-env-row]:nth-child(2) [data-test-env-edit]');
@@ -109,7 +109,11 @@ module('Acceptance | accessibility', function (hooks) {
     assert.dom('[data-test-env-key-error]').exists();
     assert.deepEqual(accessibilityProblems(), []);
 
-    await fillIn('[data-test-env-key-input]', 'RAILS_ENV');
+    await click('[data-test-env-cancel]');
+    await click('[data-test-env-row]:nth-child(2) [data-test-env-remove]');
+    assert.deepEqual(accessibilityProblems(), []);
+
+    await click('[data-test-env-remove-cancel]');
     await click('[data-test-env-bulk]');
     await fillIn('[data-test-env-bulk-text]', 'not a line');
 

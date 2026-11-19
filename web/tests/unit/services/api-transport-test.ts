@@ -223,4 +223,24 @@ module('Unit | Service | api (transport)', function (hooks) {
     );
     assert.false(JSON.stringify(headers(sent[0])).includes('hunter2'));
   });
+
+  test('one environment variable travels in the body only, its key in the path', async function (assert) {
+    respond = () => json(200, { vars: [] });
+
+    await api.putEnvVar('blog', 'DATABASE_URL', {
+      key: 'DB_URL',
+      value: 'hunter2',
+    });
+    await api.deleteEnvVar('blog', 'DB_URL');
+
+    assert.strictEqual(sent[0]?.url, '/api/apps/blog/env/DATABASE_URL');
+    assert.strictEqual(sent[0]?.init.method, 'PUT');
+    assert.strictEqual(
+      sent[0]?.init.body,
+      '{"key":"DB_URL","value":"hunter2"}',
+    );
+    assert.false(JSON.stringify(headers(sent[0])).includes('hunter2'));
+    assert.strictEqual(sent[1]?.url, '/api/apps/blog/env/DB_URL');
+    assert.strictEqual(sent[1]?.init.method, 'DELETE');
+  });
 });

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -309,4 +310,50 @@ func requireTransition(res sql.Result, op string) error {
 		return fmt.Errorf("%s: %w", op, ErrInvalidTransition)
 	}
 	return nil
+}
+
+// SetDeploymentEnvFingerprints records the fingerprints of the environment
+// variables a deployment rendered, keyed by variable name (ARCHITECTURE 9.2).
+func (s *Store) SetDeploymentEnvFingerprints(ctx context.Context, id int64, fingerprints map[string]string) error {
+	if fingerprints == nil {
+		fingerprints = map[string]string{}
+	}
+	data, err := json.Marshal(fingerprints)
+	if err != nil {
+		return fmt.Errorf("set env fingerprints: %w", err)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE deployments SET env_fingerprints = ? WHERE id = ?`, string(data), id)
+	if err != nil {
+		return fmt.Errorf("set env fingerprints: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("set env fingerprints: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("set env fingerprints of deployment %d: %w", id, ErrNotFound)
+	}
+	return nil
+}
+
+// DeploymentEnvFingerprints returns what SetDeploymentEnvFingerprints
+// recorded. ok is false when nothing was recorded for the deployment.
+func (s *Store) DeploymentEnvFingerprints(ctx context.Context, id int64) (fingerprints map[string]string, ok bool, err error) {
+	var data sql.NullString
+	err = s.db.QueryRowContext(ctx, `SELECT env_fingerprints FROM deployments WHERE id = ?`, id).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, fmt.Errorf("env fingerprints of deployment %d: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("env fingerprints: %w", err)
+	}
+	if !data.Valid {
+		return nil, false, nil
+	}
+	if err := json.Unmarshal([]byte(data.String), &fingerprints); err != nil {
+		return nil, false, fmt.Errorf("env fingerprints of deployment %d: %w", id, err)
+	}
+	if fingerprints == nil {
+		fingerprints = map[string]string{}
+	}
+	return fingerprints, true, nil
 }
