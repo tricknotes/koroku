@@ -2,6 +2,7 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
+import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
 import AsyncView from 'koroku-console/components/async-view';
@@ -22,6 +23,10 @@ import {
   diskOverLimit,
 } from 'koroku-console/utils/attention';
 import { backupHealth } from 'koroku-console/utils/backup-status';
+import {
+  containerGroupRows,
+  containerTotals,
+} from 'koroku-console/utils/container-resources';
 import { setChecked } from 'koroku-console/utils/dom';
 import { ApiError, unavailability } from 'koroku-console/utils/errors';
 import {
@@ -38,6 +43,7 @@ import {
 import type {
   BackupOverview,
   BackupRun,
+  ContainerResources,
   DockerUsageItem,
   SystemInfo,
 } from 'koroku-console/utils/types';
@@ -246,6 +252,9 @@ export default class SystemTemplate extends Component {
 
   system = new Loadable<SystemInfo>(() => this.api.getSystem());
   docker = new Loadable<DockerUsageItem[]>(() => this.api.getDockerUsage());
+  containers = new Loadable<ContainerResources>(() =>
+    this.api.getContainerResources(),
+  );
   backups = new Loadable<BackupOverview>(() => this.api.getBackups());
 
   @tracked confirmingPrune = false;
@@ -264,6 +273,7 @@ export default class SystemTemplate extends Component {
     super(owner, args);
     void this.system.load();
     void this.docker.load();
+    void this.containers.load();
     void this.backups.load();
     this.poller.every(this, RUNNING_INTERVAL, () => this.followBackup());
     this.poller.every(this, HOST_INTERVAL, () => this.refreshHost());
@@ -297,7 +307,7 @@ export default class SystemTemplate extends Component {
   }
 
   get stale(): boolean {
-    return this.system.stale || this.backups.stale;
+    return this.system.stale || this.containers.stale || this.backups.stale;
   }
 
   /** Follows a running backup until it finishes. */
@@ -308,6 +318,9 @@ export default class SystemTemplate extends Component {
   private async refreshHost(): Promise<void> {
     const reads = [];
     if (this.system.loaded) reads.push(this.system.load({ quiet: true }));
+    if (this.containers.loaded) {
+      reads.push(this.containers.load({ quiet: true }));
+    }
     if (this.backups.loaded && !this.backupRunning) {
       reads.push(this.backups.load({ quiet: true }));
     }
@@ -460,6 +473,120 @@ export default class SystemTemplate extends Component {
               </li>
             {{/each}}
           </ul>
+        </:default>
+      </AsyncView>
+    </section>
+
+    <section class="pane" aria-labelledby="containers-title">
+      <div class="pane-header">
+        <h2 class="pane-title" id="containers-title">アプリごとのメモリと CPU</h2>
+      </div>
+
+      <AsyncView
+        @data={{this.containers}}
+        @errorTitle="コンテナのメモリと CPU を取得できませんでした"
+      >
+        <:loading>
+          <div
+            class="row-list container-rows"
+            role="status"
+            aria-label="読み込み中"
+            data-test-containers-loading
+          >
+            {{#each SKELETON_ROWS as |n|}}
+              <div class="row" aria-hidden="true" data-skeleton={{n}}>
+                <span class="skeleton system-skeleton"></span>
+              </div>
+            {{/each}}
+          </div>
+        </:loading>
+
+        <:default as |resources|>
+          {{#if resources.groups.length}}
+            <RowList
+              class="container-rows"
+              @label="アプリごとのメモリと CPU"
+              data-test-containers
+            >
+              <:header>
+                <span>アプリ</span>
+                <span>メモリ</span>
+                <span>CPU</span>
+              </:header>
+              <:rows as |Row|>
+                {{#each (containerGroupRows resources) key="key" as |row|}}
+                  <Row data-test-container-group={{row.label}}>
+                    <span class="usage-app">
+                      {{#if row.app}}
+                        <LinkTo
+                          @route="app"
+                          @model={{row.app}}
+                          class="row-link usage-name"
+                          data-test-container-app
+                        >{{row.app}}</LinkTo>
+                      {{else}}
+                        <span class="usage-name">{{row.label}}</span>
+                      {{/if}}
+                      <span
+                        class="usage-breakdown"
+                        data-test-container-breakdown
+                      >
+                        {{row.breakdown}}
+                      </span>
+                    </span>
+                    <span class="usage-cell usage-memory">
+                      <span class="cell-label">メモリ</span>
+                      <span class="usage-value" data-test-container-memory>
+                        {{row.memory}}
+                      </span>
+                      <Meter
+                        class="usage-meter"
+                        @label="{{row.label}}のメモリ（ホスト全体に対する割合）"
+                        @percent={{row.memoryPercent}}
+                      />
+                      <span class="usage-detail" data-test-container-limit>
+                        {{row.limit}}
+                        {{#if row.nearLimit}}
+                          <StatusIndicator
+                            @kind="pending"
+                            @label="上限間近: {{row.nearLimit}}"
+                            data-test-container-near-limit
+                          />
+                        {{/if}}
+                      </span>
+                    </span>
+                    <span class="usage-cell usage-cpu">
+                      <span class="cell-label">CPU</span>
+                      <span class="usage-value" data-test-container-cpu>
+                        {{row.cpu}}
+                      </span>
+                      <Meter
+                        class="usage-meter"
+                        @label="{{row.label}}の CPU（ホスト全体に対する割合）"
+                        @percent={{row.cpuPercent}}
+                      />
+                    </span>
+                  </Row>
+                {{/each}}
+              </:rows>
+            </RowList>
+            {{#let (containerTotals resources) as |totals|}}
+              <p class="system-note" data-test-containers-total>
+                コンテナ全体で、メモリ
+                {{totals.memory}}（ホストの
+                {{totals.memoryPercent}}）、CPU
+                {{totals.cpu}}。メーターはホスト全体（メモリ
+                {{totals.hostMemory}}、CPU
+                {{totals.cpuCount}}
+                コア）に対する割合で、CPU は計測した瞬間の値です。「その他」は
+                koroku のアプリではないコンテナです。
+              </p>
+            {{/let}}
+          {{else}}
+            <p class="system-note" data-test-containers-empty>
+              稼働中のコンテナはありません。
+            </p>
+          {{/if}}
         </:default>
       </AsyncView>
     </section>

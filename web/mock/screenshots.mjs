@@ -631,8 +631,8 @@ SHOTS.push(
   },
 );
 
-// System screen.
-const RESOURCES = '[data-test-docker-item]';
+// System screen. The container breakdown answers last (docker stats).
+const RESOURCES = '[data-test-container-group]';
 SHOTS.push(
   {
     name: 'system-normal',
@@ -651,6 +651,12 @@ SHOTS.push(
     path: '/system?scenario=unconfigured',
     wait: RESOURCES,
     fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'system-no-containers',
+    path: '/system?scenario=empty',
+    wait: '[data-test-containers-empty]',
     themes: ['light'],
   },
   {

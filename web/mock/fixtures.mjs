@@ -18,7 +18,7 @@ export const SCENARIOS = {
   healthy: 'four apps, everything fine',
   warnings:
     'a deployment in progress, a failed one, a stopped app, a pending domain, disk above the limit, stale backup',
-  empty: 'no apps yet',
+  empty: 'no apps yet, and no container running',
   undeployed: 'one app that was created and never deployed',
   error: 'every API call fails with 500',
   'tab-error': 'apps load, everything a tab asks for fails with 500',
@@ -32,7 +32,7 @@ export const SCENARIOS = {
   fresh:
     'one app deployed a moment ago; no variables, no custom domains, no backup has run yet',
   'backups-down':
-    'everything fine, but the backup status and the Docker disk usage cannot be read',
+    'everything fine, but the backup status, the Docker disk usage and the container breakdown cannot be read',
   'volumes-down': 'everything fine, but the volumes of an app cannot be listed',
   'stale-login':
     'everything fine, but the login is older than 10 minutes: secrets are hidden and dangerous operations ask to log in again',
@@ -133,7 +133,7 @@ function system(overrides = {}) {
     version: 'v0.5.0',
     base_domain: BASE_DOMAIN,
     disk: { total_bytes: 100 * GB, used_bytes: 41.3 * GB, used_percent: 41.3 },
-    memory: { total_bytes: 4 * GB, available_bytes: 1.7 * GB },
+    memory: { total_bytes: 4 * GB, available_bytes: 1.4 * GB },
     docker_version: '29.8.0',
     swap: { total_bytes: 2 * GB, used_bytes: 0.21 * GB },
     disk_limit_percent: 85,
@@ -347,7 +347,7 @@ export function buildScenario(name) {
         ),
       });
     case 'empty':
-      return scenario([]);
+      return scenario([], { noContainers: true });
     case 'host-trouble': {
       const state = buildScenario('warnings');
       state.system.swap = { total_bytes: 2 * GB, used_bytes: 1.6 * GB };
@@ -491,13 +491,15 @@ export function services(target) {
   if (target.desired_state === 'stopped' || !target.current_deployment) {
     return [];
   }
+  // Staging sees little traffic and holds little data.
+  const scale = target.environment === 'production' ? 1 : 0.35;
   return [
     {
       name: 'web',
       state: 'running',
       status: 'Up 3 hours (healthy)',
       health: 'healthy',
-      memory_bytes: 0.31 * GB,
+      memory_bytes: 0.31 * GB * scale,
       memory_limit_bytes: 0.5 * GB,
     },
     {
@@ -505,7 +507,7 @@ export function services(target) {
       state: 'running',
       status: 'Up 3 hours (healthy)',
       health: 'healthy',
-      memory_bytes: 0.42 * GB,
+      memory_bytes: 0.42 * GB * scale,
       memory_limit_bytes: 1 * GB,
     },
     {
@@ -513,7 +515,7 @@ export function services(target) {
       state: 'running',
       status: 'Up 3 hours',
       health: '',
-      memory_bytes: 0.18 * GB,
+      memory_bytes: 0.18 * GB * scale,
       memory_limit_bytes: 0.5 * GB,
     },
   ];
@@ -597,6 +599,73 @@ export function settleBackups(state) {
       if (list.length === 0) list.push(...snapshots().slice(0, 2));
     }
   }
+}
+
+/** A made-up CPU share (of the whole host) for a container. */
+const CPU_PERCENT = { web: 1.8, db: 0.6, worker: 0.9 };
+
+/**
+ * Memory and CPU of the running containers, by app, as the services of each
+ * app report them (so the figures match the overview tab), plus Caddy's
+ * certificate helper and a registry that koroku does not manage.
+ */
+export function containerResources(state, servicesOf) {
+  const groups = [];
+  for (const target of state.apps.values()) {
+    const running = servicesOf(target).filter(
+      (service) => service.state === 'running',
+    );
+    if (running.length === 0) continue;
+    // The shop is the busy one; staging is mostly idle.
+    const quiet =
+      target.environment !== 'production'
+        ? 0.1
+        : target.slug === 'shop'
+          ? 2.4
+          : 1;
+    const containers = running.map((service) => ({
+      name: `koroku-${target.slug}-${service.name}-1`,
+      project: `koroku-${target.slug}`,
+      service: service.name,
+      memory_bytes: Math.round(service.memory_bytes),
+      memory_limit_bytes: service.memory_limit_bytes,
+      cpu_percent:
+        Math.round((CPU_PERCENT[service.name] ?? 0.2) * quiet * 100) / 100,
+    }));
+    containers.sort((a, b) => b.memory_bytes - a.memory_bytes);
+    groups.push(group(target.slug, containers));
+  }
+  groups.sort((a, b) => b.memory_bytes - a.memory_bytes);
+  if (!state.noContainers) {
+    groups.push(
+      group(null, [
+        {
+          name: 'registry',
+          project: '',
+          service: '',
+          memory_bytes: Math.round(0.02 * GB),
+          memory_limit_bytes: null,
+          cpu_percent: 0.01,
+        },
+      ]),
+    );
+  }
+  return { cpu_count: 2, memory_total_bytes: 4 * GB, groups };
+}
+
+function group(app, containers) {
+  const limits = containers.map((c) => c.memory_limit_bytes);
+  return {
+    app,
+    memory_bytes: containers.reduce((sum, c) => sum + c.memory_bytes, 0),
+    memory_limit_bytes: limits.every((limit) => typeof limit === 'number')
+      ? limits.reduce((sum, limit) => sum + limit, 0)
+      : null,
+    cpu_percent:
+      Math.round(containers.reduce((sum, c) => sum + c.cpu_percent, 0) * 100) /
+      100,
+    containers,
+  };
 }
 
 /** Docker disk usage; after a prune nothing is left to reclaim. */
