@@ -55,9 +55,20 @@ type Service struct {
 	// the environment and the paths are gone.
 	EnvFiles []EnvFile `json:"env_file"`
 
+	// ContainerName and Networks matter for groups (ARCHITECTURE 6.1):
+	// both put names into the DNS of the networks a container joins.
+	ContainerName string                     `json:"container_name"`
+	Networks      map[string]*ServiceNetwork `json:"networks"`
+
 	Runtime        string `json:"runtime"`
 	OomKillDisable bool   `json:"oom_kill_disable"`
 	MemswapLimit   string `json:"memswap_limit"`
+}
+
+// ServiceNetwork is one entry of a service's networks. Compose writes null
+// for an entry without settings.
+type ServiceNetwork struct {
+	Aliases []string `json:"aliases"`
 }
 
 // Build is the build section of a service.

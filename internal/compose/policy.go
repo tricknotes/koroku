@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +34,10 @@ const (
 	RuleBindWritable     = "bind_writable"
 	RuleRuntime          = "runtime"
 	RuleMemoryGuard      = "memory_guard"
+
+	// Groups (ARCHITECTURE 6.1). Neither is waived by the relax flag.
+	RuleGroupNetwork      = "group_network"
+	RuleGroupNameConflict = "group_name_conflict"
 )
 
 // allowedCapabilities are Docker's default capabilities plus two that
@@ -76,6 +81,10 @@ type PolicyParams struct {
 	HostPort   int
 	// Relax waives the relaxable rules for this app.
 	Relax bool
+	// GroupNetwork is the network of the app's group, or "" outside a
+	// group, and GroupServices the services allowed on it.
+	GroupNetwork  string
+	GroupServices []string
 }
 
 // PolicyResult separates findings that block the deploy from waived ones.
@@ -123,6 +132,12 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 		svc := p.Services[name]
 		if svc.Privileged {
 			add(name, RulePrivileged, "privileged: true is not allowed", true)
+		}
+		for key := range svc.Networks {
+			network := p.Networks[key]
+			if params.GroupNetwork != "" && network.Name == params.GroupNetwork && !slices.Contains(params.GroupServices, name) {
+				add(name, RuleGroupNetwork, fmt.Sprintf("the service is on the group network %q but was not chosen to join it", network.Name), false)
+			}
 		}
 		if svc.NetworkMode == "host" {
 			add(name, RuleHostNetwork, "network_mode: host is not allowed", true)
@@ -250,6 +265,14 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 		}
 	}
 	for name, network := range p.Networks {
+		if strings.HasPrefix(network.Name, GroupNetworkPrefix) {
+			// Only the app's own group network, which koroku created; the
+			// relax flag must not reach another group (ARCHITECTURE 6.1).
+			if params.GroupNetwork == "" || network.Name != params.GroupNetwork || !network.External {
+				add("", RuleGroupNetwork, fmt.Sprintf("network %q refers to the group network %q, which this app may not join", name, network.Name), false)
+			}
+			continue
+		}
 		if params.ProjectName != "" && (network.External || !strings.HasPrefix(network.Name, params.ProjectName+"_")) {
 			add("", RuleForeignNetwork, fmt.Sprintf("network %q refers to %q, which does not belong to this app", name, network.Name), true)
 		}
