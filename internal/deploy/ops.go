@@ -167,8 +167,7 @@ func (e *Engine) Start(ctx context.Context, app store.App) error {
 		if checkErr != nil {
 			return fmt.Errorf("the release cannot be started as it is (deploy the app again): %w", checkErr)
 		}
-		wait := strconv.Itoa(int(e.opts.WaitTimeout / time.Second))
-		err = e.runCompose(ctx, inv, dir, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)
+		err = e.upApp(ctx, app, func(sub ...string) error { return e.runCompose(ctx, inv, dir, sub...) })
 	} else {
 		// The release files are gone; the stopped containers still exist.
 		err = e.runCompose(ctx, e.projectOnly(app), "", "start")

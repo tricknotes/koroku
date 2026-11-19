@@ -3,13 +3,11 @@ package deploy
 import (
 	"context"
 	"errors"
-	"os"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/tricknotes/koroku/internal/compose"
 	"github.com/tricknotes/koroku/internal/store"
 )
 
@@ -92,66 +90,89 @@ func (h *harness) calls(prefix ...string) [][]string {
 	return out
 }
 
-func hasGroupFile(args []string) bool {
-	return slices.ContainsFunc(args, func(a string) bool { return strings.HasSuffix(a, compose.GroupOverrideFileName) })
+// upCalls returns the arguments after "up" of each compose up call.
+func (h *harness) upCalls() []string {
+	var out []string
+	for _, c := range h.runner.Calls() {
+		if c.Name != "docker" {
+			continue
+		}
+		if sub, _ := composeSubcommand(c.Args); sub == "up" {
+			i := slices.Index(c.Args, "up")
+			out = append(out, strings.Join(c.Args[i:], " "))
+		}
+	}
+	return out
 }
 
-func TestDeployJoinsTheGroupNetwork(t *testing.T) {
+func TestDeployAttachesTheGroupServices(t *testing.T) {
 	h, fc := newGroupHarness(t)
 	h.start()
 	app := h.createApp("shop-api")
 	group := h.joinGroup(app, "shop", "web")
 	fc.missing = map[string]bool{group.Network(): true}
+	fc.set("koroku-shop-api",
+		"c-web\tkoroku-shop-api-web-1\tweb\tkoroku-shop-api_default",
+		"c-db\tkoroku-shop-api-db-1\tdb\tkoroku-shop-api_default,koroku_group_1")
 
 	d := h.deploy("shop-api", shaA)
 	if d.Status != store.StatusSucceeded {
 		t.Fatalf("status = %s: %s\n%s", d.Status, d.Error, h.log("shop-api", d.ID))
 	}
-	override, err := os.ReadFile(h.engine.groupOverridePath("shop-api"))
-	if err != nil {
-		t.Fatalf("group override: %v", err)
+	ups := h.upCalls()
+	if len(ups) != 2 || !strings.HasPrefix(ups[0], "up --no-start") || !strings.Contains(ups[1], "--wait") {
+		t.Errorf("up calls = %v, want create then start", ups)
 	}
-	for _, want := range []string{`"web.shop-api.koroku.internal"`, `name: "koroku_group_1"`, `"default": {}`} {
-		if !strings.Contains(string(override), want) {
-			t.Errorf("group override lacks %s:\n%s", want, override)
-		}
+	connects := h.calls("network", "connect")
+	if len(connects) != 1 || strings.Join(connects[0], " ") != "network connect --alias web.shop-api.koroku.internal koroku_group_1 c-web" {
+		t.Errorf("connect calls = %v", connects)
 	}
-	if !hasGroupFile(h.lastCall("up").Args) {
-		t.Errorf("up does not use the group override: %v", h.lastCall("up").Args)
+	// db was not chosen: it comes off the network.
+	if got := h.calls("network", "disconnect"); len(got) != 1 || got[0][len(got[0])-1] != "c-db" {
+		t.Errorf("disconnect calls = %v", got)
 	}
-	created := h.calls("network", "create")
-	if len(created) != 1 || !slices.Contains(created[0], "--internal") || created[0][len(created[0])-1] != "koroku_group_1" {
+	if created := h.calls("network", "create"); len(created) != 1 || !slices.Contains(created[0], "--internal") {
 		t.Errorf("network create calls = %v", created)
 	}
-	if !strings.Contains(h.log("shop-api", d.ID), "Group network koroku_group_1: [web]") {
+	// Connecting happens between creating and starting.
+	var order []string
+	for _, c := range h.runner.Calls() {
+		if c.Name != "docker" {
+			continue
+		}
+		if sub, _ := composeSubcommand(c.Args); sub == "up" {
+			order = append(order, "up")
+		} else if len(c.Args) > 1 && c.Args[1] == "connect" {
+			order = append(order, "connect")
+		}
+	}
+	if strings.Join(order, ",") != "up,connect,up" {
+		t.Errorf("order = %v", order)
+	}
+	if !strings.Contains(h.log("shop-api", d.ID), "Joining the group network: [web]") {
 		t.Errorf("the deploy log does not mention the group")
 	}
 }
 
-func TestDeployRefusesNameConflictsInTheGroup(t *testing.T) {
-	h, fc := newGroupHarness(t)
+func TestDeployRefusesServicesThatCannotJoin(t *testing.T) {
+	h, _ := newGroupHarness(t)
 	h.start()
-	api := h.createApp("shop-api")
-	web := h.createApp("shop-web")
-	h.joinGroup(api, "shop", "web")
-	// The other member has its own "db" and puts its "db" on the network:
-	// while this app's db is down, "db" would resolve to the other one.
-	h.joinGroup(web, "shop", "db")
-	fc.set("koroku-shop-web", "c1\tkoroku-shop-web-db-1\tdb\tkoroku-shop-web_default,koroku_group_1")
+	app := h.createApp("shop-api")
+	h.joinGroup(app, "shop", "cache")
 
 	d := h.deploy("shop-api", shaA)
 	if d.Status != store.StatusFailed {
 		t.Fatalf("status = %s, want failed", d.Status)
 	}
-	if log := h.log("shop-api", d.ID); !strings.Contains(log, "[group_name_conflict] service \"db\"") {
-		t.Errorf("log lacks the conflict:\n%s", log)
+	if log := h.log("shop-api", d.ID); !strings.Contains(log, `[group_service] service "cache"`) {
+		t.Errorf("log lacks the violation:\n%s", log)
 	}
-	if slices.Contains(h.dockerCalls(), "up") {
-		t.Errorf("containers were started despite the conflict")
+	if len(h.upCalls()) != 0 {
+		t.Errorf("containers were started: %v", h.upCalls())
 	}
 }
 
-func TestStartRegeneratesTheGroupOverride(t *testing.T) {
+func TestStartAfterLeavingDoesNotAttach(t *testing.T) {
 	h, _ := newGroupHarness(t)
 	h.start()
 	app := h.createApp("shop-api")
@@ -160,7 +181,6 @@ func TestStartRegeneratesTheGroupOverride(t *testing.T) {
 		t.Fatalf("deploy: %s", d.Error)
 	}
 
-	// After leaving, starting the same release must not rejoin.
 	ctx := context.Background()
 	if err := h.store.SetAppGroup(ctx, app.ID, nil, nil, h.clock.Now()); err != nil {
 		t.Fatal(err)
@@ -170,11 +190,11 @@ func TestStartRegeneratesTheGroupOverride(t *testing.T) {
 	if err := h.engine.Start(ctx, app); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if hasGroupFile(h.lastCall("up").Args) {
-		t.Errorf("up after leaving still uses the group override")
+	if ups := h.upCalls(); len(ups) != 1 || strings.Contains(ups[0], "--no-start") {
+		t.Errorf("up calls after leaving = %v", ups)
 	}
-	if _, err := os.Stat(h.engine.groupOverridePath("shop-api")); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("the group override was not removed: %v", err)
+	if got := h.calls("network", "connect"); len(got) != 0 {
+		t.Errorf("connect calls after leaving = %v", got)
 	}
 }
 
@@ -199,8 +219,8 @@ func TestSetGroup(t *testing.T) {
 	if err := h.engine.SetGroup(ctx, app, &live.ID, nil); !errors.Is(err, store.ErrGroupEnvironment) {
 		t.Errorf("production group: err = %v", err)
 	}
-	var unknown *UnknownServicesError
-	if err := h.engine.SetGroup(ctx, app, &shop.ID, []string{"web", "cache"}); !errors.As(err, &unknown) || !slices.Equal(unknown.Services, []string{"cache"}) {
+	var cannot *GroupServiceError
+	if err := h.engine.SetGroup(ctx, app, &shop.ID, []string{"web", "cache"}); !errors.As(err, &cannot) || len(cannot.Violations) != 1 || cannot.Violations[0].Service != "cache" {
 		t.Errorf("unknown service: err = %v", err)
 	}
 	if err := h.engine.SetGroup(ctx, app, &shop.ID, []string{"web", "db"}); err != nil {
@@ -245,30 +265,6 @@ func TestSetGroup(t *testing.T) {
 	}
 	if rm := h.calls("network", "rm"); len(rm) != 1 || rm[0][2] != live.Network() {
 		t.Errorf("network rm calls = %v", rm)
-	}
-}
-
-func TestSetGroupRefusesConflicts(t *testing.T) {
-	h, fc := newGroupHarness(t)
-	h.start()
-	ctx := context.Background()
-	api := h.createApp("shop-api")
-	web := h.createApp("shop-web")
-	if d := h.deploy("shop-api", shaA); d.Status != store.StatusSucceeded {
-		t.Fatalf("deploy: %s", d.Error)
-	}
-	group := h.joinGroup(web, "shop", "web")
-	fc.set("koroku-shop-web", "c1\tkoroku-shop-web-web-1\tweb\tkoroku_group_1")
-
-	api, _ = h.store.GetApp(ctx, "shop-api")
-	err := h.engine.SetGroup(ctx, api, &group.ID, []string{"db"})
-	var policyErr *compose.PolicyError
-	if !errors.As(err, &policyErr) || policyErr.Violations[0].Rule != compose.RuleGroupNameConflict {
-		t.Fatalf("err = %v, want a group_name_conflict", err)
-	}
-	api, _ = h.store.GetApp(ctx, "shop-api")
-	if api.GroupID != nil {
-		t.Errorf("the app joined despite the conflict")
 	}
 }
 

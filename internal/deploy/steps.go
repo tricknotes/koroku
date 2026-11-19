@@ -127,11 +127,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if err != nil {
 		return false, err
 	}
-	merged, project, group, err := e.applyGroup(ctx, app, merged, project, releaseDir, log.Writer())
-	if err != nil {
-		return false, err
-	}
-	policy := compose.CheckPolicy(project, group.policyParams(compose.PolicyParams{
+	policy := compose.CheckPolicy(project, compose.PolicyParams{
 		ReleaseDir:  releaseDir,
 		ProjectName: app.ProjectName(),
 		EnvFile:     e.EnvFile(app.Slug),
@@ -139,10 +135,10 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		WebPort:     app.WebPort,
 		HostPort:    app.HostPort,
 		Relax:       app.RelaxPolicy,
-	}))
-	policy.Violations = append(policy.Violations, group.Conflicts...)
-	if group.Network != "" {
-		log.Printf("Group network %s: %v", group.Network, group.Services)
+	})
+	policy.Violations = append(policy.Violations, groupViolations(app, project)...)
+	if app.GroupID != nil && len(app.GroupServices) > 0 {
+		log.Printf("Joining the group network: %v", app.GroupServices)
 	}
 	for _, v := range policy.Waived {
 		log.Printf("Policy waived for this app: %s", v)
@@ -188,9 +184,8 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if err := writeFileAtomic(e.EnvFile(app.Slug), []byte(envContent), 0o600); err != nil {
 		return false, fmt.Errorf("write env file: %w", err)
 	}
-	live := merged
-	live.EnvFile = e.EnvFile(app.Slug)
-	if err := e.up(ctx, live, releaseDir, log); err != nil {
+	live := e.invocation(app, d.ID, composeFile, true)
+	if err := e.up(ctx, app, live, releaseDir, log); err != nil {
 		e.logContainerOutput(ctx, app, log)
 		return true, fmt.Errorf("start containers: %w", err)
 	}
@@ -290,8 +285,9 @@ func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, di
 // its files are used for another `up` (start, rollback). The files live in
 // the checkout; an app that was allowed a writable bind mount, or anything
 // else that got write access to the release directory, could have changed
-// them since the deploy that checked them. It also writes the group override
-// from the app's current group, and returns the invocation to `up` with.
+// them since the deploy that checked them. The services the app's group
+// asks for are checked against the release too. It returns the invocation
+// to `up` with.
 func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, composeFile string) (compose.Invocation, error) {
 	dir := e.ReleaseDir(app.Slug, id)
 	inv := e.invocation(app, id, composeFile, true)
@@ -299,11 +295,7 @@ func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, compos
 	if err != nil {
 		return inv, err
 	}
-	inv, project, group, err := e.applyGroup(ctx, app, inv, project, dir, io.Discard)
-	if err != nil {
-		return inv, err
-	}
-	policy := compose.CheckPolicy(project, group.policyParams(compose.PolicyParams{
+	policy := compose.CheckPolicy(project, compose.PolicyParams{
 		ReleaseDir:  dir,
 		ProjectName: app.ProjectName(),
 		EnvFile:     e.EnvFile(app.Slug),
@@ -311,8 +303,8 @@ func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, compos
 		WebPort:     app.WebPort,
 		HostPort:    app.HostPort,
 		Relax:       app.RelaxPolicy,
-	}))
-	policy.Violations = append(policy.Violations, group.Conflicts...)
+	})
+	policy.Violations = append(policy.Violations, groupViolations(app, project)...)
 	if !policy.OK() {
 		return inv, &compose.PolicyError{Violations: policy.Violations}
 	}
@@ -329,9 +321,8 @@ func (e *Engine) compose(ctx context.Context, inv compose.Invocation, dir string
 	})
 }
 
-func (e *Engine) up(ctx context.Context, inv compose.Invocation, dir string, log *deployLog) error {
-	wait := strconv.Itoa(int(e.opts.WaitTimeout / time.Second))
-	return e.compose(ctx, inv, dir, log, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)
+func (e *Engine) up(ctx context.Context, app store.App, inv compose.Invocation, dir string, log *deployLog) error {
+	return e.upApp(ctx, app, func(sub ...string) error { return e.compose(ctx, inv, dir, log, sub...) })
 }
 
 // containerOutputLines is how many lines of each container are copied into
@@ -401,7 +392,7 @@ func (e *Engine) rollback(app store.App, log *deployLog) {
 		log.Printf("Rollback failed: the env file could not be restored: %v", err)
 		return
 	}
-	if err := e.up(ctx, inv, prevDir, log); err != nil {
+	if err := e.up(ctx, app, inv, prevDir, log); err != nil {
 		log.Printf("Rollback failed: %v", err)
 		return
 	}

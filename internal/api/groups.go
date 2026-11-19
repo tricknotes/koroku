@@ -256,19 +256,15 @@ func (s *Server) handleSetAppGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.groups.SetGroup(r.Context(), app, in.GroupID, services)
-	var unknown *deploy.UnknownServicesError
-	var policyErr *compose.PolicyError
+	var cannot *deploy.GroupServiceError
 	switch {
 	case err == nil:
-	case errors.As(err, &unknown):
-		writeValidationError(w, fieldErrors{"services": "not in the running release: " + strings.Join(unknown.Services, ", ")})
-		return
-	case errors.As(err, &policyErr):
-		writeJSON(w, http.StatusUnprocessableEntity, errorBody{Error: errorDetail{
-			Code:    "group_name_conflict",
-			Message: "a name would also resolve to another app in the group",
-			Details: policyErr.Violations,
-		}})
+	case errors.As(err, &cannot):
+		parts := make([]string, len(cannot.Violations))
+		for i, v := range cannot.Violations {
+			parts[i] = v.Service + ": " + v.Message
+		}
+		writeValidationError(w, fieldErrors{"services": strings.Join(parts, "; ")})
 		return
 	case errors.Is(err, store.ErrGroupEnvironment):
 		writeValidationError(w, fieldErrors{"group_id": "the group's environment differs from the app's"})

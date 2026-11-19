@@ -127,15 +127,12 @@ func TestSetAppGroupValidation(t *testing.T) {
 		}
 	}
 
-	groups.setErr = &compose.PolicyError{Violations: []compose.Violation{{Service: "db", Rule: compose.RuleGroupNameConflict, Message: "conflict"}}}
-	rec := request(t, h, http.MethodPut, "/api/apps/shop-api/group", `{"group_id": 2, "services": ["db"]}`)
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"group_name_conflict"`) {
-		t.Errorf("conflict: %d %s", rec.Code, rec.Body)
-	}
-	groups.setErr = &deploy.UnknownServicesError{Services: []string{"cache"}}
-	rec = request(t, h, http.MethodPut, "/api/apps/shop-api/group", `{"group_id": 2, "services": ["cache"]}`)
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "cache") {
-		t.Errorf("unknown service: %d %s", rec.Code, rec.Body)
+	groups.setErr = &deploy.GroupServiceError{Violations: []compose.Violation{
+		{Service: "worker", Rule: compose.RuleGroupService, Message: "the service sets container_name"},
+	}}
+	rec := request(t, h, http.MethodPut, "/api/apps/shop-api/group", `{"group_id": 2, "services": ["worker"]}`)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"services":"worker: the service sets container_name"`) {
+		t.Errorf("service that cannot join: %d %s", rec.Code, rec.Body)
 	}
 	groups.setErr = deploy.ErrBusy
 	rec = request(t, h, http.MethodPut, "/api/apps/shop-api/group", `{"group_id": 2, "services": []}`)

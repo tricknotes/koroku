@@ -231,13 +231,13 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 
 - グループがなければ `422 validation_failed`（`details.group_id`）。`environment` が違えば同じく `details.group_id`。
 - `services` の各要素は `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`（DNS のラベルとして使える形）で、重複なし。そうでなければ `422 validation_failed`（`details.services`）。デプロイ済みのアプリでは、稼働中のリリースにないサービス名も同じエラーになる。`group_id` が `null` のときは空でなければならない。
-- 名前が他のメンバーと衝突すれば `422 group_name_conflict`（`details` はポリシー違反と同じ形の一覧で、`rule` は `group_name_conflict`）。
+- `container_name` か `network_mode` を指定したサービスは参加できない（`422 validation_failed`、`details.services`）。共用ネットワークには `<service>.<slug>.koroku.internal` とコンテナ名だけが載るので、他のメンバーと名前が衝突することはない（ARCHITECTURE 6.1）。
 - デプロイ中や他の操作の実行中は `409 busy`。
 - 届く範囲を広げる変更（参加、サービスの追加）は、次のデプロイか起動から効く。狭める変更（離脱、サービスの解除）は、この API の中で共用ネットワークから切り離してから応答する。
 - `environment` が `production` のアプリでは再ログイン（`403 reauth_required`）が要る。
 - グループに入っているアプリの `environment` は `PATCH /api/apps/{slug}` で変えられない（`422 validation_failed`、`details.environment`）。先にグループから抜ける。
 
-デプロイと起動のときも同じ名前の検査を行い、衝突があればデプロイは `failed`（ログに `Policy violation: [group_name_conflict] ...`）、起動は `422 policy_violation` になる。
+デプロイと起動のときも、参加させるサービスがリリースにあり、参加できる形かを確かめる。満たさなければデプロイは `failed`、起動は `422 policy_violation`（`rule` は `group_service`）になる。リポジトリの Compose が共用ネットワーク（`koroku_group_*`）を指していれば、「検査を緩める」フラグがあっても `group_network` の違反になる。
 
 ## 環境変数（M1）
 
