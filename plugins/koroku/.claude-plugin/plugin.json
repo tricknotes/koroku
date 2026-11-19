@@ -1,0 +1,9 @@
+{
+  "name": "koroku",
+  "version": "0.1.0",
+  "description": "Prepare a repository's Docker Compose app so koroku can deploy it",
+  "author": {
+    "name": "tricknotes"
+  },
+  "repository": "https://github.com/tricknotes/koroku"
+}

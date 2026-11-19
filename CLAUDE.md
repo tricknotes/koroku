@@ -42,6 +42,8 @@ web/                  Ember アプリ
 deploy/               プロビジョニングスクリプト、systemd unit
 docs/                 設計資料
 testdata/             サンプル Compose、golden file
+.claude-plugin/       Claude Code のマーケットプレイス定義
+plugins/koroku/       アプリのリポジトリを koroku 向けに整える Skill（利用者に配布）
 ```
 
 ## 実装規約
@@ -54,6 +56,7 @@ testdata/             サンプル Compose、golden file
 - 外部呼び出しには `context` でタイムアウトを付ける。エラーは文脈を付けて wrap する。
 - DB が唯一の正。Caddy 設定や override は常に DB から再生成できること。
 - UI の文言は日本語。コード、コメント、コミットメッセージは英語。
+- デプロイされる側に見える振る舞い（ポリシー検査、override の生成、デプロイ手順、ヘルスチェック、env ファイル、バックアップ）を変えたら、`plugins/koroku/skills/prepare-app/`（`references/requirements.md` と `scripts/rehearse.sh`）も同じ PR で直し、`plugin.json` の `version` を上げる。利用者のリポジトリはこの Skill を頼りに koroku へ合わせるため。
 
 ## テストと確認コマンド
 

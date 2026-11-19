@@ -6,6 +6,17 @@ VPS 1 台の上で、GitHub リポジトリの Docker Compose アプリを UI �
 - HTTP API: [docs/API.md](docs/API.md)
 - マイルストーンと実装規約: [CLAUDE.md](CLAUDE.md)
 
+## アプリのリポジトリを koroku 向けに整える
+
+このリポジトリは Claude Code のプラグインマーケットプレイスを兼ねていて、デプロイしたいアプリのリポジトリを koroku の前提（公開サービス、環境変数の渡り方、ポリシー検査、named volume、バックアップのダンプフックなど）に合わせる Skill を配布しています。アプリのリポジトリで Claude Code を開き、次を実行します。
+
+```text
+/plugin marketplace add tricknotes/koroku
+/plugin install koroku@koroku
+```
+
+あとは「koroku で動くようにして」と頼むか、`/koroku:prepare-app` を実行します。Skill はリポジトリを調べて直し、手元の Docker で koroku と同じ形の override を重ねたリハーサル（`config` → build / pull → `up --wait` → HTTP 確認）を行い、koroku の画面に入れる値（公開サービスとポート、ヘルスチェックパス、環境変数、ダンプフック）をまとめます。中身は [plugins/koroku/skills/prepare-app/](plugins/koroku/skills/prepare-app/) にあります。
+
 ## 開発
 
 必要なものは Docker だけです。Go、Node.js、pnpm、Chromium、restic などの道具は開発用イメージ（[dev/Dockerfile](dev/Dockerfile)）に入っていて、ホストには何も入れません。コマンドは `bin/dev` 経由でコンテナの中で実行します。イメージは初回と `dev/Dockerfile` を変えたときに自動でビルドされます。
@@ -81,3 +92,4 @@ bin/dev make build    # フロントエンド込みの bin/koroku（linux/amd64�
 | `dev/`、`bin/dev`、`compose.yaml` | 開発用の Docker イメージ、その中でコマンドを実行するラッパー、手元で動かすための Compose 設定 |
 | `docs/` | 設計資料 |
 | `testdata/` | サンプル Compose、golden file |
+| `.claude-plugin/`、`plugins/` | アプリのリポジトリ向けの Claude Code プラグイン（マーケットプレイスの定義と Skill） |

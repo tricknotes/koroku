@@ -619,6 +619,8 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 - ローカル環境の Caddy（2026-11-19、Caddy 2.11.9 の公式 Docker イメージ、WSL2）: `listen` を `127.0.0.1:80` / `127.0.0.1:443` にしても、HTTP から HTTPS への自動リダイレクトは挿入された（`http://<slug>.dev.localhost/` が 308）。内蔵 CA で `*.dev.localhost` の証明書が発行され、ルート証明書を信頼すれば検証も通る。WSL2 の localhost 転送で、Windows 側の `curl.exe` からも `https://<slug>.dev.localhost/` に届いた。
 
+- ワンショットのサービスと `up --wait`（2026-11-19、Docker 29.8.0 / Compose v5.8.0、ローカル環境）: `restart: "no"` で `true` を実行して終わるサービスを置くと、どのサービスからも待たれていない場合は `up -d --wait` が `container ... exited (0)` で失敗した（終了コード 1）。公開サービスが `depends_on` の `condition: service_completed_successfully` で待つ場合は成功した。デプロイの手順 6 は `up --wait` なので、マイグレーションなどのワンショットのサービスは、必ず別のサービスから `service_completed_successfully` で待たれる形にする必要がある。基盤側では対処せず、利用者向けの Skill（`plugins/koroku/skills/prepare-app`）に書いた。
+
 - `docker compose logs --follow` の二重出力（2026-11-18、Docker 29.8.0 / Compose v5.8.0、ローカル環境）: コンテナがまだないプロジェクトに対して `logs --follow --timestamps` を繰り返し起動しながら `up -d` すると、起動直後のコンテナの行が、時刻まで同じ内容で 2 回ずつ出る流れに当たることがあった（1 行だけ出すコンテナで 8 回中 5 回、0.5 秒ごとに出し続けるコンテナでは 6 回中 6 回で、以後の行もすべて 2 回ずつ）。`koroku` のログコレクタはこの状況で実際に同じ行を 2 回保存していた（開発用の Compose 環境でサンプルアプリをデプロイして発見）。対処は 10.1 章。
 
 ## 出典
