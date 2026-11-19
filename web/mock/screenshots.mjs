@@ -924,6 +924,146 @@ SHOTS.push(
   },
 );
 
+// Groups: the list on the system screen and the choice on the settings tab.
+const GROUP = '[data-test-group]';
+const GROUP_FORM = '[data-test-group-choices]';
+/** Runs the steps a moment apart (each may re-render), then scrolls. */
+function steps(actions, scrollTo) {
+  return `(() => {
+    const actions = ${JSON.stringify(actions)};
+    const run = (index) => {
+      if (index === actions.length) {
+        document.querySelector(${JSON.stringify(scrollTo)})
+          ?.scrollIntoView({ block: 'start' });
+        return;
+      }
+      document.querySelector(actions[index]).click();
+      setTimeout(() => run(index + 1), 200);
+    };
+    run(0);
+  })()`;
+}
+SHOTS.push(
+  {
+    name: 'groups-system',
+    path: '/system?scenario=groups',
+    wait: GROUP,
+    script: steps([], '[data-test-groups]'),
+  },
+  {
+    name: 'groups-system-phone',
+    path: '/system?scenario=groups',
+    wait: GROUP,
+    script: steps([], '[data-test-groups]'),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'groups-system-empty',
+    path: '/system?scenario=healthy',
+    wait: '[data-test-groups-empty]',
+    script: steps([], '[data-test-groups]'),
+    themes: ['light'],
+  },
+  {
+    name: 'groups-create-dialog',
+    path: '/system?scenario=groups',
+    wait: GROUP,
+    click: '[data-test-group-create]',
+    themes: ['light'],
+  },
+  {
+    name: 'groups-settings-joined',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-group-services]',
+    script: steps([], '[data-test-group-settings]'),
+  },
+  {
+    name: 'groups-settings-joined-phone',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-group-services]',
+    script: steps([], '[data-test-group-settings]'),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'groups-settings-mismatch',
+    path: '/apps/blog-staging/settings?scenario=groups',
+    wait: GROUP_FORM,
+    script: steps([], '[data-test-group-settings]'),
+    themes: ['light'],
+  },
+  {
+    name: 'groups-settings-database',
+    path: '/apps/accounts-staging/settings?scenario=groups',
+    wait: '[data-test-group-services]',
+    script: steps(
+      ['[data-test-group-service-checkbox="auth-db"]'],
+      '[data-test-group-services]',
+    ),
+    then: '[data-test-group-database-warning]',
+    themes: ['light'],
+  },
+  {
+    name: 'groups-settings-refused',
+    path: '/apps/blog-staging/settings?scenario=groups',
+    wait: GROUP_FORM,
+    script: steps(
+      [
+        '[data-test-group-option="accounts-staging"]',
+        '[data-test-group-service-checkbox="db"]',
+        '[data-test-group-save]',
+      ],
+      '[data-test-group-services]',
+    ),
+    then: '[data-test-field-error="services"]',
+    settle: 600,
+  },
+  {
+    name: 'groups-settings-production-confirm',
+    path: '/apps/accounts/settings?scenario=groups',
+    wait: '[data-test-group-services]',
+    script: steps(
+      [
+        '[data-test-group-service-checkbox="auth-db"]',
+        '[data-test-group-save]',
+      ],
+      '[data-test-group-services]',
+    ),
+    then: '[data-test-group-confirm]',
+  },
+  {
+    name: 'groups-settings-production-confirm-phone',
+    path: '/apps/accounts/settings?scenario=groups',
+    wait: '[data-test-group-services]',
+    script: steps(
+      [
+        '[data-test-group-service-checkbox="auth-db"]',
+        '[data-test-group-save]',
+      ],
+      '[data-test-group-services]',
+    ),
+    then: '[data-test-group-confirm]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['dark'],
+  },
+  {
+    name: 'groups-header',
+    path: '/apps/accounts?scenario=groups',
+    wait: '[data-test-app-group]',
+    themes: ['light'],
+  },
+  {
+    name: 'groups-header-phone',
+    path: '/apps/accounts?scenario=groups',
+    wait: '[data-test-app-group]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['dark'],
+  },
+);
+
 // App creation, login, not found.
 const REPOSITORY = '[data-test-field="repo_full_name"]';
 const CHOOSE_REPOSITORY = `(() => {

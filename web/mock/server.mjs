@@ -26,6 +26,8 @@ import {
   composeRequirements,
   containerResources,
   dockerUsage,
+  groupJson,
+  groupsOf,
   newApp,
   newDomain,
   services,
@@ -226,6 +228,118 @@ route('GET', '/api/apps/:slug/services', (context) => ({
     context.state.services?.get(context.params.slug) ??
     services(appOf(context)),
 }));
+
+// Groups (ARCHITECTURE 6.1).
+
+const SERVICE_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+function groupOf(state, id) {
+  const found = (state.groups ?? []).find((group) => group.id === Number(id));
+  if (!found) throw notFound('group_not_found');
+  return found;
+}
+
+function groupName(state, body, except) {
+  const name = String(body.name ?? '').trim();
+  if (name === '' || [...name].length > 40) {
+    throw new HttpError(422, 'validation_failed', {
+      name: 'must be 1 to 40 characters',
+    });
+  }
+  if ((state.groups ?? []).some((g) => g.name === name && g !== except)) {
+    throw new HttpError(409, 'group_name_taken');
+  }
+  return name;
+}
+
+function serviceNames(state, target) {
+  return (state.services?.get(target.slug) ?? services(target)).map(
+    (service) => service.name,
+  );
+}
+
+route('GET', '/api/groups', ({ state }) => ({ groups: groupsOf(state) }));
+route('POST', '/api/groups', ({ state, body }) => {
+  const name = groupName(state, body);
+  if (body.environment !== 'production' && body.environment !== 'staging') {
+    throw new HttpError(422, 'validation_failed', {
+      environment: 'must be production or staging',
+    });
+  }
+  state.groups ??= [];
+  state.nextGroupId ??= 1;
+  const group = {
+    id: state.nextGroupId++,
+    name,
+    environment: body.environment,
+    created_at: new Date().toISOString(),
+  };
+  state.groups.push(group);
+  return { status: 201, json: groupJson(state, group) };
+});
+route('PATCH', '/api/groups/:id', ({ state, params, body }) => {
+  const group = groupOf(state, params.id);
+  group.name = groupName(state, body, group);
+  return groupJson(state, group);
+});
+route('DELETE', '/api/groups/:id', ({ state, params }) => {
+  const group = groupOf(state, params.id);
+  if ([...state.apps.values()].some((a) => a.group_id === group.id)) {
+    throw new HttpError(409, 'group_not_empty');
+  }
+  state.groups = state.groups.filter((g) => g !== group);
+  return { status: 204 };
+});
+route('PUT', '/api/apps/:slug/group', (context) => {
+  const { state, body } = context;
+  const target = appOf(context);
+  const id = body.group_id ?? null;
+  const wanted = body.services ?? [];
+  if (id === null) {
+    if (wanted.length > 0) {
+      throw new HttpError(422, 'validation_failed', {
+        services: 'must be empty without a group',
+      });
+    }
+    return Object.assign(target, { group_id: null, group_services: [] });
+  }
+  const group = (state.groups ?? []).find((g) => g.id === id);
+  if (!group) {
+    throw new HttpError(422, 'validation_failed', {
+      group_id: 'no such group',
+    });
+  }
+  if (group.environment !== target.environment) {
+    throw new HttpError(422, 'validation_failed', {
+      group_id: `is a ${group.environment} group; the app is ${target.environment}`,
+    });
+  }
+  const own = serviceNames(state, target);
+  const bad = wanted.find(
+    (name, index) =>
+      !SERVICE_LABEL.test(name) ||
+      wanted.indexOf(name) !== index ||
+      (target.current_deployment && !own.includes(name)),
+  );
+  if (bad !== undefined) {
+    throw new HttpError(422, 'validation_failed', {
+      services: `"${bad}" is not a service of the running release`,
+    });
+  }
+  // A service with a fixed container name or someone else's network stack
+  // cannot get the group alias.
+  const fixed = state.fixedServices?.get(target.slug) ?? {};
+  const refused = wanted.find((name) => fixed[name]);
+  if (refused !== undefined) {
+    throw new HttpError(422, 'validation_failed', {
+      services: `"${refused}" sets ${fixed[refused]} and cannot join a group`,
+    });
+  }
+  return Object.assign(target, {
+    group_id: id,
+    group_services: [...wanted].sort(),
+  });
+});
 
 function savedEnv(context) {
   return context.state.env?.get(context.params.slug) ?? ENV_VARS;
@@ -722,6 +836,8 @@ route('GET', '/api/login-events', () => ({
 /** What the API refuses without a recent login (ARCHITECTURE 10.3). */
 const NEEDS_RECENT_LOGIN = [
   ['DELETE', /^\/api\/apps\/[^/]+$/],
+  // Only for production apps; the mock's stale login asks for every app.
+  ['PUT', /^\/api\/apps\/[^/]+\/group$/],
   ['PUT', /^\/api\/apps\/[^/]+\/env(\/[^/]+)?$/],
   ['DELETE', /^\/api\/apps\/[^/]+\/env\/[^/]+$/],
   ['POST', /^\/api\/apps\/[^/]+\/backups\/restore$/],

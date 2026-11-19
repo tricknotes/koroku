@@ -48,6 +48,8 @@ export const SCENARIOS = {
     'blog compares with .env.example, which the repository does not have; shop is private and the GitHub App is not installed on it',
   rollback:
     'blog and blog-staging were rolled back to a kept release after a bad deploy; older releases are kept or already removed',
+  groups:
+    'everything fine, plus accounts apps whose auth service is shared through a production and a staging group, and an empty group; the db of blog-staging sets container_name and cannot join',
 };
 
 function ago(ms) {
@@ -150,6 +152,8 @@ function app(slug, overrides = {}) {
     backup_before_deploy: production,
     env_source: 'compose',
     env_example_path: '',
+    group_id: null,
+    group_services: [],
     url,
     primary_url: url,
     pending_domains: 0,
@@ -578,6 +582,8 @@ export function buildScenario(name) {
       rolledBack(state, 'blog-staging');
       return state;
     }
+    case 'groups':
+      return groupScenario();
     default:
       return scenario(healthyApps());
   }
@@ -603,6 +609,135 @@ export function startRollback(state, slug, id) {
   list.unshift(started);
   state.apps.get(slug).latest_deployment = started;
   return { deployment: started };
+}
+
+/** A running service as `GET /api/apps/{slug}/services` reports it. */
+function runningService(name, memory, limit, health = 'healthy') {
+  return {
+    name,
+    state: 'running',
+    status: health ? `Up 5 hours (${health})` : 'Up 5 hours',
+    health,
+    memory_bytes: memory,
+    memory_limit_bytes: limit,
+  };
+}
+
+function authServices(scale) {
+  return [
+    runningService('auth', 0.22 * GB * scale, 0.5 * GB),
+    runningService('auth-db', 0.35 * GB * scale, 1 * GB),
+  ];
+}
+
+/**
+ * Groups (ARCHITECTURE 6.1): an accounts service that the shops call by
+ * `auth.accounts.koroku.internal`, in production and in staging, and a
+ * group nobody joined yet.
+ */
+function groupScenario() {
+  const apps = healthyApps();
+  const accounts = deployment('accounts', 'Rotate the signing keys', 6 * HOUR);
+  const accountsStaging = deployment(
+    'accounts-staging',
+    'Add passkey sign-in',
+    40 * MINUTE,
+  );
+  apps.push(
+    {
+      app: app('accounts', {
+        environment: 'production',
+        host_port: 20004,
+        web_service: 'auth',
+        service_memory_limits: { 'auth-db': '1g' },
+        dump_hook_service: 'auth-db',
+        current_deployment: accounts,
+        latest_deployment: accounts,
+      }),
+    },
+    {
+      app: app('accounts-staging', {
+        host_port: 20005,
+        web_service: 'auth',
+        service_memory_limits: { 'auth-db': '1g' },
+        dump_hook_service: 'auth-db',
+        current_deployment: accountsStaging,
+        latest_deployment: accountsStaging,
+      }),
+    },
+  );
+  const state = scenario(apps, {
+    services: new Map([
+      ['accounts', authServices(1)],
+      ['accounts-staging', authServices(0.35)],
+    ]),
+    groups: [
+      {
+        id: 1,
+        name: 'accounts',
+        environment: 'production',
+        created_at: ago(30 * DAY),
+      },
+      {
+        id: 2,
+        name: 'accounts-staging',
+        environment: 'staging',
+        created_at: ago(30 * DAY),
+      },
+      {
+        id: 3,
+        name: 'search',
+        environment: 'staging',
+        created_at: ago(2 * HOUR),
+      },
+    ],
+    nextGroupId: 4,
+    // Compose settings that keep a service out of a group.
+    fixedServices: new Map([['blog-staging', { db: 'container_name' }]]),
+  });
+  const join = (slug, groupId, services) => {
+    Object.assign(state.apps.get(slug), {
+      group_id: groupId,
+      group_services: services,
+    });
+  };
+  for (const target of state.apps.values()) {
+    target.group_id = null;
+    target.group_services = [];
+  }
+  join('accounts', 1, ['auth']);
+  join('shop', 1, []);
+  join('accounts-staging', 2, ['auth']);
+  join('shop-staging', 2, ['web']);
+  return state;
+}
+
+/** `GET /api/groups`: the groups with their members, as the API builds them. */
+export function groupsOf(state) {
+  return [...(state.groups ?? [])]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((group) => groupJson(state, group));
+}
+
+export function groupJson(state, group) {
+  const members = [...state.apps.values()]
+    .filter((target) => target.group_id === group.id)
+    .sort((a, b) => a.slug.localeCompare(b.slug))
+    .map((target) => {
+      const services = [...(target.group_services ?? [])].sort();
+      return {
+        slug: target.slug,
+        services,
+        hostnames: services.map(
+          (service) => `${service}.${target.slug}.koroku.internal`,
+        ),
+      };
+    });
+  return {
+    ...group,
+    network: `koroku_group_${group.id}`,
+    members,
+  };
 }
 
 /** Starts a deployment that the mock finishes by itself a little later. */

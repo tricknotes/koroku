@@ -70,8 +70,11 @@ The page URL selects what the API answers and, optionally, the theme:
 | `...&theme=dark`        | pins the theme (`light`, `dark`, or `system` to unpin)                                                        |
 
 Further scenarios cover single screens (`host-trouble`, `unconfigured`,
-`fresh`, `backups-down`, `volumes-down`, `stale-login`, `rollback`); `/__mock` lists every scenario with
-what it shows.
+`fresh`, `backups-down`, `volumes-down`, `stale-login`, `rollback`, `groups`); `/__mock` lists every scenario with
+what it shows. In `groups`, the apps `accounts` (production) and
+`accounts-staging` share their `auth` service with the shops through two
+groups, the staging group `search` has no members yet, and the `db` of
+`blog-staging` sets `container_name`, so the API refuses to connect it.
 
 The scenario is kept in a cookie, so it stays while navigating; changes made
 in the UI (deploying, adding a domain, ...) are kept in memory until the mock
