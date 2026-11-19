@@ -39,12 +39,17 @@ const MESSAGES: Record<string, string> = {
   app_not_found: 'アプリが見つかりません。',
   deployment_not_found: 'デプロイが見つかりません。',
   domain_not_found: 'ドメインが見つかりません。',
+  group_not_found:
+    'グループが見つかりません。ほかの画面で削除されたかもしれません。再読み込みしてください。',
   snapshot_not_found:
     'スナップショットが見つからないか、この操作には使えない種類です。',
   slug_taken: 'この slug はすでに使われています。',
   no_free_port: '割り当てられるポートが残っていません。',
   not_cancelable: 'このデプロイはすでに終了しているためキャンセルできません。',
   hostname_taken: 'このホスト名はすでに登録されています。',
+  group_name_taken: '同じ名前のグループがすでにあります。',
+  group_not_empty:
+    'メンバーのアプリがいるため削除できません。先に各アプリの設定タブでグループから外してください。',
   env_var_exists: '同じキーの環境変数がすでにあります。',
   env_var_not_found:
     'この環境変数は見つかりません。ほかの画面で変更されたかもしれません。再読み込みしてください。',
@@ -111,6 +116,9 @@ export function fieldErrors(error: unknown): Record<string, string> {
   if (error.code === 'hostname_taken') {
     return { hostname: MESSAGES['hostname_taken'] as string };
   }
+  if (error.code === 'group_name_taken') {
+    return { name: MESSAGES['group_name_taken'] as string };
+  }
   if (error.code !== 'validation_failed') return {};
   const fields: Record<string, string> = {};
   for (const [name, reason] of Object.entries(error.details)) {
@@ -149,6 +157,7 @@ const SPECIFIC_NOT_FOUND = new Set([
   'app_not_found',
   'deployment_not_found',
   'domain_not_found',
+  'group_not_found',
   'repo_not_found',
   'snapshot_not_found',
 ]);

@@ -166,6 +166,11 @@ export interface App {
   env_source?: EnvSource;
   /** The `.env.example` path in `dotenv` mode; '' for the default. */
   env_example_path?: string;
+  // Groups (ARCHITECTURE 6.1); absent on older backends.
+  /** The group the app belongs to; `null` when it is in none. */
+  group_id?: number | null;
+  /** Services connected to the group's shared network. */
+  group_services?: string[] | null;
 }
 
 export interface AppPatch {
@@ -184,6 +189,33 @@ export interface AppPatch {
   backup_before_deploy?: boolean;
   env_source?: EnvSource;
   env_example_path?: string;
+}
+
+/** One app of a group and the services it connects (`GET /api/groups`). */
+export interface GroupMember {
+  slug: string;
+  services: string[] | null;
+  /** `<service>.<slug>.koroku.internal`, one per connected service. */
+  hostnames: string[] | null;
+}
+
+/** A shared network for chosen services of apps (ARCHITECTURE 6.1). */
+export interface Group {
+  id: number;
+  name: string;
+  /** Members are apps of this environment only; it never changes. */
+  environment: Environment;
+  /** The Docker network, `koroku_group_<id>`. */
+  network: string;
+  /** In slug order. */
+  members: GroupMember[] | null;
+  created_at: string;
+}
+
+/** `PUT /api/apps/{slug}/group`; leaving is `{group_id: null, services: []}`. */
+export interface AppGroupChange {
+  group_id: number | null;
+  services: string[];
 }
 
 export interface NewApp {

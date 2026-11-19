@@ -4,6 +4,7 @@ import { ApiError } from 'koroku-console/utils/errors';
 import type SessionService from './session';
 import type {
   App,
+  AppGroupChange,
   AppPatch,
   AppVolume,
   BackupOverview,
@@ -20,6 +21,7 @@ import type {
   EnvRequirements,
   EnvPending,
   EnvVar,
+  Group,
   LogArchive,
   LoginEvent,
   LoginSession,
@@ -250,6 +252,36 @@ export default class ApiService extends Service {
       services: ServiceStatus[] | null;
     }>('GET', `/api/apps/${seg(slug)}/services`);
     return services ?? [];
+  }
+
+  // Groups (ARCHITECTURE 6.1)
+
+  async listGroups(): Promise<Group[]> {
+    const { groups } = await this.request<{ groups: Group[] | null }>(
+      'GET',
+      '/api/groups',
+    );
+    return groups ?? [];
+  }
+
+  createGroup(body: {
+    name: string;
+    environment: Group['environment'];
+  }): Promise<Group> {
+    return this.request('POST', '/api/groups', { body });
+  }
+
+  renameGroup(id: number, name: string): Promise<Group> {
+    return this.request('PATCH', `/api/groups/${id}`, { body: { name } });
+  }
+
+  deleteGroup(id: number): Promise<void> {
+    return this.request('DELETE', `/api/groups/${id}`);
+  }
+
+  /** Joins, leaves or changes the connected services of the app's group. */
+  setAppGroup(slug: string, body: AppGroupChange): Promise<App> {
+    return this.request('PUT', `/api/apps/${seg(slug)}/group`, { body });
   }
 
   // Environment variables

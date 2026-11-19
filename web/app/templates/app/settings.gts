@@ -5,6 +5,7 @@ import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import type Owner from '@ember/owner';
 import type RouterService from '@ember/routing/router-service';
+import AppGroupSettings from 'koroku-console/components/app-group-settings';
 import Banner from 'koroku-console/components/banner';
 import Button from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
@@ -141,6 +142,11 @@ export default class AppSettingsTemplate extends Component<Signature> {
     return Object.entries(this.errors)
       .filter(([name]) => !KNOWN_FIELDS.has(name))
       .map(([name, reason]) => `${name}: ${reason}`);
+  }
+
+  /** The environment cannot change while the app is in a group. */
+  get inGroup(): boolean {
+    return (this.app.group_id ?? null) !== null;
   }
 
   get violations(): string[] {
@@ -428,6 +434,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                 name="environment"
                 value="staging"
                 checked={{isChecked this.form.environment "staging"}}
+                disabled={{this.inGroup}}
                 data-test-environment-option="staging"
                 {{on "change" this.setEnvironment}}
               />
@@ -444,6 +451,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                 name="environment"
                 value="production"
                 checked={{isChecked this.form.environment "production"}}
+                disabled={{this.inGroup}}
                 data-test-environment-option="production"
                 {{on "change" this.setEnvironment}}
               />
@@ -455,6 +463,16 @@ export default class AppSettingsTemplate extends Component<Signature> {
               </span>
             </label>
           </fieldset>
+          {{#if this.errors.environment}}
+            <p class="field-error" data-test-field-error="environment">
+              {{this.errors.environment}}
+            </p>
+          {{/if}}
+          {{#if this.inGroup}}
+            <p class="option-hint" data-test-environment-group-note>
+              グループに入っている間は、環境を変えられません。変えるときは、先に下の「グループ」で外してください。
+            </p>
+          {{/if}}
         </div>
       </div>
 
@@ -731,6 +749,8 @@ export default class AppSettingsTemplate extends Component<Signature> {
         </p>
       </div>
     </form>
+
+    <AppGroupSettings @model={{@model}} />
 
     <section
       class="pane settings-operations"

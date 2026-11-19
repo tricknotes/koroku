@@ -1,0 +1,174 @@
+/* Groups: the list on the system screen and the choice on the settings tab. */
+
+.group-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group-card {
+  padding: var(--space-4);
+}
+
+.group-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+}
+
+.group-card-title {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.group-name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.group-network {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.group-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.group-members {
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  border-top: 1px solid var(--color-border);
+  list-style: none;
+}
+
+.group-member {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  align-items: baseline;
+  padding: var(--space-2) 0;
+}
+
+.group-member + .group-member {
+  border-top: 1px solid var(--color-border);
+}
+
+.group-member-app {
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.group-hostnames {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  font-size: var(--text-sm);
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.group-member-none,
+.group-note {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.group-note {
+  margin: var(--space-2) 0 0;
+  line-height: var(--leading-relaxed);
+}
+
+/* The pattern of the names, kept on one line. */
+.group-pattern {
+  white-space: nowrap;
+}
+
+/* Settings tab: its own form below the settings form. */
+
+.settings-group-form {
+  margin-top: var(--space-10);
+}
+
+.settings-group-form > .form-group:first-child {
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--color-border);
+}
+
+.group-option-label {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.group-services {
+  margin-top: var(--space-6);
+}
+
+.group-reach,
+.group-hostname-list {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.group-reach-title {
+  margin: 0 0 var(--space-1);
+  font-weight: var(--weight-semibold);
+}
+
+.group-reach-list {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.group-hostname-list > ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group-hostname-list li {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (width <= 40rem) {
+  .group-actions {
+    margin-left: 0;
+  }
+
+  .group-member {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.group-field-error {
+  margin: 0 0 var(--space-4);
+}
+
+.group-dialog-hostnames {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-5);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}

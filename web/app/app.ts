@@ -23,6 +23,7 @@ import './styles/domains.css';
 import './styles/backups.css';
 import './styles/settings.css';
 import './styles/system.css';
+import './styles/groups.css';
 import './styles/security.css';
 import './styles/new-app.css';
 

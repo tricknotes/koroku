@@ -215,6 +215,7 @@ export function serveConsole(
       ],
     })
     .on('GET', '/api/backups', () => state.backups)
+    .on('GET', '/api/groups', { groups: [] })
     .on('GET', app, () => state.app)
     .on('GET', `${app}/services`, {
       services: [
