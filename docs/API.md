@@ -24,8 +24,8 @@
 | 401 | `unauthenticated` | 未ログイン（M3 以降、`/auth/*` と `GET /api/session` 以外のすべて） |
 | 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない（M3） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
-| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`group_not_found` | 対象がない |
-| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`group_name_taken`、`group_not_empty` | 状態の衝突 |
+| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`group_not_found`、`link_not_found` | 対象がない |
+| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`group_name_taken`、`group_not_empty`、`link_name_taken` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
 | 507 | `disk_full`（`details.used_percent`、`details.limit_percent`） | ディスク使用率が上限超過でデプロイ拒否 |
 | 500 | `internal` | サーバー側の失敗（詳細はサーバーログ） |
@@ -46,7 +46,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、production のアプリの `PUT /api/apps/{slug}/group`。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、production のアプリの `PUT /api/apps/{slug}/group` と接続の作成・削除。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## システム（M0、prune は M5）
 
@@ -194,9 +194,9 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る） |
 | `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）と `memory_limit_bytes`（上限。無制限なら 0）も付く。取得できなければどちらも `null` |
 
-## グループ（2026-11-20、ARCHITECTURE 6.1）
+## グループと接続（2026-11-20、ARCHITECTURE 6.1）
 
-グループに入れたアプリは、選んだサービスだけを共用ネットワークにつなぎ、互いに `<service>.<slug>.koroku.internal` で呼べる。
+利用側のアプリは、自分の Compose の中で決めた名前（例: `auth`）で相手を呼ぶ。その名前がどのアプリのどのサービスを指すかを「接続」として登録すると、koroku が接続ごとのネットワークで両者をつなぐ。接続できるのは同じグループのアプリの間だけで、相手側は「公開するサービス」に入れたものだけ。
 
 グループの形:
 
@@ -205,39 +205,64 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "id": 3,
   "name": "shop",
   "environment": "staging",
-  "network": "koroku_group_3",
   "members": [
-    { "slug": "shop-api", "services": ["api"], "hostnames": ["api.shop-api.koroku.internal"] },
-    { "slug": "shop-web", "services": [], "hostnames": [] }
+    {
+      "slug": "accounts",
+      "services": ["auth"],
+      "links": []
+    },
+    {
+      "slug": "shop",
+      "services": [],
+      "links": [{ "id": 7, "name": "auth", "target_app": "accounts", "target_service": "auth", "services": ["web", "worker"] }]
+    }
   ],
   "created_at": "2026-11-20T03:00:00Z"
 }
 ```
 
 - `environment` は `production` / `staging`。作成後は変えられない。メンバーは同じ `environment` のアプリだけ。
-- `members` は slug 順。`services` が空のメンバーは、まだどのサービスも共用ネットワークにつないでいない。
+- `members` は slug 順。`services` はそのアプリが公開するサービス、`links` はそのアプリが利用側の接続。
 
-アプリの形には `group_id`（所属するグループの ID。なければ `null`）と `group_services`（共用ネットワークにつなぐサービス名の配列。空なら `[]`）が付く。
+接続の形:
+
+```json
+{ "id": 7, "name": "auth", "target_app": "accounts", "target_service": "auth", "services": ["web", "worker"], "network": "koroku_link_1a2b3c4d_7", "created_at": "2026-11-20T03:00:00Z" }
+```
+
+- `name` は利用側の Compose で相手を呼ぶ名前。`services` は、その名前を使う利用側のサービス（このサービスだけが接続のネットワークにつながる）。
+
+アプリの形には `group_id`（所属するグループの ID。なければ `null`）と `group_services`（公開するサービス名の配列。空なら `[]`）が付く。
 
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/groups` | `{"groups": [グループ, ...]}`（名前順） |
-| `POST /api/groups` | 作成。ボディ `{"name": "shop", "environment": "staging"}`。201 でグループ。`name` は前後の空白を除いて 1〜40 文字。重複は `409 group_name_taken`。作成時にネットワークも作る |
+| `POST /api/groups` | 作成。ボディ `{"name": "shop", "environment": "staging"}`。201 でグループ。`name` は前後の空白を除いて 1〜40 文字。重複は `409 group_name_taken` |
 | `PATCH /api/groups/{id}` | ボディ `{"name": "..."}`。200 でグループ |
-| `DELETE /api/groups/{id}` | 204。メンバーがいれば `409 group_not_empty`。ネットワークも消す |
-| `PUT /api/apps/{slug}/group` | 所属と、つなぐサービスを設定する。ボディ `{"group_id": 3, "services": ["api"]}`。抜けるときは `{"group_id": null, "services": []}`。200 でアプリ |
+| `DELETE /api/groups/{id}` | 204。メンバーがいれば `409 group_not_empty` |
+| `PUT /api/apps/{slug}/group` | 所属と公開するサービスを設定する。ボディ `{"group_id": 3, "services": ["auth"]}`。抜けるときは `{"group_id": null, "services": []}`。200 でアプリ |
+| `GET /api/apps/{slug}/links` | `{"links": [接続, ...]}`（名前順）。そのアプリが利用側の接続 |
+| `POST /api/apps/{slug}/links` | 接続の作成。ボディ `{"name": "auth", "target_app": "accounts", "target_service": "auth", "services": ["web"]}`。201 で接続 |
+| `DELETE /api/apps/{slug}/links/{id}` | 接続の削除。ネットワークから切ってから 204。なければ `404 link_not_found` |
 
 `PUT /api/apps/{slug}/group` の細則:
 
 - グループがなければ `422 validation_failed`（`details.group_id`）。`environment` が違えば同じく `details.group_id`。
-- `services` の各要素は `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`（DNS のラベルとして使える形）で、重複なし。そうでなければ `422 validation_failed`（`details.services`）。デプロイ済みのアプリでは、稼働中のリリースにないサービス名も同じエラーになる。`group_id` が `null` のときは空でなければならない。
-- `container_name` か `network_mode` を指定したサービスは参加できない（`422 validation_failed`、`details.services`）。共用ネットワークには `<service>.<slug>.koroku.internal` とコンテナ名だけが載るので、他のメンバーと名前が衝突することはない（ARCHITECTURE 6.1）。
-- デプロイ中や他の操作の実行中は `409 busy`。
-- 届く範囲を広げる変更（参加、サービスの追加）は、次のデプロイか起動から効く。狭める変更（離脱、サービスの解除）は、この API の中で共用ネットワークから切り離してから応答する。
-- `environment` が `production` のアプリでは再ログイン（`403 reauth_required`）が要る。
-- グループに入っているアプリの `environment` は `PATCH /api/apps/{slug}` で変えられない（`422 validation_failed`、`details.environment`）。先にグループから抜ける。
+- `services` の各要素は `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` で、重複なし。そうでなければ `422 validation_failed`（`details.services`）。デプロイ済みのアプリでは、稼働中のリリースにないサービス、`container_name` か `network_mode` を指定したサービスも同じエラーになる。`group_id` が `null` のときは空でなければならない。
+- グループを抜けると、そのアプリが利用側の接続と、そのアプリへの接続がすべて消える。公開をやめたサービスへの接続も消える。どれも、この API の中でネットワークから切ってから応答する。UI は、消える接続を事前に示して確かめる（グループの形から求められる）。
+- 公開するサービスを増やしても、それだけではどこにもつながらない（接続ができたときにつながる）。
 
-デプロイと起動のときも、参加させるサービスがリリースにあり、参加できる形かを確かめる。満たさなければデプロイは `failed`、起動は `422 policy_violation`（`rule` は `group_service`）になる。リポジトリの Compose が共用ネットワーク（`koroku_group_*`）を指していれば、「検査を緩める」フラグがあっても `group_network` の違反になる。
+`POST /api/apps/{slug}/links` の細則:
+
+- `name` は `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`。同じアプリにすでにあれば `409 link_name_taken`。
+- `target_app` は同じグループのほかのアプリ、`target_service` はその公開するサービスでなければならない（`422 validation_failed`、`details.target_app` / `details.target_service`）。利用側がグループに入っていなければ `details.target_app`。
+- `services` は 1 つ以上で、`PUT .../group` の `services` と同じ形。デプロイ済みなら、稼働中のリリースにないもの、`container_name` か `network_mode` を指定したものは `details.services`。
+- デプロイ済みなら、`name` が利用側のサービス名やコンテナ名と同じだと `details.name`（そのサービスが止まっている間に相手へ解決されてしまうため）。
+- 作ると、相手側のコンテナ（作られていれば）をすぐにつなぐ。利用側は次のデプロイか起動からつながる。
+
+共通: デプロイ中や他の操作の実行中は `409 busy`。`environment` が `production` のアプリでは、`PUT .../group` と接続の作成・削除に再ログイン（`403 reauth_required`）が要る。グループに入っているアプリの `environment` は `PATCH /api/apps/{slug}` で変えられない（`422 validation_failed`、`details.environment`）。
+
+デプロイと起動のときも、公開するサービスと接続の利用側のサービス、接続の名前を確かめる。満たさなければデプロイは `failed`、起動は `422 policy_violation`（`rule` は `link_service`）になる。リポジトリの Compose が接続のネットワーク（`koroku_link_*`）を指していれば、「検査を緩める」フラグがあっても `link_network` の違反になる。
 
 ## 環境変数（M1）
 
