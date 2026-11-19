@@ -103,7 +103,9 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 }
 ```
 
-`POST /api/system/prune`（M5）: ボディ `{"images": true, "builder": true}`（省略時は両方）。200 で `{"output": "..."}`（コマンド出力の要約）。 コマンドが失敗したら `500 prune_failed`（`details.output` にそこまでの出力）。
+- `reclaimable_bytes` は `POST /api/system/prune` で空く見込みで、Docker の回収可能（Reclaimable）ではない。イメージはどのコンテナにも使われていないタグのないイメージ（Compose がビルドしたものは層がビルドキャッシュに残るので除く）、ビルドキャッシュは 1 週間使われておらず、その先の記録も同じであるもの。volume とコンテナは消さないので常に 0。見込みは少なめに出る（ARCHITECTURE 10 章）。
+
+`POST /api/system/prune`（M5）: ボディ `{"images": true, "builder": true}`（省略時は両方）。200 で `{"output": "...", "reclaimed_bytes": 1073741824}`（コマンド出力の要約と、Docker が空けたと報告した量の合計）。コマンドが失敗したら `500 prune_failed`（`details.output` にそこまでの出力）。
 
 ## アプリ（M1、起動制御と削除は M5）
 

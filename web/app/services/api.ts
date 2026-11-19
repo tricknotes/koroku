@@ -197,6 +197,8 @@ export default class ApiService extends Service {
 
   prune(body: { images: boolean; builder: boolean }): Promise<{
     output: string;
+    /** What Docker reported it freed; absent from older backends. */
+    reclaimed_bytes?: number;
   }> {
     return this.request('POST', '/api/system/prune', { body });
   }

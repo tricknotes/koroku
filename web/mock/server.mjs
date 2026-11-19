@@ -160,16 +160,19 @@ route('POST', '/api/system/prune', async ({ state, body }) => {
   await new Promise((done) => setTimeout(done, 1500));
   state.pruned = true;
   const lines = [];
+  let reclaimed = 0;
   if (body.images !== false) {
     lines.push('$ docker image prune -f', 'Total reclaimed space: 3.1GB');
+    reclaimed += 3.1 * 2 ** 30;
   }
   if (body.builder !== false) {
     lines.push(
-      '$ docker builder prune -f --filter until=168h',
-      'Total reclaimed space: 4.2GB',
+      '$ docker builder prune --all -f --filter until=168h',
+      'Total:\t4.2GB',
     );
+    reclaimed += 4.2 * 2 ** 30;
   }
-  return { output: lines.join('\n') + '\n' };
+  return { output: lines.join('\n') + '\n', reclaimed_bytes: reclaimed };
 });
 
 route('GET', '/api/apps', ({ state }) => ({

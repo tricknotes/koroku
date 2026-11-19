@@ -213,6 +213,9 @@ module('Acceptance | system', function (hooks) {
         .dom('[data-test-docker-item="build_cache"]')
         .includesText('ビルドキャッシュ')
         .includesText('3.0 GB');
+      assert
+        .dom('[data-test-docker-item="volumes"] .docker-reclaimable')
+        .includesText('—', 'volumes are never pruned');
       assert.dom('[data-test-docker-item="volumes"]').includesText('volume');
       assert
         .dom('[data-test-docker-item="containers"]')
@@ -227,7 +230,10 @@ module('Acceptance | system', function (hooks) {
         .on('GET', '/api/system/docker', () => dockerUsage(!pruned))
         .on('POST', '/api/system/prune', () => {
           pruned = true;
-          return { output: 'Total reclaimed space: 4.0GB' };
+          return {
+            output: 'Total reclaimed space: 4.0GB',
+            reclaimed_bytes: 4 * GB,
+          };
         });
 
       await visit('/system');
@@ -248,7 +254,11 @@ module('Acceptance | system', function (hooks) {
         { images: true, builder: false },
       );
       assert.dom('[data-test-dialog]').doesNotExist();
-      assert.dom('[data-test-pruned]').exists();
+      assert
+        .dom('[data-test-pruned]')
+        .hasText(
+          '不要なデータを削除しました。Docker の報告では 4.0 GB 空きました。',
+        );
       assert
         .dom('[data-test-prune-output]')
         .hasText('Total reclaimed space: 4.0GB');
