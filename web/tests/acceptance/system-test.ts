@@ -271,7 +271,12 @@ module('Acceptance | system', function (hooks) {
       assert
         .dom(`${shop} [data-test-container-breakdown]`)
         .hasText('web 480.0 MB、db 440.0 MB');
-      assert.dom(`${shop} [data-test-container-cpu]`).hasText('12.3%');
+      assert
+        .dom(`${shop} [data-test-container-cpu]`)
+        .hasText('12.3%', 'per core, as Docker shows it');
+      assert
+        .dom(`${shop} .usage-cpu [role="meter"]`)
+        .hasAttribute('aria-valuenow', '6.2', 'the meter is full at 200%');
       assert
         .dom(`${shop} [role="meter"]`)
         .exists({ count: 2 })
@@ -290,7 +295,7 @@ module('Acceptance | system', function (hooks) {
         .dom('[data-test-containers-total]')
         .includesText('メモリ 940.0 MB（ホストの 22.9%）')
         .includesText('CPU 12.4%')
-        .includesText('2 コア');
+        .includesText('このホストは 2 コアなので最大 200%');
     });
 
     test('no running container says so', async function (assert) {

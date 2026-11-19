@@ -88,7 +88,7 @@ export interface ContainerUsage {
   memory_bytes: number;
   /** `null` when the container has no memory limit. */
   memory_limit_bytes: number | null;
-  /** Share of the whole host (all cores), 0 to 100. */
+  /** As `docker stats` shows it: one core is 100%, up to cores × 100. */
   cpu_percent: number;
 }
 

@@ -24,9 +24,10 @@ export interface ContainerGroupRow {
    * container that reaches it), by label; empty when none is.
    */
   nearLimit: string;
+  /** Per core, as Docker shows it: `150%` is one and a half cores. */
   cpu: string;
-  /** Share of the whole host's CPU, 0 to 100. */
-  cpuPercent: number;
+  /** Length of the CPU meter: a share of all cores, 0 to 100. */
+  cpuShare: number;
   /** What each container uses: `web 310.0 MB、db 420.0 MB`. */
   breakdown: string;
 }
@@ -77,7 +78,7 @@ export function containerGroupRows(
         .map((container) => containerLabel(group, container))
         .join('、'),
       cpu: formatPercent(group.cpu_percent),
-      cpuPercent: group.cpu_percent,
+      cpuShare: share(group.cpu_percent, resources.cpu_count * 100),
       breakdown: group.containers
         .map(
           (container) =>
@@ -92,6 +93,8 @@ export interface ContainerTotals {
   memory: string;
   memoryPercent: string;
   cpu: string;
+  /** What CPU use reaches with every core busy: `200%`. */
+  cpuMax: string;
   hostMemory: string;
   cpuCount: number;
 }
@@ -110,6 +113,7 @@ export function containerTotals(
     memory: formatBytes(memory),
     memoryPercent: formatPercent(share(memory, resources.memory_total_bytes)),
     cpu: formatPercent(cpu),
+    cpuMax: formatPercent(resources.cpu_count * 100),
     hostMemory: formatBytes(resources.memory_total_bytes),
     cpuCount: resources.cpu_count,
   };
