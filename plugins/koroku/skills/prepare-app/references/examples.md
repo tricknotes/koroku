@@ -40,7 +40,11 @@ services:
     environment:
       RAILS_ENV: ${RAILS_ENV:-production}
       DATABASE_URL: postgres://app:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/app
-      # SECRET_KEY_BASE、APP_HOSTS などは koroku の env ファイルから入る
+      # 値は koroku の env ファイルから入る。ここに並べておくと、koroku が
+      # 未設定のものを環境変数の画面とデプロイの前に知らせる
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?openssl rand -hex 64 で作る}
+      APP_HOSTS: ${APP_HOSTS:?公開するホスト名（カンマ区切り）}
+      RAILS_MAX_THREADS: ${RAILS_MAX_THREADS:-5}
     expose:
       - "3000"
     healthcheck:
