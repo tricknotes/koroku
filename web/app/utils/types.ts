@@ -165,14 +165,23 @@ export interface ServiceStatus {
   memory_limit_bytes?: number | null;
 }
 
+/** How a saved variable differs from the running release. */
+export type EnvPending = 'added' | 'changed';
+
 export interface EnvVar {
   key: string;
   value: string;
+  /** Saved but not deployed yet; `null` when the release has it as is. */
+  pending?: EnvPending | null;
 }
 
 /** `GET /api/apps/{slug}/env`, with hidden values turned into ''. */
 export interface EnvList {
   vars: EnvVar[];
+  /** Deleted, but still in the running release. */
+  removed: string[];
+  /** There is a running release the saved variables were compared with. */
+  compared: boolean;
   /** The session is too old to see values: only the keys are real. */
   valuesHidden: boolean;
 }

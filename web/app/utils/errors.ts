@@ -45,6 +45,9 @@ const MESSAGES: Record<string, string> = {
   no_free_port: '割り当てられるポートが残っていません。',
   not_cancelable: 'このデプロイはすでに終了しているためキャンセルできません。',
   hostname_taken: 'このホスト名はすでに登録されています。',
+  env_var_exists: '同じキーの環境変数がすでにあります。',
+  env_var_not_found:
+    'この環境変数は見つかりません。ほかの画面で変更されたかもしれません。再読み込みしてください。',
   busy: 'ほかの処理が実行中です。しばらくしてからやり直してください。',
   not_deployed: 'まだ一度もデプロイされていません。先にデプロイしてください。',
   validation_failed: '入力内容に誤りがあります。',

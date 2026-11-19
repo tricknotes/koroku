@@ -16,6 +16,7 @@ import type {
   Domain,
   DomainList,
   EnvList,
+  EnvPending,
   EnvVar,
   LogArchive,
   LoginEvent,
@@ -243,23 +244,45 @@ export default class ApiService extends Service {
 
   /** Values come back as `null` without a recent login; they become ''. */
   async getEnv(slug: string): Promise<EnvList> {
-    const { vars, values_hidden } = await this.request<{
-      vars: { key: string; value: string | null }[] | null;
-      values_hidden?: boolean;
-    }>('GET', `/api/apps/${seg(slug)}/env`);
-    return {
-      vars: (vars ?? []).map((v) => ({ key: v.key, value: v.value ?? '' })),
-      valuesHidden: values_hidden === true,
-    };
+    return envList(
+      await this.request<EnvListJson>('GET', `/api/apps/${seg(slug)}/env`),
+    );
   }
 
-  async putEnv(slug: string, vars: EnvVar[]): Promise<EnvVar[]> {
-    const saved = await this.request<{ vars: EnvVar[] | null }>(
-      'PUT',
-      `/api/apps/${seg(slug)}/env`,
-      { body: { vars } },
+  /** Replaces every variable (the `.env` editor). */
+  async putEnv(slug: string, vars: EnvVar[]): Promise<EnvList> {
+    return envList(
+      await this.request<EnvListJson>('PUT', `/api/apps/${seg(slug)}/env`, {
+        body: { vars: vars.map(({ key, value }) => ({ key, value })) },
+      }),
     );
-    return saved.vars ?? [];
+  }
+
+  /**
+   * Adds or changes one variable; `change.key` renames it. Without
+   * `change.value` a renamed variable keeps its value.
+   */
+  async putEnvVar(
+    slug: string,
+    key: string,
+    change: { key?: string; value?: string },
+  ): Promise<EnvList> {
+    return envList(
+      await this.request<EnvListJson>(
+        'PUT',
+        `/api/apps/${seg(slug)}/env/${seg(key)}`,
+        { body: change },
+      ),
+    );
+  }
+
+  async deleteEnvVar(slug: string, key: string): Promise<EnvList> {
+    return envList(
+      await this.request<EnvListJson>(
+        'DELETE',
+        `/api/apps/${seg(slug)}/env/${seg(key)}`,
+      ),
+    );
   }
 
   // Deployments
@@ -441,4 +464,25 @@ declare module '@ember/service' {
   interface Registry {
     api: ApiService;
   }
+}
+
+interface EnvListJson {
+  vars:
+    { key: string; value: string | null; pending?: EnvPending | null }[] | null;
+  removed?: string[] | null;
+  compared?: boolean;
+  values_hidden?: boolean;
+}
+
+function envList(json: EnvListJson): EnvList {
+  return {
+    vars: (json.vars ?? []).map((v) => ({
+      key: v.key,
+      value: v.value ?? '',
+      pending: v.pending ?? null,
+    })),
+    removed: json.removed ?? [],
+    compared: json.compared === true,
+    valuesHidden: json.values_hidden === true,
+  };
 }

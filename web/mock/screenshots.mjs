@@ -351,6 +351,33 @@ function appTabShots() {
         set('[data-test-env-row]:nth-child(4) [data-test-env-value-input]', 'noreply@example.org');
       })()`,
     },
+    // Saved, but not deployed yet: marks on the rows and one way to redeploy.
+    {
+      name: 'env-pending',
+      path: '/apps/blog/env?scenario=env-pending',
+      wait: '[data-test-env-pending-banner]',
+    },
+    {
+      name: 'env-pending-phone',
+      path: '/apps/blog/env?scenario=env-pending',
+      wait: '[data-test-env-pending-banner]',
+      ...PHONE,
+    },
+    // Deleting asks in the row.
+    {
+      name: 'env-deleting',
+      path: '/apps/blog/env?scenario=healthy',
+      wait: ENV,
+      clicks: ['[data-test-env-row]:nth-child(2) [data-test-env-remove]'],
+    },
+    {
+      name: 'env-deleting-phone',
+      path: '/apps/blog/env?scenario=healthy',
+      wait: ENV,
+      clicks: ['[data-test-env-row]:nth-child(2) [data-test-env-remove]'],
+      ...PHONE,
+      themes: ['light'],
+    },
     {
       name: 'env-editing-phone',
       path: '/apps/blog/env?scenario=healthy',
@@ -386,12 +413,9 @@ function appTabShots() {
     },
     {
       name: 'env-confirm-production',
-      path: '/apps/blog/env?scenario=healthy',
+      path: '/apps/blog/env?scenario=env-pending',
       wait: ENV,
-      clicks: [
-        '[data-test-env-row]:nth-child(2) [data-test-env-remove]',
-        '[data-test-env-save-deploy]',
-      ],
+      clicks: ['[data-test-env-redeploy]'],
       themes: ['light'],
     },
     {

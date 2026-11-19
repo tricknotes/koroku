@@ -36,6 +36,8 @@ export const SCENARIOS = {
   'volumes-down': 'everything fine, but the volumes of an app cannot be listed',
   'stale-login':
     'everything fine, but the login is older than 10 minutes: secrets are hidden and dangerous operations ask to log in again',
+  'env-pending':
+    'everything fine, but blog has saved variables that its running release does not have yet',
 };
 
 function ago(ms) {
@@ -429,6 +431,22 @@ export function buildScenario(name) {
       state.snapshots = new Map([[fresh.slug, []]]);
       return state;
     }
+    case 'env-pending': {
+      // Saved: one value changed and one variable added since the release
+      // was deployed; the release still has one that was deleted since.
+      const saved = ENV_VARS.map((v) =>
+        v.key === 'SECRET_KEY_BASE'
+          ? { ...v, value: '1111111111111111111111111111111111111111' }
+          : v,
+      );
+      saved.push({ key: 'MAIL_FROM', value: 'noreply@example.org' });
+      return scenario(healthyApps(), {
+        env: new Map([['blog', saved]]),
+        deployedEnv: new Map([
+          ['blog', [{ key: 'LEGACY_FLAG', value: '1' }, ...ENV_VARS]],
+        ]),
+      });
+    }
     default:
       return scenario(healthyApps());
   }
@@ -461,6 +479,9 @@ export function settle(state) {
         entry.finished_at = new Date().toISOString();
         const target = state.apps.get(slug);
         if (target) target.current_deployment = entry;
+        // The release now runs with what is saved.
+        state.deployedEnv ??= new Map();
+        state.deployedEnv.set(slug, [...(state.env?.get(slug) ?? ENV_VARS)]);
       }
     }
   }
