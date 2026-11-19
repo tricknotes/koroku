@@ -69,7 +69,8 @@ module('Unit | Utility | container-resources', function () {
       'judged against each container’s own limit, not the total',
     );
     assert.strictEqual(blog?.breakdown, 'web 470.0 MB、db 554.0 MB');
-    assert.strictEqual(blog?.cpu, '25%');
+    assert.strictEqual(blog?.cpu, '25%', 'per core, as Docker shows it');
+    assert.strictEqual(blog?.cpuShare, 6.25, 'a share of 4 cores (400%)');
 
     assert.strictEqual(other?.app, null);
     assert.strictEqual(other?.label, 'その他');
@@ -104,6 +105,7 @@ module('Unit | Utility | container-resources', function () {
         memory: '2.0 GB',
         memoryPercent: '50%',
         cpu: '3.3%',
+        cpuMax: '200%',
         hostMemory: '4.0 GB',
         cpuCount: 2,
       },

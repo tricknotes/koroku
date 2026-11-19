@@ -511,7 +511,7 @@ export default class SystemTemplate extends Component {
               <:header>
                 <span>アプリ</span>
                 <span>メモリ</span>
-                <span>CPU</span>
+                <span>CPU（{{resources.cpu_count}} コア）</span>
               </:header>
               <:rows as |Row|>
                 {{#each (containerGroupRows resources) key="key" as |row|}}
@@ -562,8 +562,8 @@ export default class SystemTemplate extends Component {
                       </span>
                       <Meter
                         class="usage-meter"
-                        @label="{{row.label}}の CPU（ホスト全体に対する割合）"
-                        @percent={{row.cpuPercent}}
+                        @label="{{row.label}}の CPU（全コアに対する割合）"
+                        @percent={{row.cpuShare}}
                       />
                     </span>
                   </Row>
@@ -575,11 +575,15 @@ export default class SystemTemplate extends Component {
                 コンテナ全体で、メモリ
                 {{totals.memory}}（ホストの
                 {{totals.memoryPercent}}）、CPU
-                {{totals.cpu}}。メーターはホスト全体（メモリ
-                {{totals.hostMemory}}、CPU
+                {{totals.cpu}}。CPU は Docker と同じく 1 コアを 100%
+                とした値で、このホストは
                 {{totals.cpuCount}}
-                コア）に対する割合で、CPU は計測した瞬間の値です。「その他」は
-                koroku のアプリではないコンテナです。
+                コアなので最大
+                {{totals.cpuMax}}
+                です。計測した瞬間の値です。メーターはホスト全体（メモリ
+                {{totals.hostMemory}}、CPU
+                {{totals.cpuMax}}）に対する割合です。「その他」は koroku
+                のアプリではないコンテナです。
               </p>
             {{/let}}
           {{else}}

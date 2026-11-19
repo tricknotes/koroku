@@ -601,8 +601,8 @@ export function settleBackups(state) {
   }
 }
 
-/** A made-up CPU share (of the whole host) for a container. */
-const CPU_PERCENT = { web: 1.8, db: 0.6, worker: 0.9 };
+/** A made-up CPU use (per core, as docker stats shows it) for a container. */
+const CPU_PERCENT = { web: 3.6, db: 1.2, worker: 1.8 };
 
 /**
  * Memory and CPU of the running containers, by app, as the services of each

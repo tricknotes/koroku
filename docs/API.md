@@ -116,19 +116,19 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
       "app": "blog",
       "memory_bytes": 412090368,
       "memory_limit_bytes": 1073741824,
-      "cpu_percent": 3.15,
+      "cpu_percent": 6.3,
       "containers": [
-        { "name": "koroku-blog-web-1", "project": "koroku-blog", "service": "web", "memory_bytes": 314572800, "memory_limit_bytes": 536870912, "cpu_percent": 3.02 },
-        { "name": "koroku-blog-db-1", "project": "koroku-blog", "service": "db", "memory_bytes": 97517568, "memory_limit_bytes": 536870912, "cpu_percent": 0.13 }
+        { "name": "koroku-blog-web-1", "project": "koroku-blog", "service": "web", "memory_bytes": 314572800, "memory_limit_bytes": 536870912, "cpu_percent": 6.04 },
+        { "name": "koroku-blog-db-1", "project": "koroku-blog", "service": "db", "memory_bytes": 97517568, "memory_limit_bytes": 536870912, "cpu_percent": 0.26 }
       ]
     },
     {
       "app": null,
       "memory_bytes": 20971520,
       "memory_limit_bytes": null,
-      "cpu_percent": 0.01,
+      "cpu_percent": 0.02,
       "containers": [
-        { "name": "registry", "project": "", "service": "", "memory_bytes": 20971520, "memory_limit_bytes": null, "cpu_percent": 0.01 }
+        { "name": "registry", "project": "", "service": "", "memory_bytes": 20971520, "memory_limit_bytes": null, "cpu_percent": 0.02 }
       ]
     }
   ]
@@ -137,7 +137,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 
 - `cpu_count` は Docker から見た CPU のコア数、`memory_total_bytes` はメモリの総量（`docker info`）。
 - `groups` はアプリごと（`app` は slug）にメモリの多い順。koroku のアプリでないコンテナは `app: null` の 1 グループにまとめて最後に置く。稼働中のコンテナがなければ空の配列。
-- `cpu_percent` は **ホスト全体（全コア）に対する割合**で、0〜100。`docker stats` の値（1 コア = 100%）を `cpu_count` で割ったもの。計測の瞬間値。
+- `cpu_percent` は `docker stats` の `CPUPerc` と同じく **1 コアを 100% とする値**で、0〜`cpu_count` × 100。計測の瞬間値。
 - `memory_bytes` は `docker stats` の使用量。`memory_limit_bytes` はコンテナのメモリ上限で、上限がなければ `null`。グループの `memory_limit_bytes` は、全コンテナに上限があるときだけその合計、1 つでもなければ `null`。
 - `project`、`service` は Compose のラベル。Compose で作られていなければ空文字。
 - Docker に問い合わせられなければ `500 internal`。

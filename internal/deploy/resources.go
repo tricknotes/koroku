@@ -27,7 +27,8 @@ type ContainerUsage struct {
 	MemoryBytes int64  `json:"memory_bytes"`
 	// MemoryLimitBytes is nil when the container has no memory limit.
 	MemoryLimitBytes *int64 `json:"memory_limit_bytes"`
-	// CPUPercent is relative to the whole host (all cores), 0 to 100.
+	// CPUPercent is as docker stats reports it: one core is 100%, so it
+	// ranges up to CPUCount × 100.
 	CPUPercent float64 `json:"cpu_percent"`
 }
 
@@ -125,7 +126,7 @@ func (e *Engine) ContainerResources(ctx context.Context) (ContainerResources, er
 			Project:     meta.project,
 			Service:     meta.service,
 			MemoryBytes: row.memory,
-			CPUPercent:  roundCPU(row.cpu / float64(result.CPUCount)),
+			CPUPercent:  roundCPU(row.cpu),
 		}
 		if meta.limit > 0 {
 			limit := meta.limit
@@ -280,8 +281,7 @@ func groupByApp(containers []ContainerUsage, slugs map[string]string) []Resource
 	return groups
 }
 
-// roundCPU keeps two decimals: stats prints two, and dividing by the core
-// count adds noise below that.
+// roundCPU keeps two decimals, as stats prints; sums would add float noise.
 func roundCPU(percent float64) float64 {
 	return math.Round(percent*100) / 100
 }

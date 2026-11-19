@@ -61,24 +61,24 @@ func TestContainerResources(t *testing.T) {
 		MemoryTotalBytes: 7959953408,
 		Groups: []ResourceGroup{
 			{
-				App: strp("blog"), MemoryBytes: parseDockerSize("93.84MiB") + parseDockerSize("207.1MiB"), MemoryLimitBytes: int64p(1 << 30), CPUPercent: 1.54,
+				App: strp("blog"), MemoryBytes: parseDockerSize("93.84MiB") + parseDockerSize("207.1MiB"), MemoryLimitBytes: int64p(1 << 30), CPUPercent: 6.17,
 				Containers: []ContainerUsage{
-					{Name: "koroku-blog-db-1", Project: "koroku-blog", Service: "db", MemoryBytes: parseDockerSize("207.1MiB"), MemoryLimitBytes: int64p(512 << 20), CPUPercent: 0.02},
-					{Name: "koroku-blog-web-1", Project: "koroku-blog", Service: "web", MemoryBytes: parseDockerSize("93.84MiB"), MemoryLimitBytes: int64p(512 << 20), CPUPercent: 1.52},
+					{Name: "koroku-blog-db-1", Project: "koroku-blog", Service: "db", MemoryBytes: parseDockerSize("207.1MiB"), MemoryLimitBytes: int64p(512 << 20), CPUPercent: 0.08},
+					{Name: "koroku-blog-web-1", Project: "koroku-blog", Service: "web", MemoryBytes: parseDockerSize("93.84MiB"), MemoryLimitBytes: int64p(512 << 20), CPUPercent: 6.09},
 				},
 			},
 			{
-				App: strp("shop"), MemoryBytes: 300 << 20, MemoryLimitBytes: int64p(512 << 20), CPUPercent: 3,
+				App: strp("shop"), MemoryBytes: 300 << 20, MemoryLimitBytes: int64p(512 << 20), CPUPercent: 12,
 				Containers: []ContainerUsage{
-					{Name: "koroku-shop-web-1", Project: "koroku-shop", Service: "web", MemoryBytes: 300 << 20, MemoryLimitBytes: int64p(512 << 20), CPUPercent: 3},
+					{Name: "koroku-shop-web-1", Project: "koroku-shop", Service: "web", MemoryBytes: 300 << 20, MemoryLimitBytes: int64p(512 << 20), CPUPercent: 12},
 				},
 			},
 			{
 				// A koroku- project that is no app, and a container outside
 				// Compose, share the last group. No limit: no total limit.
-				MemoryBytes: parseDockerSize("19.23MiB"), CPUPercent: 0.25,
+				MemoryBytes: parseDockerSize("19.23MiB"), CPUPercent: 1,
 				Containers: []ContainerUsage{
-					{Name: "koroku-dev-caddy-1", Project: "koroku-dev", Service: "caddy", MemoryBytes: parseDockerSize("19.23MiB"), CPUPercent: 0.25},
+					{Name: "koroku-dev-caddy-1", Project: "koroku-dev", Service: "caddy", MemoryBytes: parseDockerSize("19.23MiB"), CPUPercent: 1},
 					{Name: "registry"},
 				},
 			},
