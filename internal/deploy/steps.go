@@ -53,8 +53,13 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, err
 	}
 	log.Printf("Compose file: %s", composeFile)
-	envContent, err := e.renderEnv(ctx, app, log.masker)
+	envContent, fingerprints, err := e.renderEnv(ctx, app, log.masker)
 	if err != nil {
+		return false, err
+	}
+	// What this release runs with, so the console can tell which saved
+	// variables are not deployed yet (ARCHITECTURE 9.2).
+	if err := e.opts.Store.SetDeploymentEnvFingerprints(ctx, d.ID, fingerprints); err != nil {
 		return false, err
 	}
 	// The snapshot lets a later rollback restore the environment this
@@ -217,22 +222,30 @@ func (e *Engine) repoAuth(ctx context.Context, app store.App, masker *secrets.Ma
 }
 
 // renderEnv decrypts the app's variables, registers their values for
-// masking and renders the env file.
-func (e *Engine) renderEnv(ctx context.Context, app store.App, masker *secrets.Masker) (string, error) {
+// masking and renders the env file. It also returns the fingerprint of
+// each variable.
+func (e *Engine) renderEnv(ctx context.Context, app store.App, masker *secrets.Masker) (string, map[string]string, error) {
 	rows, err := e.opts.Store.ListEnvVars(ctx, app.ID)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	vars := make(map[string]string, len(rows))
+	fingerprints := make(map[string]string, len(rows))
 	for _, row := range rows {
-		plain, err := e.opts.Box.Open(row.ValueEncrypted, secrets.EnvVarContext(app.ID, row.Key))
+		ad := secrets.EnvVarContext(app.ID, row.Key)
+		plain, err := e.opts.Box.Open(row.ValueEncrypted, ad)
 		if err != nil {
-			return "", fmt.Errorf("environment variable %s: %w", row.Key, err)
+			return "", nil, fmt.Errorf("environment variable %s: %w", row.Key, err)
 		}
 		vars[row.Key] = string(plain)
+		fingerprints[row.Key] = e.opts.Box.Fingerprint(ad, plain)
 		masker.Add(string(plain))
 	}
-	return RenderEnvFile(vars)
+	content, err := RenderEnvFile(vars)
+	if err != nil {
+		return "", nil, err
+	}
+	return content, fingerprints, nil
 }
 
 // composeConfig runs `docker compose config --format json`. With

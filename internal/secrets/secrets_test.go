@@ -60,6 +60,38 @@ func TestBoxRejectsTampering(t *testing.T) {
 	}
 }
 
+func TestBoxFingerprint(t *testing.T) {
+	box, _ := NewBox(testKey())
+	a := box.Fingerprint("env:1:A", []byte("value"))
+	if a != box.Fingerprint("env:1:A", []byte("value")) {
+		t.Error("the fingerprint is not stable")
+	}
+	if len(a) != 32 || strings.Contains(a, "value") {
+		t.Errorf("fingerprint = %q", a)
+	}
+	for name, other := range map[string]string{
+		"value":        box.Fingerprint("env:1:A", []byte("value2")),
+		"key":          box.Fingerprint("env:1:B", []byte("value")),
+		"app":          box.Fingerprint("env:2:A", []byte("value")),
+		"split":        box.Fingerprint("env:1:Av", []byte("alue")),
+		"empty value":  box.Fingerprint("env:1:A", nil),
+		"other master": mustBox(t, bytes.Repeat([]byte{0x01}, KeySize)).Fingerprint("env:1:A", []byte("value")),
+	} {
+		if other == a {
+			t.Errorf("a different %s gives the same fingerprint", name)
+		}
+	}
+}
+
+func mustBox(t *testing.T, key []byte) *Box {
+	t.Helper()
+	box, err := NewBox(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return box
+}
+
 func TestLoadOrCreateKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "etc", "master.key")
 

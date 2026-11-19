@@ -62,3 +62,62 @@ func (s *Store) ReplaceEnvVars(ctx context.Context, appID int64, vars []EnvVar) 
 	}
 	return nil
 }
+
+// PutEnvVar adds an env var or replaces the value of an existing one.
+func (s *Store) PutEnvVar(ctx context.Context, appID int64, v EnvVar) error {
+	if _, err := s.db.ExecContext(ctx,
+		`INSERT INTO env_vars (app_id, key, value_encrypted) VALUES (?, ?, ?)
+		 ON CONFLICT (app_id, key) DO UPDATE SET value_encrypted = excluded.value_encrypted`,
+		appID, v.Key, v.ValueEncrypted); err != nil {
+		return fmt.Errorf("put env var: %w", err)
+	}
+	return nil
+}
+
+// RenameEnvVar replaces the env var from with v in one transaction, so that
+// no reader sees the variable missing or twice. It returns ErrNotFound when
+// from does not exist and ErrConflict when v.Key already does.
+func (s *Store) RenameEnvVar(ctx context.Context, appID int64, from string, v EnvVar) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("rename env var: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `DELETE FROM env_vars WHERE app_id = ? AND key = ?`, appID, from)
+	if err != nil {
+		return fmt.Errorf("rename env var: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return fmt.Errorf("rename env var: %w", err)
+	} else if n == 0 {
+		return fmt.Errorf("env var %q: %w", from, ErrNotFound)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO env_vars (app_id, key, value_encrypted) VALUES (?, ?, ?)`,
+		appID, v.Key, v.ValueEncrypted); err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("env var %q: %w", v.Key, ErrConflict)
+		}
+		return fmt.Errorf("rename env var: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("rename env var: %w", err)
+	}
+	return nil
+}
+
+// DeleteEnvVar removes one env var. It returns ErrNotFound when there is none.
+func (s *Store) DeleteEnvVar(ctx context.Context, appID int64, key string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM env_vars WHERE app_id = ? AND key = ?`, appID, key)
+	if err != nil {
+		return fmt.Errorf("delete env var: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete env var: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("env var %q: %w", key, ErrNotFound)
+	}
+	return nil
+}

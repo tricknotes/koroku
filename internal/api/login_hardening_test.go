@@ -90,6 +90,8 @@ func TestDangerousOperationsNeedRecentLogin(t *testing.T) {
 	refused := []struct{ method, target, body string }{
 		{http.MethodDelete, "/api/apps/blog", ""},
 		{http.MethodPut, "/api/apps/blog/env", `{"vars":[]}`},
+		{http.MethodPut, "/api/apps/blog/env/SECRET", `{"value":"x"}`},
+		{http.MethodDelete, "/api/apps/blog/env/SECRET", ""},
 		{http.MethodPatch, "/api/apps/blog", `{"environment":"production"}`},
 		{http.MethodPatch, "/api/apps/blog", `{"relax_policy":true}`},
 		{http.MethodPatch, "/api/apps/blog", `{"repo_full_name":"octo/other"}`},
@@ -105,7 +107,7 @@ func TestDangerousOperationsNeedRecentLogin(t *testing.T) {
 	// Values are hidden rather than the request refused.
 	env := b.do(http.MethodGet, "/api/apps/blog/env", "", nil)
 	if env.Code != http.StatusOK || strings.Contains(env.Body.String(), "s3cr3t") ||
-		!strings.Contains(env.Body.String(), `{"key":"SECRET","value":null}`) ||
+		!strings.Contains(env.Body.String(), `{"key":"SECRET","value":null,`) ||
 		!strings.Contains(env.Body.String(), `"values_hidden":true`) {
 		t.Errorf("env after the window: %d %s", env.Code, env.Body)
 	}

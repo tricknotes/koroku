@@ -339,7 +339,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | --- | --- |
 | `apps` | `id`, `slug`（一意）, `repo_id`, `repo_full_name`, `default_branch`, `compose_path`, `web_service`, `web_port`, `host_port`（一意）, `healthcheck_path`, `desired_state`（running / stopped）, `relax_policy`, `current_deployment_id` |
 | `env_vars` | `app_id`, `key`, `value_encrypted`（`app_id` + `key` で一意） |
-| `deployments` | `id`, `app_id`, `ref`, `commit_sha`, `commit_message`, `status`, `error`, `queued_at`, `started_at`, `finished_at` |
+| `deployments` | `id`, `app_id`, `ref`, `commit_sha`, `commit_message`, `status`, `error`, `queued_at`, `started_at`, `finished_at`, `env_fingerprints`（9.2） |
 | `sessions` | `token_hash`, `id`, `github_user_id`, `expires_at`, `last_seen_at`, `ip`, `user_agent`（10.3） |
 
 **API（すべてセッション Cookie 必須、`/auth/*` を除く）**
@@ -350,7 +350,8 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | `GET /api/session` | ログイン状態 |
 | `GET /api/repos`、`GET /api/repos/{owner}/{repo}/branches`、`GET /api/repos/{owner}/{repo}/commits?ref=` | リポジトリとデプロイ対象の選択 |
 | `GET /api/apps`、`POST /api/apps`、`GET / PATCH / DELETE /api/apps/{slug}` | アプリの CRUD。削除は `?volumes=true` で volume も消す |
-| `GET / PUT /api/apps/{slug}/env` | 環境変数（一括置換） |
+| `GET / PUT /api/apps/{slug}/env` | 環境変数（一覧と稼働中のリリースとの差、一括置換） |
+| `PUT / DELETE /api/apps/{slug}/env/{key}` | 環境変数 1 件の追加・変更・名前の変更・削除（9.2） |
 | `GET / POST /api/apps/{slug}/deployments` | 履歴、デプロイ開始（`{ref}` か `{sha}`） |
 | `GET /api/deployments/{id}`、`GET /api/deployments/{id}/logs`（SSE）、`POST /api/deployments/{id}/cancel` | デプロイ詳細とライブログ |
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart` | 起動制御 |
@@ -391,7 +392,19 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
   - 除外リストにあるが Docker に実在しない名前（先に外しておいた、あるいは volume を消した）も `exists: false` として一覧に含める。UI に出ないと対象へ戻せないため。
   - volume の大きさは返さない。求めるにはディレクトリを歩く（`docker system df -v` も同じ）必要があり、タブを開くたびに走らせるには重い。スナップショットの `size_bytes` が目安になる。
 
-バックアップタブ自体の API（一覧、実行、リストア、ダンプのダウンロード）は 10.2 の内容を M5 で `docs/API.md` に定義済み。「保存して再デプロイ」は環境変数の `PUT` とデプロイの `POST` を UI が続けて呼ぶだけで、専用の API は作らない。状態の自動更新はポーリング（一覧と詳細は数秒間隔、デプロイ中のログは SSE）で行い、状態変化を配信する専用の SSE は作らない（アプリ 3〜5 個の規模では不要）。
+バックアップタブ自体の API（一覧、実行、リストア、ダンプのダウンロード）は 10.2 の内容を M5 で `docs/API.md` に定義済み。環境変数の画面の「再デプロイ」はデプロイの `POST` を呼ぶだけで、専用の API は作らない（保存とは分けた。9.2）。状態の自動更新はポーリング（一覧と詳細は数秒間隔、デプロイ中のログは SSE）で行い、状態変化を配信する専用の SSE は作らない（アプリ 3〜5 個の規模では不要）。
+
+### 9.2 環境変数を 1 件ずつ確定する（2026-11-19）
+
+環境変数の画面は、表で全件を編集してから「保存」「保存して再デプロイ」で一括置換する作りだった。1 件だけ直したいときにも画面全体の「未保存の変更」を抱えることになり、別のタブで開いた古い一覧で保存すると他の行の変更を消してしまう。そこで、行ごとに編集して確定（保存）する形に変える。
+
+- API に `PUT /api/apps/{slug}/env/{key}`（追加・変更、本文の `key` で名前の変更）と `DELETE /api/apps/{slug}/env/{key}` を足す。名前の変更は 1 つのトランザクションで行い、「削除して追加」の途中の状態を作らない。一括置換の `PUT /api/apps/{slug}/env` は「.env 形式で編集」のために残す。
+- 保存はデプロイを伴わない。行ごとに「保存して再デプロイ」を付けると、3 件直せば 3 回デプロイが走るため。代わりに、DB の値と稼働中のリリースの値の差を「未反映の変更」として画面に出し、再デプロイのボタンはそこに 1 つだけ置く。
+- 差を知るため、デプロイの手順 3 で env ファイルを作るときに、各変数の指紋（キーと値の HMAC-SHA256 を 16 バイトに切ったもの）を `deployments.env_fingerprints` に JSON で記録する。`GET /api/apps/{slug}/env` は、`current_deployment_id` のデプロイの指紋と今の DB を比べて、変数ごとの `pending`（`added` / `changed`）と、削除したがまだ稼働中の `removed` を返す。
+  - 値そのものや素のハッシュは記録しない。短い値は素のハッシュから総当たりで戻せるため。HMAC の鍵はマスターキーから導出する（`HMAC(master_key, "koroku env fingerprint v1")`）。マスターキーを差し替えると比べられなくなるが、それは全件「変更」と出るだけで、再デプロイすれば揃う。
+  - 稼働中のリリースがない（未デプロイ）か、この列を足す前のデプロイが稼働中のときは比べられないので、`compared: false` を返し、UI は差を出さない。
+  - 指紋は値を含まないので、再ログインから 10 分を過ぎて値を隠しているときも差は返す。
+- 失うもの: 関連する変数（接続先とパスワードなど）を同時に変えられない。1 件目を保存した時点で、半端な組み合わせが DB に残る。デプロイは手動でしか始まらないので、その間に誰かがデプロイしない限り稼働中のアプリには影響しない。まとめて変えたいときは「.env 形式で編集」（一括置換）を使う。
 
 ## 10. セキュリティと運用
 
@@ -527,7 +540,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - セッションの発行（ログイン）から 10 分以内でなければ、次の操作を `403 reauth_required` で断る。UI は再ログインの案内を出し、GitHub のログインを経て元の画面に戻す。
   - アプリの削除
   - 本番アプリ（`environment = production`）のデプロイ
-  - 環境変数の保存と、値の表示（下記）
+  - 環境変数の保存（一括置換も 1 件ずつの追加・変更・削除も）と、値の表示（下記）
   - volume のリストアと、DB ダンプのダウンロード
   - アプリ設定のうち、`environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）の変更。本番の確認ダイアログを外す、ポリシー検査を外す、別のコードを動かす、のいずれかにつながるため
 - 環境変数の `GET` は、10 分を過ぎていても断らず、値を `null` にして `values_hidden: true` を返す。キーの一覧は見られるようにして、タブそのものは使えるようにするため。
