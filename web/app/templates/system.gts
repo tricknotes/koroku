@@ -167,8 +167,10 @@ function dockerLabel(item: DockerUsageItem): string {
   return DOCKER_LABELS[item.type] ?? item.type;
 }
 
+/** Volumes and containers are never pruned: nothing to expect there. */
 function reclaimable(item: DockerUsageItem): string {
-  return item.reclaimable_bytes > 0 ? formatBytes(item.reclaimable_bytes) : '—';
+  if (item.type === 'volumes' || item.type === 'containers') return '—';
+  return formatBytes(item.reclaimable_bytes);
 }
 
 function dockerTotal(items: DockerUsageItem[]): string {
@@ -252,6 +254,7 @@ export default class SystemTemplate extends Component {
   @tracked pruning = false;
   @tracked pruned = false;
   @tracked pruneOutput: string | null = null;
+  @tracked prunedBytes: number | null = null;
   @tracked pruneError: unknown = null;
 
   @tracked startingBackup = false;
@@ -277,6 +280,11 @@ export default class SystemTemplate extends Component {
   /** The backup figures are still on their way for the first time. */
   get backupsPending(): boolean {
     return !this.backups.loaded && !this.backups.error;
+  }
+
+  /** What the last prune freed, as Docker reported it. */
+  get prunedSize(): string | null {
+    return this.prunedBytes === null ? null : formatBytes(this.prunedBytes);
   }
 
   get nothingToPrune(): boolean {
@@ -321,13 +329,15 @@ export default class SystemTemplate extends Component {
     this.pruning = true;
     this.pruned = false;
     this.pruneOutput = null;
+    this.prunedBytes = null;
     this.pruneError = null;
     try {
-      const { output } = await this.api.prune({
+      const { output, reclaimed_bytes } = await this.api.prune({
         images: this.pruneImages,
         builder: this.pruneBuilder,
       });
       this.pruneOutput = output;
+      this.prunedBytes = reclaimed_bytes ?? null;
       this.pruned = true;
     } catch (error) {
       this.pruneError = error;
@@ -473,7 +483,11 @@ export default class SystemTemplate extends Component {
         {{else if this.pruneError}}
           <ErrorMessage @error={{this.pruneError}} />
         {{else if this.pruned}}
-          <Banner data-test-pruned>不要なデータを削除しました。</Banner>
+          <Banner data-test-pruned>
+            不要なデータを削除しました。{{#if this.prunedSize}}Docker の報告では
+              {{this.prunedSize}}
+              空きました。{{/if}}
+          </Banner>
         {{/if}}
         {{#if this.pruneOutput}}
           <pre
@@ -513,7 +527,7 @@ export default class SystemTemplate extends Component {
               <span>種類</span>
               <span class="docker-number">件数</span>
               <span class="docker-number">使用量</span>
-              <span class="docker-number">回収可能</span>
+              <span class="docker-number">空く見込み</span>
             </:header>
             <:rows as |Row|>
               {{#each (dockerRows items) key="type" as |item|}}
@@ -528,7 +542,7 @@ export default class SystemTemplate extends Component {
                     {{formatBytes item.total_bytes}}
                   </span>
                   <span class="docker-number docker-reclaimable">
-                    <span class="cell-label">回収可能</span>
+                    <span class="cell-label">空く見込み</span>
                     {{reclaimable item}}
                   </span>
                 </Row>
@@ -537,9 +551,11 @@ export default class SystemTemplate extends Component {
           </RowList>
           <p class="system-note" data-test-docker-total>
             合計
-            {{dockerTotal items}}。回収可能は Docker
-            の見積もりです。「不要なデータを削除」で消えるのは、タグのないイメージと、1
-            週間使われていないビルドキャッシュです。
+            {{dockerTotal
+              items
+            }}。「空く見込み」は「不要なデータを削除」で空く量の目安で、少なめに出ます。消えるのは、どのコンテナにも使われていないタグのないイメージと、1
+            週間使われていないビルドキャッシュです。ロールバック用に残している直近のリリースや停止中のアプリのイメージ、volume
+            は消しません。
           </p>
         </:default>
       </AsyncView>

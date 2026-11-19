@@ -74,6 +74,7 @@ export interface SystemInfo {
 export interface DockerUsageItem {
   type: 'images' | 'containers' | 'volumes' | 'build_cache';
   total_bytes: number;
+  /** What `POST /api/system/prune` would free (an estimate on the low side). */
   reclaimable_bytes: number;
   count: number;
 }

@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -368,9 +369,13 @@ func TestServicesAndPrune(t *testing.T) {
 {"Active":"0","Reclaimable":"41.52GB","Size":"65.75GB","TotalCount":"663","Type":"Build Cache"}
 {"Active":"0","Reclaimable":"1GB","Size":"1GB","TotalCount":"1","Type":"Something New"}
 `, nil
+		case strings.HasPrefix(joined, "image ls "):
+			return "", nil
+		case joined == "system df -v --format json":
+			return `{"Images":[{"Repository":"<none>","Tag":"<none>","Containers":"0","UniqueSize":"12MB"}],"BuildCache":[]}`, nil
 		case joined == "image prune -f":
 			return "Total reclaimed space: 12MB\n", nil
-		case joined == "builder prune -f --filter until=168h":
+		case joined == "builder prune --all -f --filter until=168h":
 			return "Total:\t0B\n", errors.New("buildx not available")
 		}
 		return "", errors.New("unexpected command: " + joined)
@@ -390,10 +395,11 @@ func TestServicesAndPrune(t *testing.T) {
 
 	usage, err := h.engine.DockerDiskUsage(context.Background())
 	wantUsage := []DiskUsageItem{
-		{Type: "images", TotalBytes: 40970000000, ReclaimableBytes: 28320000000, Count: 68},
-		{Type: "containers", TotalBytes: 8998000, ReclaimableBytes: 8998000, Count: 8},
+		// Docker's Reclaimable column is ignored: the figure is what Prune frees.
+		{Type: "images", TotalBytes: 40970000000, ReclaimableBytes: 12000000, Count: 68},
+		{Type: "containers", TotalBytes: 8998000, ReclaimableBytes: 0, Count: 8},
 		{Type: "volumes", TotalBytes: 17520000000, ReclaimableBytes: 0, Count: 59},
-		{Type: "build_cache", TotalBytes: 65750000000, ReclaimableBytes: 41520000000, Count: 663},
+		{Type: "build_cache", TotalBytes: 65750000000, ReclaimableBytes: 0, Count: 663},
 	}
 	if err != nil || !reflect.DeepEqual(usage, wantUsage) {
 		t.Errorf("DockerDiskUsage = %+v, %v", usage, err)
@@ -403,7 +409,10 @@ func TestServicesAndPrune(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "builder prune") {
 		t.Errorf("err = %v", err)
 	}
-	for _, want := range []string{"$ docker image prune -f", "Total reclaimed space: 12MB", "$ docker builder prune -f --filter until=168h"} {
+	if result.ReclaimedBytes != 12000000 {
+		t.Errorf("ReclaimedBytes = %d, want what Docker reported", result.ReclaimedBytes)
+	}
+	for _, want := range []string{"$ docker image prune -f", "Total reclaimed space: 12MB", "$ docker builder prune --all -f --filter until=168h"} {
 		if !strings.Contains(result.Output, want) {
 			t.Errorf("output lacks %q:\n%s", want, result.Output)
 		}
@@ -430,6 +439,77 @@ func TestParseDockerSize(t *testing.T) {
 	}
 }
 
+func TestReclaimedBytes(t *testing.T) {
+	cases := map[string]int64{
+		"Deleted Images:\nuntagged: sha256:abc\n\nTotal reclaimed space: 1.2GB\n": 1200000000,
+		"Total reclaimed space: 0B\n": 0,
+		"ID\tRECLAIMABLE\tSIZE\tLAST ACCESSED\nabc\ttrue\t1.861MB\t8 days ago\nTotal:\t1.861MB\n": 1861000,
+		"":                                   0,
+		"Error response from daemon: boom\n": 0,
+	}
+	for in, want := range cases {
+		if got := reclaimedBytes(in); got != want {
+			t.Errorf("reclaimedBytes(%q) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+// The reclaimable figure is what Prune removes, not Docker's estimate.
+func TestPrunableBytes(t *testing.T) {
+	now := time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC)
+	const (
+		old    = "2026-11-01 10:00:00.123456789 +0000 UTC"
+		recent = "2026-11-17 10:00:00 +0000 UTC"
+	)
+	record := func(id, parent, lastUsed, inUse, shared, size string) map[string]string {
+		return map[string]string{
+			"ID": id, "Parent": parent, "LastUsedAt": lastUsed, "CreatedAt": old,
+			"InUse": inUse, "Shared": shared, "Size": size,
+		}
+	}
+	df := map[string]any{
+		"Images": []map[string]string{
+			{"Repository": "<none>", "Tag": "<none>", "Containers": "0", "UniqueSize": "12MB"},
+			{"ID": "sha256:built", "Repository": "<none>", "Tag": "<none>", "Containers": "0", "UniqueSize": "50MB"}, // its layers stay as build cache
+			{"Repository": "postgres", "Tag": "<none>", "Containers": "0", "UniqueSize": "3MB"},                      // pulled by digest
+			{"Repository": "<none>", "Tag": "<none>", "Containers": "1", "UniqueSize": "30MB"},                       // a stopped container keeps it
+			{"Repository": "koroku-blog-web", "Tag": "r3", "Containers": "0", "UniqueSize": "99MB"},
+		},
+		"BuildCache": []map[string]string{
+			// a chain ending in a layer an image uses: all old, so it goes;
+			// the shared end frees nothing
+			record("a", "", old, "false", "false", "100MB"),
+			record("b", "a", old, "false", "false", "50MB"),
+			record("c", "b", old, "false", "true", "70MB"),
+			// an old base under a recent record stays
+			record("d", "", old, "false", "false", "10MB"),
+			record("e", "d", recent, "false", "false", "20MB"),
+			// in use
+			record("f", "", old, "true", "false", "40MB"),
+			// never used: its creation time counts
+			record("g", "", "", "false", "false", "1MB"),
+			// an unreadable time is kept
+			record("h", "", "yesterday", "false", "false", "80MB"),
+			// a merge of two old records, used recently
+			record("x", "", old, "false", "false", "5MB"),
+			record("y", "", old, "false", "false", "7MB"),
+			record("m", "x, y", recent, "false", "false", "1MB"),
+		},
+	}
+	out, err := json.Marshal(df)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := prunableBytes(out, now, []string{"sha256:built"})
+	want := map[string]int64{"images": 15000000, "build_cache": 151000000}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("prunableBytes = %v, %v; want %v", got, err, want)
+	}
+	if _, err := prunableBytes([]byte("Error"), now, nil); err == nil {
+		t.Error("garbage must be an error")
+	}
+}
+
 // docker system df races removals of containers, images and files in
 // running containers (containerd image store); errors from the daemon are
 // retried, a daemon that cannot be reached is not.
@@ -453,11 +533,22 @@ func TestDockerDiskUsageRetriesDaemonErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, nil)
+			// The summary and the verbose listing run concurrently; the
+			// summary fails as the case says, the listing always works.
+			var mu sync.Mutex
 			calls := 0
 			h.runner.Handler = func(_ context.Context, cmd runner.Cmd) (string, error) {
-				if strings.Join(cmd.Args, " ") != "system df --format json" {
+				switch strings.Join(cmd.Args, " ") {
+				case strings.Join(composeBuiltDanglingArgs, " "):
+					return "", nil
+				case "system df -v --format json":
+					return `{"Images":[],"BuildCache":[]}`, nil
+				case "system df --format json":
+				default:
 					return "", errors.New("unexpected command")
 				}
+				mu.Lock()
+				defer mu.Unlock()
 				calls++
 				if calls <= len(tc.failures) {
 					return "", tc.failures[calls-1]

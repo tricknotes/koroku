@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -364,20 +365,37 @@ func parseComposePS(out []byte) ([]ServiceStatus, error) {
 	return services, nil
 }
 
-// PruneResult is the outcome of a manual cleanup.
+// PruneResult is the outcome of a manual cleanup. ReclaimedBytes is the
+// space Docker reports it freed, summed over the commands that said so.
 type PruneResult struct {
-	Output string `json:"output"`
+	Output         string `json:"output"`
+	ReclaimedBytes int64  `json:"reclaimed_bytes"`
 }
 
-// Prune removes dangling images and build cache older than a week
+// buildCacheKeep is how long build cache stays after its last use. Prune
+// removes what has not been used for longer (ARCHITECTURE chapter 10); it
+// must match the filter of builderPruneArgs.
+const buildCacheKeep = 168 * time.Hour
+
+// builderPruneArgs prunes build cache unused for buildCacheKeep. --all is
+// needed: without it, the BuildKit built into Docker keeps every record
+// whose layer an image also uses, and with it every record behind it.
+var builderPruneArgs = []string{"builder", "prune", "--all", "-f", "--filter", "until=168h"}
+
+// Prune removes dangling images and build cache unused for a week
 // (ARCHITECTURE chapter 10). It never touches volumes or tagged images.
 func (e *Engine) Prune(ctx context.Context, images, builder bool) (PruneResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	var output bytes.Buffer
+	var reclaimed int64
 	run := func(args ...string) error {
 		fmt.Fprintf(&output, "$ docker %s\n", strings.Join(args, " "))
-		return e.opts.Runner.Run(ctx, runner.Cmd{Name: "docker", Args: args, Stdout: &output, Stderr: &output})
+		var out bytes.Buffer
+		err := e.opts.Runner.Run(ctx, runner.Cmd{Name: "docker", Args: args, Stdout: &out, Stderr: &out})
+		reclaimed += reclaimedBytes(out.String())
+		output.Write(out.Bytes())
+		return err
 	}
 	var errs []error
 	if images {
@@ -386,7 +404,7 @@ func (e *Engine) Prune(ctx context.Context, images, builder bool) (PruneResult, 
 		}
 	}
 	if builder {
-		if err := run("builder", "prune", "-f", "--filter", "until=168h"); err != nil {
+		if err := run(builderPruneArgs...); err != nil {
 			errs = append(errs, fmt.Errorf("builder prune: %w", err))
 		}
 	}
@@ -394,7 +412,22 @@ func (e *Engine) Prune(ctx context.Context, images, builder bool) (PruneResult, 
 	if len(text) > 8192 {
 		text = "...\n" + text[len(text)-8192:]
 	}
-	return PruneResult{Output: text}, errors.Join(errs...)
+	return PruneResult{Output: text, ReclaimedBytes: reclaimed}, errors.Join(errs...)
+}
+
+// reclaimedBytes reads the total a prune command prints last:
+// "Total reclaimed space: 1.2GB" (image prune) or "Total:\t1.861MB"
+// (builder prune).
+func reclaimedBytes(out string) int64 {
+	var total int64
+	for _, line := range strings.Split(out, "\n") {
+		for _, prefix := range []string{"Total reclaimed space:", "Total:"} {
+			if size, ok := strings.CutPrefix(strings.TrimSpace(line), prefix); ok {
+				total = parseDockerSize(size)
+			}
+		}
+	}
+	return total
 }
 
 // RunMaintenance prunes old build cache once a day until ctx is canceled.
@@ -416,7 +449,8 @@ func (e *Engine) RunMaintenance(ctx context.Context) {
 	}
 }
 
-// DiskUsageItem is one row of `docker system df`.
+// DiskUsageItem is one row of `docker system df`. ReclaimableBytes is what
+// Prune would free, not Docker's own estimate (ARCHITECTURE chapter 10).
 type DiskUsageItem struct {
 	Type             string `json:"type"` // images | containers | volumes | build_cache
 	TotalBytes       int64  `json:"total_bytes"`
@@ -430,8 +464,53 @@ var (
 	dfRetryDelay = 250 * time.Millisecond
 )
 
-// DockerDiskUsage reports how much disk Docker uses (`docker system df`).
-// The command walks every image and volume, so it can take seconds.
+// DockerDiskUsage reports how much disk Docker uses (`docker system df`)
+// and how much of it Prune would free. The totals come from the summary;
+// what Prune frees from the verbose listing, as Docker's reclaimable figure
+// counts tagged images and recent build cache, which Prune keeps. Both walk
+// every image and volume, so they can take seconds; they run concurrently
+// (measured: together as fast as either alone).
+func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	var summary, detail, built []byte
+	var summaryErr, detailErr, builtErr error
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		summary, summaryErr = e.systemDF(ctx, "system", "df", "--format", "json")
+	}()
+	go func() {
+		defer wg.Done()
+		detail, detailErr = e.systemDF(ctx, "system", "df", "-v", "--format", "json")
+	}()
+	go func() {
+		defer wg.Done()
+		built, builtErr = runner.Output(ctx, e.opts.Runner, runner.Cmd{Name: "docker", Args: composeBuiltDanglingArgs})
+		if builtErr != nil {
+			builtErr = fmt.Errorf("docker image ls: %w", builtErr)
+		}
+	}()
+	wg.Wait()
+	if err := errors.Join(summaryErr, detailErr, builtErr); err != nil {
+		return nil, err
+	}
+	items, err := parseSystemDF(summary)
+	if err != nil {
+		return nil, err
+	}
+	reclaimable, err := prunableBytes(detail, e.opts.Clock.Now(), strings.Fields(string(built)))
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].ReclaimableBytes = reclaimable[items[i].Type]
+	}
+	return items, nil
+}
+
+// systemDF runs one form of `docker system df`.
 //
 // With the containerd image store (the default of new Docker installs), df
 // fails when what it walks changes meanwhile: a container or image removed
@@ -440,17 +519,13 @@ var (
 // container's writable layer ("snapshotter.Usage failed for ...: lstat
 // ...: no such file or directory"). Errors the daemon returns are retried
 // a few times; others (the daemon is not reachable) are returned at once.
-func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
-	defer cancel()
+func (e *Engine) systemDF(ctx context.Context, args ...string) ([]byte, error) {
 	var err error
 	for attempt := 1; ; attempt++ {
 		var out []byte
-		out, err = runner.Output(ctx, e.opts.Runner, runner.Cmd{
-			Name: "docker", Args: []string{"system", "df", "--format", "json"},
-		})
+		out, err = runner.Output(ctx, e.opts.Runner, runner.Cmd{Name: "docker", Args: args})
 		if err == nil {
-			return parseSystemDF(out)
+			return out, nil
 		}
 		if attempt == dfAttempts || !strings.Contains(err.Error(), "Error response from daemon") {
 			break
@@ -459,11 +534,19 @@ func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, fmt.Errorf("docker system df: %w", err)
+			return nil, fmt.Errorf("docker %s: %w", strings.Join(args, " "), err)
 		case <-timer.C:
 		}
 	}
-	return nil, fmt.Errorf("docker system df: %w", err)
+	return nil, fmt.Errorf("docker %s: %w", strings.Join(args, " "), err)
+}
+
+// composeBuiltDanglingArgs lists the dangling images Compose built (it
+// labels them). Their layers are also build cache, so removing such an
+// image alone frees nothing.
+var composeBuiltDanglingArgs = []string{
+	"image", "ls", "--no-trunc", "--format", "{{.ID}}",
+	"--filter", "dangling=true", "--filter", "label=com.docker.compose.project",
 }
 
 var diskUsageTypes = map[string]string{
@@ -473,6 +556,8 @@ var diskUsageTypes = map[string]string{
 	"Build Cache":   "build_cache",
 }
 
+// parseSystemDF reads the summary: one JSON object per type. Docker's
+// Reclaimable column is not used (see DockerDiskUsage).
 func parseSystemDF(out []byte) ([]DiskUsageItem, error) {
 	items := []DiskUsageItem{}
 	for _, line := range bytes.Split(bytes.TrimSpace(out), []byte("\n")) {
@@ -481,7 +566,7 @@ func parseSystemDF(out []byte) ([]DiskUsageItem, error) {
 			continue
 		}
 		var row struct {
-			Type, Size, Reclaimable, TotalCount string
+			Type, Size, TotalCount string
 		}
 		if err := json.Unmarshal(line, &row); err != nil {
 			return nil, errors.New("parse docker system df output")
@@ -491,16 +576,92 @@ func parseSystemDF(out []byte) ([]DiskUsageItem, error) {
 			continue
 		}
 		count, _ := strconv.Atoi(row.TotalCount)
-		// Reclaimable looks like "28.32GB (69%)".
-		reclaimable, _, _ := strings.Cut(row.Reclaimable, " ")
 		items = append(items, DiskUsageItem{
-			Type:             kind,
-			TotalBytes:       parseDockerSize(row.Size),
-			ReclaimableBytes: parseDockerSize(reclaimable),
-			Count:            count,
+			Type:       kind,
+			TotalBytes: parseDockerSize(row.Size),
+			Count:      count,
 		})
 	}
 	return items, nil
+}
+
+// dfTimeLayout is how `docker system df -v` prints build cache times
+// (Go's time.Time.String).
+const dfTimeLayout = "2006-01-02 15:04:05.999999999 -0700 MST"
+
+// prunableBytes estimates, from `docker system df -v --format json`, what
+// Prune frees, by type:
+//
+//   - images: `docker image prune` removes images without a tag that no
+//     container (running or not) uses; each frees its unique size, unless
+//     it was built here (its ID is in built): the build cache keeps its
+//     layers until that cache goes too, so it is left out.
+//   - build_cache: builderPruneArgs removes records unused for
+//     buildCacheKeep, and a record only once every record built on it is
+//     gone, so a record counts when it and all records after it are old
+//     and not in use. Records shared with an image free nothing: the image
+//     keeps the layer.
+//
+// Volumes and containers are never pruned. The estimate leaves out what
+// becomes free only because the image prune ran first.
+func prunableBytes(out []byte, now time.Time, built []string) (map[string]int64, error) {
+	var df struct {
+		Images []struct {
+			ID, Tag, Containers, UniqueSize string
+		}
+		BuildCache []struct {
+			ID, Parent, InUse, Shared, Size, CreatedAt, LastUsedAt string
+		}
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(out), &df); err != nil {
+		return nil, errors.New("parse docker system df -v output")
+	}
+	result := map[string]int64{}
+	for _, image := range df.Images {
+		if image.Tag == "<none>" && image.Containers == "0" && !slices.Contains(built, image.ID) {
+			result["images"] += parseDockerSize(image.UniqueSize)
+		}
+	}
+
+	cutoff := now.Add(-buildCacheKeep)
+	children := map[string][]int{}
+	for i, record := range df.BuildCache {
+		// A record made from several (a merge) lists every parent.
+		for _, parent := range strings.Split(record.Parent, ",") {
+			if parent = strings.TrimSpace(parent); parent != "" {
+				children[parent] = append(children[parent], i)
+			}
+		}
+	}
+	removable := make([]*bool, len(df.BuildCache))
+	var isRemovable func(i int) bool
+	isRemovable = func(i int) bool {
+		if removable[i] != nil {
+			return *removable[i]
+		}
+		ok := false
+		removable[i] = &ok // guards against a malformed cycle
+		record := df.BuildCache[i]
+		used := record.LastUsedAt
+		if used == "" {
+			used = record.CreatedAt
+		}
+		at, err := time.Parse(dfTimeLayout, used)
+		ok = err == nil && at.Before(cutoff) && record.InUse != "true"
+		for _, child := range children[record.ID] {
+			if !ok {
+				break
+			}
+			ok = isRemovable(child)
+		}
+		return ok
+	}
+	for i, record := range df.BuildCache {
+		if isRemovable(i) && record.Shared != "true" {
+			result["build_cache"] += parseDockerSize(record.Size)
+		}
+	}
+	return result, nil
 }
 
 // parseDockerSize converts sizes as the Docker CLI prints them ("8.998MB",
