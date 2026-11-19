@@ -153,7 +153,9 @@ export default class AppLinks extends Component<Signature> {
   /** `auth → accounts / auth` while the dialog is filled in. */
   get preview(): string | null {
     const target = this.chosenTarget;
-    if (!target || this.draft.name === '') return null;
+    if (!target || this.draft.name === '' || this.dialogErrors['name']) {
+      return null;
+    }
     return linkLabel(this.app.slug, {
       name: this.draft.name,
       target_app: target.app,
