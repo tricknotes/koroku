@@ -65,7 +65,7 @@ func TestCheckLinks(t *testing.T) {
 func TestValidLinkName(t *testing.T) {
 	for name, want := range map[string]bool{
 		"api": true, "api-v2": true, "a": true, "9": true,
-		"API": false, "api_v2": false, "api.v2": false, "-api": false, "api-": false, "": false,
+		"API": false, strings.Repeat("a", 63): true, strings.Repeat("a", 64): false, "api_v2": false, "api.v2": false, "-api": false, "api-": false, "": false,
 	} {
 		if got := ValidLinkName(name); got != want {
 			t.Errorf("ValidLinkName(%q) = %v, want %v", name, got, want)

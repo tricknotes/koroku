@@ -18,7 +18,8 @@ import (
 // store.LinkNetworkPrefix.
 const LinkNetworkPrefix = "koroku_link_"
 
-var dnsLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+// dnsLabelPattern is a DNS label: at most 63 characters.
+var dnsLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // ValidLinkName reports whether a service or link name can be used on a
 // link network: it must be a DNS label.

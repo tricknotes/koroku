@@ -248,13 +248,13 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 `PUT /api/apps/{slug}/group` の細則:
 
 - グループがなければ `422 validation_failed`（`details.group_id`）。`environment` が違えば同じく `details.group_id`。
-- `services` の各要素は `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` で、重複なし。そうでなければ `422 validation_failed`（`details.services`）。デプロイ済みのアプリでは、稼働中のリリースにないサービス、`container_name` か `network_mode` を指定したサービスも同じエラーになる。`group_id` が `null` のときは空でなければならない。
-- グループを抜けると、そのアプリが利用側の接続と、そのアプリへの接続がすべて消える。公開をやめたサービスへの接続も消える。どれも、この API の中でネットワークから切ってから応答する。UI は、消える接続を事前に示して確かめる（グループの形から求められる）。
+- `services` の各要素は `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` で 63 文字以内、重複なし。そうでなければ `422 validation_failed`（`details.services`）。デプロイ済みのアプリでは、稼働中のリリースにないサービス、`container_name` か `network_mode` を指定したサービスも同じエラーになる。`group_id` が `null` のときは空でなければならない。
+- グループを抜けると（別のグループへ移るときも）、そのアプリが利用側の接続と、そのアプリへの接続がすべて消える。公開をやめたサービスへの接続も消える。どれも、この API の中でネットワークから切ってから応答する。UI は、消える接続を事前に示して確かめる（グループの形から求められる）。
 - 公開するサービスを増やしても、それだけではどこにもつながらない（接続ができたときにつながる）。
 
 `POST /api/apps/{slug}/links` の細則:
 
-- `name` は `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`。同じアプリにすでにあれば `409 link_name_taken`。
+- `name` は `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` で 63 文字以内（DNS のラベル）。同じアプリにすでにあれば `409 link_name_taken`。
 - `target_app` は同じグループのほかのアプリ、`target_service` はその公開するサービスでなければならない（`422 validation_failed`、`details.target_app` / `details.target_service`）。利用側がグループに入っていなければ `details.target_app`。
 - `services` は 1 つ以上で、`PUT .../group` の `services` と同じ形。デプロイ済みなら、稼働中のリリースにないもの、`container_name` か `network_mode` を指定したものは `details.services`。
 - デプロイ済みなら、`name` が利用側のサービス名やコンテナ名と同じだと `details.name`（そのサービスが止まっている間に相手へ解決されてしまうため）。
