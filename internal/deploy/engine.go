@@ -121,6 +121,9 @@ type Engine struct {
 
 	// finishTimeout bounds the database writes that record a result.
 	finishTimeout time.Duration
+
+	// installation caches store.InstallationID (guarded by mu).
+	installation string
 }
 
 // New builds an Engine. Call Run to start the worker.

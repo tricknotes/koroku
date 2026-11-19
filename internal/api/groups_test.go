@@ -31,7 +31,19 @@ func (f *fakeGroups) SetGroup(ctx context.Context, app store.App, groupID *int64
 	if f.setErr != nil {
 		return f.setErr
 	}
-	return f.store.SetAppGroup(ctx, app.ID, groupID, services, time.Now())
+	_, err := f.store.SetAppGroup(ctx, app.ID, groupID, services, time.Now())
+	return err
+}
+
+func (f *fakeGroups) CreateLink(ctx context.Context, app store.App, name string, target store.App, targetService string, services []string) (store.Link, error) {
+	if f.setErr != nil {
+		return store.Link{}, f.setErr
+	}
+	return f.store.CreateLink(ctx, app.ID, name, target.ID, targetService, services, time.Now())
+}
+
+func (f *fakeGroups) DeleteLink(ctx context.Context, app store.App, id int64) error {
+	return f.store.DeleteLink(ctx, app.ID, id)
 }
 
 func newGroupServer(t *testing.T) (http.Handler, *fakeGroups) {
@@ -54,7 +66,7 @@ func TestGroupAPI(t *testing.T) {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
 	g := decode[groupJSON](t, rec)
-	if g.Name != "shop" || g.Network != "koroku_group_1" || len(g.Members) != 0 {
+	if g.Name != "shop" || len(g.Members) != 0 {
 		t.Errorf("created group = %+v", g)
 	}
 	if rec := request(t, h, http.MethodPost, "/api/groups", `{"name": "shop", "environment": "staging"}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "group_name_taken") {
@@ -78,7 +90,7 @@ func TestGroupAPI(t *testing.T) {
 		Groups []groupJSON `json:"groups"`
 	}](t, rec)
 	if len(list.Groups) != 1 || len(list.Groups[0].Members) != 1 ||
-		list.Groups[0].Members[0].Hostnames[0] != "api.shop-api.koroku.internal" {
+		list.Groups[0].Members[0].Services[0] != "api" {
 		t.Errorf("groups = %s", rec.Body)
 	}
 
@@ -127,8 +139,8 @@ func TestSetAppGroupValidation(t *testing.T) {
 		}
 	}
 
-	groups.setErr = &deploy.GroupServiceError{Violations: []compose.Violation{
-		{Service: "worker", Rule: compose.RuleGroupService, Message: "the service sets container_name"},
+	groups.setErr = &deploy.LinkServiceError{Violations: []compose.Violation{
+		{Service: "worker", Rule: compose.RuleLinkService, Message: "the service sets container_name"},
 	}}
 	rec := request(t, h, http.MethodPut, "/api/apps/shop-api/group", `{"group_id": 2, "services": ["worker"]}`)
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"services":"worker: the service sets container_name"`) {
@@ -138,5 +150,71 @@ func TestSetAppGroupValidation(t *testing.T) {
 	rec = request(t, h, http.MethodPut, "/api/apps/shop-api/group", `{"group_id": 2, "services": []}`)
 	if rec.Code != http.StatusConflict {
 		t.Errorf("busy: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestLinkAPI(t *testing.T) {
+	h, groups := newGroupServer(t)
+	createApp(t, h, "accounts")
+	createApp(t, h, "shop")
+	createApp(t, h, "outsider")
+	request(t, h, http.MethodPost, "/api/groups", `{"name": "team", "environment": "staging"}`)
+	request(t, h, http.MethodPut, "/api/apps/accounts/group", `{"group_id": 1, "services": ["auth"]}`)
+
+	// Not in a group yet.
+	rec := request(t, h, http.MethodPost, "/api/apps/shop/links", `{"name": "auth", "target_app": "accounts", "target_service": "auth", "services": ["web"]}`)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"target_app"`) {
+		t.Errorf("outside a group: %d %s", rec.Code, rec.Body)
+	}
+	request(t, h, http.MethodPut, "/api/apps/shop/group", `{"group_id": 1, "services": []}`)
+
+	for body, field := range map[string]string{
+		`{"name": "Auth", "target_app": "accounts", "target_service": "auth", "services": ["web"]}`:    "name",
+		`{"name": "auth", "target_app": "accounts", "target_service": "db", "services": ["web"]}`:      "target_service",
+		`{"name": "auth", "target_app": "outsider", "target_service": "auth", "services": ["web"]}`:    "target_app",
+		`{"name": "auth", "target_app": "shop", "target_service": "auth", "services": ["web"]}`:        "target_app",
+		`{"name": "auth", "target_app": "accounts", "target_service": "auth", "services": []}`:         "services",
+		`{"name": "auth", "target_app": "accounts", "target_service": "auth", "services": ["w", "w"]}`: "services",
+	} {
+		rec := request(t, h, http.MethodPost, "/api/apps/shop/links", body)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"`+field+`"`) {
+			t.Errorf("%s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+
+	rec = request(t, h, http.MethodPost, "/api/apps/shop/links", `{"name": "auth", "target_app": "accounts", "target_service": "auth", "services": ["web", "worker"]}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	link := decode[linkJSON](t, rec)
+	if link.Name != "auth" || link.TargetApp != "accounts" || !strings.HasPrefix(link.Network, "koroku_link_") {
+		t.Errorf("link = %+v", link)
+	}
+	if rec := request(t, h, http.MethodPost, "/api/apps/shop/links", `{"name": "auth", "target_app": "accounts", "target_service": "auth", "services": ["web"]}`); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "link_name_taken") {
+		t.Errorf("duplicate: %d %s", rec.Code, rec.Body)
+	}
+
+	// The name shadows a service of the deployed consumer.
+	groups.setErr = &deploy.LinkServiceError{Violations: []compose.Violation{{Service: "db", Rule: compose.RuleLinkService, Message: "the link name \"db\" is also a service of this app"}}}
+	rec = request(t, h, http.MethodPost, "/api/apps/shop/links", `{"name": "db", "target_app": "accounts", "target_service": "auth", "services": ["web"]}`)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"name":"db: the link name`) {
+		t.Errorf("shadowing name: %d %s", rec.Code, rec.Body)
+	}
+	groups.setErr = nil
+
+	rec = request(t, h, http.MethodGet, "/api/apps/shop/links", "")
+	if !strings.Contains(rec.Body.String(), `"target_service":"auth"`) {
+		t.Errorf("list: %s", rec.Body)
+	}
+	rec = request(t, h, http.MethodGet, "/api/groups", "")
+	if !strings.Contains(rec.Body.String(), `"links":[{"id":1,"name":"auth","target_app":"accounts"`) {
+		t.Errorf("group with links: %s", rec.Body)
+	}
+
+	if rec := request(t, h, http.MethodDelete, "/api/apps/shop/links/1", ""); rec.Code != http.StatusNoContent {
+		t.Errorf("delete: %d %s", rec.Code, rec.Body)
+	}
+	if rec := request(t, h, http.MethodDelete, "/api/apps/shop/links/1", ""); rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "link_not_found") {
+		t.Errorf("delete again: %d %s", rec.Code, rec.Body)
 	}
 }

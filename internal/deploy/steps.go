@@ -136,10 +136,11 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		HostPort:    app.HostPort,
 		Relax:       app.RelaxPolicy,
 	})
-	policy.Violations = append(policy.Violations, groupViolations(app, project)...)
-	if app.GroupID != nil && len(app.GroupServices) > 0 {
-		log.Printf("Joining the group network: %v", app.GroupServices)
+	linkProblems, err := e.linkViolations(ctx, app, project)
+	if err != nil {
+		return false, err
 	}
+	policy.Violations = append(policy.Violations, linkProblems...)
 	for _, v := range policy.Waived {
 		log.Printf("Policy waived for this app: %s", v)
 	}
@@ -285,8 +286,8 @@ func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, di
 // its files are used for another `up` (start, rollback). The files live in
 // the checkout; an app that was allowed a writable bind mount, or anything
 // else that got write access to the release directory, could have changed
-// them since the deploy that checked them. The services the app's group
-// asks for are checked against the release too. It returns the invocation
+// them since the deploy that checked them. What the app's links ask of the
+// release is checked too. It returns the invocation
 // to `up` with.
 func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, composeFile string) (compose.Invocation, error) {
 	dir := e.ReleaseDir(app.Slug, id)
@@ -304,7 +305,11 @@ func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, compos
 		HostPort:    app.HostPort,
 		Relax:       app.RelaxPolicy,
 	})
-	policy.Violations = append(policy.Violations, groupViolations(app, project)...)
+	linkProblems, err := e.linkViolations(ctx, app, project)
+	if err != nil {
+		return inv, err
+	}
+	policy.Violations = append(policy.Violations, linkProblems...)
 	if !policy.OK() {
 		return inv, &compose.PolicyError{Violations: policy.Violations}
 	}

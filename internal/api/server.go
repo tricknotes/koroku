@@ -198,6 +198,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/groups/{id}", s.handleUpdateGroup)
 	mux.HandleFunc("DELETE /api/groups/{id}", s.handleDeleteGroup)
 	mux.HandleFunc("PUT /api/apps/{slug}/group", s.handleSetAppGroup)
+	mux.HandleFunc("GET /api/apps/{slug}/links", s.handleListLinks)
+	mux.HandleFunc("POST /api/apps/{slug}/links", s.handleCreateLink)
+	mux.HandleFunc("DELETE /api/apps/{slug}/links/{id}", s.handleDeleteLink)
 
 	mux.HandleFunc("GET /api/deployments/{id}", s.handleGetDeployment)
 	mux.HandleFunc("GET /api/deployments/{id}/logs", s.handleDeploymentLogs)

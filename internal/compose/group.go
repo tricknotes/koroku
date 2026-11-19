@@ -7,52 +7,81 @@ import (
 	"sort"
 )
 
-// Groups (ARCHITECTURE 6.1): the chosen services of the apps in a group are
-// attached to a network koroku creates, and reach each other as
-// <service>.<slug>.koroku.internal. koroku attaches them with
+// Links between apps (ARCHITECTURE 6.1): a name in the consumer's Compose
+// file means a service another app in the group exposes. koroku creates a
+// network per link and attaches the target service under that name with
 // `docker network connect --alias`, outside the Compose configuration: a
 // network joined through Compose also carries the bare service name, which
 // can resolve to another app's service of the same name.
 
-// GroupNetworkPrefix starts the name of every group network. Slugs cannot
-// contain "_", so no app's own network (koroku-<slug>_*) starts with it.
-// It must match store.GroupNetworkPrefix.
-const GroupNetworkPrefix = "koroku_group_"
+// LinkNetworkPrefix starts the name of every link network. It must match
+// store.LinkNetworkPrefix.
+const LinkNetworkPrefix = "koroku_link_"
 
-var groupServicePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+var dnsLabelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
-// ValidGroupService reports whether a service name can join a group: it
-// becomes a DNS label in the service's hostname.
-func ValidGroupService(name string) bool { return groupServicePattern.MatchString(name) }
+// ValidLinkName reports whether a service or link name can be used on a
+// link network: it must be a DNS label.
+func ValidLinkName(name string) bool { return dnsLabelPattern.MatchString(name) }
 
-// GroupHostname is the name other members use to reach a joined service.
-func GroupHostname(service, slug string) string {
-	return service + "." + slug + ".koroku.internal"
+// LinkUse is what a consumer app asks of one link.
+type LinkUse struct {
+	Name     string
+	Services []string
 }
 
-// CheckGroupServices reports the chosen services that cannot join the group
+// CheckLinkServices reports the services that cannot be attached to a link
 // network: missing from the project, a name that is not a DNS label, a
-// container_name (it would put an arbitrary name on the shared network) or
-// a network_mode (the service has no network of its own).
-func CheckGroupServices(p Project, services []string) []Violation {
+// container_name (it would put an arbitrary name on the network) or a
+// network_mode (the service has no network of its own). It covers both the
+// services an app exposes and the ones that use its links.
+func CheckLinkServices(p Project, services []string) []Violation {
 	sorted := slices.Clone(services)
 	sort.Strings(sorted)
 	var found []Violation
-	add := func(service, message string) {
-		found = append(found, Violation{Service: service, Rule: RuleGroupService, Message: message})
-	}
-	for _, name := range sorted {
-		svc, ok := p.Services[name]
-		switch {
-		case !ok:
-			add(name, "the service joins the group but is not defined in the Compose file")
-		case !ValidGroupService(name):
-			add(name, "the service name is not a valid DNS label, so it cannot join a group")
-		case svc.ContainerName != "":
-			add(name, fmt.Sprintf("the service sets container_name %q, so it cannot join a group", svc.ContainerName))
-		case svc.NetworkMode != "":
-			add(name, fmt.Sprintf("the service uses network_mode %q, so it cannot join a group", svc.NetworkMode))
+	for _, name := range slices.Compact(sorted) {
+		if msg := linkServiceProblem(p, name); msg != "" {
+			found = append(found, Violation{Service: name, Rule: RuleLinkService, Message: msg})
 		}
 	}
 	return found
+}
+
+func linkServiceProblem(p Project, name string) string {
+	svc, ok := p.Services[name]
+	switch {
+	case !ok:
+		return "the service is not defined in the Compose file"
+	case !ValidLinkName(name):
+		return "the service name is not a valid DNS label, so it cannot be linked"
+	case svc.ContainerName != "":
+		return fmt.Sprintf("the service sets container_name %q, so it cannot be linked", svc.ContainerName)
+	case svc.NetworkMode != "":
+		return fmt.Sprintf("the service uses network_mode %q, so it cannot be linked", svc.NetworkMode)
+	}
+	return ""
+}
+
+// CheckLinks checks the consumer side of an app's links against its
+// project: the services that use each link, and that no link name is also a
+// name of the app's own (a stopped service of that name would let the name
+// resolve to the other app instead).
+func CheckLinks(p Project, links []LinkUse) []Violation {
+	own := map[string]bool{}
+	for name, svc := range p.Services {
+		own[name] = true
+		if svc.ContainerName != "" {
+			own[svc.ContainerName] = true
+		}
+	}
+	var services []string
+	var found []Violation
+	for _, link := range links {
+		services = append(services, link.Services...)
+		if own[link.Name] {
+			found = append(found, Violation{Service: link.Name, Rule: RuleLinkService,
+				Message: fmt.Sprintf("the link name %q is also a service of this app; rename the service or the link", link.Name)})
+		}
+	}
+	return append(found, CheckLinkServices(p, services)...)
 }

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
 	"time"
 )
 
@@ -19,10 +18,6 @@ var (
 	ErrGroupEnvironment = errors.New("the app's environment differs from the group's")
 )
 
-// GroupNetworkPrefix starts the name of every group network. Slugs cannot
-// contain "_", so no app's own network (koroku-<slug>_*) starts with it.
-const GroupNetworkPrefix = "koroku_group_"
-
 // Group is a set of apps whose chosen services share a network.
 type Group struct {
 	ID          int64
@@ -30,9 +25,6 @@ type Group struct {
 	Environment string
 	CreatedAt   time.Time
 }
-
-// Network is the name of the group's Docker network.
-func (g Group) Network() string { return GroupNetworkPrefix + strconv.FormatInt(g.ID, 10) }
 
 const groupColumns = `id, name, environment, created_at`
 
@@ -157,49 +149,90 @@ func (s *Store) ListGroupMembers(ctx context.Context, groupID int64) ([]App, err
 }
 
 // SetAppGroup puts an app in a group (or takes it out with a nil groupID)
-// and sets the services that join the group network. The group must exist
-// and have the app's environment.
-func (s *Store) SetAppGroup(ctx context.Context, appID int64, groupID *int64, services []string, now time.Time) error {
+// and sets the services it exposes. The group must exist and have the
+// app's environment. Links that no longer hold are deleted with it and
+// returned, so that their networks can be removed: when the app leaves or
+// changes group, every link from or to it; otherwise the links to the
+// services it stops exposing.
+func (s *Store) SetAppGroup(ctx context.Context, appID int64, groupID *int64, services []string, now time.Time) ([]Link, error) {
 	if groupID == nil && len(services) > 0 {
-		return errors.New("set app group: services given without a group")
+		return nil, errors.New("set app group: services given without a group")
 	}
 	encoded, err := encodeStrings(services)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("set app group: %w", err)
+		return nil, fmt.Errorf("set app group: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if groupID != nil {
-		var appEnv, groupEnv string
-		if err := tx.QueryRowContext(ctx, `SELECT environment FROM apps WHERE id = ?`, appID).Scan(&appEnv); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("set app group: app: %w", ErrNotFound)
-			}
-			return fmt.Errorf("set app group: %w", err)
+	var (
+		appEnv     string
+		currentRaw sql.NullInt64
+	)
+	if err := tx.QueryRowContext(ctx, `SELECT environment, group_id FROM apps WHERE id = ?`, appID).Scan(&appEnv, &currentRaw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("set app group: app: %w", ErrNotFound)
 		}
+		return nil, fmt.Errorf("set app group: %w", err)
+	}
+	if groupID != nil {
+		var groupEnv string
 		if err := tx.QueryRowContext(ctx, `SELECT environment FROM app_groups WHERE id = ?`, *groupID).Scan(&groupEnv); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("set app group: group: %w", ErrNotFound)
+				return nil, fmt.Errorf("set app group: group: %w", ErrNotFound)
 			}
-			return fmt.Errorf("set app group: %w", err)
+			return nil, fmt.Errorf("set app group: %w", err)
 		}
 		if appEnv != groupEnv {
-			return ErrGroupEnvironment
+			return nil, ErrGroupEnvironment
 		}
 	}
+
+	// Links that no longer hold.
+	var gone []Link
+	sameGroup := groupID != nil && currentRaw.Valid && currentRaw.Int64 == *groupID
+	if sameGroup {
+		links, err := queryLinks(ctx, tx, `WHERE l.target_app_id = ?`, appID)
+		if err != nil {
+			return nil, err
+		}
+		for _, l := range links {
+			if !containsString(services, l.TargetService) {
+				gone = append(gone, l)
+			}
+		}
+	} else {
+		if gone, err = queryLinks(ctx, tx, `WHERE l.app_id = ? OR l.target_app_id = ?`, appID, appID); err != nil {
+			return nil, err
+		}
+	}
+	for _, l := range gone {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM app_links WHERE id = ?`, l.ID); err != nil {
+			return nil, fmt.Errorf("set app group: %w", err)
+		}
+	}
+
 	res, err := tx.ExecContext(ctx, `UPDATE apps SET group_id = ?, group_services = ?, updated_at = ? WHERE id = ?`,
 		nullInt(groupID), encoded, toMillis(now), appID)
 	if err != nil {
-		return fmt.Errorf("set app group: %w", err)
+		return nil, fmt.Errorf("set app group: %w", err)
 	}
 	if err := requireOneRow(res, "set app group"); err != nil {
-		return err
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("set app group: %w", err)
+		return nil, fmt.Errorf("set app group: %w", err)
 	}
-	return nil
+	return gone, nil
+}
+
+func containsString(list []string, v string) bool {
+	for _, item := range list {
+		if item == v {
+			return true
+		}
+	}
+	return false
 }

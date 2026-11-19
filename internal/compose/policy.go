@@ -34,9 +34,10 @@ const (
 	RuleRuntime          = "runtime"
 	RuleMemoryGuard      = "memory_guard"
 
-	// Groups (ARCHITECTURE 6.1). Neither is waived by the relax flag.
-	RuleGroupNetwork = "group_network"
-	RuleGroupService = "group_service"
+	// Links between apps (ARCHITECTURE 6.1). Neither is waived by the
+	// relax flag.
+	RuleLinkNetwork = "link_network"
+	RuleLinkService = "link_service"
 )
 
 // allowedCapabilities are Docker's default capabilities plus two that
@@ -254,10 +255,10 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 		}
 	}
 	for name, network := range p.Networks {
-		if strings.HasPrefix(network.Name, GroupNetworkPrefix) {
-			// Only koroku attaches containers to group networks, from the
+		if strings.HasPrefix(network.Name, LinkNetworkPrefix) {
+			// Only koroku attaches containers to link networks, from the
 			// database; the relax flag must not reach one (ARCHITECTURE 6.1).
-			add("", RuleGroupNetwork, fmt.Sprintf("network %q refers to the group network %q; group networks are attached by koroku, not by the Compose file", name, network.Name), false)
+			add("", RuleLinkNetwork, fmt.Sprintf("network %q refers to the link network %q; link networks are attached by koroku, not by the Compose file", name, network.Name), false)
 			continue
 		}
 		if params.ProjectName != "" && (network.External || !strings.HasPrefix(network.Name, params.ProjectName+"_")) {

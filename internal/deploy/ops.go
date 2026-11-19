@@ -248,8 +248,16 @@ func (e *Engine) Delete(ctx context.Context, app store.App, removeVolumes bool) 
 		}
 	}
 
+	// The app's links go with its row; their networks are removed after.
+	links, err := e.opts.Store.ListLinksOf(ctx, app.ID)
+	if err != nil {
+		return err
+	}
 	if err := e.opts.Store.DeleteApp(ctx, app.ID); err != nil {
 		return err
+	}
+	if err := e.removeLinkNetworks(ctx, links); err != nil {
+		e.opts.Logger.Warn("removing the app's link networks failed", "app", app.Slug, "error", err)
 	}
 	if err := os.RemoveAll(e.appDir(app.Slug)); err != nil {
 		e.opts.Logger.Warn("removing the app directory failed", "app", app.Slug, "error", err)

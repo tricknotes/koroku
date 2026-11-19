@@ -15,27 +15,45 @@ import (
 	"github.com/tricknotes/koroku/internal/store"
 )
 
-// GroupManager changes groups and memberships together with their Docker
-// networks (ARCHITECTURE 6.1).
+// GroupManager changes groups, memberships and links together with their
+// Docker networks (ARCHITECTURE 6.1).
 type GroupManager interface {
 	CreateGroup(ctx context.Context, name, environment string) (store.Group, error)
 	DeleteGroup(ctx context.Context, id int64) error
 	SetGroup(ctx context.Context, app store.App, groupID *int64, services []string) error
+	CreateLink(ctx context.Context, app store.App, name string, target store.App, targetService string, services []string) (store.Link, error)
+	DeleteLink(ctx context.Context, app store.App, id int64) error
+}
+
+type linkJSON struct {
+	ID            int64     `json:"id"`
+	Name          string    `json:"name"`
+	TargetApp     string    `json:"target_app"`
+	TargetService string    `json:"target_service"`
+	Services      []string  `json:"services"`
+	Network       string    `json:"network,omitempty"`
+	CreatedAt     time.Time `json:"created_at,omitzero"`
 }
 
 type groupMemberJSON struct {
-	Slug      string   `json:"slug"`
-	Services  []string `json:"services"`
-	Hostnames []string `json:"hostnames"`
+	Slug     string     `json:"slug"`
+	Services []string   `json:"services"`
+	Links    []linkJSON `json:"links"`
 }
 
 type groupJSON struct {
 	ID          int64             `json:"id"`
 	Name        string            `json:"name"`
 	Environment string            `json:"environment"`
-	Network     string            `json:"network"`
 	Members     []groupMemberJSON `json:"members"`
 	CreatedAt   time.Time         `json:"created_at"`
+}
+
+func linkToJSON(l store.Link, installation string) linkJSON {
+	return linkJSON{
+		ID: l.ID, Name: l.Name, TargetApp: l.TargetAppSlug, TargetService: l.TargetService,
+		Services: l.Services, Network: l.Network(installation), CreatedAt: l.CreatedAt,
+	}
 }
 
 func (s *Server) groupToJSON(r *http.Request, g store.Group) (groupJSON, error) {
@@ -44,13 +62,19 @@ func (s *Server) groupToJSON(r *http.Request, g store.Group) (groupJSON, error) 
 		return groupJSON{}, err
 	}
 	out := groupJSON{
-		ID: g.ID, Name: g.Name, Environment: g.Environment, Network: g.Network(),
+		ID: g.ID, Name: g.Name, Environment: g.Environment,
 		Members: []groupMemberJSON{}, CreatedAt: g.CreatedAt,
 	}
 	for _, app := range members {
-		m := groupMemberJSON{Slug: app.Slug, Services: app.GroupServices, Hostnames: []string{}}
-		for _, service := range app.GroupServices {
-			m.Hostnames = append(m.Hostnames, compose.GroupHostname(service, app.Slug))
+		links, err := s.store.ListAppLinks(r.Context(), app.ID)
+		if err != nil {
+			return groupJSON{}, err
+		}
+		m := groupMemberJSON{Slug: app.Slug, Services: app.GroupServices, Links: []linkJSON{}}
+		for _, l := range links {
+			m.Links = append(m.Links, linkJSON{
+				ID: l.ID, Name: l.Name, TargetApp: l.TargetAppSlug, TargetService: l.TargetService, Services: l.Services,
+			})
 		}
 		out.Members = append(out.Members, m)
 	}
@@ -224,7 +248,7 @@ func (s *Server) handleSetAppGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	errs := fieldErrors{}
 	for i, service := range services {
-		if !compose.ValidGroupService(service) {
+		if !compose.ValidLinkName(service) {
 			errs.add("services", "each service name must be lowercase letters, digits and inner hyphens")
 		}
 		if slices.Contains(services[:i], service) {
@@ -256,15 +280,11 @@ func (s *Server) handleSetAppGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.groups.SetGroup(r.Context(), app, in.GroupID, services)
-	var cannot *deploy.GroupServiceError
+	var cannot *deploy.LinkServiceError
 	switch {
 	case err == nil:
 	case errors.As(err, &cannot):
-		parts := make([]string, len(cannot.Violations))
-		for i, v := range cannot.Violations {
-			parts[i] = v.Service + ": " + v.Message
-		}
-		writeValidationError(w, fieldErrors{"services": strings.Join(parts, "; ")})
+		writeValidationError(w, fieldErrors{"services": violationText(cannot.Violations)})
 		return
 	case errors.Is(err, store.ErrGroupEnvironment):
 		writeValidationError(w, fieldErrors{"group_id": "the group's environment differs from the app's"})
@@ -288,4 +308,164 @@ func (s *Server) handleSetAppGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, j)
+}
+
+func violationText(violations []compose.Violation) string {
+	parts := make([]string, len(violations))
+	for i, v := range violations {
+		parts[i] = v.Service + ": " + v.Message
+	}
+	return strings.Join(parts, "; ")
+}
+
+func (s *Server) handleListLinks(w http.ResponseWriter, r *http.Request) {
+	app, ok := s.loadApp(w, r)
+	if !ok {
+		return
+	}
+	links, err := s.store.ListAppLinks(r.Context(), app.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	installation, err := s.store.InstallationID(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	out := []linkJSON{}
+	for _, l := range links {
+		out = append(out, linkToJSON(l, installation))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"links": out})
+}
+
+func (s *Server) handleCreateLink(w http.ResponseWriter, r *http.Request) {
+	if !s.requireGroups(w) {
+		return
+	}
+	app, ok := s.loadApp(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Name          string   `json:"name"`
+		TargetApp     string   `json:"target_app"`
+		TargetService string   `json:"target_service"`
+		Services      []string `json:"services"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	errs := fieldErrors{}
+	if !compose.ValidLinkName(in.Name) {
+		errs.add("name", "must be lowercase letters, digits and inner hyphens")
+	}
+	if len(in.Services) == 0 {
+		errs.add("services", "choose at least one service that uses the name")
+	}
+	for i, service := range in.Services {
+		if !compose.ValidLinkName(service) {
+			errs.add("services", "each service name must be lowercase letters, digits and inner hyphens")
+		}
+		if slices.Contains(in.Services[:i], service) {
+			errs.add("services", "a service is listed twice")
+		}
+	}
+	if app.GroupID == nil {
+		errs.add("target_app", "the app is not in a group")
+	}
+	target, err := s.store.GetApp(r.Context(), in.TargetApp)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		errs.add("target_app", "no such app")
+	case err != nil:
+		s.internalError(w, r, err)
+		return
+	case target.ID == app.ID || target.GroupID == nil || app.GroupID == nil || *target.GroupID != *app.GroupID:
+		errs.add("target_app", "must be another app in the same group")
+	case !slices.Contains(target.GroupServices, in.TargetService):
+		errs.add("target_service", "must be a service the target app exposes")
+	}
+	if len(errs) > 0 {
+		writeValidationError(w, errs)
+		return
+	}
+	if app.Environment == store.EnvironmentProduction && !s.requireRecentAuth(w, r) {
+		return
+	}
+
+	link, err := s.groups.CreateLink(r.Context(), app, in.Name, target, in.TargetService, in.Services)
+	var cannot *deploy.LinkServiceError
+	switch {
+	case err == nil:
+	case errors.As(err, &cannot):
+		errs := fieldErrors{}
+		var named, others []compose.Violation
+		for _, v := range cannot.Violations {
+			if v.Service == in.Name && !slices.Contains(in.Services, v.Service) {
+				named = append(named, v)
+			} else {
+				others = append(others, v)
+			}
+		}
+		if len(named) > 0 {
+			errs.add("name", violationText(named))
+		}
+		if len(others) > 0 {
+			errs.add("services", violationText(others))
+		}
+		writeValidationError(w, errs)
+		return
+	case errors.Is(err, store.ErrConflict):
+		writeError(w, http.StatusConflict, "link_name_taken", "the app already has a link with this name")
+		return
+	case errors.Is(err, store.ErrLinkTarget):
+		writeValidationError(w, fieldErrors{"target_service": "must be a service another app in the group exposes"})
+		return
+	default:
+		if s.writeOpError(w, r, err) {
+			return
+		}
+	}
+	installation, err := s.store.InstallationID(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, linkToJSON(link, installation))
+}
+
+func (s *Server) handleDeleteLink(w http.ResponseWriter, r *http.Request) {
+	if !s.requireGroups(w) {
+		return
+	}
+	app, ok := s.loadApp(w, r)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err == nil {
+		_, err = s.store.GetLink(r.Context(), app.ID, id)
+	}
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, strconv.ErrSyntax) || errors.Is(err, strconv.ErrRange) {
+			writeError(w, http.StatusNotFound, "link_not_found", "no such link")
+			return
+		}
+		s.internalError(w, r, err)
+		return
+	}
+	if app.Environment == store.EnvironmentProduction && !s.requireRecentAuth(w, r) {
+		return
+	}
+	err = s.groups.DeleteLink(r.Context(), app, id)
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "link_not_found", "no such link")
+	default:
+		s.writeOpError(w, r, err)
+	}
 }
