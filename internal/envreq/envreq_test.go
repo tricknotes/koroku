@@ -1,0 +1,151 @@
+package envreq
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"testing"
+
+	"github.com/tricknotes/koroku/internal/github"
+)
+
+type fakeFiles struct {
+	dirs    map[string][]string // ref -> root names; missing ref = repo not visible
+	files   map[string]string   // ref + ":" + path -> content
+	readErr error
+	calls   int
+}
+
+func (f *fakeFiles) ListDir(_ context.Context, _, _, dir, ref string) ([]string, error) {
+	f.calls++
+	names, ok := f.dirs[ref]
+	if !ok || dir != "" {
+		return nil, fmt.Errorf("list: %w", github.ErrNotFound)
+	}
+	return names, nil
+}
+
+func (f *fakeFiles) ReadFile(_ context.Context, _, _, path, ref string) ([]byte, error) {
+	f.calls++
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	content, ok := f.files[ref+":"+path]
+	if !ok {
+		return nil, fmt.Errorf("read: %w", github.ErrNotFound)
+	}
+	return []byte(content), nil
+}
+
+const sha = "9fceb02d0ae598e95dc970b74767f19372d61af8"
+
+func TestReadCompose(t *testing.T) {
+	files := &fakeFiles{
+		dirs:  map[string][]string{sha: {"README.md", "docker-compose.yml"}},
+		files: map[string]string{sha + ":docker-compose.yml": "x: ${A:?the A} ${B:-b}\n"},
+	}
+	r := NewReader(files)
+	req := Request{Owner: "octo", Repo: "blog", SHA: sha, Source: SourceCompose}
+	got := r.Read(context.Background(), req)
+	b := "b"
+	want := Result{Status: StatusOK, Path: "docker-compose.yml", Variables: []Variable{
+		{Key: "A", Required: true, Description: "the A"},
+		{Key: "B", Default: &b},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Read = %+v, want %+v", got, want)
+	}
+	calls := files.calls
+	r.Read(context.Background(), req)
+	if files.calls != calls {
+		t.Errorf("second read called GitHub again (%d -> %d calls)", calls, files.calls)
+	}
+}
+
+func TestReadDotenv(t *testing.T) {
+	files := &fakeFiles{
+		dirs:  map[string][]string{sha: {".env.example"}},
+		files: map[string]string{sha + ":config/env.sample": "# Mail server\n# host only\nSMTP_HOST=\n\nexport API_KEY=xxx\nnot a line\n"},
+	}
+	got := NewReader(files).Read(context.Background(), Request{Owner: "o", Repo: "r", SHA: sha, Source: SourceDotenv, ExamplePath: "config/env.sample"})
+	want := Result{Status: StatusOK, Path: "config/env.sample", Variables: []Variable{
+		{Key: "API_KEY", Required: true},
+		{Key: "SMTP_HOST", Required: true, Description: "Mail server host only"},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Read = %+v, want %+v", got, want)
+	}
+}
+
+func TestReadUnavailable(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name  string
+		files *fakeFiles
+		req   Request
+		want  Result
+	}{
+		{"off", &fakeFiles{}, Request{Source: SourceOff}, Result{Status: StatusOff}},
+		{"repo not visible", &fakeFiles{dirs: map[string][]string{}}, Request{SHA: sha, Source: SourceCompose},
+			Unavailable(ReasonRepoUnavailable, "")},
+		{"no compose file", &fakeFiles{dirs: map[string][]string{sha: {"README.md"}}}, Request{SHA: sha, Source: SourceCompose},
+			Unavailable(ReasonFileNotFound, "")},
+		{"no example file", &fakeFiles{dirs: map[string][]string{sha: {}}}, Request{SHA: sha, Source: SourceDotenv},
+			Unavailable(ReasonFileNotFound, ".env.example")},
+		{"rate limited", &fakeFiles{dirs: map[string][]string{sha: {}}, readErr: fmt.Errorf("x: %w", github.ErrRateLimited)},
+			Request{SHA: sha, Source: SourceCompose, ComposePath: "deploy/compose.yaml"},
+			Unavailable(ReasonRateLimited, "deploy/compose.yaml")},
+		{"other error", &fakeFiles{dirs: map[string][]string{sha: {}}, readErr: errors.New("boom")},
+			Request{SHA: sha, Source: SourceDotenv},
+			Unavailable(ReasonGitHubError, ".env.example")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NewReader(tc.files).Read(ctx, tc.req); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Read = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+	if got := NewReader(nil).Read(ctx, Request{Source: SourceCompose}); got.Reason != ReasonNotConfigured {
+		t.Errorf("nil files: reason = %q", got.Reason)
+	}
+}
+
+func TestReadDoesNotCacheTransientFailures(t *testing.T) {
+	files := &fakeFiles{dirs: map[string][]string{sha: {"compose.yaml"}}, readErr: errors.New("boom")}
+	r := NewReader(files)
+	req := Request{SHA: sha, Source: SourceCompose}
+	if got := r.Read(context.Background(), req); got.Reason != ReasonGitHubError {
+		t.Fatalf("reason = %q", got.Reason)
+	}
+	files.readErr = nil
+	files.files = map[string]string{sha + ":compose.yaml": "x: ${A}\n"}
+	if got := r.Read(context.Background(), req); got.Status != StatusOK || len(got.Variables) != 1 {
+		t.Fatalf("after recovery: %+v", got)
+	}
+}
+
+func TestCacheIsBounded(t *testing.T) {
+	files := &fakeFiles{dirs: map[string][]string{}}
+	r := NewReader(files)
+	for i := 0; i < cacheSize+10; i++ {
+		ref := fmt.Sprintf("%040d", i)
+		files.dirs[ref] = []string{"compose.yaml"}
+		files.files = map[string]string{ref + ":compose.yaml": "x: 1\n"}
+		r.Read(context.Background(), Request{SHA: ref, Source: SourceCompose})
+	}
+	if len(r.cache) != cacheSize || len(r.order) != cacheSize {
+		t.Errorf("cache holds %d entries (%d in order), want %d", len(r.cache), len(r.order), cacheSize)
+	}
+}
+
+func TestCompare(t *testing.T) {
+	set, unlisted := Compare([]Variable{{Key: "A"}, {Key: "B"}}, []string{"Z", "A", "C"})
+	if !reflect.DeepEqual(set, map[string]bool{"A": true, "B": false}) {
+		t.Errorf("set = %v", set)
+	}
+	if !reflect.DeepEqual(unlisted, []string{"C", "Z"}) {
+		t.Errorf("unlisted = %v", unlisted)
+	}
+}

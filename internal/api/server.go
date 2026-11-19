@@ -14,6 +14,7 @@ import (
 
 	"github.com/tricknotes/koroku/internal/clock"
 	"github.com/tricknotes/koroku/internal/config"
+	"github.com/tricknotes/koroku/internal/envreq"
 	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
 	"github.com/tricknotes/koroku/internal/system"
@@ -74,6 +75,7 @@ type Server struct {
 	logs     AppLogs
 	backups  Backups
 	volumes  AppVolumes
+	envReqs  *envreq.Reader
 
 	routeStatus func() RouteStatus
 
@@ -91,7 +93,12 @@ func New(opts Options) *Server {
 	if clk == nil {
 		clk = clock.System{}
 	}
+	var files envreq.Files
+	if opts.Auth.GitHub != nil {
+		files = opts.Auth.GitHub
+	}
 	return &Server{
+		envReqs:  envreq.NewReader(files),
 		cfg:      opts.Config,
 		store:    opts.Store,
 		system:   opts.System,
@@ -154,6 +161,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/apps/{slug}/services", s.handleListServices)
 	mux.HandleFunc("GET /api/apps/{slug}/env", s.handleGetEnv)
 	mux.HandleFunc("PUT /api/apps/{slug}/env", s.handlePutEnv)
+	mux.HandleFunc("GET /api/apps/{slug}/env/requirements", s.handleEnvRequirements)
 	mux.HandleFunc("PUT /api/apps/{slug}/env/{key}", s.handlePutEnvVar)
 	mux.HandleFunc("DELETE /api/apps/{slug}/env/{key}", s.handleDeleteEnvVar)
 	mux.HandleFunc("GET /api/apps/{slug}/deployments", s.handleListDeployments)

@@ -337,7 +337,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 | テーブル | 主なカラム |
 | --- | --- |
-| `apps` | `id`, `slug`（一意）, `repo_id`, `repo_full_name`, `default_branch`, `compose_path`, `web_service`, `web_port`, `host_port`（一意）, `healthcheck_path`, `desired_state`（running / stopped）, `relax_policy`, `current_deployment_id` |
+| `apps` | `id`, `slug`（一意）, `repo_id`, `repo_full_name`, `default_branch`, `compose_path`, `web_service`, `web_port`, `host_port`（一意）, `healthcheck_path`, `desired_state`（running / stopped）, `relax_policy`, `current_deployment_id`, `env_source`, `env_example_path`（9.4） |
 | `env_vars` | `app_id`, `key`, `value_encrypted`（`app_id` + `key` で一意） |
 | `deployments` | `id`, `app_id`, `ref`, `commit_sha`, `commit_message`, `status`, `error`, `queued_at`, `started_at`, `finished_at`, `env_fingerprints`（9.2） |
 | `sessions` | `token_hash`, `id`, `github_user_id`, `expires_at`, `last_seen_at`, `ip`, `user_agent`（10.3） |
@@ -352,6 +352,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | `GET /api/apps`、`POST /api/apps`、`GET / PATCH / DELETE /api/apps/{slug}` | アプリの CRUD。削除は `?volumes=true` で volume も消す |
 | `GET / PUT /api/apps/{slug}/env` | 環境変数（一覧と稼働中のリリースとの差、一括置換） |
 | `PUT / DELETE /api/apps/{slug}/env/{key}` | 環境変数 1 件の追加・変更・名前の変更・削除（9.2） |
+| `GET /api/apps/{slug}/env/requirements?ref=` | リポジトリが必要とする変数と、設定済みの変数との照合（9.4） |
 | `GET / POST /api/apps/{slug}/deployments` | 履歴、デプロイ開始（`{ref}` か `{sha}`） |
 | `GET /api/deployments/{id}`、`GET /api/deployments/{id}/logs`（SSE）、`POST /api/deployments/{id}/cancel` | デプロイ詳細とライブログ |
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart` | 起動制御 |
@@ -418,6 +419,47 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - メモリの使用量は stats の値（cgroup の使用量からページキャッシュの非アクティブ分を除いたもの。`docker stats` の表示と同じ）。割合の分母は `docker info` のメモリ総量（VPS ではホストの `MemTotal` と同じ）。上限は `HostConfig.Memory` で、0（上限なし）は `null`。アプリの上限の合計は、そのアプリの稼働中のコンテナすべてに上限があるときだけ出す（koroku は override で全サービスに付けるので、普通は出る）。
 - 競合: stats のあとで inspect する間にコンテナが消えると、inspect は `No such container` で失敗するが、残りのコンテナの出力は出す。その場合は出力を使い、消えたコンテナは除く（消えたものは何も使っていない）。stats と inspect が Docker デーモンのエラーで失敗したときは、`docker system df` と同じく数回やり直す。
 - 履歴は持たない。画面を開いている間、ホストの状態と同じ 30 秒間隔で取り直す。
+
+### 9.4 リポジトリが必要とする環境変数との照合（2026-11-20）
+
+アプリのコードが新しい環境変数を使い始めたとき、koroku の画面には何も出ず、デプロイして初めて（あるいはデプロイが成功したあとで）設定漏れに気づいていた。そこで、リポジトリの側に「必要な変数の一覧」を書いてもらい、環境変数の画面とデプロイの前に、設定済みの変数と照らし合わせて見せる。
+
+**一覧の取り方（アプリ設定で選ぶ）**
+
+| `env_source` | 読むもの | 必須と任意 | 説明 |
+| --- | --- | --- | --- |
+| `compose`（既定） | Compose ファイル中の `${VAR}` / `$VAR` の参照（`docker compose config --variables` 相当） | `${VAR:?msg}`・`${VAR?msg}` と、既定値のない `${VAR}`・`$VAR` は必須。`${VAR:-x}`・`${VAR-x}`・`${VAR:+x}`・`${VAR+x}` は任意 | `:?` / `?` のメッセージ |
+| `dotenv` | リポジトリの `.env.example`（パスは `env_example_path` で変えられる） | 区別しない（すべて必須） | キーの直前に続くコメント行 |
+| `off` | 読まない | — | — |
+
+- **既定を `compose` にした理由**: `koroku` はもともと `--env-file` で補間に使う変数を渡しており（6 章）、`${VAR}` の参照はリポジトリに必ずある Compose ファイルに書ける。`.env.example` を置いていないリポジトリで「ファイルがない」と出続けることもない。`${VAR}` を 1 つも書いていなければ「必要な変数はない」と出るだけで害がない。既存のアプリもマイグレーションで `compose` にする。利用者向けの Skill（`plugins/koroku/skills/prepare-app`）も、必須の変数を `${VAR:?説明}`、任意の変数を `${VAR:-既定値}` で Compose に書く形を勧める。
+- **`compose` の判定は `docker compose config --variables` と少し変えている**: Compose の `Required` は `?` の形だけで、`${VAR}` は任意と扱う。しかし未設定の `${VAR}` は空文字に置き換わって起動するので、ほぼ確実に設定漏れである。そこで既定値のない参照も必須として出し、空でよい変数は `${VAR:-}` と書けば任意になるようにした。既定値の中に入れ子になった参照（`${A:-${B}}` の `B`）は、外側が未設定のときだけ評価されるので任意とする。
+- **`dotenv` に必須と任意の区別がない理由**: `.env.example` には区別を書く決まった方法がない。コメントの書き方で推し量ると誤判定するので、すべて必須として扱い、区別が欲しければ `compose` を使うよう画面と Skill で案内する。
+
+**Compose の参照の読み取り**
+
+- `docker compose config --variables` を呼ばず、Go で Compose ファイルの文字列を走査する。呼ぶにはファイルを一時ディレクトリに書き出す必要があり、`include` や `extends` の参照先が揃わないとエラーで何も得られない。走査なら Docker のない開発環境とテストでも同じに動き、`:?` のメッセージ（Compose の出力には含まれない）を説明として出せる。YAML パーサーの依存も増やさない（5 章の Compose ファイル検出と同じ方針）。
+- 扱う構文は Compose の補間と同じ: `$$` はエスケープ、`${VAR}`、`$VAR`、`${VAR:-x}` `${VAR-x}` `${VAR:?x}` `${VAR?x}` `${VAR:+x}` `${VAR+x}`、既定値の中の入れ子。YAML のコメント（行頭か空白の後の `#`、引用符の外）の中は読まない。ブロックスカラー（`|`、`>`）の中の `#` はコメントではないので読む。同じ変数が何度も出たら、どこか 1 か所でも必須なら必須。
+- 結合テストで、`testdata` の Compose ファイルについて変数名・`?` の有無・既定値が `docker compose config --variables --format json` と一致することを確かめる。
+- **読まないもの**（画面にも「Compose ファイルの `${VAR}` だけを見る」と書く）:
+  - `include:`、`extends: { file: }` で参照する別ファイル。読むのは `compose_path`（未指定なら自動検出した 1 ファイル）だけ。
+  - `environment: [VAR]` のような値なしの受け渡し、リポジトリ内の `env_file:`、アプリのコードが直接読む変数。`koroku` は env ファイルで全変数を全サービスに注入するので、コードだけが読む変数は Compose に現れない。必要なら Compose に `${VAR:?...}` として書いてもらう。
+  - 補間の中の不正な構文は、その参照を読み飛ばす（デプロイ時に `config` が失敗して分かる）。
+
+**照合の結果**
+
+- 照合するのは DB に保存済みの変数（稼働中のリリースではない）。「次にデプロイしたら足りるか」を知りたいため。値は使わず、キーの有無だけを見る。
+- 「設定してあるが一覧にない変数」も返す。`dotenv` では「リポジトリから消えた変数」として行に印を付ける。`compose` では、アプリのコードが直接読む変数（Compose に現れない）が正常に多数あるので、画面には出さない。
+- 環境変数の画面は、アプリの `default_branch` の最新コミットと照合する。デプロイの画面は、選んだブランチかコミットと照合し、足りない必須の変数があれば選択欄の下と、本番アプリの確認ダイアログに警告を出す。**デプロイは止めない**。`${VAR:?}` の形なら手順 4 の `config` が失敗して旧版が動き続けるし、意図して未設定のまま出すこともあるため。
+- 環境変数の画面には、足りない変数の行に「追加」ボタンを置き、押すとキーを入れた新しい行の編集を開く（9.2 の 1 件ずつの保存と同じ流れ）。
+
+**取得**
+
+- GitHub の contents API（installation token）で、ref のコミットのファイルを読む。clone はしない。ブランチ名はまずデプロイと同じ方法でコミット SHA に解決し、Compose ファイルのパスの自動検出（ルートの一覧）と本体の読み取りを SHA で行う。
+- 結果は（リポジトリ、SHA、方式、パス）をキーに、プロセス内に 64 件までキャッシュする。SHA の中身は変わらないので期限は付けない。環境変数を 1 件保存するたびに画面が照合し直しても、GitHub への問い合わせは SHA の解決 1 回で済む。キャッシュするのはキーと説明だけで、値は持たない。「ファイルがない」はそのコミットでは変わらないのでキャッシュし、ほかの失敗はキャッシュしない。
+- GitHub への問い合わせは全体で 15 秒で打ち切る。
+- 読めなかったときもエラーにせず、200 で `status: "unavailable"` と理由を返し、画面は照合なしで通常どおり使えるようにする。理由は `file_not_found`（ファイルがない）、`repo_unavailable`（GitHub App がインストールされていない。public でも、認証なしの contents API は 1 時間 60 回の制限があるので使わない）、`unsupported_repo`（`repo_url` を明示したアプリ。GitHub の API で読めない）、`not_configured`（GitHub App が未設定）、`ref_not_found`、`too_large`、`rate_limited`、`github_error`。
+- 不採用案: デプロイの手順 2 で取得したチェックアウトから読む。デプロイ前に知りたいという目的に合わない。
 
 ## 10. セキュリティと運用
 

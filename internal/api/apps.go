@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/tricknotes/koroku/internal/envreq"
 	"github.com/tricknotes/koroku/internal/gitrepo"
 	"github.com/tricknotes/koroku/internal/store"
 )
@@ -48,6 +50,8 @@ type appJSON struct {
 	DumpHookService      string            `json:"dump_hook_service"`
 	DumpHookCommand      string            `json:"dump_hook_command"`
 	BackupBeforeDeploy   bool              `json:"backup_before_deploy"`
+	EnvSource            string            `json:"env_source"`
+	EnvExamplePath       string            `json:"env_example_path"`
 	URL                  string            `json:"url"`
 	PrimaryURL           string            `json:"primary_url"`
 	PendingDomains       int               `json:"pending_domains"`
@@ -77,6 +81,8 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		DumpHookService:      app.DumpHookService,
 		DumpHookCommand:      app.DumpHookCommand,
 		BackupBeforeDeploy:   app.BackupBeforeDeploy,
+		EnvSource:            app.EnvSource,
+		EnvExamplePath:       app.EnvExamplePath,
 		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
 		CreatedAt:            app.CreatedAt,
 		UpdatedAt:            app.UpdatedAt,
@@ -137,6 +143,8 @@ type appInput struct {
 	DumpHookService      *string            `json:"dump_hook_service"`
 	DumpHookCommand      *string            `json:"dump_hook_command"`
 	BackupBeforeDeploy   *bool              `json:"backup_before_deploy"`
+	EnvSource            *string            `json:"env_source"`
+	EnvExamplePath       *string            `json:"env_example_path"`
 }
 
 // fieldErrors collects validation problems keyed by JSON field name.
@@ -209,6 +217,13 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 		app.BackupBeforeDeploy = *in.BackupBeforeDeploy
 	}
 
+	if in.EnvSource != nil {
+		app.EnvSource = strings.TrimSpace(*in.EnvSource)
+	}
+	if in.EnvExamplePath != nil {
+		app.EnvExamplePath = strings.TrimSpace(*in.EnvExamplePath)
+	}
+
 	if app.RepoFullName == "" && app.RepoURL == "" {
 		errs.add("repo_full_name", "a repository is required (repo_full_name or repo_url)")
 	}
@@ -227,6 +242,15 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 		clean := filepath.Clean(app.ComposePath)
 		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
 			errs.add("compose_path", "must be a path inside the repository")
+		}
+	}
+	if !envreq.ValidSource(app.EnvSource) {
+		errs.add("env_source", "must be compose, dotenv or off")
+	}
+	if app.EnvExamplePath != "" {
+		clean := path.Clean(app.EnvExamplePath)
+		if path.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || len(app.EnvExamplePath) > 255 {
+			errs.add("env_example_path", "must be a file path inside the repository")
 		}
 	}
 	if !servicePattern.MatchString(app.WebService) {
@@ -374,6 +398,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		WebService:      "web",
 		HealthcheckPath: "/",
 		Environment:     store.EnvironmentStaging,
+		EnvSource:       envreq.SourceCompose,
 	}
 	errs := in.apply(&app, s.cfg.Deploy.AllowFileRepos)
 	if in.Slug == nil {

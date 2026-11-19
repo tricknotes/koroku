@@ -164,6 +164,8 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "relax_policy": false,
   "memory_limit": "",
   "service_memory_limits": { "db": "1g" },
+  "env_source": "compose",
+  "env_example_path": "",
   "url": "https://blog.dev.example.com",
   "primary_url": "https://www.example.org",
   "pending_domains": 0,
@@ -179,6 +181,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - `current_deployment` は稼働中の（最後に成功した）デプロイ、`latest_deployment` は最新のデプロイ。どちらも「デプロイ」の形か `null`。
 - `compose_path` が空なら自動検出（`compose.yaml`、`compose.yml`、`docker-compose.yml`、`docker-compose.yaml` の順）。
 - `memory_limit` が空なら基盤の既定値。書式は数字 + 単位 `b` `k` `m` `g`（例 `512m`）。
+- 必要な環境変数の読み取り方（ARCHITECTURE 9.4）: `env_source` は `compose`（既定。Compose ファイルの `${VAR}`）/ `dotenv`（`.env.example`）/ `off`。`env_example_path` は `dotenv` で読むファイルのパスで、空なら `.env.example`。
 - バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。
 
 | メソッドとパス | 内容 |
@@ -218,6 +221,34 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - 変更系はすべて、直近 10 分以内のログインでなければ `403 reauth_required`。
 
 key は英字かアンダースコアで始まる英数字とアンダースコア。重複は 422。
+
+### 必要な環境変数との照合（2026-11-20）
+
+`GET /api/apps/{slug}/env/requirements?ref=main` か `?sha=<40 桁>`: リポジトリがそのコミットで必要とする変数と、保存済みの変数との照合（ARCHITECTURE 9.4）。どちらも省くとアプリの `default_branch`。値は扱わないので、再ログインから 10 分を過ぎていても応答する。
+
+```json
+{
+  "source": "compose",
+  "status": "ok",
+  "reason": "",
+  "ref": "main",
+  "commit_sha": "9fceb02d0ae598e95dc970b74767f19372d61af8",
+  "path": "compose.yaml",
+  "variables": [
+    {"key": "SECRET_KEY_BASE", "required": true, "default": null, "description": "Rails secret", "set": true},
+    {"key": "SMTP_HOST", "required": true, "default": null, "description": "", "set": false},
+    {"key": "RAILS_LOG_LEVEL", "required": false, "default": "info", "description": "", "set": false}
+  ],
+  "unlisted": ["OLD_FLAG"]
+}
+```
+
+- `source` はアプリの `env_source`。`off` なら `status: "off"` で、ほかは空。
+- `status` は `ok` / `off` / `unavailable`。`unavailable` のとき `reason` は `file_not_found`、`repo_unavailable`（GitHub App が未インストール）、`unsupported_repo`（`repo_url` のアプリ）、`not_configured`（GitHub App が未設定）、`ref_not_found`、`too_large`、`rate_limited`、`github_error` のいずれかで、`variables` と `unlisted` は空。読めなくても 200 で返す（UI は照合なしで画面を使えるようにする）。
+- `commit_sha` は照合したコミット（解決できなければ空文字）。`path` は読んだファイル（`compose` で自動検出したときは見つけた名前。見つからなければ空文字）。
+- `variables` は key 順。`required` は必須か（`compose` では `${VAR:?}`・`${VAR?}`・既定値のない `${VAR}`、`dotenv` ではすべて）、`default` は Compose の既定値（`:-` / `-` の右辺。なければ `null`）、`description` は `:?` のメッセージか `.env.example` の直前のコメント（なければ空文字）、`set` は同じ名前の変数が保存されているか。
+- `unlisted` は保存済みだが一覧にない key（key 順）。`compose` ではアプリのコードが直接読む変数も入るので、UI は `dotenv` のときだけ表示する。
+- `ref` と `sha` の検証に失敗したら 422。アプリがなければ `404 app_not_found`。
 
 ## デプロイ（M1）
 
