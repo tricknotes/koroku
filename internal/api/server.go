@@ -135,6 +135,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/system", s.handleSystem)
 	mux.HandleFunc("GET /api/system/docker", s.handleDockerUsage)
+	mux.HandleFunc("GET /api/system/containers", s.handleContainerResources)
 	mux.HandleFunc("POST /api/system/prune", s.handlePrune)
 
 	mux.HandleFunc("GET /api/repos", s.handleListRepos)

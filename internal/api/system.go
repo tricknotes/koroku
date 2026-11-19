@@ -74,3 +74,15 @@ func (s *Server) handleDockerUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
+
+func (s *Server) handleContainerResources(w http.ResponseWriter, r *http.Request) {
+	resources, err := s.ops.ContainerResources(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if resources.Groups == nil {
+		resources.Groups = []deploy.ResourceGroup{}
+	}
+	writeJSON(w, http.StatusOK, resources)
+}

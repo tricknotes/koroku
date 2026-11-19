@@ -19,6 +19,7 @@ type AppOperator interface {
 	Services(ctx context.Context, app store.App) ([]deploy.ServiceStatus, error)
 	Prune(ctx context.Context, images, builder bool) (deploy.PruneResult, error)
 	DockerDiskUsage(ctx context.Context) ([]deploy.DiskUsageItem, error)
+	ContainerResources(ctx context.Context) (deploy.ContainerResources, error)
 }
 
 // writeOpError maps operation errors; it reports whether one was written.

@@ -514,8 +514,8 @@ func TestPrunableBytes(t *testing.T) {
 // running containers (containerd image store); errors from the daemon are
 // retried, a daemon that cannot be reached is not.
 func TestDockerDiskUsageRetriesDaemonErrors(t *testing.T) {
-	defer func(d time.Duration) { dfRetryDelay = d }(dfRetryDelay)
-	dfRetryDelay = time.Millisecond
+	defer func(d time.Duration) { dockerRetryDelay = d }(dockerRetryDelay)
+	dockerRetryDelay = time.Millisecond
 	const row = `{"Reclaimable":"0B (0%)","Size":"1GB","TotalCount":"2","Type":"Images"}` + "\n"
 	raced := errors.New("Error response from daemon: failed to retrieve container list: rw layer snapshot not found for container 0123456789ab")
 
