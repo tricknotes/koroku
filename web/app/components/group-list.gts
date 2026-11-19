@@ -11,7 +11,9 @@ import { errorMessage, fieldErrors } from 'koroku-console/utils/errors';
 import {
   groupMembers,
   isEmptyGroup,
-  memberHostnames,
+  linkLabel,
+  memberLinks,
+  memberServices,
 } from 'koroku-console/utils/groups';
 import Loadable from 'koroku-console/utils/loadable';
 import type { Environment, Group } from 'koroku-console/utils/types';
@@ -33,6 +35,10 @@ function hasMembers(group: Group): boolean {
 
 function isChecked(current: Environment, value: Environment): boolean {
   return current === value;
+}
+
+function joined(names: string[]): string {
+  return names.join('、');
 }
 
 function noteId(group: Group): string {
@@ -61,8 +67,9 @@ class GroupDraft {
 
 /**
  * The groups of the host on the system screen: each with its environment,
- * its network and which services of which apps are connected. Groups are
- * made, renamed and removed here; apps join them on their settings tab.
+ * and per member the services it exposes and the links it made. Groups are
+ * made, renamed and removed here; apps join them, expose services and
+ * make links on their settings tab.
  */
 export default class GroupList extends Component {
   @service declare api: ApiService;
@@ -138,7 +145,7 @@ export default class GroupList extends Component {
         name,
         environment: this.draft.environment,
       });
-      this.notice = `グループ「${group.name}」を作成しました。アプリの設定タブから、入れるアプリとサービスを選んでください。`;
+      this.notice = `グループ「${group.name}」を作成しました。入れるアプリの設定タブで、このグループを選んでください。`;
     });
   };
 
@@ -208,11 +215,9 @@ export default class GroupList extends Component {
           {{/if}}
         </div>
         <p class="pane-description">
-          グループに入れたアプリは、選んだサービスだけを共用のネットワークにつなぎ、
-          <code
-            class="group-pattern"
-          >&lt;サービス&gt;.&lt;アプリ&gt;.koroku.internal</code>
-          の名前で互いに呼べます。入れるアプリとサービスは、各アプリの設定タブで選びます。
+          グループは、接続してよいアプリの範囲です。同じグループのアプリは、ほかのアプリが公開するサービスを、自分の
+          Compose
+          で決めた名前で呼べます（接続）。所属、公開するサービス、接続は、各アプリの設定タブで決めます。
         </p>
 
         <div class="pane-notices" aria-live="polite">
@@ -241,13 +246,6 @@ export default class GroupList extends Component {
                           data-test-group-environment
                         />
                       </div>
-                      <span class="group-network">
-                        ネットワーク
-                        <span
-                          class="mono"
-                          data-test-group-network
-                        >{{group.network}}</span>
-                      </span>
                       <div class="group-actions">
                         <Button
                           @size="small"
@@ -285,26 +283,49 @@ export default class GroupList extends Component {
                               @model={{member.slug}}
                               class="group-member-app"
                             >{{member.slug}}</LinkTo>
-                            {{#let (memberHostnames member) as |hostnames|}}
-                              {{#if hostnames.length}}
-                                <ul
-                                  class="group-hostnames"
-                                  aria-label="{{member.slug}} の接続先の名前"
-                                >
-                                  {{#each hostnames as |hostname|}}
-                                    <li
-                                      class="mono"
-                                      data-test-group-hostname
-                                    >{{hostname}}</li>
-                                  {{/each}}
-                                </ul>
-                              {{else}}
-                                <span
-                                  class="group-member-none"
-                                  data-test-group-no-services
-                                >まだどのサービスもつないでいません</span>
-                              {{/if}}
-                            {{/let}}
+                            <dl class="group-member-facts">
+                              <dt>公開</dt>
+                              <dd data-test-group-exposed>
+                                {{#each
+                                  (memberServices member)
+                                  as |name index|
+                                }}{{if index "、"}}<span
+                                    class="mono"
+                                    data-test-group-exposed-service
+                                  >{{name}}</span>{{else}}<span
+                                    class="group-member-none"
+                                    data-test-group-no-services
+                                  >なし</span>{{/each}}
+                              </dd>
+                              <dt>接続</dt>
+                              <dd>
+                                {{#let (memberLinks member) as |links|}}
+                                  {{#if links.length}}
+                                    <ul
+                                      class="group-links"
+                                      aria-label="{{member.slug}} の接続"
+                                    >
+                                      {{#each links key="id" as |link|}}
+                                        <li data-test-group-link={{link.name}}>
+                                          <span class="mono">{{linkLabel
+                                              member.slug
+                                              link
+                                            }}</span>
+                                          <span class="group-link-consumers">
+                                            （{{joined link.services}}）
+                                          </span>
+                                        </li>
+                                      {{/each}}
+                                    </ul>
+                                  {{else}}
+                                    <span
+                                      class="group-member-none"
+                                      data-test-group-no-links
+                                    >なし</span>
+                                  {{/if}}
+                                {{/let}}
+                              </dd>
+                            </dl>
                           </li>
                         {{/each}}
                       </ul>
@@ -428,7 +449,7 @@ export default class GroupList extends Component {
       >
         <FormField
           @label="新しい名前"
-          @hint="40 文字以内。接続先の名前やネットワークは変わりません。"
+          @hint="40 文字以内。メンバーと接続は変わりません。"
           @error={{this.dialogErrors.name}}
           data-test-field-group="group-name"
           as |field|
@@ -466,9 +487,7 @@ export default class GroupList extends Component {
         <p>
           グループ
           <strong>{{this.deleting.name}}</strong>
-          と、その共用ネットワーク
-          <code>{{this.deleting.network}}</code>
-          を削除します。
+          を削除します。メンバーはいないので、切断される接続はありません。
         </p>
       </ConfirmDialog>
     {{/if}}

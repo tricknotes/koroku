@@ -10,23 +10,29 @@ import type AppContext from 'koroku-console/utils/app-context';
 import { inputChecked, preventDefault } from 'koroku-console/utils/dom';
 import { fieldErrors } from 'koroku-console/utils/errors';
 import {
-  GROUP_SERVICE_NAME,
+  DNS_LABEL,
   appGroupId,
   appGroupServices,
-  groupChangeEffect,
-  groupHostname,
   groupMembers,
   joinBlocker,
   looksLikeDatabase,
+  memberLinks,
+  removedLinks,
+  type RemovedLink,
 } from 'koroku-console/utils/groups';
 import Loadable from 'koroku-console/utils/loadable';
 import { ENVIRONMENT_LABELS } from 'koroku-console/utils/status';
-import type { App, Group, ServiceStatus } from 'koroku-console/utils/types';
+import type {
+  App,
+  AppLink,
+  Group,
+  ServiceStatus,
+} from 'koroku-console/utils/types';
+import AppLinks from './app-links';
 import AsyncView from './async-view';
 import Banner from './banner';
 import Button from './button';
 import ConfirmDialog from './confirm-dialog';
-import CopyButton from './copy-button';
 import EnvironmentBadge from './environment-badge';
 import ErrorMessage from './error-message';
 import Icon from './icon';
@@ -40,14 +46,15 @@ interface GroupChoice {
   members: string;
 }
 
-/** One service as a choice. */
+/** One service as a choice of what to expose. */
 interface ServiceChoice {
   name: string;
-  hostname: string;
   checked: boolean;
-  /** The name cannot be a DNS label: it cannot join. */
+  /** The name cannot be a DNS label: it cannot be exposed. */
   invalid: boolean;
   database: boolean;
+  /** The saved links of other members to this service. */
+  usedBy: string[];
 }
 
 function sameSet(a: string[], b: string[]): boolean {
@@ -63,16 +70,18 @@ interface Signature {
 }
 
 /**
- * The settings tab's choice of a group and of the services that join its
- * shared network (ARCHITECTURE 6.1). Saved on its own, apart from the
- * settings form: the API applies it at once, and narrowing takes effect
- * immediately.
+ * The settings tab's group: which group the app is in and which of its
+ * services the other members may link to (ARCHITECTURE 6.1), and below it
+ * the app's own links. Saved on its own, apart from the settings form: the
+ * API applies it at once, and leaving or un-exposing deletes the links
+ * that depend on it, so those are named before saving.
  */
 export default class AppGroupSettings extends Component<Signature> {
   @service declare api: ApiService;
 
   groups: Loadable<Group[]>;
   services: Loadable<ServiceStatus[]>;
+  links: Loadable<AppLink[]>;
 
   @tracked groupId: number | null;
   @tracked chosen: string[];
@@ -89,8 +98,10 @@ export default class AppGroupSettings extends Component<Signature> {
     this.chosen = appGroupServices(this.app);
     this.groups = new Loadable(() => this.args.model.loadGroups());
     this.services = new Loadable(() => this.api.listServices(this.app.slug));
+    this.links = new Loadable(() => this.api.listLinks(this.app.slug));
     void this.groups.load();
     void this.services.load();
+    if (this.savedGroupId !== null) void this.links.load();
   }
 
   get app(): App {
@@ -112,16 +123,36 @@ export default class AppGroupSettings extends Component<Signature> {
     );
   }
 
-  get effect() {
-    return groupChangeEffect(
-      { groupId: this.savedGroupId, services: this.savedServices },
-      { groupId: this.groupId, services: this.chosen },
+  /** The group the app is in now, as saved. */
+  get savedGroup(): Group | null {
+    if (this.savedGroupId === null) return null;
+    return (
+      (this.groups.value ?? []).find((g) => g.id === this.savedGroupId) ?? null
     );
   }
 
   get selectedGroup(): Group | null {
     if (this.groupId === null) return null;
     return (this.groups.value ?? []).find((g) => g.id === this.groupId) ?? null;
+  }
+
+  /** The links that saving the current choice deletes. */
+  get removed(): RemovedLink[] {
+    return removedLinks(this.savedGroup, this.app.slug, {
+      groupId: this.groupId,
+      services: this.chosen,
+    });
+  }
+
+  get leaving(): boolean {
+    return this.savedGroupId !== null && this.groupId !== this.savedGroupId;
+  }
+
+  /** Newly exposed services: they connect nothing by themselves. */
+  get exposing(): string[] {
+    if (this.groupId === null) return [];
+    if (this.leaving) return [...this.chosen].sort();
+    return this.chosen.filter((s) => !this.savedServices.includes(s)).sort();
   }
 
   get groupChoices(): GroupChoice[] {
@@ -136,36 +167,40 @@ export default class AppGroupSettings extends Component<Signature> {
     }));
   }
 
-  /** Some groups are there, but none the app may join. */
-  get onlyOtherEnvironments(): boolean {
-    const choices = this.groupChoices;
-    return choices.length > 0 && choices.every((choice) => choice.blocker);
-  }
-
   get blockedCount(): number {
     return this.groupChoices.filter((choice) => choice.blocker).length;
   }
 
+  /** Who links to which of this app's services now. */
+  private get linksToApp(): Map<string, string[]> {
+    const used = new Map<string, string[]>();
+    if (!this.savedGroup) return used;
+    for (const member of groupMembers(this.savedGroup)) {
+      for (const link of memberLinks(member)) {
+        if (link.target_app !== this.app.slug) continue;
+        const list = used.get(link.target_service) ?? [];
+        list.push(`${member.slug} の ${link.name}`);
+        used.set(link.target_service, list);
+      }
+    }
+    return used;
+  }
+
   /**
-   * The running services, plus any connected one that is not running now
-   * (stopped, or gone from the release): it can still be disconnected.
+   * The running services, plus any exposed one that is not running now
+   * (stopped, or gone from the release): it can still be un-exposed.
    */
   get serviceChoices(): ServiceChoice[] {
     const names = new Set<string>(this.chosen);
     for (const service of this.services.value ?? []) names.add(service.name);
+    const used = this.groupId === this.savedGroupId ? this.linksToApp : null;
     return [...names].sort().map((name) => ({
       name,
-      hostname: groupHostname(name, this.app.slug),
       checked: this.chosen.includes(name),
-      invalid: !GROUP_SERVICE_NAME.test(name),
+      invalid: !DNS_LABEL.test(name),
       database: looksLikeDatabase(name),
+      usedBy: used?.get(name) ?? [],
     }));
-  }
-
-  get chosenHostnames(): string[] {
-    return [...this.chosen]
-      .sort()
-      .map((name) => groupHostname(name, this.app.slug));
   }
 
   get chosenDatabases(): string[] {
@@ -198,8 +233,8 @@ export default class AppGroupSettings extends Component<Signature> {
   chooseGroup = (id: number | null) => {
     this.touch();
     this.groupId = id;
-    // Leaving a group disconnects everything; another group starts from
-    // the services chosen so far.
+    // Leaving a group exposes nothing; another group starts from the
+    // services chosen so far.
     if (id === null) this.chosen = [];
   };
 
@@ -217,7 +252,7 @@ export default class AppGroupSettings extends Component<Signature> {
       this.nothingToSave = true;
       return;
     }
-    if (this.args.model.isProduction) {
+    if (this.args.model.isProduction || this.removed.length > 0) {
       this.confirming = true;
       return;
     }
@@ -229,7 +264,8 @@ export default class AppGroupSettings extends Component<Signature> {
   };
 
   apply = async () => {
-    const effect = this.effect;
+    const removed = this.removed.length;
+    const exposing = this.exposing.length > 0;
     const leaving = this.groupId === null;
     this.saving = true;
     try {
@@ -240,15 +276,24 @@ export default class AppGroupSettings extends Component<Signature> {
       this.args.model.set(app);
       this.groupId = appGroupId(app);
       this.chosen = appGroupServices(app);
-      this.notice = savedNotice(effect, leaving);
+      this.notice = savedNotice({ leaving, removed, exposing });
     } catch (error) {
       this.error = error;
     } finally {
       this.saving = false;
       this.confirming = false;
     }
-    // The members of the groups changed (or someone else changed them).
-    await this.groups.load({ quiet: true });
+    await this.refresh();
+  };
+
+  /** The members and links changed (or someone else changed them). */
+  refresh = async () => {
+    await Promise.all([
+      this.groups.load({ quiet: true }),
+      this.savedGroupId === null
+        ? Promise.resolve()
+        : this.links.load({ quiet: this.links.loaded }),
+    ]);
   };
 
   <template>
@@ -265,12 +310,7 @@ export default class AppGroupSettings extends Component<Signature> {
           <div>
             <h2 class="form-group-title" id="settings-group-title">グループ</h2>
             <p class="form-group-description">
-              同じグループのアプリどうしで、選んだサービスだけを共用のネットワークにつなぎます。ほかのアプリからは
-              <span class="mono"><span
-                  class="group-pattern"
-                >&lt;サービス&gt;.</span>{{this.app.slug}}.<wbr
-                />koroku.internal</span>
-              の名前で接続します。
+              接続を作れるのは、同じグループのアプリの間だけです。グループに入ることや、サービスを公開することだけでは、どこにもつながりません。
             </p>
           </div>
           <div class="form-group-body">
@@ -296,7 +336,7 @@ export default class AppGroupSettings extends Component<Signature> {
                   <span class="option-body">
                     <span class="option-label">グループに入れない</span>
                     <span class="option-hint">
-                      ほかのアプリとはネットワークでつながりません。
+                      ほかのアプリとは接続できません。
                     </span>
                   </span>
                 </label>
@@ -373,7 +413,7 @@ export default class AppGroupSettings extends Component<Signature> {
                   aria-describedby="settings-group-services-note"
                   data-test-group-services
                 >
-                  <legend>つなぐサービス</legend>
+                  <legend>公開するサービス</legend>
                   {{#each this.serviceChoices key="name" as |choice|}}
                     <label
                       class="option"
@@ -402,12 +442,19 @@ export default class AppGroupSettings extends Component<Signature> {
                         </span>
                         {{#if choice.invalid}}
                           <span class="option-hint">
-                            名前に英小文字・数字・ハイフン以外が含まれるため、つなげません。
+                            名前に英小文字・数字・ハイフン以外が含まれるため、公開できません。
                           </span>
-                        {{else}}
+                        {{else if choice.usedBy.length}}
                           <span
-                            class="option-hint mono"
-                          >{{choice.hostname}}</span>
+                            class="option-hint"
+                            data-test-group-service-used-by
+                          >
+                            接続している:
+                            {{#each choice.usedBy as |user index|}}{{if
+                                index
+                                "、"
+                              }}<span class="mono">{{user}}</span>{{/each}}
+                          </span>
                         {{/if}}
                       </span>
                     </label>
@@ -417,13 +464,12 @@ export default class AppGroupSettings extends Component<Signature> {
                     </p>
                   {{/each}}
                   <p class="option-hint" id="settings-group-services-note">
-                    サービスを 1
-                    つも選ばなければ、グループに入るだけで何もつなぎません。Compose
+                    公開したサービスは、グループのほかのアプリが接続先に選べるようになります。公開するだけでは、どこにもつながりません。Compose
                     で
                     <code>container_name</code>
                     か
                     <code>network_mode</code>
-                    を指定したサービスはつなげません（保存のときに断られます）。
+                    を指定したサービスは公開できません（保存のときに断られます）。
                   </p>
                 </fieldset>
                 {{#if this.errors.services}}
@@ -431,11 +477,11 @@ export default class AppGroupSettings extends Component<Signature> {
                     class="field-error group-field-error"
                     data-test-field-error="services"
                   >
-                    つなげないサービスが含まれています。<code
+                    公開できないサービスが含まれています。<code
                     >container_name</code>
                     か
                     <code>network_mode</code>
-                    を指定したサービスと、稼働中のリリースにないサービスはつなげません（{{this.errors.services}}）。
+                    を指定したサービスと、稼働中のリリースにないサービスは公開できません（{{this.errors.services}}）。
                   </p>
                 {{/if}}
 
@@ -443,52 +489,52 @@ export default class AppGroupSettings extends Component<Signature> {
                   <p class="group-reach-title">届く範囲</p>
                   <ul class="group-reach-list">
                     <li>
-                      つないだサービスは、同じグループでつながっているほかのアプリのサービスと、<strong
+                      公開したサービスは、それに接続したアプリの利用側のサービスと、<strong
                       >双方向に、すべてのポートで</strong>通信できます。ポートや向きは絞れません。
                     </li>
                     <li>
-                      参加とサービスの追加は、次のデプロイか起動から効きます。外す変更は、保存した時点ですぐに切断します。
+                      グループからの離脱と公開の解除は、保存した時点ですぐに切断し、それに依存する接続も削除します。
                     </li>
                     <li>
                       外へのポートの公開や volume
-                      の共有はできません。グループで共有するのはネットワークだけです。
+                      の共有はできません。共有するのはネットワークだけです。
                     </li>
                   </ul>
                 </div>
 
-                {{#if this.chosenHostnames.length}}
-                  <div class="group-hostname-list" data-test-group-hostnames>
-                    <p class="group-reach-title">
-                      ほかのメンバーからの接続先
-                    </p>
-                    <ul>
-                      {{#each this.chosenHostnames as |hostname|}}
-                        <li>
-                          <span
-                            class="mono"
-                            data-test-group-chosen-hostname
-                          >{{hostname}}</span>
-                          <CopyButton @text={{hostname}} @label={{hostname}} />
-                        </li>
-                      {{/each}}
-                    </ul>
-                  </div>
-                {{/if}}
-
                 {{#if this.chosenDatabases.length}}
                   <Banner
                     @tone="warning"
-                    @title="データベースらしいサービスをつなごうとしています"
+                    @title="データベースらしいサービスを公開しようとしています"
                     data-test-group-database-warning
                   >
                     {{#each this.chosenDatabases as |name|}}<span
                         class="mono"
                       >{{name}}</span>
-                    {{/each}}は、グループのほかのアプリから直接接続できるようになります。ほかのアプリに見せたいのが
+                    {{/each}}に接続したアプリからは、データベースへ直接届くようになります。ほかのアプリに見せたいのが
                     API だけなら、API
-                    のサービスだけをつないでください。データベースをつなぐなら、パスワードなどの認証が効いていることを確かめてください。
+                    のサービスだけを公開してください。データベースを公開するなら、パスワードなどの認証が効いていることを確かめてください。
                   </Banner>
                 {{/if}}
+              {{/if}}
+
+              {{#if this.removed.length}}
+                <Banner
+                  @tone="warning"
+                  @title="保存すると、次の接続が削除されます"
+                  class="group-removed-banner"
+                  data-test-group-removed
+                >
+                  <ul class="group-removed-list">
+                    {{#each this.removed key="id" as |link|}}
+                      <li
+                        class="mono"
+                        data-test-group-removed-link
+                      >{{link.label}}</li>
+                    {{/each}}
+                  </ul>
+                  その名前を使っているサービスは、保存した時点で相手に接続できなくなります。
+                </Banner>
               {{/if}}
             </AsyncView>
           </div>
@@ -515,8 +561,9 @@ export default class AppGroupSettings extends Component<Signature> {
               </span>
             {{else if this.nothingToSave}}
               <span data-test-group-unchanged>変更はありません。</span>
-            {{else if this.effect.narrows}}
-              外す変更は、保存した時点ですぐに切断します。
+            {{else if this.removed.length}}
+              保存した時点で、{{this.removed.length}}
+              件の接続を削除します。
             {{else}}
               グループの設定は、ほかの設定とは別に保存します。
             {{/if}}
@@ -524,57 +571,72 @@ export default class AppGroupSettings extends Component<Signature> {
         </div>
       </form>
 
+      <AppLinks
+        @model={{@model}}
+        @groups={{this.groups}}
+        @services={{this.services}}
+        @links={{this.links}}
+        @onChanged={{this.refresh}}
+      />
+
       {{#if this.confirming}}
         <ConfirmDialog
-          @title="本番アプリのグループの設定を変えますか？"
-          @confirmLabel="保存する"
+          @title={{if
+            @model.isProduction
+            "本番アプリのグループの設定を変えますか？"
+            "接続を削除して保存しますか？"
+          }}
+          @confirmLabel={{if this.removed.length "削除して保存する" "保存する"}}
+          @danger={{if this.removed.length true false}}
           @busy={{this.saving}}
           @onConfirm={{this.apply}}
           @onCancel={{this.cancel}}
         >
           <p data-test-group-confirm>
-            本番アプリ
+            {{if @model.isProduction "本番アプリ" "アプリ"}}
             <strong>{{this.app.slug}}</strong>
             {{#if this.selectedGroup}}
               {{#if this.staysInGroup}}
                 がグループ
                 <strong>{{this.selectedGroup.name}}</strong>
-                でつなぐサービスを変えます。
+                で公開するサービスを変えます。
               {{else}}
                 をグループ
                 <strong>{{this.selectedGroup.name}}</strong>
                 に入れます。
               {{/if}}
               {{#if this.chosen.length}}
-                保存後、ほかのメンバーから接続できるのは次の名前です。
+                保存後に公開するのは
+                {{#each this.chosen as |name index|}}{{if index "、"}}<code
+                  >{{name}}</code>{{/each}}
+                です。
               {{else}}
-                サービスは何もつなぎません。
+                サービスは何も公開しません。
               {{/if}}
             {{else}}
-              をグループから外し、共用ネットワークからすぐに切断します。
+              をグループから外します。
             {{/if}}
           </p>
-          {{#if this.selectedGroup}}
-            {{#if this.chosen.length}}
-              <ul class="group-dialog-hostnames">
-                {{#each this.chosenHostnames as |hostname|}}
-                  <li class="mono">{{hostname}}</li>
-                {{/each}}
-              </ul>
-            {{/if}}
-          {{/if}}
-          {{#if this.effect.narrows}}
+          {{#if this.removed.length}}
+            <p>次の接続を、保存した時点で削除して切断します。</p>
+            <ul class="group-dialog-links" data-test-group-confirm-removed>
+              {{#each this.removed key="id" as |link|}}
+                <li class="mono">{{link.label}}</li>
+              {{/each}}
+            </ul>
             <p>
-              外すサービスへの接続は、保存した時点で切れます。ほかのアプリがそのサービスを使っていれば、そのアプリはエラーになります。
+              その名前を使っているサービスは、相手に接続できなくなります。元に戻すには、接続を作り直してください。
             </p>
           {{/if}}
-          {{#if this.effect.widens}}
-            <p>新しくつなぐサービスは、次のデプロイか起動から接続されます。</p>
+          {{#if this.exposing.length}}
+            <p>
+              新しく公開するサービスは、ほかのアプリが接続を作るまで、どこにもつながりません。
+            </p>
           {{/if}}
           {{#if this.chosenDatabases.length}}
             <p data-test-group-confirm-database>
               <strong
-              >データベースらしいサービス（{{this.chosenDatabaseList}}）を含みます。</strong>
+              >データベースらしいサービス（{{this.chosenDatabaseList}}）を公開します。</strong>
             </p>
           {{/if}}
         </ConfirmDialog>
@@ -583,18 +645,25 @@ export default class AppGroupSettings extends Component<Signature> {
   </template>
 }
 
-function savedNotice(
-  effect: { widens: boolean; narrows: boolean },
-  leaving: boolean,
-): string {
+function savedNotice({
+  leaving,
+  removed,
+  exposing,
+}: {
+  leaving: boolean;
+  removed: number;
+  exposing: boolean;
+}): string {
   if (leaving) {
-    return '保存しました。グループから外し、共用ネットワークから切断しました。';
+    return removed > 0
+      ? `保存しました。グループから外し、${removed} 件の接続を削除しました。`
+      : '保存しました。グループから外しました。';
   }
-  if (effect.widens && effect.narrows) {
-    return '保存しました。外したサービスはすでに切断しました。つないだサービスは、次のデプロイか起動から接続されます。';
+  if (removed > 0) {
+    return `保存しました。${removed} 件の接続を削除し、切断しました。`;
   }
-  if (effect.narrows) {
-    return '保存しました。外したサービスは共用ネットワークから切断しました。';
+  if (exposing) {
+    return '保存しました。公開したサービスは、ほかのアプリが接続を作るとつながります。';
   }
-  return '保存しました。次のデプロイか起動から接続されます。';
+  return '保存しました。';
 }

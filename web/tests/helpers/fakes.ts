@@ -405,14 +405,12 @@ export function makeBackups(
   };
 }
 
-/** A staging group without members, koroku_group_<id>. */
+/** A staging group without members. */
 export function makeGroup(overrides: Partial<Group> = {}): Group {
-  const id = overrides.id ?? 3;
   return {
-    id,
+    id: 3,
     name: 'shop',
     environment: 'staging',
-    network: `koroku_group_${id}`,
     members: [],
     created_at: '2026-11-20T03:00:00Z',
     ...overrides,

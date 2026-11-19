@@ -49,7 +49,7 @@ export const SCENARIOS = {
   rollback:
     'blog and blog-staging were rolled back to a kept release after a bad deploy; older releases are kept or already removed',
   groups:
-    'everything fine, plus accounts apps whose auth service is shared through a production and a staging group, and an empty group; the db of blog-staging sets container_name and cannot join',
+    'everything fine, plus accounts apps that expose auth (and a mailer in staging), shops that link to them, blog-staging alone in its group, blog in none, and an empty group; the db of blog-staging sets container_name and cannot be exposed',
 };
 
 function ago(ms) {
@@ -631,8 +631,9 @@ function authServices(scale) {
 }
 
 /**
- * Groups (ARCHITECTURE 6.1): an accounts service that the shops call by
- * `auth.accounts.koroku.internal`, in production and in staging, and a
+ * Groups and links (ARCHITECTURE 6.1): the shops call the auth service of
+ * accounts by `auth` in production and in staging (staging also links the
+ * mailer), blog-staging is alone in its group, blog is in none, and a
  * group nobody joined yet.
  */
 function groupScenario() {
@@ -669,7 +670,13 @@ function groupScenario() {
   const state = scenario(apps, {
     services: new Map([
       ['accounts', authServices(1)],
-      ['accounts-staging', authServices(0.35)],
+      [
+        'accounts-staging',
+        [
+          ...authServices(0.35),
+          runningService('mailer', 0.08 * GB, 0.25 * GB, ''),
+        ],
+      ],
     ]),
     groups: [
       {
@@ -688,10 +695,27 @@ function groupScenario() {
         id: 3,
         name: 'search',
         environment: 'staging',
+        created_at: ago(3 * DAY),
+      },
+      {
+        id: 4,
+        name: 'media',
+        environment: 'staging',
         created_at: ago(2 * HOUR),
       },
     ],
-    nextGroupId: 4,
+    nextGroupId: 5,
+    links: [
+      link(1, 'shop', 'auth', 'accounts', 'auth', ['web', 'worker']),
+      link(2, 'shop-staging', 'auth', 'accounts-staging', 'auth', [
+        'web',
+        'worker',
+      ]),
+      link(3, 'shop-staging', 'mailer', 'accounts-staging', 'mailer', [
+        'worker',
+      ]),
+    ],
+    nextLinkId: 4,
     // Compose settings that keep a service out of a group.
     fixedServices: new Map([['blog-staging', { db: 'container_name' }]]),
   });
@@ -707,9 +731,47 @@ function groupScenario() {
   }
   join('accounts', 1, ['auth']);
   join('shop', 1, []);
-  join('accounts-staging', 2, ['auth']);
-  join('shop-staging', 2, ['web']);
+  join('accounts-staging', 2, ['auth', 'mailer']);
+  join('shop-staging', 2, []);
+  // Alone in its group: nothing to link to yet.
+  join('blog-staging', 3, []);
   return state;
+}
+
+/** A link of `app` (the consumer), as the mock keeps it. */
+function link(id, consumer, name, targetApp, targetService, services) {
+  return {
+    id,
+    app: consumer,
+    name,
+    target_app: targetApp,
+    target_service: targetService,
+    services,
+    created_at: ago((10 - id) * DAY),
+  };
+}
+
+/** The installation ID in the names of link networks (made up). */
+const INSTALLATION = '1a2b3c4d';
+
+/** `GET /api/apps/{slug}/links`: one link as the API returns it. */
+export function linkJson(entry) {
+  return {
+    id: entry.id,
+    name: entry.name,
+    target_app: entry.target_app,
+    target_service: entry.target_service,
+    services: [...entry.services],
+    network: `koroku_link_${INSTALLATION}_${entry.id}`,
+    created_at: entry.created_at,
+  };
+}
+
+/** The links `slug` is the consumer of, by name. */
+export function linksOf(state, slug) {
+  return (state.links ?? [])
+    .filter((entry) => entry.app === slug)
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** `GET /api/groups`: the groups with their members, as the API builds them. */
@@ -723,21 +785,18 @@ export function groupJson(state, group) {
   const members = [...state.apps.values()]
     .filter((target) => target.group_id === group.id)
     .sort((a, b) => a.slug.localeCompare(b.slug))
-    .map((target) => {
-      const services = [...(target.group_services ?? [])].sort();
-      return {
-        slug: target.slug,
-        services,
-        hostnames: services.map(
-          (service) => `${service}.${target.slug}.koroku.internal`,
-        ),
-      };
-    });
-  return {
-    ...group,
-    network: `koroku_group_${group.id}`,
-    members,
-  };
+    .map((target) => ({
+      slug: target.slug,
+      services: [...(target.group_services ?? [])].sort(),
+      links: linksOf(state, target.slug).map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        target_app: entry.target_app,
+        target_service: entry.target_service,
+        services: [...entry.services],
+      })),
+    }));
+  return { ...group, members };
 }
 
 /** Starts a deployment that the mock finishes by itself a little later. */

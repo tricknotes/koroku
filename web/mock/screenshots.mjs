@@ -924,34 +924,52 @@ SHOTS.push(
   },
 );
 
-// Groups: the list on the system screen and the choice on the settings tab.
+// Groups and links: the list on the system screen, the group, the exposed
+// services and the links on the settings tab.
 const GROUP = '[data-test-group]';
-const GROUP_FORM = '[data-test-group-choices]';
-/** Runs the steps a moment apart (each may re-render), then scrolls. */
-function steps(actions, scrollTo) {
+const LINKS = '[data-test-links]';
+/**
+ * Runs the steps a moment apart (each may re-render), then scrolls. A step
+ * is a selector to click, or `{fill, value}` to type into a field.
+ */
+function steps(actions, scrollTo, block = 'start') {
   return `(() => {
     const actions = ${JSON.stringify(actions)};
     const run = (index) => {
       if (index === actions.length) {
         document.querySelector(${JSON.stringify(scrollTo)})
-          ?.scrollIntoView({ block: 'start' });
+          ?.scrollIntoView({ block: ${JSON.stringify(block)} });
         return;
       }
-      document.querySelector(actions[index]).click();
+      const action = actions[index];
+      if (typeof action === 'string') {
+        document.querySelector(action).click();
+      } else {
+        const field = document.querySelector(action.fill);
+        field.value = action.value;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      }
       setTimeout(() => run(index + 1), 200);
     };
     run(0);
   })()`;
 }
+/** Opens the add dialog of shop-staging and fills it in. */
+const ADD_LINK = [
+  '[data-test-link-add]',
+  '[data-test-link-target-input="accounts-staging/auth"]',
+  { fill: '[data-test-link-name-input]', value: 'accounts' },
+  '[data-test-link-consumer-checkbox="web"]',
+];
 SHOTS.push(
   {
-    name: 'groups-system',
+    name: 'links-system',
     path: '/system?scenario=groups',
     wait: GROUP,
     script: steps([], '[data-test-groups]'),
   },
   {
-    name: 'groups-system-phone',
+    name: 'links-system-phone',
     path: '/system?scenario=groups',
     wait: GROUP,
     script: steps([], '[data-test-groups]'),
@@ -959,42 +977,183 @@ SHOTS.push(
     fullPage: false,
   },
   {
-    name: 'groups-system-empty',
+    name: 'links-system-empty',
     path: '/system?scenario=healthy',
     wait: '[data-test-groups-empty]',
     script: steps([], '[data-test-groups]'),
     themes: ['light'],
   },
   {
-    name: 'groups-create-dialog',
+    name: 'links-group-create-dialog',
     path: '/system?scenario=groups',
     wait: GROUP,
     click: '[data-test-group-create]',
     themes: ['light'],
   },
   {
-    name: 'groups-settings-joined',
+    name: 'links-settings-group',
     path: '/apps/shop-staging/settings?scenario=groups',
     wait: '[data-test-group-services]',
     script: steps([], '[data-test-group-settings]'),
   },
   {
-    name: 'groups-settings-joined-phone',
+    name: 'links-settings-links',
     path: '/apps/shop-staging/settings?scenario=groups',
-    wait: '[data-test-group-services]',
-    script: steps([], '[data-test-group-settings]'),
+    wait: '[data-test-link]',
+    script: steps([], LINKS, 'center'),
+  },
+  {
+    name: 'links-settings-phone',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-link]',
+    script: steps([], LINKS),
     ...PHONE,
     fullPage: false,
   },
   {
-    name: 'groups-settings-mismatch',
-    path: '/apps/blog-staging/settings?scenario=groups',
-    wait: GROUP_FORM,
-    script: steps([], '[data-test-group-settings]'),
+    name: 'links-settings-exposed',
+    path: '/apps/accounts-staging/settings?scenario=groups',
+    wait: '[data-test-group-service-used-by]',
+    script: steps([], '[data-test-group-services]'),
     themes: ['light'],
   },
   {
-    name: 'groups-settings-database',
+    name: 'links-add-dialog',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-link]',
+    script: steps(ADD_LINK, LINKS),
+    then: '[data-test-link-preview]',
+  },
+  {
+    name: 'links-add-dialog-phone',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-link]',
+    script: steps(ADD_LINK, LINKS),
+    then: '[data-test-link-preview]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['dark'],
+  },
+  {
+    name: 'links-add-dialog-production',
+    path: '/apps/shop/settings?scenario=groups',
+    wait: '[data-test-link]',
+    script: steps(['[data-test-link-add]'], LINKS),
+    then: '[data-test-link-production]',
+    themes: ['light'],
+  },
+  {
+    name: 'links-add-error',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-link]',
+    script: steps(
+      [
+        '[data-test-link-add]',
+        '[data-test-link-target-input="accounts-staging/mailer"]',
+        { fill: '[data-test-link-name-input]', value: 'web' },
+        '[data-test-dialog-confirm]',
+      ],
+      LINKS,
+    ),
+    then: '[data-test-field-group="link-name"] [data-test-field-error]',
+  },
+  {
+    name: 'links-add-taken',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-link]',
+    script: steps(
+      [
+        '[data-test-link-add]',
+        '[data-test-link-target-input="accounts-staging/auth"]',
+        '[data-test-link-consumer-checkbox="web"]',
+        '[data-test-dialog-confirm]',
+      ],
+      LINKS,
+    ),
+    then: '[data-test-field-group="link-name"] [data-test-field-error]',
+    themes: ['light'],
+  },
+  {
+    name: 'links-delete-confirm',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-link]',
+    script: steps(['[data-test-link="auth"] [data-test-link-delete]'], LINKS),
+    then: '[data-test-link-delete-confirm]',
+    themes: ['light'],
+  },
+  {
+    name: 'links-leave-confirm',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-group-services]',
+    script: steps(
+      ['[data-test-group-option="none"]', '[data-test-group-save]'],
+      '[data-test-group-settings]',
+    ),
+    then: '[data-test-group-confirm-removed]',
+  },
+  {
+    name: 'links-leave-confirm-phone',
+    path: '/apps/shop-staging/settings?scenario=groups',
+    wait: '[data-test-group-services]',
+    script: steps(
+      ['[data-test-group-option="none"]', '[data-test-group-save]'],
+      '[data-test-group-settings]',
+    ),
+    then: '[data-test-group-confirm-removed]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
+    name: 'links-leave-pending',
+    path: '/apps/accounts-staging/settings?scenario=groups',
+    wait: '[data-test-group-services]',
+    script: steps(
+      ['[data-test-group-service-checkbox="mailer"]'],
+      '[data-test-group-services]',
+    ),
+    then: '[data-test-group-removed]',
+    themes: ['light'],
+  },
+  {
+    name: 'links-production-confirm',
+    path: '/apps/accounts/settings?scenario=groups',
+    wait: '[data-test-group-services]',
+    script: steps(
+      [
+        '[data-test-group-service-checkbox="auth"]',
+        '[data-test-group-service-checkbox="auth-db"]',
+        '[data-test-group-save]',
+      ],
+      '[data-test-group-services]',
+    ),
+    then: '[data-test-group-confirm]',
+  },
+  {
+    name: 'links-production-delete-confirm',
+    path: '/apps/shop/settings?scenario=groups',
+    wait: '[data-test-link]',
+    script: steps(['[data-test-link="auth"] [data-test-link-delete]'], LINKS),
+    then: '[data-test-link-delete-confirm]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['dark'],
+  },
+  {
+    name: 'links-no-group',
+    path: '/apps/blog/settings?scenario=groups',
+    wait: '[data-test-links-no-group]',
+    script: steps([], LINKS, 'center'),
+    themes: ['light'],
+  },
+  {
+    name: 'links-no-targets',
+    path: '/apps/blog-staging/settings?scenario=groups',
+    wait: '[data-test-links-no-targets]',
+    script: steps([], '[data-test-group-services]'),
+  },
+  {
+    name: 'links-database',
     path: '/apps/accounts-staging/settings?scenario=groups',
     wait: '[data-test-group-services]',
     script: steps(
@@ -1005,57 +1164,25 @@ SHOTS.push(
     themes: ['light'],
   },
   {
-    name: 'groups-settings-refused',
+    name: 'links-refused',
     path: '/apps/blog-staging/settings?scenario=groups',
-    wait: GROUP_FORM,
+    wait: '[data-test-group-services]',
     script: steps(
-      [
-        '[data-test-group-option="accounts-staging"]',
-        '[data-test-group-service-checkbox="db"]',
-        '[data-test-group-save]',
-      ],
+      ['[data-test-group-service-checkbox="db"]', '[data-test-group-save]'],
       '[data-test-group-services]',
     ),
     then: '[data-test-field-error="services"]',
     settle: 600,
+    themes: ['light'],
   },
   {
-    name: 'groups-settings-production-confirm',
-    path: '/apps/accounts/settings?scenario=groups',
-    wait: '[data-test-group-services]',
-    script: steps(
-      [
-        '[data-test-group-service-checkbox="auth-db"]',
-        '[data-test-group-save]',
-      ],
-      '[data-test-group-services]',
-    ),
-    then: '[data-test-group-confirm]',
-  },
-  {
-    name: 'groups-settings-production-confirm-phone',
-    path: '/apps/accounts/settings?scenario=groups',
-    wait: '[data-test-group-services]',
-    script: steps(
-      [
-        '[data-test-group-service-checkbox="auth-db"]',
-        '[data-test-group-save]',
-      ],
-      '[data-test-group-services]',
-    ),
-    then: '[data-test-group-confirm]',
-    ...PHONE,
-    fullPage: false,
-    themes: ['dark'],
-  },
-  {
-    name: 'groups-header',
+    name: 'links-header',
     path: '/apps/accounts?scenario=groups',
     wait: '[data-test-app-group]',
     themes: ['light'],
   },
   {
-    name: 'groups-header-phone',
+    name: 'links-header-phone',
     path: '/apps/accounts?scenario=groups',
     wait: '[data-test-app-group]',
     ...PHONE,

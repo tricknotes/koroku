@@ -169,7 +169,7 @@ export interface App {
   // Groups (ARCHITECTURE 6.1); absent on older backends.
   /** The group the app belongs to; `null` when it is in none. */
   group_id?: number | null;
-  /** Services connected to the group's shared network. */
+  /** The services other members may link to (公開するサービス). */
   group_services?: string[] | null;
 }
 
@@ -191,22 +191,47 @@ export interface AppPatch {
   env_example_path?: string;
 }
 
-/** One app of a group and the services it connects (`GET /api/groups`). */
-export interface GroupMember {
-  slug: string;
-  services: string[] | null;
-  /** `<service>.<slug>.koroku.internal`, one per connected service. */
-  hostnames: string[] | null;
+/**
+ * One link (ARCHITECTURE 6.1): in the consumer app, `name` points at
+ * `target_service` of `target_app`, for the consumer's `services`.
+ */
+export interface AppLink {
+  id: number;
+  /** The name the consumer's own Compose file calls the target by. */
+  name: string;
+  target_app: string;
+  /** An exposed service of the target app. */
+  target_service: string;
+  /** The consumer's services that use the name; at least one. */
+  services: string[];
+  /** The Docker network; only in `GET /api/apps/{slug}/links`. */
+  network?: string;
+  created_at?: string;
 }
 
-/** A shared network for chosen services of apps (ARCHITECTURE 6.1). */
+/** `POST /api/apps/{slug}/links`. */
+export interface NewAppLink {
+  name: string;
+  target_app: string;
+  target_service: string;
+  services: string[];
+}
+
+/** One app of a group, what it exposes and its links (`GET /api/groups`). */
+export interface GroupMember {
+  slug: string;
+  /** The services other members may link to. */
+  services: string[] | null;
+  /** The links this app is the consumer of. */
+  links: AppLink[] | null;
+}
+
+/** The apps that may link to each other (ARCHITECTURE 6.1). */
 export interface Group {
   id: number;
   name: string;
   /** Members are apps of this environment only; it never changes. */
   environment: Environment;
-  /** The Docker network, `koroku_group_<id>`. */
-  network: string;
   /** In slug order. */
   members: GroupMember[] | null;
   created_at: string;
@@ -215,6 +240,7 @@ export interface Group {
 /** `PUT /api/apps/{slug}/group`; leaving is `{group_id: null, services: []}`. */
 export interface AppGroupChange {
   group_id: number | null;
+  /** The services to expose. */
   services: string[];
 }
 

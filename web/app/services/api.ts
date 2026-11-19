@@ -5,6 +5,7 @@ import type SessionService from './session';
 import type {
   App,
   AppGroupChange,
+  AppLink,
   AppPatch,
   AppVolume,
   BackupOverview,
@@ -27,6 +28,7 @@ import type {
   LoginSession,
   LogHistory,
   NewApp,
+  NewAppLink,
   Repo,
   ServiceStatus,
   SessionResponse,
@@ -279,9 +281,29 @@ export default class ApiService extends Service {
     return this.request('DELETE', `/api/groups/${id}`);
   }
 
-  /** Joins, leaves or changes the connected services of the app's group. */
+  /**
+   * Joins or leaves a group, or changes the exposed services. Leaving or
+   * un-exposing deletes the links that depend on it.
+   */
   setAppGroup(slug: string, body: AppGroupChange): Promise<App> {
     return this.request('PUT', `/api/apps/${seg(slug)}/group`, { body });
+  }
+
+  /** The links the app is the consumer of, by name. */
+  async listLinks(slug: string): Promise<AppLink[]> {
+    const { links } = await this.request<{ links: AppLink[] | null }>(
+      'GET',
+      `/api/apps/${seg(slug)}/links`,
+    );
+    return links ?? [];
+  }
+
+  createLink(slug: string, body: NewAppLink): Promise<AppLink> {
+    return this.request('POST', `/api/apps/${seg(slug)}/links`, { body });
+  }
+
+  deleteLink(slug: string, id: number): Promise<void> {
+    return this.request('DELETE', `/api/apps/${seg(slug)}/links/${id}`);
   }
 
   // Environment variables

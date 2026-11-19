@@ -1,16 +1,15 @@
-// Groups (ARCHITECTURE 6.1): what the console says about them and the
-// choice of a group and its services on the settings tab.
+// Groups and links (ARCHITECTURE 6.1): what the console says about them,
+// the choice of a group and of the exposed services on the settings tab,
+// and the links an app makes to the exposed services of other members.
 
 import { ENVIRONMENT_LABELS } from './status';
-import type { App, Environment, Group, GroupMember } from './types';
+import type { App, AppLink, Environment, Group, GroupMember } from './types';
 
-/** What a service of a group must be named like: one DNS label. */
-export const GROUP_SERVICE_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-
-/** The name other members reach a connected service by. */
-export function groupHostname(service: string, slug: string): string {
-  return `${service}.${slug}.koroku.internal`;
-}
+/**
+ * One DNS label: what an exposed service, a consumer service and the name
+ * of a link must look like.
+ */
+export const DNS_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 /**
  * Words in a service name (or image, when one is known) that suggest a
@@ -32,8 +31,8 @@ export function memberServices(member: GroupMember): string[] {
   return member.services ?? [];
 }
 
-export function memberHostnames(member: GroupMember): string[] {
-  return member.hostnames ?? [];
+export function memberLinks(member: GroupMember): AppLink[] {
+  return member.links ?? [];
 }
 
 export function isEmptyGroup(group: Group): boolean {
@@ -60,27 +59,104 @@ export function joinBlocker(
   return `${ENVIRONMENT_LABELS[group.environment]}のグループです。${ENVIRONMENT_LABELS[environment]}のアプリは入れません。`;
 }
 
-export interface GroupChangeEffect {
-  /** Joins a group or connects more services: effective from the next up. */
-  widens: boolean;
-  /** Leaves or disconnects services: applied when saving. */
-  narrows: boolean;
+/** An exposed service of another member: what a link may point at. */
+export interface LinkTarget {
+  app: string;
+  service: string;
+  /** `app/service`, the value of the choice. */
+  key: string;
 }
 
-/** How a change of group or services changes what can reach what. */
-export function groupChangeEffect(
-  before: { groupId: number | null; services: string[] },
+/** The exposed services of the other members of the group, by app. */
+export function linkTargets(group: Group | null, slug: string): LinkTarget[] {
+  if (!group) return [];
+  return groupMembers(group)
+    .filter((member) => member.slug !== slug)
+    .flatMap((member) =>
+      [...memberServices(member)].sort().map((service) => ({
+        app: member.slug,
+        service,
+        key: `${member.slug}/${service}`,
+      })),
+    );
+}
+
+/** `shop の auth → accounts / auth`: a link with its consumer. */
+export function linkLabel(
+  owner: string,
+  link: Pick<AppLink, 'name' | 'target_app' | 'target_service'>,
+): string {
+  return `${owner} の ${link.name} → ${link.target_app} / ${link.target_service}`;
+}
+
+/** `accounts / auth`: where a link points. */
+export function linkTargetLabel(
+  link: Pick<AppLink, 'target_app' | 'target_service'>,
+): string {
+  return `${link.target_app} / ${link.target_service}`;
+}
+
+/** A link that a change of group or of exposed services deletes. */
+export interface RemovedLink {
+  /** The consumer app. */
+  owner: string;
+  id: number;
+  label: string;
+}
+
+/**
+ * The links that go away when the app `slug`, now a member of `group`,
+ * moves to `after`: leaving (or changing groups) deletes its own links and
+ * every link to it; un-exposing a service deletes the links to that
+ * service. The API deletes them at once (docs/API.md), so the console
+ * names them before saving.
+ */
+export function removedLinks(
+  group: Group | null,
+  slug: string,
   after: { groupId: number | null; services: string[] },
-): GroupChangeEffect {
-  if (before.groupId !== after.groupId) {
-    return {
-      widens: after.groupId !== null,
-      narrows: before.groupId !== null,
-    };
+): RemovedLink[] {
+  if (!group) return [];
+  const leaving = after.groupId !== group.id;
+  const removed: RemovedLink[] = [];
+  for (const member of groupMembers(group)) {
+    for (const link of memberLinks(member)) {
+      const own = member.slug === slug;
+      const toApp = link.target_app === slug;
+      const goes =
+        (leaving && (own || toApp)) ||
+        (!leaving && toApp && !after.services.includes(link.target_service));
+      if (goes) {
+        removed.push({
+          owner: member.slug,
+          id: link.id,
+          label: linkLabel(member.slug, link),
+        });
+      }
+    }
   }
-  if (after.groupId === null) return { widens: false, narrows: false };
-  return {
-    widens: after.services.some((s) => !before.services.includes(s)),
-    narrows: before.services.some((s) => !after.services.includes(s)),
-  };
+  return removed.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Why a link name cannot be used, or `null`. The API checks the same
+ * (`link_name_taken`, `details.name`); the console says it before sending.
+ */
+export function linkNameProblem(
+  name: string,
+  ownServices: string[],
+  takenNames: string[],
+): string | null {
+  if (name === '') return '名前を入力してください。';
+  if (!DNS_LABEL.test(name)) {
+    return '英小文字・数字・ハイフンで入力してください（先頭と末尾は英小文字か数字）。';
+  }
+  if (name.length > 63) return '63 文字以内で入力してください。';
+  if (ownServices.includes(name)) {
+    return 'このアプリのサービスと同じ名前は使えません。そのサービスが止まっている間に、名前が相手に解決されてしまうためです。';
+  }
+  if (takenNames.includes(name)) {
+    return 'このアプリには、同じ名前の接続がすでにあります。';
+  }
+  return null;
 }
