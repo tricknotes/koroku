@@ -248,6 +248,36 @@ func TestSystemStatusAndDockerUsage(t *testing.T) {
 	}
 }
 
+func TestContainerResources(t *testing.T) {
+	srv := newTestServer(t, nil)
+	h := srv.Handler()
+	fake := srv.ops.(*fakeDeployer)
+
+	// No running containers: an empty list, not null.
+	fake.resources = deploy.ContainerResources{CPUCount: 2, MemoryTotalBytes: 4 << 30}
+	empty := request(t, h, http.MethodGet, "/api/system/containers", "")
+	if want := `{"cpu_count":2,"memory_total_bytes":4294967296,"groups":[]}`; strings.TrimSpace(empty.Body.String()) != want {
+		t.Errorf("empty = %s", empty.Body)
+	}
+
+	slug, limit := "blog", int64(512<<20)
+	fake.resources.Groups = []deploy.ResourceGroup{{
+		App: &slug, MemoryBytes: 100 << 20, MemoryLimitBytes: &limit, CPUPercent: 1.5,
+		Containers: []deploy.ContainerUsage{{Name: "koroku-blog-web-1", Project: "koroku-blog", Service: "web", MemoryBytes: 100 << 20, MemoryLimitBytes: &limit, CPUPercent: 1.5}},
+	}}
+	got := request(t, h, http.MethodGet, "/api/system/containers", "")
+	want := `{"cpu_count":2,"memory_total_bytes":4294967296,"groups":[{"app":"blog","memory_bytes":104857600,"memory_limit_bytes":536870912,"cpu_percent":1.5,` +
+		`"containers":[{"name":"koroku-blog-web-1","project":"koroku-blog","service":"web","memory_bytes":104857600,"memory_limit_bytes":536870912,"cpu_percent":1.5}]}]}`
+	if strings.TrimSpace(got.Body.String()) != want {
+		t.Errorf("containers = %s", got.Body)
+	}
+
+	fake.opErr = errors.New("Cannot connect to the Docker daemon")
+	if failed := request(t, h, http.MethodGet, "/api/system/containers", ""); failed.Code != http.StatusInternalServerError {
+		t.Errorf("status = %d", failed.Code)
+	}
+}
+
 func TestAppPrimaryURLAndPendingDomains(t *testing.T) {
 	checker := &fakeDomainChecker{ok: map[string]bool{"www.example.org": true}}
 	srv := newTestServer(t, func(o *Options) {

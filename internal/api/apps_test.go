@@ -35,6 +35,7 @@ type fakeDeployer struct {
 	ops        []string
 	services   []deploy.ServiceStatus
 	diskUsage  []deploy.DiskUsageItem
+	resources  deploy.ContainerResources
 }
 
 func (f *fakeDeployer) Enqueue(ctx context.Context, app store.App, ref, sha, message string) (store.Deployment, error) {
@@ -103,6 +104,12 @@ func (f *fakeDeployer) DockerDiskUsage(context.Context) ([]deploy.DiskUsageItem,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.diskUsage, f.opErr
+}
+
+func (f *fakeDeployer) ContainerResources(context.Context) (deploy.ContainerResources, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.resources, f.opErr
 }
 
 func (f *fakeDeployer) Prune(_ context.Context, images, builder bool) (deploy.PruneResult, error) {

@@ -11,6 +11,7 @@ import type {
   Branch,
   Commit,
   ComposeDetection,
+  ContainerResources,
   Deployment,
   DockerUsageItem,
   Domain,
@@ -193,6 +194,14 @@ export default class ApiService extends Service {
       '/api/system/docker',
     );
     return items ?? [];
+  }
+
+  async getContainerResources(): Promise<ContainerResources> {
+    const resources = await this.request<ContainerResources>(
+      'GET',
+      '/api/system/containers',
+    );
+    return { ...resources, groups: resources.groups ?? [] };
   }
 
   prune(body: { images: boolean; builder: boolean }): Promise<{

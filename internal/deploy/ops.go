@@ -458,10 +458,11 @@ type DiskUsageItem struct {
 	Count            int    `json:"count"`
 }
 
-// dfAttempts and dfRetryDelay bound the retries of `docker system df`.
+// dockerAttempts and dockerRetryDelay bound the retries of read-only docker
+// commands that race container removal (`docker system df`, `docker stats`).
 var (
-	dfAttempts   = 3
-	dfRetryDelay = 250 * time.Millisecond
+	dockerAttempts   = 3
+	dockerRetryDelay = 250 * time.Millisecond
 )
 
 // DockerDiskUsage reports how much disk Docker uses (`docker system df`)
@@ -479,11 +480,11 @@ func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		summary, summaryErr = e.systemDF(ctx, "system", "df", "--format", "json")
+		summary, summaryErr = e.retryingDocker(ctx, "system", "df", "--format", "json")
 	}()
 	go func() {
 		defer wg.Done()
-		detail, detailErr = e.systemDF(ctx, "system", "df", "-v", "--format", "json")
+		detail, detailErr = e.retryingDocker(ctx, "system", "df", "-v", "--format", "json")
 	}()
 	go func() {
 		defer wg.Done()
@@ -510,7 +511,8 @@ func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
 	return items, nil
 }
 
-// systemDF runs one form of `docker system df`.
+// retryingDocker runs a read-only docker command that walks every container
+// or image: `docker system df` and `docker stats`.
 //
 // With the containerd image store (the default of new Docker installs), df
 // fails when what it walks changes meanwhile: a container or image removed
@@ -519,7 +521,7 @@ func (e *Engine) DockerDiskUsage(ctx context.Context) ([]DiskUsageItem, error) {
 // container's writable layer ("snapshotter.Usage failed for ...: lstat
 // ...: no such file or directory"). Errors the daemon returns are retried
 // a few times; others (the daemon is not reachable) are returned at once.
-func (e *Engine) systemDF(ctx context.Context, args ...string) ([]byte, error) {
+func (e *Engine) retryingDocker(ctx context.Context, args ...string) ([]byte, error) {
 	var err error
 	for attempt := 1; ; attempt++ {
 		var out []byte
@@ -527,10 +529,10 @@ func (e *Engine) systemDF(ctx context.Context, args ...string) ([]byte, error) {
 		if err == nil {
 			return out, nil
 		}
-		if attempt == dfAttempts || !strings.Contains(err.Error(), "Error response from daemon") {
+		if attempt == dockerAttempts || !strings.Contains(err.Error(), "Error response from daemon") {
 			break
 		}
-		timer := time.NewTimer(time.Duration(attempt) * dfRetryDelay)
+		timer := time.NewTimer(time.Duration(attempt) * dockerRetryDelay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

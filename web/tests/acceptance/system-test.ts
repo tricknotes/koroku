@@ -9,6 +9,7 @@ import {
 } from 'koroku-console/tests/helpers/fakes';
 import type {
   BackupRun,
+  ContainerResources,
   DockerUsageItem,
   SystemInfo,
 } from 'koroku-console/utils/types';
@@ -46,6 +47,57 @@ function dockerUsage(reclaimable = true): { items: DockerUsageItem[] } {
   };
 }
 
+const MB = 1024 ** 2;
+
+function containerResources(): ContainerResources {
+  return {
+    cpu_count: 2,
+    memory_total_bytes: 4 * GB,
+    groups: [
+      {
+        app: 'shop',
+        memory_bytes: 920 * MB,
+        memory_limit_bytes: 1.5 * GB,
+        cpu_percent: 12.34,
+        containers: [
+          {
+            name: 'koroku-shop-web-1',
+            project: 'koroku-shop',
+            service: 'web',
+            memory_bytes: 480 * MB,
+            memory_limit_bytes: 512 * MB,
+            cpu_percent: 12,
+          },
+          {
+            name: 'koroku-shop-db-1',
+            project: 'koroku-shop',
+            service: 'db',
+            memory_bytes: 440 * MB,
+            memory_limit_bytes: GB,
+            cpu_percent: 0.34,
+          },
+        ],
+      },
+      {
+        app: null,
+        memory_bytes: 20 * MB,
+        memory_limit_bytes: null,
+        cpu_percent: 0.01,
+        containers: [
+          {
+            name: 'registry',
+            project: '',
+            service: '',
+            memory_bytes: 20 * MB,
+            memory_limit_bytes: null,
+            cpu_percent: 0.01,
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function run(overrides: Partial<BackupRun> = {}): BackupRun {
   return {
     id: 12,
@@ -78,6 +130,7 @@ module('Acceptance | system', function (hooks) {
     fakes.api
       .on('GET', '/api/system', () => system)
       .on('GET', '/api/system/docker', dockerUsage())
+      .on('GET', '/api/system/containers', containerResources())
       .on('GET', '/api/backups', makeBackups({ runs: [run()] }));
   });
 
@@ -195,6 +248,81 @@ module('Acceptance | system', function (hooks) {
 
       assert.dom('[data-test-resource="disk"]').exists();
       assert.dom('[data-test-error]').doesNotExist();
+    });
+  });
+
+  module('containers', function () {
+    test('memory and CPU are broken down by app, with the rest apart', async function (assert) {
+      await visit('/system');
+
+      assert.dom('[data-test-container-group]').exists({ count: 2 });
+      const shop = '[data-test-container-group="shop"]';
+      assert
+        .dom(`${shop} [data-test-container-app]`)
+        .hasText('shop')
+        .hasAttribute('href', '/apps/shop');
+      assert.dom(`${shop} [data-test-container-memory]`).hasText('920.0 MB');
+      assert
+        .dom(`${shop} [data-test-container-limit]`)
+        .includesText('上限 1.5 GB（60%）');
+      assert
+        .dom(`${shop} [data-test-container-near-limit]`)
+        .hasText('上限間近: web', 'web uses 94% of its own limit');
+      assert
+        .dom(`${shop} [data-test-container-breakdown]`)
+        .hasText('web 480.0 MB、db 440.0 MB');
+      assert.dom(`${shop} [data-test-container-cpu]`).hasText('12.3%');
+      assert
+        .dom(`${shop} [role="meter"]`)
+        .exists({ count: 2 })
+        .hasAttribute('aria-valuenow', '22.5', 'memory as a share of the host');
+
+      const other = '[data-test-container-group="その他"]';
+      assert.dom(`${other} [data-test-container-app]`).doesNotExist();
+      assert.dom(other).includesText('その他');
+      assert.dom(`${other} [data-test-container-limit]`).hasText('上限なし');
+      assert
+        .dom(`${other} [data-test-container-breakdown]`)
+        .hasText('registry 20.0 MB');
+      assert.dom(`${other} [data-test-container-near-limit]`).doesNotExist();
+
+      assert
+        .dom('[data-test-containers-total]')
+        .includesText('メモリ 940.0 MB（ホストの 22.9%）')
+        .includesText('CPU 12.4%')
+        .includesText('2 コア');
+    });
+
+    test('no running container says so', async function (assert) {
+      fakes.api.on('GET', '/api/system/containers', {
+        cpu_count: 2,
+        memory_total_bytes: 4 * GB,
+        groups: [],
+      });
+
+      await visit('/system');
+
+      assert
+        .dom('[data-test-containers-empty]')
+        .hasText('稼働中のコンテナはありません。');
+      assert.dom('[data-test-containers]').doesNotExist();
+    });
+
+    test('a failing breakdown offers a retry and leaves the rest', async function (assert) {
+      fakes.api.fail('GET', '/api/system/containers', 500, 'internal');
+
+      await visit('/system');
+
+      assert
+        .dom('[data-test-error]')
+        .includesText('コンテナのメモリと CPU を取得できませんでした');
+      assert.dom('[data-test-resource="disk"]').exists();
+      assert.dom('[data-test-docker]').exists();
+
+      fakes.api.on('GET', '/api/system/containers', containerResources());
+      await click('[data-test-error] button');
+
+      assert.dom('[data-test-container-group]').exists({ count: 2 });
     });
   });
 

@@ -164,6 +164,28 @@ export function serveConsole(
         },
       }),
     )
+    .on('GET', '/api/system/containers', {
+      cpu_count: 2,
+      memory_total_bytes: 4 * GB,
+      groups: [
+        {
+          app: slug,
+          memory_bytes: 300 * 1024 ** 2,
+          memory_limit_bytes: 512 * 1024 ** 2,
+          cpu_percent: 1.5,
+          containers: [
+            {
+              name: `koroku-${slug}-web-1`,
+              project: `koroku-${slug}`,
+              service: 'web',
+              memory_bytes: 300 * 1024 ** 2,
+              memory_limit_bytes: 512 * 1024 ** 2,
+              cpu_percent: 1.5,
+            },
+          ],
+        },
+      ],
+    })
     .on('GET', '/api/system/docker', {
       items: [
         {

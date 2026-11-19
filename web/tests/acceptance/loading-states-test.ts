@@ -36,6 +36,7 @@ module('Acceptance | loading states', function (hooks) {
   test('system: each part stands in for itself until its own answer arrives', async function (assert) {
     const system = fakes.api.hold('GET', '/api/system');
     const docker = fakes.api.hold('GET', '/api/system/docker');
+    const containers = fakes.api.hold('GET', '/api/system/containers');
     const backups = fakes.api.hold('GET', '/api/backups');
 
     const visiting = visit('/system');
@@ -48,6 +49,8 @@ module('Acceptance | loading states', function (hooks) {
       .hasAria('label', '読み込み中');
     assert.dom('[data-test-loading] .skeleton').exists();
     assert.dom('[data-test-docker-loading] .skeleton').exists();
+    assert.dom('[data-test-containers-loading]').hasAttribute('role', 'status');
+    assert.dom('[data-test-containers-loading] .skeleton').exists();
     assert.dom('[data-test-job="backup"] .skeleton').exists();
     assert.dom('[data-test-job="backup"]').includesText('読み込み中');
     assert.dom('[data-test-resource]').doesNotExist();
@@ -76,11 +79,13 @@ module('Acceptance | loading states', function (hooks) {
     assert.dom('[data-test-job="backup"] .skeleton').exists();
 
     system.release(makeSystem());
+    containers.release({ cpu_count: 2, memory_total_bytes: 1024, groups: [] });
     backups.release(makeBackups());
     await visiting;
 
     assert.dom('[data-test-loading]').doesNotExist();
     assert.dom('[data-test-resource="disk"]').exists();
+    assert.dom('[data-test-containers-empty]').exists();
     assert.dom('[data-test-job="backup"] .skeleton').doesNotExist();
     assert.dom('[data-test-backup-run]').exists();
     assert.dom('.skeleton').doesNotExist('no placeholder is left behind');

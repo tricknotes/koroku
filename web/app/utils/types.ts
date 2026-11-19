@@ -79,6 +79,36 @@ export interface DockerUsageItem {
   count: number;
 }
 
+/** One running container (`GET /api/system/containers`). */
+export interface ContainerUsage {
+  name: string;
+  /** Compose labels; empty when the container is not from Compose. */
+  project: string;
+  service: string;
+  memory_bytes: number;
+  /** `null` when the container has no memory limit. */
+  memory_limit_bytes: number | null;
+  /** Share of the whole host (all cores), 0 to 100. */
+  cpu_percent: number;
+}
+
+/** The running containers of one app, or (`app: null`) of no app. */
+export interface ContainerGroup {
+  app: string | null;
+  memory_bytes: number;
+  /** Sum of the limits; `null` when any container has none. */
+  memory_limit_bytes: number | null;
+  cpu_percent: number;
+  containers: ContainerUsage[];
+}
+
+/** `GET /api/system/containers`. */
+export interface ContainerResources {
+  cpu_count: number;
+  memory_total_bytes: number;
+  groups: ContainerGroup[];
+}
+
 export type DeploymentStatus =
   'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
 

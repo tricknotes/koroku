@@ -23,6 +23,7 @@ import {
   appVolumes,
   buildScenario,
   commits,
+  containerResources,
   dockerUsage,
   newApp,
   newDomain,
@@ -154,6 +155,15 @@ route('GET', '/api/system', ({ state }) => state.system);
 route('GET', '/api/system/docker', ({ state }) => {
   if (state.backupsDown) throw new HttpError(500, 'internal');
   return dockerUsage(state);
+});
+route('GET', '/api/system/containers', async ({ state }) => {
+  if (state.backupsDown) throw new HttpError(500, 'internal');
+  // docker stats samples twice; the real call takes a couple of seconds.
+  await new Promise((done) => setTimeout(done, 600));
+  return containerResources(
+    state,
+    (target) => state.services?.get(target.slug) ?? services(target),
+  );
 });
 route('POST', '/api/system/prune', async ({ state, body }) => {
   // Long enough to see the "in progress" state.
