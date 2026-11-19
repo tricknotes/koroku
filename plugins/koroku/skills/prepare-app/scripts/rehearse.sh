@@ -6,7 +6,8 @@
 # binding, drops every other published port, injects the env file into all
 # services, adds restart: unless-stopped and a memory limit, and then runs
 # config -> build/pull -> up --wait -> an HTTP check that accepts any status
-# below 500. The policy check is not reproduced here.
+# below 500. The policy check is not reproduced here, and neither are group
+# networks: the other apps of a group are not on this machine.
 #
 # Usage: rehearse.sh --port <container port> [options]
 #   --file <path>        Compose file relative to the repository root

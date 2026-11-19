@@ -24,6 +24,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 - **環境変数は koroku の画面で設定し、全サービスに注入される**。リポジトリの `.env` は `${VAR}` の補間に使われない。Compose の `environment:` に直書きした値は koroku の値より強いので、本番で変えたい値は `${VAR:-既定値}` の形にする。
 - **アプリが必要とする環境変数は Compose ファイルに `${VAR}` で宣言する**。koroku は Compose ファイルの `${VAR}` を読み、環境変数の画面とデプロイの前に、未設定のものを知らせる。必須の変数は `${VAR:?説明}`、任意の変数は `${VAR:-既定値}`（空でよければ `${VAR:-}`）と書く。koroku は env ファイルで全変数を全サービスに注入するので、アプリのコードが直接読むだけの変数は Compose に現れず、koroku からは見えない。新しく使い始めた変数も、ここに足すまで知らされない。
 - **データは named volume に置く**。書き込み可能な bind mount、`external` や `name:` 付きの volume、`container_name` は使えないか、同じリポジトリを staging と本番の 2 アプリで動かすと衝突する。
+- **ほかのアプリとは、共有ネットワークではなく koroku のグループでつなぐ**。`external` なネットワークで他アプリとつなぐ構成は使えない。グループでつないだサービスは `<サービス名>.<slug>.koroku.internal` で呼べるので、接続先は環境変数で渡す。
 - **ワンショットのサービス（マイグレーションなど）は `restart: "no"` を書き、別のサービスから `condition: service_completed_successfully` で待たれるようにする**。誰も待っていないと、正常終了でも `up --wait` が失敗する。
 - **デプロイ時に取得されるのはコミット済みのファイルだけ**。`.git` は消され、submodule と Git LFS は取得されない。
 - **本番の設定で起動する**。koroku にアプリの開発モードはない。ホットリロードやソースの bind mount は `compose.override.yaml` に分ければ、手元の `docker compose up` では使われ、koroku では使われない（koroku は `-f` を明示するので自動で読まない）。

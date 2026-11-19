@@ -8,7 +8,7 @@ koroku の設計（`docs/ARCHITECTURE.md` の 6〜8 章と 10 章）から、デ
 2. 画面で設定した環境変数を env ファイルに書き、override を生成する。
 3. `docker compose -p koroku-<slug> -f <Compose ファイル> -f koroku.override.yaml --env-file <env ファイル> config` で正規化し、ポリシー検査をかける。
 4. `build:` を持つサービスはホスト（x86_64）でビルドし、`image:` だけのサービスは pull する。
-5. `up -d --remove-orphans --wait --wait-timeout 300` で起動する。
+5. `up -d --remove-orphans --wait --wait-timeout 300` で起動する。アプリがグループに入っていて、グループにつなぐサービスがあるときは、先に `up --no-start` でコンテナを作り、そのサービスを共用ネットワークにつないでから起動する（下の「グループ」）。
 6. `http://127.0.0.1:<割当ポート><ヘルスチェックパス>` が 5xx 以外を返すまで最大 60 秒待つ。
 7. 手順 5 以降で失敗したら、直前に成功したリリースへ自動で戻す（DB のマイグレーションは戻さない）。
 
@@ -104,7 +104,9 @@ services:
 | `bind_outside_release` | リポジトリの外への bind mount（`../`、絶対パス、外を指すシンボリックリンク） | named volume にするか、リポジトリ内のファイルにする | 可 |
 | `bind_writable` | `:ro` のない bind mount | 設定ファイルを渡す bind には `:ro` を付ける。書き込むデータは named volume に置く | 可 |
 | `volume_host_path` | `driver_opts.device` にホストのパスを指定した named volume | 普通の named volume にする | 可 |
-| `foreign_volume` / `foreign_network` | `external: true`、`name:` で名前を固定した volume / ネットワーク | `external` と `name:` を外す（プロジェクト名が接頭辞に付く） | 可 |
+| `foreign_volume` / `foreign_network` | `external: true`、`name:` で名前を固定した volume / ネットワーク | `external` と `name:` を外す（プロジェクト名が接頭辞に付く）。ほかのアプリと通信したいなら、ネットワークを共有せず koroku のグループを使う | 可 |
+| `group_network` | `koroku_group_*`（グループの共用ネットワーク）を Compose から指すこと | 外す。共用ネットワークにつなぐのは koroku だけで、どのサービスをつなぐかは画面で選ぶ | **不可** |
+| `group_service` | グループにつなぐと画面で選んだサービスが、Compose にない、名前が DNS のラベルの形でない、`container_name` か `network_mode` を指定している | サービス名を英小文字・数字・内側の `-` にし、`container_name` と `network_mode` を外す。つなぐサービスを選び直してもよい | **不可** |
 | `capability` | Docker の既定と `IPC_LOCK`・`SYS_NICE` 以外の `cap_add`（`SYS_ADMIN`、`NET_ADMIN` など） | 外す | 可 |
 | `device` | `devices`、`device_cgroup_rules` | 外す | 可 |
 | `security_opt` | `seccomp` / `apparmor` の `unconfined`、ラベルの無効化など | 外す | 可 |
@@ -131,6 +133,18 @@ services:
 | ビルドの重さ | ビルドは本番と同じホスト（目安 2 vCPU・4GB、swap 2GB）で、ほかのアプリが動いたまま行う。マルチステージにし、`.dockerignore` で `node_modules`・`tmp`・`log` などを外す |
 | private なイメージ | koroku のホストで `docker login` してあることが前提。ホストの管理者に頼む |
 | サービス名の `-数字` | ログはコンテナ名からサービス名を求める。サービス名は英小文字と `-` / `_` にしておくと扱いやすい |
+
+## グループ（ほかのアプリとの通信）
+
+アプリ同士は既定で互いに見えない。ほかのアプリのサービスを呼びたいときは、koroku の画面でグループを作り、両方のアプリをそのグループに入れて、つなぐサービスを選ぶ。
+
+- つないだサービスは、同じグループのほかのアプリから `<サービス名>.<slug>.koroku.internal` で呼べる（例: `http://api.shop-api.koroku.internal:8080`）。接続先はアプリごとに変わるので、環境変数で渡す。staging と本番は別のグループになる（グループに入れるのは同じ環境のアプリだけ）。
+- 共用ネットワークには、この名前とコンテナ名だけが載る。`db` や `web` のような素のサービス名で、ほかのアプリのサービスに届くことはない。
+- つないだサービス同士は、双方向に全ポートで届く。ほかのアプリに見せたいのが API だけなら、API のサービスだけをつなぐ。DB をつなぐなら認証を必ず効かせる。
+- 共用ネットワークは外部と通信できない（`internal`）。外への通信は、これまでどおりアプリ自身のネットワークを通る。
+- `container_name` か `network_mode` を指定したサービスはつなげない。
+- つなぐサービスを増やしたときは、次のデプロイか起動から効く。外したときは、その場で切れる。
+- 起動時にほかのメンバーへ接続するサービスでも、起動前に共用ネットワークにつながるので、ヘルスチェックはそのまま通る。ただし、相手のアプリが止まっていれば届かない。起動時に相手を必須にしない作りにしておく。
 
 ## バックアップ
 
