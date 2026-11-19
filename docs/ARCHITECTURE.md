@@ -430,7 +430,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | `sessions` | セッション（Cookie のハッシュ、表示用の ID、最終利用、IP、User-Agent。10.3） |
 | `login_events` | ログイン履歴（10.3） |
 
-グループ内の共用ネットワーク（6.1）を実装するときに、`app_groups`（`id`, `name`（一意）, `environment`）と `app_group_services`（`app_id`, `service`。`app_id` + `service` で一意）を足し、`apps` に `group_id`（null 可）を足す。
+グループ内の共用ネットワーク（6.1）のために、`app_groups`（`id`, `name`（一意）, `environment`, `created_at`）を足し、`apps` に `group_id`（null 可）と `group_services`（共用ネットワークにつなぐサービス名の JSON 配列）を足す。サービス名は `service_memory_limits` と同じく JSON の列に持つ。アプリの行と一緒に読み書きするだけで、サービス名で検索することがないため。
 
 API はすべて JSON の REST で、ログとデプロイの進行は SSE で配信する。`/auth/*` を除き、セッション Cookie が要る。エンドポイントの一覧と形は [API.md](API.md) が正。
 

@@ -24,8 +24,8 @@
 | 401 | `unauthenticated` | 未ログイン（M3 以降、`/auth/*` と `GET /api/session` 以外のすべて） |
 | 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない（M3） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
-| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found` | 対象がない |
-| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy` | 状態の衝突 |
+| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`group_not_found` | 対象がない |
+| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`group_name_taken`、`group_not_empty` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
 | 507 | `disk_full`（`details.used_percent`、`details.limit_percent`） | ディスク使用率が上限超過でデプロイ拒否 |
 | 500 | `internal` | サーバー側の失敗（詳細はサーバーログ） |
@@ -46,7 +46,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、production のアプリの `PUT /api/apps/{slug}/group`。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## システム（M0、prune は M5）
 
@@ -193,6 +193,51 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204 |
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る） |
 | `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）と `memory_limit_bytes`（上限。無制限なら 0）も付く。取得できなければどちらも `null` |
+
+## グループ（2026-11-20、ARCHITECTURE 6.1）
+
+グループに入れたアプリは、選んだサービスだけを共用ネットワークにつなぎ、互いに `<service>.<slug>.koroku.internal` で呼べる。
+
+グループの形:
+
+```json
+{
+  "id": 3,
+  "name": "shop",
+  "environment": "staging",
+  "network": "koroku_group_3",
+  "members": [
+    { "slug": "shop-api", "services": ["api"], "hostnames": ["api.shop-api.koroku.internal"] },
+    { "slug": "shop-web", "services": [], "hostnames": [] }
+  ],
+  "created_at": "2026-11-20T03:00:00Z"
+}
+```
+
+- `environment` は `production` / `staging`。作成後は変えられない。メンバーは同じ `environment` のアプリだけ。
+- `members` は slug 順。`services` が空のメンバーは、まだどのサービスも共用ネットワークにつないでいない。
+
+アプリの形には `group_id`（所属するグループの ID。なければ `null`）と `group_services`（共用ネットワークにつなぐサービス名の配列。空なら `[]`）が付く。
+
+| メソッドとパス | 内容 |
+| --- | --- |
+| `GET /api/groups` | `{"groups": [グループ, ...]}`（名前順） |
+| `POST /api/groups` | 作成。ボディ `{"name": "shop", "environment": "staging"}`。201 でグループ。`name` は前後の空白を除いて 1〜40 文字。重複は `409 group_name_taken`。作成時にネットワークも作る |
+| `PATCH /api/groups/{id}` | ボディ `{"name": "..."}`。200 でグループ |
+| `DELETE /api/groups/{id}` | 204。メンバーがいれば `409 group_not_empty`。ネットワークも消す |
+| `PUT /api/apps/{slug}/group` | 所属と、つなぐサービスを設定する。ボディ `{"group_id": 3, "services": ["api"]}`。抜けるときは `{"group_id": null, "services": []}`。200 でアプリ |
+
+`PUT /api/apps/{slug}/group` の細則:
+
+- グループがなければ `422 validation_failed`（`details.group_id`）。`environment` が違えば同じく `details.group_id`。
+- `services` の各要素は `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`（DNS のラベルとして使える形）で、重複なし。そうでなければ `422 validation_failed`（`details.services`）。デプロイ済みのアプリでは、稼働中のリリースにないサービス名も同じエラーになる。`group_id` が `null` のときは空でなければならない。
+- 名前が他のメンバーと衝突すれば `422 group_name_conflict`（`details` はポリシー違反と同じ形の一覧で、`rule` は `group_name_conflict`）。
+- デプロイ中や他の操作の実行中は `409 busy`。
+- 届く範囲を広げる変更（参加、サービスの追加）は、次のデプロイか起動から効く。狭める変更（離脱、サービスの解除）は、この API の中で共用ネットワークから切り離してから応答する。
+- `environment` が `production` のアプリでは再ログイン（`403 reauth_required`）が要る。
+- グループに入っているアプリの `environment` は `PATCH /api/apps/{slug}` で変えられない（`422 validation_failed`、`details.environment`）。先にグループから抜ける。
+
+デプロイと起動のときも同じ名前の検査を行い、衝突があればデプロイは `failed`（ログに `Policy violation: [group_name_conflict] ...`）、起動は `422 policy_violation` になる。
 
 ## 環境変数（M1）
 
