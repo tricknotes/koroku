@@ -14,9 +14,11 @@ export const ENV_SOURCE_LABELS: Record<EnvSource, string> = {
 const REASONS: Record<EnvRequirementsReason, string> = {
   file_not_found: 'ファイルがリポジトリにありません。',
   repo_unavailable:
-    'GitHub App がこのリポジトリにインストールされていないため、ファイルを読めません。',
+    'リポジトリを読めません。private リポジトリなら、GitHub App をインストールしてください（public リポジトリは App なしで読めます）。',
   unsupported_repo:
-    'リポジトリを URL で指定したアプリでは、ファイルを読めません（GitHub のリポジトリ名で指定したアプリだけが対象です）。',
+    'GitHub 以外の URL で指定したリポジトリは、ファイルを読めません（github.com のリポジトリだけが対象です）。',
+  // No longer sent since public repositories are read without the App;
+  // kept for older servers.
   not_configured: 'GitHub App が設定されていないため、ファイルを読めません。',
   ref_not_found: 'ブランチかコミットが見つかりません。',
   too_large: 'ファイルが大きすぎて読めません。',

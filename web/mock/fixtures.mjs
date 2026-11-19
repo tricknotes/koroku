@@ -45,7 +45,7 @@ export const SCENARIOS = {
   'env-dotenv':
     'blog compares with .env.example: one key is missing, one saved key is no longer listed',
   'env-unavailable':
-    'blog compares with .env.example, which the repository does not have; shop cannot be read from GitHub',
+    'blog compares with .env.example, which the repository does not have; shop is private and the GitHub App is not installed on it',
 };
 
 function ago(ms) {
@@ -483,7 +483,7 @@ export function buildScenario(name) {
         requirements: new Map([
           [
             'shop',
-            { compose: { status: 'unavailable', reason: 'github_error' } },
+            { compose: { status: 'unavailable', reason: 'repo_unavailable' } },
           ],
         ]),
       });

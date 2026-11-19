@@ -495,15 +495,16 @@ function appTabShots() {
       wait: '[data-test-env-reqs-unavailable]',
     },
     {
-      name: 'env-reqs-fetch-error',
+      name: 'env-reqs-private',
       path: '/apps/shop/env?scenario=env-unavailable',
       wait: '[data-test-env-reqs-unavailable]',
       themes: ['light'],
     },
     {
-      name: 'env-reqs-unconfigured-phone',
+      // No GitHub App: the public repository is read anonymously.
+      name: 'env-reqs-no-app-phone',
       path: '/apps/blog/env?scenario=unconfigured',
-      wait: '[data-test-env-reqs-unavailable]',
+      wait: '[data-test-env-reqs-ok], [data-test-env-reqs-missing], [data-test-env-reqs-none]',
       ...PHONE,
       themes: ['dark'],
     },

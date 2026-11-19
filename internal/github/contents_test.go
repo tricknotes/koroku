@@ -240,3 +240,52 @@ func TestContentPathsCannotEscapeTheRepository(t *testing.T) {
 		t.Errorf("requests were sent for invalid paths: %q", seen)
 	}
 }
+
+// An anonymous client reads public repositories without any credential and
+// refuses everything that needs the App.
+func TestAnonymousClient(t *testing.T) {
+	f := newFakeGitHub(t)
+	content := []byte("services: {}\n")
+	f.mux.HandleFunc("GET /repos/octo/public/contents/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, fileEntry("compose.yaml", content))
+	})
+	f.mux.HandleFunc("GET /repos/octo/public/contents", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, []map[string]any{{"type": "file", "name": "compose.yaml"}})
+	})
+	f.mux.HandleFunc("GET /repos/octo/private/contents", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "Not Found")
+	})
+	c, err := NewAnonymous(f.srv.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	names, err := c.ListDir(ctx, "octo", "public", "", "main")
+	if err != nil || len(names) != 1 {
+		t.Fatalf("ListDir = %v, %v", names, err)
+	}
+	got, err := c.ReadFile(ctx, "octo", "public", "compose.yaml", "main")
+	if err != nil || string(got) != string(content) {
+		t.Fatalf("ReadFile = %q, %v", got, err)
+	}
+	f.mu.Lock()
+	bearer, requests := f.lastBearer, len(f.requests)
+	f.mu.Unlock()
+	if bearer != "" || requests != 2 {
+		t.Errorf("credential %q sent, %d requests (no token minting expected)", bearer, requests)
+	}
+
+	if _, err := c.ListDir(ctx, "octo", "private", "", "main"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("private repository: %v, want ErrNotFound", err)
+	}
+	if _, err := c.RepoToken(ctx, "octo", "public"); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("RepoToken: %v, want ErrNotConfigured", err)
+	}
+	if _, err := c.ExchangeCode(ctx, "code", "https://example.com/cb"); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("ExchangeCode: %v, want ErrNotConfigured", err)
+	}
+	if s := c.String(); s != "github.Client{anonymous}" {
+		t.Errorf("String = %q", s)
+	}
+}

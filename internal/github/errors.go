@@ -21,6 +21,9 @@ var (
 	ErrInvalidArgument = errors.New("github: invalid argument")
 	// ErrTooLarge means a file is bigger than MaxFileSize.
 	ErrTooLarge = errors.New("github: file too large")
+	// ErrNotConfigured means the call needs App credentials and the client
+	// has none (NewAnonymous).
+	ErrNotConfigured = errors.New("github: no app credentials")
 )
 
 // APIError is a non-2xx response from GitHub.

@@ -106,14 +106,14 @@ export default class AppDeployTemplate extends Component<Signature> {
   );
   /** What the commit picked in the form needs (ARCHITECTURE 9.4). */
   targetRequirements = new Loadable<EnvRequirements>(() =>
-    this.api.getEnvRequirements(this.app.slug, { sha: this.checkedSha }),
+    this.api.getEnvRequirements(this.app.slug, this.checkedQuery),
   );
   /** What the deployment waiting in the confirmation dialog needs. */
   pendingRequirements = new Loadable<EnvRequirements>(() =>
     this.api.getEnvRequirements(this.app.slug, this.pendingTarget()),
   );
-  /** The commit `targetRequirements` was loaded for. */
-  private checkedSha = '';
+  /** What `targetRequirements` was loaded for: a commit, or a typed ref. */
+  private checkedQuery: { ref?: string; sha?: string } = {};
 
   @tracked branch: string;
   /** Empty means "the head of the branch". */
@@ -135,8 +135,14 @@ export default class AppDeployTemplate extends Component<Signature> {
 
     void this.loadHistory();
     if (this.app.repo_full_name) {
-      void this.branches.load();
+      // Without the lists (the App cannot see the repository) the ref is
+      // typed; check the default one right away.
+      void this.branches.load().then(() => {
+        if (this.manual) this.checkManual();
+      });
       void this.loadCommits();
+    } else {
+      this.checkManual();
     }
 
     this.poller.every(this, POLL_INTERVAL, () => this.poll());
@@ -235,9 +241,12 @@ export default class AppDeployTemplate extends Component<Signature> {
     if (wasActive && !this.hasActive) await this.args.model.reload();
   };
 
-  /** Requirements are only read for repositories the GitHub App reads. */
+  /**
+   * Requirements are read from GitHub, with the App or anonymously for
+   * public repositories; the server says when it cannot (ARCHITECTURE 9.4).
+   */
   get checksRequirements(): boolean {
-    return Boolean(this.app.repo_full_name) && this.app.env_source !== 'off';
+    return this.app.env_source !== 'off';
   }
 
   private async loadCommits(): Promise<void> {
@@ -248,15 +257,39 @@ export default class AppDeployTemplate extends Component<Signature> {
   /** Compares the commit the form would deploy with the saved variables. */
   private checkTarget(): void {
     const sha = this.targetCommit?.sha ?? '';
-    if (!this.checksRequirements || !sha || sha === this.checkedSha) return;
-    this.checkedSha = sha;
+    if (!this.checksRequirements || !sha || sha === this.checkedQuery.sha)
+      return;
+    this.checkedQuery = { sha };
     void this.targetRequirements.load();
   }
+
+  /** The same for a ref or SHA typed by hand, once the field is left. */
+  checkManual = () => {
+    const value = this.manualRef.trim();
+    if (!this.checksRequirements || !value) return;
+    const query = isFullSha(value)
+      ? { sha: value.toLowerCase() }
+      : { ref: value };
+    if (
+      query.sha === this.checkedQuery.sha &&
+      query.ref === this.checkedQuery.ref
+    )
+      return;
+    this.checkedQuery = query;
+    void this.targetRequirements.load();
+  };
 
   /** Shown only while it is about the commit still picked. */
   get targetRequirementsValue(): EnvRequirements | null {
     const value = this.targetRequirements.value;
     if (!value || this.targetRequirements.loading) return null;
+    if (this.manual) {
+      const typed = this.manualRef.trim();
+      const matches = isFullSha(typed)
+        ? value.commit_sha === typed.toLowerCase()
+        : value.ref === typed;
+      return matches ? value : null;
+    }
     return value.commit_sha === this.targetCommit?.sha ? value : null;
   }
 
@@ -412,6 +445,7 @@ export default class AppDeployTemplate extends Component<Signature> {
               data-deploy-focus
               data-test-deploy-ref
               {{on "input" (setValue this "manualRef")}}
+              {{on "change" this.checkManual}}
             />
           </FormField>
         {{else}}

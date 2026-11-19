@@ -143,10 +143,39 @@ func New(cfg Config) (*Client, error) {
 	}, nil
 }
 
+// NewAnonymous returns a client that sends no credentials. It can read
+// public repositories (ListDir, ReadFile, within GitHub's limit of 60
+// unauthenticated requests an hour per IP); everything that needs the App
+// fails with ErrNotConfigured. apiBaseURL defaults to https://api.github.com
+// and httpClient to one with a timeout.
+func NewAnonymous(apiBaseURL string, httpClient *http.Client) (*Client, error) {
+	apiBase, err := normalizeBaseURL(apiBaseURL, defaultAPIBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("github: api base url: %w", err)
+	}
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: defaultTimeout}
+	}
+	return &Client{
+		apiBase:       apiBase,
+		webBase:       defaultWebBaseURL,
+		http:          httpClient,
+		clock:         clock.System{},
+		tokens:        make(map[int64]*tokenSlot),
+		installations: make(map[string]installationEntry),
+	}, nil
+}
+
+// anonymous reports whether the client has no App credentials.
+func (c *Client) anonymous() bool { return c.key == nil }
+
 // String identifies the client without exposing its credentials.
 func (c *Client) String() string {
 	if c == nil {
 		return "github.Client(nil)"
+	}
+	if c.anonymous() {
+		return "github.Client{anonymous}"
 	}
 	return "github.Client{AppID:" + strconv.FormatInt(c.appID, 10) + "}"
 }

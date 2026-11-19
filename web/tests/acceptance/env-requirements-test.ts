@@ -308,6 +308,34 @@ module('Acceptance | environment variable requirements', function (hooks) {
       );
     });
 
+    test('a ref typed by hand is checked too (no branch list without the App)', async function (assert) {
+      app = {
+        ...app,
+        repo_full_name: '',
+        repo_url: 'https://github.com/octo/blog.git',
+      };
+      fakes.api.on('GET', REQUIREMENTS, (call: FakeCall) => {
+        const ref = call.query['ref'] ?? '';
+        const needs =
+          ref === 'main'
+            ? [variable('DATABASE_URL'), variable('SMTP_HOST')]
+            : [variable('DATABASE_URL')];
+        return requirements(saved, needs, { ref, commit_sha: SHA_A });
+      });
+      await visit('/apps/blog/deploy');
+
+      assert.deepEqual(fakes.api.callsTo('GET', REQUIREMENTS)[0]?.query, {
+        ref: 'main',
+      });
+      assert.dom('[data-test-deploy-env-warning]').includesText('SMTP_HOST');
+
+      await fillIn('[data-test-deploy-ref]', 'old-release');
+      assert.deepEqual(fakes.api.callsTo('GET', REQUIREMENTS).at(-1)?.query, {
+        ref: 'old-release',
+      });
+      assert.dom('[data-test-deploy-env-warning]').doesNotExist();
+    });
+
     test('apps that are not compared ask nothing', async function (assert) {
       app = { ...app, env_source: 'off' };
       await visit('/apps/blog/deploy');

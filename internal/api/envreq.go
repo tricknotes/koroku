@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -97,15 +98,9 @@ func (s *Server) readEnvRequirements(ctx context.Context, app store.App, out *en
 	if app.EnvSource == envreq.SourceOff {
 		return envreq.Result{Status: envreq.StatusOff}
 	}
-	if app.RepoURL != "" || app.RepoFullName == "" {
+	owner, repo, ok := githubRepoOf(app)
+	if !ok {
 		return envreq.Unavailable(envreq.ReasonUnsupportedRepo, "")
-	}
-	owner, repo, err := github.SplitFullName(app.RepoFullName)
-	if err != nil {
-		return envreq.Unavailable(envreq.ReasonUnsupportedRepo, "")
-	}
-	if s.auth.GitHub == nil {
-		return envreq.Unavailable(envreq.ReasonNotConfigured, "")
 	}
 	if out.CommitSHA == "" {
 		if s.refs == nil {
@@ -126,4 +121,26 @@ func (s *Server) readEnvRequirements(ctx context.Context, app store.App, out *en
 		s.log.Warn("reading env requirements failed", "app", app.Slug)
 	}
 	return result
+}
+
+// githubRepoOf names the github.com repository an app is fetched from: its
+// full name, or a repo_url of the form https://github.com/<owner>/<repo>
+// (with or without .git). Other URLs cannot be read through the API.
+func githubRepoOf(app store.App) (owner, repo string, ok bool) {
+	fullName := app.RepoFullName
+	if app.RepoURL != "" {
+		u, err := url.Parse(app.RepoURL)
+		if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, "github.com") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			return "", "", false
+		}
+		fullName = strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
+	}
+	if fullName == "" {
+		return "", "", false
+	}
+	owner, repo, err := github.SplitFullName(fullName)
+	if err != nil {
+		return "", "", false
+	}
+	return owner, repo, true
 }

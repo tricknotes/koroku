@@ -458,7 +458,11 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - GitHub の contents API（installation token）で、ref のコミットのファイルを読む。clone はしない。ブランチ名はまずデプロイと同じ方法でコミット SHA に解決し、Compose ファイルのパスの自動検出（ルートの一覧）と本体の読み取りを SHA で行う。
 - 結果は（リポジトリ、SHA、方式、パス）をキーに、プロセス内に 64 件までキャッシュする。SHA の中身は変わらないので期限は付けない。環境変数を 1 件保存するたびに画面が照合し直しても、GitHub への問い合わせは SHA の解決 1 回で済む。キャッシュするのはキーと説明だけで、値は持たない。「ファイルがない」はそのコミットでは変わらないのでキャッシュし、ほかの失敗はキャッシュしない。
 - GitHub への問い合わせは全体で 15 秒で打ち切る。
-- 読めなかったときもエラーにせず、200 で `status: "unavailable"` と理由を返し、画面は照合なしで通常どおり使えるようにする。理由は `file_not_found`（ファイルがない）、`repo_unavailable`（GitHub App がインストールされていない。public でも、認証なしの contents API は 1 時間 60 回の制限があるので使わない）、`unsupported_repo`（`repo_url` を明示したアプリ。GitHub の API で読めない）、`not_configured`（GitHub App が未設定）、`ref_not_found`、`too_large`、`rate_limited`、`github_error`。
+- GitHub App で読めないリポジトリは、認証なしの contents API で読む（2026-11-20 に変更。利用者の依頼で public リポジトリにも対応した。当初は 1 時間 60 回の制限を理由に使わなかった）。対象は、App がインストールされていないリポジトリ、App そのものが未設定のホスト、`repo_url` が `https://github.com/<owner>/<repo>`（`.git` 付きも可）のアプリ。
+  - 制限は送信元 IP ごとに 1 時間 60 回で、koroku の画面からの照合だけがこれを使う。1 コミットにつき 2 回（ルートの一覧とファイル本体）で、結果はコミットごとにキャッシュするので、新しいコミットを 1 時間に 30 個まで照合できる。ブランチからコミットへの解決は `git ls-remote`（7 章のデプロイと同じ）で、この回数に入らない。
+  - 超えたら `rate_limited` を返し、画面は照合なしで使える。デプロイは git で取得するので影響しない。
+  - 認証なしで 404 なら、private か存在しないリポジトリなので `repo_unavailable` にする。
+- 読めなかったときもエラーにせず、200 で `status: "unavailable"` と理由を返し、画面は照合なしで通常どおり使えるようにする。理由は `file_not_found`（ファイルがない）、`repo_unavailable`（GitHub App からも認証なしでも読めない。private リポジトリに App がインストールされていないなど）、`unsupported_repo`（`repo_url` が github.com 以外。GitHub の API では読めない）、`ref_not_found`、`too_large`、`rate_limited`、`github_error`。`not_configured` は、認証なしで読めるようになったので返さなくなった（古い画面のために型には残す）。
 - 不採用案: デプロイの手順 2 で取得したチェックアウトから読む。デプロイ前に知りたいという目的に合わない。
 
 ## 10. セキュリティと運用

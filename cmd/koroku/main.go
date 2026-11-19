@@ -290,6 +290,13 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 
 	gitRefs := deploy.GitRefResolver{Fetcher: fetcher}
 	apiOpts.Refs = gitRefs
+	// Public repositories the App cannot see (or every repository, without
+	// an App) are read anonymously for the variable comparison.
+	publicGitHub, err := github.NewAnonymous("", nil)
+	if err != nil {
+		return fmt.Errorf("github: %w", err)
+	}
+	apiOpts.PublicFiles = publicGitHub
 	if gh != nil {
 		tokens := deploy.GitHubTokens{Client: gh}
 		deployOpts.Tokens = tokens

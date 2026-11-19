@@ -68,8 +68,13 @@ func (a apiCommit) commit() Commit {
 }
 
 // repoCall prepares a GET on a path below /repos/{owner}/{repo}, authenticated
-// with the repository's installation token.
+// with the repository's installation token, or unauthenticated on an
+// anonymous client.
 func (c *Client) repoCall(ctx context.Context, owner, repo, suffix string, query url.Values) (call, error) {
+	if c.anonymous() {
+		// Public repositories only; GitHub answers 404 for the rest.
+		return call{method: http.MethodGet, path: repoPath(owner, repo) + suffix, query: query}, nil
+	}
 	tok, err := c.RepoToken(ctx, owner, repo)
 	if err != nil {
 		return call{}, err
