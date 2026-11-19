@@ -61,7 +61,7 @@ type App struct {
 	// needs: "compose", "dotenv" or "off" (ARCHITECTURE 9.4).
 	EnvSource string
 	// EnvExamplePath is the .env.example path read in dotenv mode.
-	EnvExamplePath      string
+	EnvExamplePath string
 	// GroupID is the group whose network GroupServices join (ARCHITECTURE
 	// 6.1). Membership is changed with SetAppGroup only.
 	GroupID             *int64

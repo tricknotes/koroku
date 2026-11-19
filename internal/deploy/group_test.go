@@ -302,4 +302,3 @@ func TestReconcileGroups(t *testing.T) {
 		t.Errorf("disconnected = %v, want %v", disconnected, want)
 	}
 }
-

@@ -361,6 +361,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	}
 	apiOpts.Deployer = engine
 	apiOpts.Ops = engine
+	apiOpts.Groups = engine
 	go engine.RunMaintenance(ctx)
 	srv := api.New(apiOpts)
 	go checker.Run(ctx, routing.RecheckInterval)

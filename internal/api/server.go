@@ -57,6 +57,8 @@ type Options struct {
 	Volumes AppVolumes
 	// RouteStatus reports the last proxy configuration load. Optional.
 	RouteStatus func() RouteStatus
+	// Groups manages app groups and their networks (ARCHITECTURE 6.1).
+	Groups GroupManager
 }
 
 // Server routes HTTP requests.
@@ -80,6 +82,7 @@ type Server struct {
 	backups  Backups
 	volumes  AppVolumes
 	envReqs  *envreq.Reader
+	groups   GroupManager
 
 	routeStatus func() RouteStatus
 
@@ -120,6 +123,7 @@ func New(opts Options) *Server {
 		logs:     opts.Logs,
 		backups:  opts.Backups,
 		volumes:  opts.Volumes,
+		groups:   opts.Groups,
 
 		routeStatus: opts.RouteStatus,
 
@@ -188,6 +192,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/apps/{slug}/backups/restore", s.handleRestoreVolume)
 	mux.HandleFunc("GET /api/apps/{slug}/backups/{snapshot}/download", s.handleDownloadDump)
 	mux.HandleFunc("GET /api/apps/{slug}/volumes", s.handleListVolumes)
+
+	mux.HandleFunc("GET /api/groups", s.handleListGroups)
+	mux.HandleFunc("POST /api/groups", s.handleCreateGroup)
+	mux.HandleFunc("PATCH /api/groups/{id}", s.handleUpdateGroup)
+	mux.HandleFunc("DELETE /api/groups/{id}", s.handleDeleteGroup)
+	mux.HandleFunc("PUT /api/apps/{slug}/group", s.handleSetAppGroup)
 
 	mux.HandleFunc("GET /api/deployments/{id}", s.handleGetDeployment)
 	mux.HandleFunc("GET /api/deployments/{id}/logs", s.handleDeploymentLogs)
