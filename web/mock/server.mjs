@@ -23,6 +23,7 @@ import {
   appVolumes,
   buildScenario,
   commits,
+  composeRequirements,
   containerResources,
   dockerUsage,
   newApp,
@@ -305,6 +306,61 @@ route('DELETE', '/api/apps/:slug/env/:key', (context) => {
   );
   return envList(context);
 });
+
+/**
+ * What the repository needs at a commit, compared with the saved keys. The
+ * body carries a `status` field of its own, so it is sent as `json`.
+ */
+route('GET', '/api/apps/:slug/env/requirements', (context) => ({
+  status: 200,
+  json: envRequirements(context),
+}));
+
+function envRequirements(context) {
+  const app = appOf(context);
+  const source = app.env_source ?? 'compose';
+  const sha = context.query.get('sha');
+  const ref = sha ? '' : (context.query.get('ref') ?? app.default_branch);
+  const head = {
+    source,
+    ref,
+    commit_sha: sha ?? commits()[0].sha,
+    path: '',
+    reason: '',
+    variables: [],
+    unlisted: [],
+  };
+  if (source === 'off') return { ...head, status: 'off', commit_sha: '' };
+  if (context.state.github === false) {
+    return {
+      ...head,
+      status: 'unavailable',
+      reason: 'not_configured',
+      commit_sha: '',
+    };
+  }
+  const spec =
+    context.state.requirements?.get(app.slug)?.[source] ??
+    (source === 'compose'
+      ? composeRequirements()
+      : {
+          status: 'unavailable',
+          reason: 'file_not_found',
+          path: app.env_example_path || '.env.example',
+        });
+  if (spec.status !== 'ok') return { ...head, ...spec, variables: [] };
+  const saved = new Set(savedEnv(context).map((v) => v.key));
+  const listed = new Set(spec.variables.map((v) => v.key));
+  return {
+    ...head,
+    status: 'ok',
+    path: spec.path,
+    variables: spec.variables
+      .map((v) => ({ ...v, set: saved.has(v.key) }))
+      .sort((a, b) => (a.key < b.key ? -1 : 1)),
+    unlisted: [...saved].filter((key) => !listed.has(key)).sort(),
+  };
+}
 
 route('GET', '/api/apps/:slug/deployments', (context) => ({
   deployments: context.state.deployments.get(appOf(context).slug),

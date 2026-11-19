@@ -92,8 +92,19 @@
   font-size: var(--text-xs);
 }
 
-.deploy-form-error > .banner {
+.deploy-form-error > .banner,
+.deploy-env-warning > .banner {
   margin-bottom: 0;
+}
+
+/* Inside the confirmation dialog the warning follows the text closely. */
+.dialog-body .env-reqs-warning {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+}
+
+.env-reqs-warning p {
+  margin: var(--space-1) 0 0;
 }
 
 /* History: one row per deployment, opening into its steps. */
@@ -572,6 +583,19 @@ div.step-header {
 
   .deploy-detail-actions {
     margin-left: 0;
+  }
+
+  /* The link goes under the text instead of squeezing it. */
+  .deploy-env-warning > .banner {
+    flex-wrap: wrap;
+  }
+
+  .deploy-env-warning .banner-body {
+    flex-basis: calc(100% - 2.5rem);
+  }
+
+  .deploy-env-warning .banner-actions {
+    margin-left: calc(var(--text-md) + var(--space-3));
   }
 
   /* The step's own title gives way; name, state and duration stay. */

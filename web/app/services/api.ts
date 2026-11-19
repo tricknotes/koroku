@@ -17,6 +17,7 @@ import type {
   Domain,
   DomainList,
   EnvList,
+  EnvRequirements,
   EnvPending,
   EnvVar,
   LogArchive,
@@ -294,6 +295,29 @@ export default class ApiService extends Service {
         `/api/apps/${seg(slug)}/env/${seg(key)}`,
       ),
     );
+  }
+
+  /**
+   * What the repository needs at `target` (a branch or a full SHA; the
+   * app's default branch when omitted), compared with the saved keys.
+   */
+  async getEnvRequirements(
+    slug: string,
+    target: { ref?: string; sha?: string } = {},
+  ): Promise<EnvRequirements> {
+    const query: Record<string, string> = {};
+    if (target.sha) query['sha'] = target.sha;
+    else if (target.ref) query['ref'] = target.ref;
+    const json = await this.request<EnvRequirements>(
+      'GET',
+      `/api/apps/${seg(slug)}/env/requirements`,
+      { query },
+    );
+    return {
+      ...json,
+      variables: json.variables ?? [],
+      unlisted: json.unlisted ?? [],
+    };
   }
 
   // Deployments

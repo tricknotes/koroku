@@ -38,6 +38,14 @@ export const SCENARIOS = {
     'everything fine, but the login is older than 10 minutes: secrets are hidden and dangerous operations ask to log in again',
   'env-pending':
     'everything fine, but blog has saved variables that its running release does not have yet',
+  'env-missing':
+    'the Compose file of blog asks for variables that are not saved: two required, two optional',
+  'env-optional':
+    'the Compose file of blog asks for optional variables that are not saved (defaults apply)',
+  'env-dotenv':
+    'blog compares with .env.example: one key is missing, one saved key is no longer listed',
+  'env-unavailable':
+    'blog compares with .env.example, which the repository does not have; shop cannot be read from GitHub',
 };
 
 function ago(ms) {
@@ -97,6 +105,8 @@ function app(slug, overrides = {}) {
     dump_hook_service: 'db',
     dump_hook_command: 'pg_dump -U postgres app',
     backup_before_deploy: production,
+    env_source: 'compose',
+    env_example_path: '',
     url,
     primary_url: url,
     pending_domains: 0,
@@ -431,6 +441,55 @@ export function buildScenario(name) {
       state.snapshots = new Map([[fresh.slug, []]]);
       return state;
     }
+    case 'env-missing':
+      return scenario(healthyApps(), {
+        requirements: new Map([
+          ['blog', { compose: composeRequirements(MISSING_EXTRA) }],
+        ]),
+      });
+    case 'env-optional':
+      return scenario(healthyApps(), {
+        requirements: new Map([
+          [
+            'blog',
+            {
+              compose: composeRequirements(
+                MISSING_EXTRA.filter((v) => !v.required),
+              ),
+            },
+          ],
+        ]),
+      });
+    case 'env-dotenv': {
+      const state = scenario(healthyApps(), {
+        requirements: new Map([
+          [
+            'blog',
+            {
+              dotenv: {
+                status: 'ok',
+                path: '.env.example',
+                variables: DOTENV_VARIABLES,
+              },
+            },
+          ],
+        ]),
+      });
+      state.apps.get('blog').env_source = 'dotenv';
+      return state;
+    }
+    case 'env-unavailable': {
+      const state = scenario(healthyApps(), {
+        requirements: new Map([
+          [
+            'shop',
+            { compose: { status: 'unavailable', reason: 'github_error' } },
+          ],
+        ]),
+      });
+      state.apps.get('blog').env_source = 'dotenv';
+      return state;
+    }
     case 'env-pending': {
       // Saved: one value changed and one variable added since the release
       // was deployed; the release still has one that was deleted since.
@@ -566,6 +625,78 @@ export const ENV_VARS = [
   { key: 'DATABASE_URL', value: 'postgres://app:not-a-real-password@db/app' },
   { key: 'RAILS_ENV', value: 'production' },
   { key: 'SECRET_KEY_BASE', value: '0000000000000000000000000000000000000000' },
+];
+
+/**
+ * What a Compose file asks for (GET /api/apps/{slug}/env/requirements):
+ * the saved ENV_VARS, plus `extra`.
+ */
+export function composeRequirements(extra = []) {
+  return {
+    status: 'ok',
+    path: 'compose.yaml',
+    variables: [
+      {
+        key: 'DATABASE_URL',
+        required: true,
+        default: null,
+        description: '',
+      },
+      {
+        key: 'RAILS_ENV',
+        required: false,
+        default: 'production',
+        description: '',
+      },
+      {
+        key: 'SECRET_KEY_BASE',
+        required: true,
+        default: null,
+        description: 'openssl rand -hex 64 で作る',
+      },
+      ...extra,
+    ],
+  };
+}
+
+/** Variables a newer commit of blog started to use. */
+export const MISSING_EXTRA = [
+  {
+    key: 'SMTP_HOST',
+    required: true,
+    default: null,
+    description: '送信メールのサーバー',
+  },
+  { key: 'SMTP_PASSWORD', required: true, default: null, description: '' },
+  {
+    key: 'MAIL_FROM',
+    required: false,
+    default: 'noreply@example.com',
+    description: '',
+  },
+  { key: 'RAILS_MAX_THREADS', required: false, default: '5', description: '' },
+];
+
+/** The keys of a `.env.example`; RAILS_ENV is saved but not listed. */
+export const DOTENV_VARIABLES = [
+  {
+    key: 'DATABASE_URL',
+    required: true,
+    default: null,
+    description: 'PostgreSQL の接続先',
+  },
+  {
+    key: 'SECRET_KEY_BASE',
+    required: true,
+    default: null,
+    description: 'openssl rand -hex 64 で作る',
+  },
+  {
+    key: 'STRIPE_API_KEY',
+    required: true,
+    default: null,
+    description: '決済に使う Stripe のシークレットキー',
+  },
 ];
 
 /** Starts a backup that the mock finishes by itself a little later. */

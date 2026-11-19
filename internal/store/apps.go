@@ -23,6 +23,10 @@ const (
 	EnvironmentStaging    = "staging"
 )
 
+// EnvSourceCompose is the default source of required variables for new
+// apps (ARCHITECTURE 9.4). The values are defined by package envreq.
+const EnvSourceCompose = "compose"
+
 var (
 	// ErrConflict is returned when a unique value (slug, hostname) is taken.
 	ErrConflict = errors.New("already exists")
@@ -53,9 +57,14 @@ type App struct {
 	DumpHookService      string
 	DumpHookCommand      string
 	BackupBeforeDeploy   bool
-	CurrentDeploymentID  *int64
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// EnvSource is where the console reads the variables the repository
+	// needs: "compose", "dotenv" or "off" (ARCHITECTURE 9.4).
+	EnvSource string
+	// EnvExamplePath is the .env.example path read in dotenv mode.
+	EnvExamplePath      string
+	CurrentDeploymentID *int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // CloneURL is the URL git fetches from.
@@ -76,7 +85,8 @@ func (a App) ProjectName() string { return "koroku-" + a.Slug }
 const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 	web_service, web_port, host_port, healthcheck_path, desired_state, environment,
 	relax_policy, memory_limit, service_memory_limits, current_deployment_id, created_at, updated_at,
-	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy`
+	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
+	env_source, env_example_path`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -95,7 +105,8 @@ func scanApp(row rowScanner) (App, error) {
 	err := row.Scan(&a.ID, &a.Slug, &repoID, &a.RepoFullName, &a.RepoURL, &a.DefaultBranch, &a.ComposePath,
 		&a.WebService, &a.WebPort, &a.HostPort, &a.HealthcheckPath, &a.DesiredState, &a.Environment,
 		&a.RelaxPolicy, &a.MemoryLimit, &limitsJSON, &currentID, &created, &updated,
-		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy)
+		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy,
+		&a.EnvSource, &a.EnvExamplePath)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -189,16 +200,21 @@ func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, 
 	if app.Environment == "" {
 		app.Environment = EnvironmentStaging
 	}
+	if app.EnvSource == "" {
+		app.EnvSource = EnvSourceCompose
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO apps (
 			slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 			web_service, web_port, host_port, healthcheck_path, desired_state, environment,
 			relax_policy, memory_limit, service_memory_limits, created_at, updated_at,
-			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
+			env_source, env_example_path)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now),
-		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy)
+		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
+		app.EnvSource, app.EnvExamplePath)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -292,12 +308,14 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			repo_id = ?, repo_full_name = ?, repo_url = ?, default_branch = ?, compose_path = ?,
 			web_service = ?, web_port = ?, healthcheck_path = ?, environment = ?,
 			relax_policy = ?, memory_limit = ?, service_memory_limits = ?, updated_at = ?,
-			backup_exclude_volumes = ?, dump_hook_service = ?, dump_hook_command = ?, backup_before_deploy = ?
+			backup_exclude_volumes = ?, dump_hook_service = ?, dump_hook_command = ?, backup_before_deploy = ?,
+			env_source = ?, env_example_path = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now),
-		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy, app.ID)
+		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
+		app.EnvSource, app.EnvExamplePath, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}

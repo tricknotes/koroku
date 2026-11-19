@@ -1,0 +1,31 @@
+# Interpolation cases for compose.Variables. The integration test checks
+# that names, the ? form and defaults agree with
+# `docker compose config --variables`. ${IN_COMMENT} is not read.
+services:
+  web:
+    image: "example/web:${TAG:-latest}"
+    command: ["bundle", "exec", "puma", "-p", "$PORT"] # ${AFTER_CODE}
+    environment:
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Rails secret (openssl rand -hex 64)}
+      DATABASE_URL: postgres://app:${POSTGRES_PASSWORD?}@db:5432/app
+      APP_HOSTS: ${APP_HOSTS}
+      LOG_LEVEL: ${LOG_LEVEL-info}
+      SENTRY_ENV: ${SENTRY_DSN:+production}
+      MAIL_FROM: ${MAIL_FROM:-noreply@${MAIL_DOMAIN:-example.com}}
+      ESCAPED: "$${NOT_A_VARIABLE}"
+      OPTIONAL_EMPTY: ${OPTIONAL_EMPTY:-}
+      QUOTED: '${QUOTED_VALUE} # still the value'
+      LABEL: "it's ${APOSTROPHE}"
+    labels:
+      ${LABEL_KEY}: "keys are not interpolated"
+  worker:
+    image: "example/web:${TAG:-latest}"
+    command: |
+      sh -c 'echo $$HOME # ${IN_BLOCK}'
+    environment:
+      - QUEUE=${QUEUE:-default}
+      - SECRET_KEY_BASE=${SECRET_KEY_BASE}
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set the database password}

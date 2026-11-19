@@ -122,6 +122,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# koroku compares these with the variables saved on its screen and warns
+# about missing ones (REQUIRED, or no DEFAULT VALUE) before a deployment.
+echo "==> Variables $file references"
+if vars="$("${base[@]}" config --variables 2>/dev/null)"; then
+  if [ -n "$vars" ]; then
+    printf '%s\n' "$vars" | sed 's/^/    /'
+  else
+    echo "    (none: koroku cannot tell which variables the app needs)"
+  fi
+else
+  echo "    (this Compose cannot list them: docker compose config --variables failed)"
+fi
+
 echo "==> Normalizing $file"
 services="$("${base[@]}" config --services)" || die "docker compose config failed (see above)"
 printf '%s\n' "$services" | grep -qx -- "$service" ||

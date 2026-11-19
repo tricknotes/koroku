@@ -10,6 +10,7 @@ import Banner from 'koroku-console/components/banner';
 import Button from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import DeploymentDetail from 'koroku-console/components/deployment-detail';
+import EnvRequirementsWarning from 'koroku-console/components/env-requirements-warning';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
@@ -38,6 +39,7 @@ import type {
   Branch,
   Commit,
   Deployment,
+  EnvRequirements,
 } from 'koroku-console/utils/types';
 
 const POLL_INTERVAL = 3000;
@@ -102,6 +104,16 @@ export default class AppDeployTemplate extends Component<Signature> {
   history = new Loadable<Deployment[]>(() =>
     this.api.listDeployments(this.app.slug),
   );
+  /** What the commit picked in the form needs (ARCHITECTURE 9.4). */
+  targetRequirements = new Loadable<EnvRequirements>(() =>
+    this.api.getEnvRequirements(this.app.slug, { sha: this.checkedSha }),
+  );
+  /** What the deployment waiting in the confirmation dialog needs. */
+  pendingRequirements = new Loadable<EnvRequirements>(() =>
+    this.api.getEnvRequirements(this.app.slug, this.pendingTarget()),
+  );
+  /** The commit `targetRequirements` was loaded for. */
+  private checkedSha = '';
 
   @tracked branch: string;
   /** Empty means "the head of the branch". */
@@ -124,7 +136,7 @@ export default class AppDeployTemplate extends Component<Signature> {
     void this.loadHistory();
     if (this.app.repo_full_name) {
       void this.branches.load();
-      void this.commits.load();
+      void this.loadCommits();
     }
 
     this.poller.every(this, POLL_INTERVAL, () => this.poll());
@@ -223,10 +235,52 @@ export default class AppDeployTemplate extends Component<Signature> {
     if (wasActive && !this.hasActive) await this.args.model.reload();
   };
 
+  /** Requirements are only read for repositories the GitHub App reads. */
+  get checksRequirements(): boolean {
+    return Boolean(this.app.repo_full_name) && this.app.env_source !== 'off';
+  }
+
+  private async loadCommits(): Promise<void> {
+    await this.commits.load();
+    this.checkTarget();
+  }
+
+  /** Compares the commit the form would deploy with the saved variables. */
+  private checkTarget(): void {
+    const sha = this.targetCommit?.sha ?? '';
+    if (!this.checksRequirements || !sha || sha === this.checkedSha) return;
+    this.checkedSha = sha;
+    void this.targetRequirements.load();
+  }
+
+  /** Shown only while it is about the commit still picked. */
+  get targetRequirementsValue(): EnvRequirements | null {
+    const value = this.targetRequirements.value;
+    if (!value || this.targetRequirements.loading) return null;
+    return value.commit_sha === this.targetCommit?.sha ? value : null;
+  }
+
+  private pendingTarget(): { ref?: string; sha?: string } {
+    const target = this.pending;
+    if (!target) return {};
+    return target.sha ? { sha: target.sha } : { ref: target.ref };
+  }
+
+  get pendingRequirementsValue(): EnvRequirements | null {
+    return this.pendingRequirements.loading
+      ? null
+      : this.pendingRequirements.value;
+  }
+
   selectBranch = (event: Event) => {
     this.branch = inputValue(event);
     this.sha = '';
-    void this.commits.load();
+    void this.loadCommits();
+  };
+
+  selectCommit = (event: Event) => {
+    this.sha = inputValue(event);
+    this.checkTarget();
   };
 
   submit = () => {
@@ -264,6 +318,7 @@ export default class AppDeployTemplate extends Component<Signature> {
     if (!target.ref && !target.sha) return;
     if (this.args.model.isProduction) {
       this.pending = target;
+      if (this.checksRequirements) void this.pendingRequirements.load();
     } else {
       void this.deploy(target);
     }
@@ -379,7 +434,7 @@ export default class AppDeployTemplate extends Component<Signature> {
             <select
               id={{field.id}}
               data-test-deploy-commit
-              {{on "change" (setValue this "sha")}}
+              {{on "change" this.selectCommit}}
             >
               <option value="" selected={{eq this.sha ""}}>
                 ブランチの先頭
@@ -439,6 +494,13 @@ export default class AppDeployTemplate extends Component<Signature> {
           {{/if}}
         </div>
       </form>
+
+      <div class="deploy-env-warning" aria-live="polite">
+        <EnvRequirementsWarning
+          @slug={{this.app.slug}}
+          @requirements={{this.targetRequirementsValue}}
+        />
+      </div>
 
       <div class="deploy-form-error" aria-live="polite">
         <ErrorMessage @error={{this.error}} @showDetails={{true}} />
@@ -609,6 +671,11 @@ export default class AppDeployTemplate extends Component<Signature> {
           をデプロイします。</p>
         <p
         >コンテナの入れ替えで数秒の断があります。起動に失敗した場合は直前の成功リリースに戻ります。</p>
+        <EnvRequirementsWarning
+          @slug={{this.app.slug}}
+          @requirements={{this.pendingRequirementsValue}}
+          @inDialog={{true}}
+        />
       </ConfirmDialog>
     {{/if}}
   </template>
