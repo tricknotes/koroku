@@ -37,6 +37,10 @@ type Options struct {
 	Deployer Deployer
 	// Refs resolves branch names for deployments. Optional.
 	Refs RefResolver
+	// PublicFiles reads public repositories without credentials, for
+	// the variable comparison when the GitHub App cannot (ARCHITECTURE
+	// 9.4). Optional.
+	PublicFiles envreq.Files
 	// Router reloads the reverse proxy after routing changes. Optional.
 	Router Router
 	// Domains verifies custom domains. Optional.
@@ -98,7 +102,7 @@ func New(opts Options) *Server {
 		files = opts.Auth.GitHub
 	}
 	return &Server{
-		envReqs:  envreq.NewReader(files),
+		envReqs:  envreq.NewReader(files, opts.PublicFiles),
 		cfg:      opts.Config,
 		store:    opts.Store,
 		system:   opts.System,

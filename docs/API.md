@@ -244,7 +244,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 ```
 
 - `source` はアプリの `env_source`。`off` なら `status: "off"` で、ほかは空。
-- `status` は `ok` / `off` / `unavailable`。`unavailable` のとき `reason` は `file_not_found`、`repo_unavailable`（GitHub App が未インストール）、`unsupported_repo`（`repo_url` のアプリ）、`not_configured`（GitHub App が未設定）、`ref_not_found`、`too_large`、`rate_limited`、`github_error` のいずれかで、`variables` と `unlisted` は空。読めなくても 200 で返す（UI は照合なしで画面を使えるようにする）。
+- `status` は `ok` / `off` / `unavailable`。`unavailable` のとき `reason` は `file_not_found`、`repo_unavailable`（GitHub App からも認証なしでも読めない。private で App が未インストールなど）、`unsupported_repo`（`repo_url` が github.com 以外）、`ref_not_found`、`too_large`、`rate_limited`、`github_error` のいずれかで、`variables` と `unlisted` は空。読めなくても 200 で返す（UI は照合なしで画面を使えるようにする）。 GitHub App で読めないリポジトリは、認証なしの contents API（1 時間 60 回まで）で読む（ARCHITECTURE 9.4）。`not_configured` はもう返さない。
 - `commit_sha` は照合したコミット（解決できなければ空文字）。`path` は読んだファイル（`compose` で自動検出したときは見つけた名前。見つからなければ空文字）。
 - `variables` は key 順。`required` は必須か（`compose` では `${VAR:?}`・`${VAR?}`・既定値のない `${VAR}`、`dotenv` ではすべて）、`default` は Compose の既定値（`:-` / `-` の右辺。なければ `null`）、`description` は `:?` のメッセージか `.env.example` の直前のコメント（なければ空文字）、`set` は同じ名前の変数が保存されているか。
 - `unlisted` は保存済みだが一覧にない key（key 順）。`compose` ではアプリのコードが直接読む変数も入るので、UI は `dotenv` のときだけ表示する。

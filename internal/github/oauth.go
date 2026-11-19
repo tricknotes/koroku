@@ -36,6 +36,9 @@ func (c *Client) AuthorizeURL(state, redirectURI string) string {
 // token. The token is meant to be used once (see User) and never stored.
 // Rejections by GitHub are returned as *OAuthError, which matches ErrUnauthorized.
 func (c *Client) ExchangeCode(ctx context.Context, code, redirectURI string) (userToken string, err error) {
+	if c.anonymous() {
+		return "", ErrNotConfigured
+	}
 	if code == "" {
 		return "", fmt.Errorf("%w: empty authorization code", ErrInvalidArgument)
 	}

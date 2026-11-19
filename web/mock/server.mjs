@@ -331,14 +331,8 @@ function envRequirements(context) {
     unlisted: [],
   };
   if (source === 'off') return { ...head, status: 'off', commit_sha: '' };
-  if (context.state.github === false) {
-    return {
-      ...head,
-      status: 'unavailable',
-      reason: 'not_configured',
-      commit_sha: '',
-    };
-  }
+  // Without the GitHub App, public repositories are read anonymously, so
+  // a bare host compares as usual (ARCHITECTURE 9.4).
   const spec =
     context.state.requirements?.get(app.slug)?.[source] ??
     (source === 'compose'
@@ -506,13 +500,20 @@ route('GET', '/api/repos', ({ state }) => {
   if (state.github === false) throw new HttpError(503, 'not_configured');
   return { repos: REPOS };
 });
-route('GET', '/api/repos/:owner/:repo/branches', () => ({
-  branches: [
-    { name: 'main', sha: commits()[0].sha },
-    { name: 'next', sha: commits()[1].sha },
-  ],
-}));
-route('GET', '/api/repos/:owner/:repo/commits', () => ({ commits: commits() }));
+// Without the GitHub App the deploy form falls back to a typed ref.
+route('GET', '/api/repos/:owner/:repo/branches', ({ state }) => {
+  if (state.github === false) throw new HttpError(503, 'not_configured');
+  return {
+    branches: [
+      { name: 'main', sha: commits()[0].sha },
+      { name: 'next', sha: commits()[1].sha },
+    ],
+  };
+});
+route('GET', '/api/repos/:owner/:repo/commits', ({ state }) => {
+  if (state.github === false) throw new HttpError(503, 'not_configured');
+  return { commits: commits() };
+});
 route('GET', '/api/repos/:owner/:repo/compose', () => COMPOSE);
 
 // --- HTTP plumbing --------------------------------------------------------

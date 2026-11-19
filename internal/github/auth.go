@@ -69,6 +69,9 @@ func ParsePrivateKey(pemBytes []byte) (*rsa.PrivateKey, error) {
 
 // appJWT signs a short-lived RS256 JWT that authenticates as the app itself.
 func (c *Client) appJWT() (string, error) {
+	if c.anonymous() {
+		return "", ErrNotConfigured
+	}
 	now := c.clock.Now()
 	claims, err := json.Marshal(struct {
 		IssuedAt  int64  `json:"iat"`

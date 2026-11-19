@@ -97,19 +97,24 @@ type Request struct {
 const cacheSize = 64
 
 // Reader fetches and parses requirement files through the GitHub contents
-// API. Results for a commit never change, so successful ones are cached
-// without expiry (failures are not cached).
+// API: with the App's installation token when it can see the repository,
+// otherwise without credentials (public repositories only). Results for a
+// commit never change, so successful ones are cached without expiry
+// (failures are not cached).
 type Reader struct {
-	files Files
+	app    Files
+	public Files
 
 	mu    sync.Mutex
 	cache map[Request]Result
 	order []Request
 }
 
-// NewReader returns a Reader backed by files.
-func NewReader(files Files) *Reader {
-	return &Reader{files: files, cache: map[Request]Result{}}
+// NewReader returns a Reader that reads through app (the GitHub App
+// client, nil when none is configured) and falls back to public (an
+// unauthenticated client, nil to disable) for repositories app cannot see.
+func NewReader(app, public Files) *Reader {
+	return &Reader{app: app, public: public, cache: map[Request]Result{}}
 }
 
 // Read returns the requirements for req. Failures are reported in the
@@ -118,7 +123,7 @@ func (r *Reader) Read(ctx context.Context, req Request) Result {
 	if req.Source == SourceOff {
 		return Result{Status: StatusOff}
 	}
-	if r.files == nil {
+	if r.app == nil && r.public == nil {
 		return Unavailable(ReasonNotConfigured, "")
 	}
 	r.mu.Lock()
@@ -155,9 +160,21 @@ func cloneResult(res Result) Result {
 }
 
 func (r *Reader) fetch(ctx context.Context, req Request) Result {
-	// List the root first: when it is not found the App cannot see the
-	// repository, which a missing file alone could not tell apart.
-	root, err := r.files.ListDir(ctx, req.Owner, req.Repo, "", req.SHA)
+	// List the root first: when it is not found the client cannot see the
+	// repository, which a missing file alone could not tell apart. The App
+	// goes first; a repository it cannot see may still be public. An
+	// anonymous request is only made when the App gives up, which keeps
+	// within GitHub's 60 unauthenticated requests an hour.
+	var files Files
+	var root []string
+	err := github.ErrNotFound
+	for _, candidate := range []Files{r.app, r.public} {
+		if candidate == nil || !errors.Is(err, github.ErrNotFound) {
+			continue
+		}
+		files = candidate
+		root, err = files.ListDir(ctx, req.Owner, req.Repo, "", req.SHA)
+	}
 	if err != nil {
 		if errors.Is(err, github.ErrNotFound) {
 			return Unavailable(ReasonRepoUnavailable, "")
@@ -188,7 +205,7 @@ func (r *Reader) fetch(ctx context.Context, req Request) Result {
 		return Unavailable(ReasonGitHubError, "")
 	}
 	filePath = path.Clean(filePath)
-	content, err := r.files.ReadFile(ctx, req.Owner, req.Repo, filePath, req.SHA)
+	content, err := files.ReadFile(ctx, req.Owner, req.Repo, filePath, req.SHA)
 	if err != nil {
 		if errors.Is(err, github.ErrNotFound) {
 			return Unavailable(ReasonFileNotFound, filePath)

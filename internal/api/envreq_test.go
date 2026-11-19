@@ -128,7 +128,7 @@ func TestEnvRequirementsDotenvAndSettings(t *testing.T) {
 }
 
 func TestEnvRequirementsUnavailable(t *testing.T) {
-	// Without a GitHub App nothing can be read.
+	// Without a GitHub App nor anonymous access nothing can be read.
 	h := newTestServer(t, nil).Handler()
 	createApp(t, h, "blog")
 	got := decode[envReqOut](t, request(t, h, http.MethodGet, "/api/apps/blog/env/requirements", ""))
@@ -136,7 +136,7 @@ func TestEnvRequirementsUnavailable(t *testing.T) {
 		t.Errorf("no GitHub = %+v", got)
 	}
 
-	// Apps with an explicit URL are not read through the API.
+	// Apps with a URL outside github.com are not read through the API.
 	h2, _ := newEnvReqServer(t, map[string]string{"compose.yaml": "x: ${A}\n"})
 	rec := request(t, h2, http.MethodPost, "/api/apps", `{"slug": "shop", "repo_url": "https://example.com/git/shop.git", "web_port": 3000}`)
 	if rec.Code != http.StatusCreated {
@@ -153,5 +153,29 @@ func TestEnvRequirementsUnavailable(t *testing.T) {
 	none := decode[envReqOut](t, request(t, h3, http.MethodGet, "/api/apps/blog/env/requirements", ""))
 	if none.Reason != "file_not_found" {
 		t.Errorf("no compose = %+v", none)
+	}
+}
+
+// Without a GitHub App, or for a github.com URL, public repositories are
+// read anonymously (ARCHITECTURE 9.4).
+func TestEnvRequirementsPublicRepositories(t *testing.T) {
+	public := &fakeGitHub{files: map[string]string{"compose.yaml": "x: ${A:?the A}\n"}}
+	h := newTestServer(t, func(o *Options) { o.PublicFiles = public }).Handler()
+	createApp(t, h, "blog")
+	got := decode[envReqOut](t, request(t, h, http.MethodGet, "/api/apps/blog/env/requirements", ""))
+	if got.Status != "ok" || len(got.Variables) != 1 || got.Variables[0].Key != "A" || !got.Variables[0].Required {
+		t.Errorf("full name, no App = %+v", got)
+	}
+
+	for _, repoURL := range []string{"https://github.com/octo/shop.git", "https://github.com/octo/shop", "https://GitHub.com/octo/shop/"} {
+		h := newTestServer(t, func(o *Options) { o.PublicFiles = public }).Handler()
+		rec := request(t, h, http.MethodPost, "/api/apps", `{"slug": "shop", "repo_url": "`+repoURL+`", "web_port": 3000}`)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", repoURL, rec.Code, rec.Body)
+		}
+		got := decode[envReqOut](t, request(t, h, http.MethodGet, "/api/apps/shop/env/requirements", ""))
+		if got.Status != "ok" || len(got.Variables) != 1 {
+			t.Errorf("repo_url %s = %+v", repoURL, got)
+		}
 	}
 }
