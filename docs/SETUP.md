@@ -86,7 +86,7 @@
 
 ## 4. GitHub App
 
-ログイン、private リポジトリの取得、デプロイの状態をリポジトリの Deployments に写すのに使う（ARCHITECTURE 5 章）。
+ログイン、private リポジトリの取得、デプロイの状態をリポジトリの Deployments に写すのに使う（ARCHITECTURE 5 章）。push での自動デプロイ（ARCHITECTURE 5.2）を使うなら、App の Webhook で push を受ける（4.6）。
 
 ### 4.1 登録
 
@@ -100,11 +100,14 @@
 | Expire user authorization tokens | オンのまま |
 | Request user authorization (OAuth) during installation | オフ |
 | Enable Device Flow | オフ |
-| Webhook → Active | **オフ**（`koroku` は Webhook を受けない） |
+| Webhook → Active | push での自動デプロイを使うなら **オン**（4.6）。使わないならオフ |
+| Webhook URL | オンにするなら `https://console.dev.example.com/webhooks/github` |
+| Webhook secret | オンにするなら、4.6 で作る値 |
 | Repository permissions → Contents | **Read-only** |
 | Repository permissions → Metadata | Read-only（自動で付く） |
 | Repository permissions → Deployments | **Read and write**（デプロイの状態をリポジトリの Deployments に出す。なくても動くが、反映されない） |
 | ほかの権限 | すべて No access |
+| Subscribe to events | 自動デプロイを使うなら **Push** だけ。使わないなら何も選ばない |
 | Where can this GitHub App be installed? | **Only on this account**（別の org のリポジトリも使うなら **Any account**。4.5） |
 
 あとから Deployments の権限を足した場合は、App の設定画面の **Permissions & events** で変えて保存したあと、インストール先（**Install App** → 自分のアカウントの歯車）に出る権限の変更の依頼を **Accept** する。受け入れるまで、GitHub は koroku からの記録を 403 で断る（koroku は警告を出してデプロイを続ける）。
@@ -159,6 +162,29 @@ rm github-app.pem
    ```
 
 4. `sudo koroku check` の `github.install` に org が出ることを確かめる。知らないアカウントにインストールされていれば警告が出るので、その場合は App の設定画面の **Install App** の一覧を確かめる。
+### 4.6 push での自動デプロイ（任意）
+
+アプリの設定タブで「push されたら自動でデプロイする」を使うときだけ行う（ARCHITECTURE 5.2）。使わなければ Webhook はオフのままでよい。あとから行ってもよい。
+
+1. サーバーで secret を作る（20 文字以上）。
+
+   ```sh
+   openssl rand -hex 32
+   ```
+
+2. App の設定画面の **General** → **Webhook** で **Active** をオンにし、**Webhook URL** に `https://console.dev.example.com/webhooks/github`、**Webhook secret** に 1 の値を入れて保存する。
+3. **Permissions & events** → **Subscribe to events** で **Push** を選んで保存する（Contents の Read-only があれば選べる。権限は増えない）。
+4. `config.toml` の `[github]` に 1 の値を書き、`koroku` を再起動する。
+
+   ```toml
+   webhook_secret = "..."
+   ```
+
+5. App の設定画面の **Advanced** → **Recent Deliveries** で、`ping` が 200 で届いていることを確かめる（2 で保存したときに送られる。届いていなければ **Redeliver**）。
+6. アプリの設定タブで自動デプロイを有効にし、追うブランチに push する。デプロイの履歴に「push で自動デプロイ」の行が出る。
+
+`webhook_secret` がない間、`koroku` はすべての配送を 403 で断る。管理画面の設定タブと `koroku check` の `github.webhook` が、足りない設定を知らせる。
+
 ## 5. オブジェクトストレージ
 
 ログの退避（`logs/`）とバックアップ（`restic/`）を 1 つのバケットに置く（ARCHITECTURE 10.1、10.2）。
@@ -204,7 +230,7 @@ sudo cat /etc/koroku/restic.key    # パスワードマネージャなどに控�
 
 - restic のパスワード（`/etc/koroku/restic.key` の中身）
 - オブジェクトストレージの endpoint、region、バケット名、Access Key ID、Secret Access Key
-- GitHub App の client secret と秘密鍵（なくしても GitHub で作り直せる）
+- GitHub App の client secret と秘密鍵、Webhook の secret（なくしても GitHub で作り直せる）
 - `master.key`: `koroku` の初回起動で `/etc/koroku/master.key` に作られる。最初のバックアップが成功するまでは、`sudo base64 /etc/koroku/master.key` の出力も控えておく（そのあとは基盤のバックアップに入る）
 
 ## 7. `config.toml` を書く
@@ -225,6 +251,7 @@ app_id = 123456
 client_id = "Iv23li..."
 client_secret = "..."
 allowed_user_id = 1234567
+# webhook_secret = "..."            # 4.6。push での自動デプロイを使うときだけ
 
 [storage]                           # 5 節
 endpoint = "https://s3.example.com"
@@ -262,6 +289,7 @@ sudo koroku check
 | `github.app` | App ID と秘密鍵の組が正しく、Client ID が一致し、権限が Contents と Metadata の Read-only と Deployments の Read and write だけ（Deployments がなければ警告） |
 | `github.install` | App が 1 つ以上のアカウントにインストールされている |
 | `github.user` | 許可するユーザー ID のアカウントが実在する |
+| `github.webhook` | 自動デプロイを使うアプリがあるとき、`webhook_secret` があり、App が Push を購読し、Webhook URL が `https://<console_host>/webhooks/github`（使うアプリがなく secret もなければ `[skip]`） |
 | `storage` | バケットに書き、読み、一覧し、消せる（`koroku-check/` に小さなファイルを書いてすぐ消す） |
 | `backup` | restic のリポジトリを読める（パスワードが合う）。基盤のスナップショットがあり、新しい |
 

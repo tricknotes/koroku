@@ -171,7 +171,7 @@ Claude Code は以下を代行しない。必要になった時点で依頼し�
 | 必要になる時点 | 用意するもの |
 | --- | --- |
 | M2 | VPS（Ubuntu 24.04 か 26.04、amd64、メモリ 4GB 程度）と、その IP に向けた DNS レコード（ワイルドカードが登録できなければ `console.<base_domain>` と各 `<slug>.<base_domain>` を個別に） |
-| M3 | GitHub App の登録（権限は Contents: Read-only、Metadata: Read-only、Deployments: Read and write、callback は `https://<console_host>/auth/github/callback`）、App ID、秘密鍵、許可するユーザー ID |
+| M3 | GitHub App の登録（権限は Contents: Read-only、Metadata: Read-only、Deployments: Read and write、callback は `https://<console_host>/auth/github/callback`）、App ID、秘密鍵、許可するユーザー ID。push での自動デプロイを使うなら、Webhook を Active にして URL `https://<console_host>/webhooks/github` と secret を設定し、Push のイベントを購読する（secret は `[github] webhook_secret`） |
 | M5 | オブジェクトストレージのバケット、バケット限定のアクセスキー、`logs/` プレフィックスに 90 日削除のライフサイクルルール。restic のリポジトリパスワード（VPS 外にも控える） |
 
 ## やらないこと
@@ -180,7 +180,6 @@ Claude Code は以下を代行しない。必要になった時点で依頼し�
 - マルチノード、マルチユーザー、オートスケール
 - 無停止デプロイ（デプロイ対象アプリの数秒の断は許容）
 - ホスト冗長化（ホスト障害時の全停止は許容）
-- push 時の自動デプロイ（将来追加の可能性はあるが、今は Webhook を受けない）
 - Loki などのログ基盤、外部への障害通知
 
 ## 既定案で進める未決事項
