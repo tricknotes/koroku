@@ -15,6 +15,7 @@ import (
 
 	"github.com/tricknotes/koroku/internal/clock"
 	"github.com/tricknotes/koroku/internal/config"
+	"github.com/tricknotes/koroku/internal/envpresets"
 	"github.com/tricknotes/koroku/internal/envreq"
 	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
@@ -90,6 +91,8 @@ type Server struct {
 	volumes  AppVolumes
 	copier   DBCopier
 	envReqs  *envreq.Reader
+	// envPresets reads repositories for the create screen (ARCHITECTURE 9.8).
+	envPresets *envpresets.Reader
 
 	routeStatus func() RouteStatus
 
@@ -110,31 +113,34 @@ func New(opts Options) *Server {
 		clk = clock.System{}
 	}
 	var files envreq.Files
+	var presetFiles envpresets.Files
 	if opts.Auth.GitHub != nil {
 		files = opts.Auth.GitHub
+		presetFiles = opts.Auth.GitHub
 	}
 	return &Server{
-		envReqs:  envreq.NewReader(files, opts.PublicFiles),
-		cfg:      opts.Config,
-		store:    opts.Store,
-		system:   opts.System,
-		web:      opts.Web,
-		log:      logger,
-		version:  opts.Version,
-		clock:    clk,
-		box:      opts.Box,
-		deployer: opts.Deployer,
-		promoter: opts.Promoter,
-		refs:     opts.Refs,
-		router:   opts.Router,
-		domains:  opts.Domains,
-		auth:     opts.Auth,
-		ops:      opts.Ops,
-		tasks:    opts.Tasks,
-		logs:     opts.Logs,
-		backups:  opts.Backups,
-		volumes:  opts.Volumes,
-		copier:   opts.Copier,
+		envReqs:    envreq.NewReader(files, opts.PublicFiles),
+		envPresets: envpresets.NewReader(presetFiles, opts.PublicFiles),
+		cfg:        opts.Config,
+		store:      opts.Store,
+		system:     opts.System,
+		web:        opts.Web,
+		log:        logger,
+		version:    opts.Version,
+		clock:      clk,
+		box:        opts.Box,
+		deployer:   opts.Deployer,
+		promoter:   opts.Promoter,
+		refs:       opts.Refs,
+		router:     opts.Router,
+		domains:    opts.Domains,
+		auth:       opts.Auth,
+		ops:        opts.Ops,
+		tasks:      opts.Tasks,
+		logs:       opts.Logs,
+		backups:    opts.Backups,
+		volumes:    opts.Volumes,
+		copier:     opts.Copier,
 
 		routeStatus: opts.RouteStatus,
 
@@ -179,6 +185,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/repos/{owner}/{repo}/branches", s.handleListBranches)
 	mux.HandleFunc("GET /api/repos/{owner}/{repo}/commits", s.handleListCommits)
 	mux.HandleFunc("GET /api/repos/{owner}/{repo}/compose", s.handleDetectCompose)
+	mux.HandleFunc("GET /api/repos/{owner}/{repo}/env-presets", s.handleEnvPresets)
 
 	mux.HandleFunc("GET /api/apps", s.handleListApps)
 	mux.HandleFunc("POST /api/apps", s.handleCreateApp)

@@ -88,6 +88,48 @@ func TestCreateAppRejectsDuplicateSlug(t *testing.T) {
 	}
 }
 
+func TestCreateAppWithEnv(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+
+	var sealedFor int64
+	created, err := s.CreateAppWithEnv(ctx, newApp("blog"), 20000, 20999, testNow, func(id int64) ([]EnvVar, error) {
+		sealedFor = id
+		return []EnvVar{{Key: "RAILS_ENV", ValueEncrypted: []byte("sealed-1")}, {Key: "SECRET_KEY_BASE", ValueEncrypted: []byte("sealed-2")}}, nil
+	})
+	if err != nil {
+		t.Fatalf("CreateAppWithEnv: %v", err)
+	}
+	if sealedFor != created.ID {
+		t.Errorf("env was sealed for app %d, created %d", sealedFor, created.ID)
+	}
+	vars, err := s.ListEnvVars(ctx, created.ID)
+	if err != nil || len(vars) != 2 || vars[0].Key != "RAILS_ENV" || string(vars[1].ValueEncrypted) != "sealed-2" {
+		t.Errorf("ListEnvVars = %+v, %v", vars, err)
+	}
+
+	// A failure leaves neither the app nor any variable behind.
+	boom := errors.New("sealing failed")
+	_, err = s.CreateAppWithEnv(ctx, newApp("shop"), 20000, 20999, testNow, func(int64) ([]EnvVar, error) {
+		return nil, boom
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the sealing error", err)
+	}
+	if _, err := s.GetApp(ctx, "shop"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the app was created anyway: %v", err)
+	}
+	_, err = s.CreateAppWithEnv(ctx, newApp("shop"), 20000, 20999, testNow, func(int64) ([]EnvVar, error) {
+		return []EnvVar{{Key: "A", ValueEncrypted: []byte("x")}, {Key: "A", ValueEncrypted: []byte("y")}}, nil
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate keys: err = %v, want ErrConflict", err)
+	}
+	if _, err := s.GetApp(ctx, "shop"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("the app was created despite the duplicate: %v", err)
+	}
+}
+
 func TestPortAllocation(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
