@@ -172,6 +172,20 @@ function countPending(state, slug) {
 }
 
 route('GET', '/api/system', ({ state }) => state.system);
+route('GET', '/api/system/github', () => ({
+  configured: true,
+  app: {
+    slug: 'koroku-octo',
+    html_url: 'https://github.com/apps/koroku-octo',
+    settings_url: 'https://github.com/settings/apps/koroku-octo',
+    install_url: 'https://github.com/apps/koroku-octo/installations/new',
+  },
+  installations: [
+    { account: 'octo', repository_selection: 'selected', used: true },
+    { account: 'example-org', repository_selection: 'all', used: false },
+  ],
+  installation_accounts: [],
+}));
 route('GET', '/api/system/docker', ({ state }) => {
   if (state.backupsDown) throw new HttpError(500, 'internal');
   return dockerUsage(state);

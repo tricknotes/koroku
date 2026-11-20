@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 )
 
 // App describes the GitHub App the client authenticates as. `koroku check`
@@ -15,6 +17,10 @@ type App struct {
 	Slug     string
 	ClientID string
 	HTMLURL  string
+	// Owner is the login of the account that registered the App, and
+	// OwnerIsOrg whether that account is an organization.
+	Owner      string
+	OwnerIsOrg bool
 	// Permissions maps a permission name (contents, metadata, ...) to its
 	// level (read, write, admin).
 	Permissions map[string]string
@@ -45,6 +51,10 @@ func (c *Client) App(ctx context.Context) (App, error) {
 		ClientID    string            `json:"client_id"`
 		HTMLURL     string            `json:"html_url"`
 		Permissions map[string]string `json:"permissions"`
+		Owner       struct {
+			Login string `json:"login"`
+			Type  string `json:"type"`
+		} `json:"owner"`
 	}
 	if _, err := c.do(ctx, call{method: http.MethodGet, path: "/app", bearer: jwt}, &resp); err != nil {
 		return App{}, fmt.Errorf("github: app: %w", err)
@@ -57,8 +67,33 @@ func (c *Client) App(ctx context.Context) (App, error) {
 		Slug:        resp.Slug,
 		ClientID:    resp.ClientID,
 		HTMLURL:     resp.HTMLURL,
+		Owner:       resp.Owner.Login,
+		OwnerIsOrg:  resp.Owner.Type == "Organization",
 		Permissions: resp.Permissions,
 	}, nil
+}
+
+// SettingsURL is the App's settings page on GitHub, where its permissions
+// and (under Advanced) whether any account may install it are changed. It
+// is derived from HTMLURL (https://github.com/apps/<slug>); "" when that is
+// not of this form.
+func (a App) SettingsURL() string {
+	base, ok := strings.CutSuffix(a.HTMLURL, "/apps/"+a.Slug)
+	if !ok || a.Slug == "" || a.Owner == "" {
+		return ""
+	}
+	if a.OwnerIsOrg {
+		return base + "/organizations/" + url.PathEscape(a.Owner) + "/settings/apps/" + url.PathEscape(a.Slug)
+	}
+	return base + "/settings/apps/" + url.PathEscape(a.Slug)
+}
+
+// InstallURL is the page that installs the App on another account.
+func (a App) InstallURL() string {
+	if a.HTMLURL == "" {
+		return ""
+	}
+	return a.HTMLURL + "/installations/new"
 }
 
 // Installations lists the accounts the App is installed on.

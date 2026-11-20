@@ -7,8 +7,9 @@ import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
 import AsyncView from 'koroku-console/components/async-view';
 import Banner from 'koroku-console/components/banner';
-import Button from 'koroku-console/components/button';
+import Button, { buttonClass } from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import CopyButton from 'koroku-console/components/copy-button';
 import ErrorMessage from 'koroku-console/components/error-message';
 import Icon from 'koroku-console/components/icon';
 import Meter, { type MeterTone } from 'koroku-console/components/meter';
@@ -45,8 +46,33 @@ import type {
   BackupRun,
   ContainerResources,
   DockerUsageItem,
+  GitHubAppStatus,
   SystemInfo,
 } from 'koroku-console/utils/types';
+
+const SELECTION_LABELS: Record<string, string> = {
+  all: 'すべてのリポジトリ',
+  selected: '選んだリポジトリ',
+};
+
+function selectionLabel(selection: string): string {
+  return SELECTION_LABELS[selection] ?? selection;
+}
+
+/**
+ * The installation_accounts line to put in config.toml: what is configured
+ * plus the installations koroku does not use yet.
+ */
+function accountsLine(status: GitHubAppStatus): string {
+  const accounts = [...status.installation_accounts];
+  for (const inst of status.installations) {
+    if (!inst.used && !accounts.includes(inst.account)) {
+      accounts.push(inst.account);
+    }
+  }
+  if (accounts.length === 0) accounts.push('my-org');
+  return `installation_accounts = [${accounts.map((a) => `"${a}"`).join(', ')}]`;
+}
 
 /** A running backup is followed closely; the host figures move slowly. */
 const RUNNING_INTERVAL = 5000;
@@ -256,6 +282,7 @@ export default class SystemTemplate extends Component {
     this.api.getContainerResources(),
   );
   backups = new Loadable<BackupOverview>(() => this.api.getBackups());
+  github = new Loadable<GitHubAppStatus>(() => this.api.getGitHubApp());
 
   @tracked confirmingPrune = false;
   @tracked pruneImages = true;
@@ -275,6 +302,7 @@ export default class SystemTemplate extends Component {
     void this.docker.load();
     void this.containers.load();
     void this.backups.load();
+    void this.github.load();
     this.poller.every(this, RUNNING_INTERVAL, () => this.followBackup());
     this.poller.every(this, HOST_INTERVAL, () => this.refreshHost());
   }
@@ -943,6 +971,133 @@ export default class SystemTemplate extends Component {
         </section>
       {{/let}}
     {{/if}}
+
+    {{! A server without this endpoint has nothing to show here. }}
+    {{#unless this.github.unavailable}}
+      <section
+        class="pane"
+        id="github-app"
+        aria-labelledby="github-title"
+        data-test-github-app
+      >
+        <div class="pane-header">
+          <h2 class="pane-title" id="github-title">GitHub App</h2>
+        </div>
+        <AsyncView
+          @data={{this.github}}
+          @errorTitle="GitHub App の情報を取得できませんでした"
+          as |gh|
+        >
+          {{#if gh.app}}
+            <dl class="readout">
+              <dt>App</dt>
+              <dd>
+                <a
+                  href={{gh.app.html_url}}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="mono"
+                  data-test-github-app-link
+                >{{gh.app.slug}}</a>
+              </dd>
+            </dl>
+            <ul class="box job-rows" data-test-github-installations>
+              {{#each gh.installations as |inst|}}
+                <li class="job" data-test-github-installation={{inst.account}}>
+                  <span class="job-name mono">{{inst.account}}</span>
+                  <span class="job-state">
+                    {{#if inst.used}}
+                      <StatusIndicator
+                        @kind="running"
+                        @label="使う"
+                        @quiet={{true}}
+                      />
+                    {{else}}
+                      <StatusIndicator @kind="pending" @label="使わない" />
+                    {{/if}}
+                  </span>
+                  <span class="job-facts">{{selectionLabel
+                      inst.repository_selection
+                    }}</span>
+                </li>
+              {{else}}
+                <li class="job" data-test-github-no-installation>
+                  <span
+                    class="job-name"
+                  >まだどこにもインストールされていません。</span>
+                </li>
+              {{/each}}
+            </ul>
+
+            <div class="github-guide" data-test-github-guide>
+              <h3 class="github-guide-title">別の org のリポジトリを使う</h3>
+              <p class="github-guide-lead">
+                自分が管理する別の org の private
+                リポジトリをデプロイするには、App をその org
+                にもインストールし、koroku
+                が使うインストール先に加えます。public
+                リポジトリなら、インストールせずに作成画面で URL
+                を指定するだけで使えます。
+              </p>
+              <ol class="github-guide-steps">
+                <li>
+                  <span>App
+                    をどのアカウントにもインストールできるようにします（App
+                    の設定の
+                    <strong>Advanced</strong>
+                    →
+                    <strong>Make public</strong>）。誰でもインストールできるようになりますが、koroku
+                    は 3 で加えたアカウントのインストールしか使いません。</span>
+                  {{#if gh.app.settings_url}}
+                    <a
+                      class={{buttonClass "default" "small"}}
+                      href="{{gh.app.settings_url}}/advanced"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-test-github-settings
+                    >App の設定を開く<Icon @name="external" /></a>
+                  {{/if}}
+                </li>
+                <li>
+                  <span>App をその org
+                    にインストールし、デプロイするリポジトリを選びます。</span>
+                  <a
+                    class={{buttonClass "default" "small"}}
+                    href={{gh.app.install_url}}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-test-github-install
+                  >インストール先を選ぶ<Icon @name="external" /></a>
+                </li>
+                <li>
+                  <span>サーバーの
+                    <code>/etc/koroku/config.toml</code>
+                    の
+                    <code>[github]</code>
+                    に次の行を書き、koroku
+                    を再起動します。「使わない」と表示されているインストール先は、ここに加えると使われます。</span>
+                  <span class="github-guide-config">
+                    <code class="mono" data-test-github-config>{{accountsLine
+                        gh
+                      }}</code>
+                    <CopyButton
+                      @text={{accountsLine gh}}
+                      @label="config.toml に書く行"
+                    />
+                  </span>
+                </li>
+              </ol>
+            </div>
+          {{else}}
+            <p class="github-unconfigured" data-test-github-unconfigured>
+              GitHub App が設定されていません。設定すると、GitHub
+              でログインし、private リポジトリをデプロイできます（docs/SETUP.md
+              の 4 節）。
+            </p>
+          {{/if}}
+        </AsyncView>
+      </section>
+    {{/unless}}
 
     {{#if this.system.value}}
       {{#let this.system.value as |system|}}

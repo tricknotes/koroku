@@ -14,6 +14,7 @@ import type {
   ComposeDetection,
   CreatedApiToken,
   ContainerResources,
+  GitHubAppStatus,
   CopySourceKind,
   DbCopy,
   Deployment,
@@ -229,6 +230,18 @@ export default class ApiService extends Service {
       '/api/system/docker',
     );
     return items ?? [];
+  }
+
+  async getGitHubApp(): Promise<GitHubAppStatus> {
+    const status = await this.request<GitHubAppStatus>(
+      'GET',
+      '/api/system/github',
+    );
+    return {
+      ...status,
+      installations: status.installations ?? [],
+      installation_accounts: status.installation_accounts ?? [],
+    };
   }
 
   async getContainerResources(): Promise<ContainerResources> {

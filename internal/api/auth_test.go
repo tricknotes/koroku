@@ -37,6 +37,15 @@ type fakeGitHub struct {
 	files    map[string]string
 	err      error
 	lastRef  string
+
+	app      github.App
+	installs []github.Installation
+}
+
+func (f *fakeGitHub) App(context.Context) (github.App, error) { return f.app, f.err }
+
+func (f *fakeGitHub) Installations(context.Context) ([]github.Installation, error) {
+	return f.installs, f.err
 }
 
 func (f *fakeGitHub) AuthorizeURL(state, redirectURI string) string {

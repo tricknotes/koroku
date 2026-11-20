@@ -1227,6 +1227,21 @@ SHOTS.push(
     fullPage: true,
   },
   {
+    name: 'system-github',
+    path: '/system?scenario=healthy',
+    wait: '[data-test-github-guide]',
+    script: `document.querySelector('[data-test-github-app]').scrollIntoView()`,
+  },
+  {
+    name: 'system-github-phone',
+    path: '/system?scenario=healthy',
+    wait: '[data-test-github-guide]',
+    script: `document.querySelector('[data-test-github-app]').scrollIntoView()`,
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
     name: 'system-problem',
     path: '/system?scenario=host-trouble',
     wait: RESOURCES,

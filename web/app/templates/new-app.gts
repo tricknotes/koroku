@@ -461,7 +461,7 @@ export default class NewAppTemplate extends Component {
           {{else if this.repos.loaded}}
             <FormField
               @label="リポジトリ"
-              @hint="GitHub App をインストールしたリポジトリが並びます。別の org のリポジトリは、その org に App をインストールすると並びます。"
+              @hint="GitHub App をインストールしたリポジトリが並びます。"
               @error={{this.errors.repo_full_name}}
               data-test-field-group="repo_full_name"
               as |field|
@@ -490,6 +490,11 @@ export default class NewAppTemplate extends Component {
                 data-test-repo-use-url
                 {{on "click" this.useUrl}}
               >一覧にない公開リポジトリを URL で指定</Button>
+              <LinkTo
+                @route="system"
+                class="new-app-repo-help"
+                data-test-repo-other-org
+              >別の org のリポジトリを使うには</LinkTo>
             </p>
           {{else}}
             <p class="new-app-progress" aria-live="polite" data-test-loading>
