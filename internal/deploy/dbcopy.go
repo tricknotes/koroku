@@ -269,7 +269,7 @@ func (j *copyJob) run(ctx context.Context) (bytes int64, err error) {
 	j.log.Step(StepCheck, "Checking %s and %s", src.Slug, dst.Slug)
 	switch j.req.Kind {
 	case store.CopySourceLive:
-		j.log.Printf("Source: the running app %s, dump hook in service %s: %s", src.Slug, src.DumpHookService, src.DumpHookCommand)
+		j.log.Printf("Source: %s, live dump in service %s: %s", src.Slug, src.DumpHookService, src.DumpHookCommand)
 	default:
 		j.log.Printf("Source: snapshot %s of %s, taken %s", shortSnapshotID(j.snapshot.ID), src.Slug, j.snapshot.Time.UTC().Format(time.RFC3339))
 	}
