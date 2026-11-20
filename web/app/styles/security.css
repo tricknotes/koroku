@@ -78,3 +78,92 @@
     justify-content: flex-start;
   }
 }
+
+/* API トークン (ARCHITECTURE 10.4). */
+
+.token-rows {
+  /* The same columns as the sessions above, so the two lists line up. */
+  --row-columns: minmax(0, 1fr) 7rem 7rem 7rem 8rem;
+}
+
+.token-rows .row {
+  min-height: 2.75rem;
+}
+
+.token-name {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.token-last-used {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+}
+
+.token-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+}
+
+.token-fields {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  color: var(--color-text);
+}
+
+.token-value,
+.token-snippet {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+
+.token-value code,
+.token-snippet pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-1) 0 0;
+  background: none;
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+
+  /* A token has no natural break; wrap anywhere rather than at "export ". */
+  word-break: break-all;
+}
+
+.token-howto {
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-sm);
+}
+
+@media (width <= 56rem) {
+  .token-rows > .row-list-header {
+    display: none;
+  }
+
+  .token-rows .row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-1) var(--space-4);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .token-name,
+  .token-rows .session-action {
+    grid-column: 1 / -1;
+  }
+
+  .token-rows .session-action {
+    justify-content: flex-start;
+  }
+}

@@ -26,6 +26,14 @@ const DESKTOP = { width: 1280, height: 900 };
 const PHONE = { width: 390, height: 844, scale: 2, fullPage: true };
 const LIST = '[data-test-app]';
 const DEPLOYMENT = '[data-test-deployment]';
+// Fills in the token dialog and submits it; the mock answers with a made-up
+// value.
+const CREATE_TOKEN = `(() => {
+  const name = document.querySelector('[data-test-token-name-input]');
+  name.value = 'ノート PC の Claude Code';
+  name.dispatchEvent(new Event('input', { bubbles: true }));
+  document.querySelector('[data-test-dialog-confirm]').click();
+})()`;
 
 /**
  * name, path, what to wait for, and optionally: viewport, `dark`, `keys`
@@ -113,6 +121,44 @@ const SHOTS = [
     wait: '[data-test-sessions]',
     click: '[data-test-revoke-others]',
     themes: ['light'],
+  },
+  // API tokens for Claude Code (ARCHITECTURE 10.4).
+  {
+    name: 'security-tokens-empty',
+    path: '/security?scenario=empty',
+    wait: '[data-test-no-tokens]',
+  },
+  {
+    name: 'security-token-create',
+    path: '/security?scenario=healthy',
+    wait: '[data-test-tokens]',
+    click: '[data-test-token-create]',
+  },
+  {
+    name: 'security-token-created',
+    path: '/security?scenario=healthy',
+    wait: '[data-test-tokens]',
+    click: '[data-test-token-create]',
+    script: CREATE_TOKEN,
+    then: '[data-test-token-value]',
+    mutates: true,
+  },
+  {
+    name: 'security-token-created-phone',
+    path: '/security?scenario=healthy',
+    wait: '[data-test-tokens]',
+    click: '[data-test-token-create]',
+    script: CREATE_TOKEN,
+    then: '[data-test-token-value]',
+    mutates: true,
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'security-token-revoke',
+    path: '/security?scenario=healthy',
+    wait: '[data-test-tokens]',
+    click: '[data-test-token="3fa9c2d17b40e815"] [data-test-token-revoke]',
   },
   {
     name: 'security-reauth-dialog',

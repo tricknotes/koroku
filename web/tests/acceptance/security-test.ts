@@ -52,6 +52,7 @@ module('Acceptance | security', function (hooks) {
     fakes = installFakes(this.owner);
     fakes.api
       .on('GET', '/api/apps', { apps: [makeApp()] })
+      .on('GET', '/api/tokens', { tokens: [] })
       .on('GET', '/api/sessions', {
         sessions: [
           makeSession(),
