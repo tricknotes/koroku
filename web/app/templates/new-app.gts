@@ -55,7 +55,7 @@ export default class NewAppTemplate extends Component {
   repos = new Loadable<Repo[]>(() => this.api.listRepos());
   compose = new Loadable<ComposeDetection>(() =>
     this.api.detectCompose(this.repoFullName, {
-      ref: this.defaultBranch,
+      ref: this.detectedBranch,
       path: this.requestedComposePath,
     }),
   );
@@ -63,6 +63,8 @@ export default class NewAppTemplate extends Component {
   @tracked repoFullName = '';
   @tracked repoUrl = '';
   @tracked defaultBranch = '';
+  /** The branch the shown Compose detection was made on. */
+  @tracked detectedBranch = '';
   @tracked composePath = '';
   @tracked webService = '';
   @tracked webPort = '';
@@ -142,6 +144,18 @@ export default class NewAppTemplate extends Component {
     this.suggestSlugFrom(this.repoUrl.trim());
   };
 
+  /**
+   * Detects again on the branch typed in, once the field is left (not on
+   * every keystroke). Another branch can have other files, so the chosen
+   * file is forgotten.
+   */
+  changeBranch = () => {
+    if (this.manualRepo || this.repoFullName === '') return;
+    if (this.defaultBranch.trim() === this.detectedBranch) return;
+    this.requestedComposePath = '';
+    void this.detect();
+  };
+
   selectComposePath = (event: Event) => {
     this.requestedComposePath = inputValue(event);
     void this.detect();
@@ -168,8 +182,10 @@ export default class NewAppTemplate extends Component {
 
   private async detect(): Promise<void> {
     const repo = this.repoFullName;
+    const branch = this.defaultBranch.trim();
+    this.detectedBranch = branch;
     await this.compose.load();
-    if (repo !== this.repoFullName) return;
+    if (repo !== this.repoFullName || branch !== this.detectedBranch) return;
 
     const detection = this.compose.value;
     this.composePath = detection?.path ?? '';
@@ -334,7 +350,7 @@ export default class NewAppTemplate extends Component {
             <FormField
               class="field-narrow"
               @label="既定のブランチ"
-              @hint="デプロイの画面で最初に選ばれるブランチです。"
+              @hint="デプロイの画面で最初に選ばれるブランチです。Compose ファイルもこのブランチから検出します。"
               @error={{this.errors.default_branch}}
               data-test-field-group="default_branch"
               as |field|
@@ -350,6 +366,7 @@ export default class NewAppTemplate extends Component {
                 aria-invalid={{field.invalid}}
                 data-test-field="default_branch"
                 {{on "input" (setValue this "defaultBranch")}}
+                {{on "change" this.changeBranch}}
               />
             </FormField>
           {{/if}}
@@ -393,11 +410,19 @@ export default class NewAppTemplate extends Component {
                       <span class="mono" data-test-compose-path>
                         {{this.composePath}}
                       </span>
+                      {{#if this.detectedBranch}}
+                        <span class="readout-note" data-test-compose-branch>
+                          （ブランチ
+                          <span class="mono">{{this.detectedBranch}}</span>）
+                        </span>
+                      {{/if}}
                     </dd>
                   </dl>
                 {{else}}
                   <Banner @tone="warning" data-test-compose-missing>
-                    リポジトリ直下に Compose
+                    {{#if this.detectedBranch}}ブランチ
+                      <span class="mono">{{this.detectedBranch}}</span>
+                      の{{/if}}リポジトリ直下に Compose
                     ファイルが見つかりませんでした。パスは作成後に「設定」で指定できます。
                   </Banner>
                 {{/if}}
