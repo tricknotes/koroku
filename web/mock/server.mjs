@@ -39,6 +39,7 @@ import {
 import { deploymentLog } from './deploy-log.mjs';
 import { copyHistory, copyLog, newCopy, settleCopies } from './db-copy.mjs';
 import { LOG_SCENARIOS, registerLogRoutes } from './logs.mjs';
+import { memoryHistory } from './memory.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.MOCK_PORT ?? 4300);
@@ -232,6 +233,16 @@ route('GET', '/api/apps/:slug/services', (context) => ({
     context.state.services?.get(context.params.slug) ??
     services(appOf(context)),
 }));
+
+route('GET', '/api/apps/:slug/memory', (context) => {
+  const range = context.query.get('range') ?? '24h';
+  if (!['24h', '7d', '14d'].includes(range)) {
+    throw new HttpError(400, 'invalid_range');
+  }
+  // The app of `fresh` was deployed minutes ago: hours of data at most.
+  const collectingHours = context.scenario === 'fresh' ? 3 : undefined;
+  return memoryHistory(appOf(context), range, { collectingHours });
+});
 
 function savedEnv(context) {
   return context.state.env?.get(context.params.slug) ?? ENV_VARS;

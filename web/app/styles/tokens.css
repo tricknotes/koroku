@@ -58,6 +58,16 @@
   --color-accent-border: light-dark(#b9d3fb, #1b3d70);
 
   /*
+   * The one chart (memory history): usage in the accent hue, the limit as
+   * a neutral reference line. The dark usage step is darker than the
+   * accent so the line stays inside the lightness band on the dark page.
+   */
+  --chart-usage: light-dark(#0060df, #3d8fef);
+  --chart-usage-wash: light-dark(rgb(0 96 223 / 10%), rgb(61 143 239 / 14%));
+  --chart-limit: light-dark(#6e6e6e, #8f8f8f);
+  --chart-grid: var(--gray-300);
+
+  /*
    * The five states, used the same way on every screen:
    * running, deploying, failed, stopped, pending.
    * `--color-<state>` is the text/icon colour (AA on the page and on its own
