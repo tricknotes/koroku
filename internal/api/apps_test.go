@@ -36,6 +36,29 @@ type fakeDeployer struct {
 	services   []deploy.ServiceStatus
 	diskUsage  []deploy.DiskUsageItem
 	resources  deploy.ContainerResources
+	// available lists the deployments whose releases are kept.
+	available map[int64]bool
+}
+
+func (f *fakeDeployer) EnqueueRollback(ctx context.Context, app store.App, fromID int64) (store.Deployment, error) {
+	from, err := f.store.GetDeployment(ctx, fromID)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	if from.AppID != app.ID {
+		return store.Deployment{}, deploy.ErrOtherApp
+	}
+	if !f.ReleaseAvailable(app, fromID) {
+		return store.Deployment{}, deploy.ErrReleaseUnavailable
+	}
+	d, _, err := f.store.EnqueueRollback(ctx, from, time.Date(2026, 11, 21, 3, 0, 0, 0, time.UTC))
+	return d, err
+}
+
+func (f *fakeDeployer) ReleaseAvailable(_ store.App, id int64) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.available[id]
 }
 
 func (f *fakeDeployer) Enqueue(ctx context.Context, app store.App, ref, sha, message string) (store.Deployment, error) {
@@ -764,5 +787,64 @@ func TestDeploymentLogStreamIgnoresBadLastEventID(t *testing.T) {
 			}
 		}
 		_ = resp.Body.Close()
+	}
+}
+
+func TestCreateRollback(t *testing.T) {
+	var fake *fakeDeployer
+	srv := newTestServer(t, func(o *Options) { fake = o.Deployer.(*fakeDeployer) })
+	h := srv.Handler()
+	createApp(t, h, "blog")
+	createApp(t, h, "other")
+	ctx := context.Background()
+	now := time.Date(2026, 11, 21, 3, 0, 0, 0, time.UTC)
+	succeed := func(slug string) store.Deployment {
+		t.Helper()
+		app, _ := fake.store.GetApp(ctx, slug)
+		d, _, err := fake.store.EnqueueDeployment(ctx, app.ID, "main", testSHA, "Old", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := fake.store.StartDeployment(ctx, d.ID, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := fake.store.FinishDeployment(ctx, d.ID, store.StatusSucceeded, "", now); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	kept, pruned, foreign := succeed("blog"), succeed("blog"), succeed("other")
+	fake.mu.Lock()
+	fake.available = map[int64]bool{kept.ID: true, foreign.ID: true}
+	fake.mu.Unlock()
+
+	list := decode[struct {
+		Deployments []deploymentJSON `json:"deployments"`
+	}](t, request(t, h, http.MethodGet, "/api/apps/blog/deployments", ""))
+	for _, d := range list.Deployments {
+		if want := d.ID == kept.ID; d.RollbackAvailable != want {
+			t.Errorf("deployment %d rollback_available = %v, want %v", d.ID, d.RollbackAvailable, want)
+		}
+	}
+
+	rec := request(t, h, http.MethodPost, "/api/apps/blog/deployments", fmt.Sprintf(`{"rollback_to": %d}`, kept.ID))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("rollback: %d %s", rec.Code, rec.Body)
+	}
+	rb := decode[deploymentJSON](t, rec)
+	if rb.Ref != "rollback" || rb.SourceDeploymentID == nil || *rb.SourceDeploymentID != kept.ID || rb.Status != "queued" {
+		t.Errorf("rollback = %+v", rb)
+	}
+
+	for body, want := range map[string]string{
+		fmt.Sprintf(`{"rollback_to": %d}`, pruned.ID):                     "release_unavailable",
+		fmt.Sprintf(`{"rollback_to": %d}`, foreign.ID):                    `"rollback_to"`,
+		`{"rollback_to": 999}`:                                            `"rollback_to"`,
+		fmt.Sprintf(`{"rollback_to": %d, "sha": "%s"}`, kept.ID, testSHA): `"rollback_to"`,
+	} {
+		rec := request(t, h, http.MethodPost, "/api/apps/blog/deployments", body)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("%s: %d %s", body, rec.Code, rec.Body)
+		}
 	}
 }

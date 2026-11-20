@@ -58,10 +58,16 @@ type Deployment struct {
 	QueuedAt      time.Time
 	StartedAt     *time.Time
 	FinishedAt    *time.Time
+	// SourceDeploymentID is set on a rollback: the deployment whose kept
+	// release it starts again (ARCHITECTURE 7.1).
+	SourceDeploymentID *int64
 }
 
+// RollbackRef is the ref recorded on rollbacks.
+const RollbackRef = "rollback"
+
 const deploymentColumns = `id, app_id, ref, commit_sha, commit_message, status, error,
-	queued_at, started_at, finished_at`
+	queued_at, started_at, finished_at, source_deployment_id`
 
 func scanDeployment(row rowScanner) (Deployment, error) {
 	var (
@@ -69,9 +75,10 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 		queued   int64
 		started  sql.NullInt64
 		finished sql.NullInt64
+		source   sql.NullInt64
 	)
 	err := row.Scan(&d.ID, &d.AppID, &d.Ref, &d.CommitSHA, &d.CommitMessage, &d.Status, &d.Error,
-		&queued, &started, &finished)
+		&queued, &started, &finished, &source)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -81,6 +88,9 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 	d.QueuedAt = fromMillis(queued)
 	d.StartedAt = fromNullMillis(started)
 	d.FinishedAt = fromNullMillis(finished)
+	if source.Valid {
+		d.SourceDeploymentID = &source.Int64
+	}
 	return d, nil
 }
 
@@ -88,6 +98,17 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 // of the same app are canceled because only the newest request matters; their
 // IDs are returned.
 func (s *Store) EnqueueDeployment(ctx context.Context, appID int64, ref, sha, message string, now time.Time) (Deployment, []int64, error) {
+	return s.enqueue(ctx, appID, ref, sha, message, nil, now)
+}
+
+// EnqueueRollback records a queued rollback to the kept release of source
+// (ARCHITECTURE 7.1), with source's commit. Like EnqueueDeployment, it
+// supersedes the app's other queued deployments.
+func (s *Store) EnqueueRollback(ctx context.Context, source Deployment, now time.Time) (Deployment, []int64, error) {
+	return s.enqueue(ctx, source.AppID, RollbackRef, source.CommitSHA, source.CommitMessage, &source.ID, now)
+}
+
+func (s *Store) enqueue(ctx context.Context, appID int64, ref, sha, message string, source *int64, now time.Time) (Deployment, []int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
@@ -117,8 +138,8 @@ func (s *Store) EnqueueDeployment(ctx context.Context, appID int64, ref, sha, me
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO deployments (app_id, ref, commit_sha, commit_message, status, queued_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`, appID, ref, sha, message, StatusQueued, toMillis(now))
+		`INSERT INTO deployments (app_id, ref, commit_sha, commit_message, status, queued_at, source_deployment_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`, appID, ref, sha, message, StatusQueued, toMillis(now), nullInt(source))
 	if err != nil {
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
 	}
@@ -197,7 +218,8 @@ func (s *Store) StartDeployment(ctx context.Context, id int64, now time.Time) er
 }
 
 // FinishDeployment moves a running deployment to a terminal status. On
-// success the app's current deployment is updated in the same transaction.
+// success the app's current deployment is updated in the same transaction:
+// to the deployment itself, or for a rollback to the release it started.
 func (s *Store) FinishDeployment(ctx context.Context, id int64, status, errMsg string, now time.Time) error {
 	if !CanTransition(StatusRunning, status) {
 		return fmt.Errorf("finish deployment as %q: %w", status, ErrInvalidTransition)
@@ -218,8 +240,8 @@ func (s *Store) FinishDeployment(ctx context.Context, id int64, status, errMsg s
 	}
 	if status == StatusSucceeded {
 		if _, err := tx.ExecContext(ctx,
-			`UPDATE apps SET current_deployment_id = ?, updated_at = ?
-			 WHERE id = (SELECT app_id FROM deployments WHERE id = ?)`, id, toMillis(now), id); err != nil {
+			`UPDATE apps SET current_deployment_id = (SELECT COALESCE(source_deployment_id, id) FROM deployments WHERE id = ?),
+			 updated_at = ? WHERE id = (SELECT app_id FROM deployments WHERE id = ?)`, id, toMillis(now), id); err != nil {
 			return fmt.Errorf("finish deployment: %w", err)
 		}
 	}

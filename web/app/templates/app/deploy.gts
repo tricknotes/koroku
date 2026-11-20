@@ -11,6 +11,7 @@ import Button from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import DeploymentDetail from 'koroku-console/components/deployment-detail';
 import EnvRequirementsWarning from 'koroku-console/components/env-requirements-warning';
+import EnvironmentBadge from 'koroku-console/components/environment-badge';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
@@ -28,7 +29,15 @@ import {
   isFullSha,
   shortSha,
 } from 'koroku-console/utils/format';
+import { ApiError } from 'koroku-console/utils/errors';
 import Loadable from 'koroku-console/utils/loadable';
+import {
+  canRollBack,
+  isReleaseGone,
+  isRollback,
+  releaseId,
+  rollbackSummary,
+} from 'koroku-console/utils/rollback';
 import {
   DEPLOYMENT_STATUS_KINDS,
   DEPLOYMENT_STATUS_LABELS,
@@ -87,6 +96,14 @@ function detailId(deployment: Deployment): string {
   return `deployment-${deployment.id}-detail`;
 }
 
+/** "9fceb02 Fix login": the commit of a deployment, in one line. */
+function commitText(deployment: Deployment): string {
+  return `${shortSha(deployment.commit_sha)} ${firstLine(deployment.commit_message)}`.trim();
+}
+
+const GONE_HINT =
+  'この版のリリースはもう保持していないため、コミットを取得・ビルドし直してデプロイします。';
+
 interface Signature {
   Args: { model: AppContext };
 }
@@ -127,6 +144,12 @@ export default class AppDeployTemplate extends Component<Signature> {
 
   /** The deployment whose steps are open below its row. */
   @tracked selectedId: number | null = null;
+
+  /** The deployment whose release waits in the rollback dialog. */
+  @tracked rollbackTarget: Deployment | null = null;
+  @tracked rollingBack = false;
+  /** Why the rollback in the dialog did not start. */
+  @tracked rollbackError: unknown = null;
 
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
@@ -214,6 +237,18 @@ export default class AppDeployTemplate extends Component<Signature> {
 
   isSelected = (deployment: Deployment): boolean =>
     this.selectedId === deployment.id;
+
+  /** "この版に戻す" applies: kept, finished, and not what runs now. */
+  canRollBack = (deployment: Deployment): boolean =>
+    canRollBack(deployment, this.app.current_deployment);
+
+  /** Once ran, but only a new build of its commit can bring it back. */
+  isReleaseGone = (deployment: Deployment): boolean =>
+    isReleaseGone(deployment, this.app.current_deployment);
+
+  /** The detail says what can be done with the release of the deployment. */
+  hasReleaseActions = (deployment: Deployment): boolean =>
+    this.canRollBack(deployment) || this.isReleaseGone(deployment);
 
   private async loadHistory(): Promise<void> {
     await this.history.load();
@@ -395,6 +430,62 @@ export default class AppDeployTemplate extends Component<Signature> {
       this.canceling = null;
     }
     await this.refresh();
+  };
+
+  /** Opens the confirmation for starting a kept release again. */
+  requestRollback = (deployment: Deployment) => {
+    this.error = null;
+    this.rollbackError = null;
+    this.rollbackTarget = deployment;
+  };
+
+  cancelRollback = () => {
+    this.rollbackTarget = null;
+    this.rollbackError = null;
+  };
+
+  get rollbackSourceId(): number | null {
+    return this.rollbackTarget ? releaseId(this.rollbackTarget) : null;
+  }
+
+  get rollbackTitle(): string {
+    return this.args.model.isProduction
+      ? '本番アプリをこの版に戻しますか？'
+      : 'この版に戻しますか？';
+  }
+
+  /**
+   * Starts the rollback and opens its live log, like a deployment. Errors
+   * stay in the dialog, next to what was asked; a re-login is asked for by
+   * its own dialog, so this one gives way.
+   */
+  confirmRollback = async () => {
+    const target = this.rollbackTarget;
+    if (!target) return;
+    this.rollingBack = true;
+    this.rollbackError = null;
+    try {
+      const deployment = await this.api.rollBack(
+        this.app.slug,
+        releaseId(target),
+      );
+      this.rollbackTarget = null;
+      await this.history.load({ quiet: true });
+      this.selectedId = deployment.id;
+      await this.args.model.reload();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'reauth_required') {
+        this.rollbackTarget = null;
+        return;
+      }
+      this.rollbackError = error;
+      // The release is gone since the list was read: show that in it.
+      if (error instanceof ApiError && error.code === 'release_unavailable') {
+        await this.history.load({ quiet: true });
+      }
+    } finally {
+      this.rollingBack = false;
+    }
   };
 
   /** Opens the steps of a deployment, or closes them again. */
@@ -619,11 +710,22 @@ export default class AppDeployTemplate extends Component<Signature> {
                           {{on "click" (fn this.toggle deployment)}}
                         >{{rowTitle deployment}}</button>
                         <span class="deploy-meta">
+                          {{#if (isRollback deployment)}}
+                            <Badge
+                              @tone="info"
+                              title="保持している版を、ビルドせずに起動し直したデプロイです"
+                              data-test-rollback-badge
+                            >ロールバック</Badge>
+                          {{/if}}
                           <span
                             class="deploy-sha"
                             title={{deployment.commit_sha}}
                           >{{shortSha deployment.commit_sha}}</span>
-                          {{#if deployment.ref}}
+                          {{#if (isRollback deployment)}}
+                            <span data-test-rollback-summary>
+                              {{rollbackSummary deployment}}
+                            </span>
+                          {{else if deployment.ref}}
                             <span>{{deployment.ref}}</span>
                           {{/if}}
                         </span>
@@ -660,12 +762,26 @@ export default class AppDeployTemplate extends Component<Signature> {
                             data-test-cancel
                             {{on "click" (fn this.cancel deployment)}}
                           >キャンセル</Button>
+                        {{else if (this.canRollBack deployment)}}
+                          <Button
+                            @size="small"
+                            @variant="ghost"
+                            @disabled={{this.deploying}}
+                            class="row-action"
+                            title="保持しているこの版を、ビルドせずに起動し直します"
+                            data-test-rollback
+                            {{on "click" (fn this.requestRollback deployment)}}
+                          >この版に戻す</Button>
                         {{else if deployment.commit_sha}}
                           <Button
                             @size="small"
                             @variant="ghost"
                             @disabled={{this.deploying}}
                             class="row-action"
+                            title={{if
+                              (this.isReleaseGone deployment)
+                              GONE_HINT
+                            }}
                             data-test-redeploy
                             {{on "click" (fn this.redeploy deployment)}}
                           >このコミットを再デプロイ</Button>
@@ -679,7 +795,47 @@ export default class AppDeployTemplate extends Component<Signature> {
                         id={{detailId deployment}}
                         @deployment={{deployment}}
                         @onLogEnd={{this.refresh}}
-                      />
+                      >
+                        {{#if (this.hasReleaseActions deployment)}}
+                          <div class="deploy-release" data-test-release-actions>
+                            {{#if (this.canRollBack deployment)}}
+                              <p data-test-release-kept>
+                                この版のリリースを保持しています。ビルドせずに、すぐ起動し直せます。
+                              </p>
+                              <div class="deploy-release-buttons">
+                                <Button
+                                  @size="small"
+                                  @disabled={{this.deploying}}
+                                  data-test-detail-rollback
+                                  {{on
+                                    "click"
+                                    (fn this.requestRollback deployment)
+                                  }}
+                                >この版に戻す</Button>
+                                <Button
+                                  @size="small"
+                                  @variant="ghost"
+                                  @disabled={{this.deploying}}
+                                  data-test-detail-redeploy
+                                  {{on "click" (fn this.redeploy deployment)}}
+                                >このコミットを再デプロイ</Button>
+                              </div>
+                            {{else}}
+                              <p data-test-release-gone>
+                                この版のリリースはもう保持していないため、すぐには戻せません。戻すには、このコミットを再デプロイします（取得とビルドからやり直すため、数分かかります）。
+                              </p>
+                              <div class="deploy-release-buttons">
+                                <Button
+                                  @size="small"
+                                  @disabled={{this.deploying}}
+                                  data-test-detail-redeploy
+                                  {{on "click" (fn this.redeploy deployment)}}
+                                >このコミットを再デプロイ</Button>
+                              </div>
+                            {{/if}}
+                          </div>
+                        {{/if}}
+                      </DeploymentDetail>
                     {{/if}}
                   </li>
                 {{/each}}
@@ -710,6 +866,42 @@ export default class AppDeployTemplate extends Component<Signature> {
           @requirements={{this.pendingRequirementsValue}}
           @inDialog={{true}}
         />
+      </ConfirmDialog>
+    {{/if}}
+
+    {{#if this.rollbackTarget}}
+      <ConfirmDialog
+        @title={{this.rollbackTitle}}
+        @confirmLabel="この版に戻す"
+        @busy={{this.rollingBack}}
+        @onConfirm={{this.confirmRollback}}
+        @onCancel={{this.cancelRollback}}
+      >
+        <div data-test-rollback-dialog>
+          <p>
+            {{#if @model.isProduction}}
+              <EnvironmentBadge
+                @environment="production"
+                data-test-rollback-production
+              />
+            {{/if}}
+            <strong>{{this.app.slug}}</strong>
+            を、デプロイ
+            <strong data-test-rollback-dialog-target>#{{this.rollbackSourceId}}
+              {{commitText this.rollbackTarget}}</strong>
+            の版に戻します。
+          </p>
+          <ul class="dialog-points">
+            <li
+            >ビルドはしません。保持しているイメージをそのまま起動します。コンテナの入れ替えで数秒の断があります。</li>
+            <li
+              data-test-rollback-env
+            >環境変数は、この版が動いていた時の値に戻ります。いま保存している値は残り、環境変数のタブに未反映の変更として表示されます。</li>
+            <li data-test-rollback-migration>DB
+              のマイグレーションは元に戻りません。この版より後にスキーマを変えていると、起動に失敗することがあります。失敗したときは、いま動いている版に自動で戻ります。</li>
+          </ul>
+          <ErrorMessage @error={{this.rollbackError}} />
+        </div>
       </ConfirmDialog>
     {{/if}}
   </template>

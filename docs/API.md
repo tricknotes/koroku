@@ -265,19 +265,23 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
   "error": "",
   "queued_at": "2026-11-18T03:00:00Z",
   "started_at": "2026-11-18T03:00:01Z",
-  "finished_at": "2026-11-18T03:01:10Z"
+  "finished_at": "2026-11-18T03:01:10Z",
+  "source_deployment_id": null,
+  "rollback_available": true
 }
 ```
 
-`status` は `queued` / `running` / `succeeded` / `failed` / `canceled`。
+`status` は `queued` / `running` / `succeeded` / `failed` / `canceled`。`source_deployment_id` は、ロールバック（ARCHITECTURE 7.1）の記録なら戻す先のデプロイの ID（`ref` は `rollback`）、通常のデプロイなら `null`。`rollback_available` は、そのデプロイのリリースへ再ビルドなしで戻せるか（成功していて、ファイルが残っている。ロールバックの記録なら戻す先について）。
 
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/deployments?limit=50` | `{"deployments": [デプロイ, ...]}`（新しい順、`limit` は 1〜200） |
-| `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}` か `{"sha": "<40 桁>"}`（両方あれば `sha` をデプロイし `ref` は表示用）。202 でデプロイ。ロールバックは過去の `sha` を指定する |
+| `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}` か `{"sha": "<40 桁>"}`（両方あれば `sha` をデプロイし `ref` は表示用）。202 でデプロイ。保持しているリリースへ再ビルドなしで戻すときは `{"rollback_to": <デプロイの ID>}`（ほかのフィールドと同時には指定できない）。戻せなければ `422 release_unavailable`、別のアプリのデプロイなら `422 validation_failed`（`details.rollback_to`）。保持していない古い版へは、過去の `sha` を指定して再デプロイする |
 | `GET /api/deployments/{id}` | デプロイ |
 | `POST /api/deployments/{id}/cancel` | 202 でその時点のデプロイ。実行中のものは非同期に止まる。終了済みは `409 not_cancelable` |
 | `GET /api/deployments/{id}/logs` | デプロイログの SSE（下記）。`?format=text` を付けると、その時点までの全文を `text/plain` で返す |
+
+**ロールバックのログ**: `rollback_to` で作ったデプロイは `Queued rollback to deployment #<id> (<sha>).` で始まり、手順は `prepare` `validate` `start` `route` `check` `done`（取得、ビルド、pull はない）。
 
 **手順の見出し行**: デプロイログのうち `==> ` で始まる行は手順の区切りで、`==> <RFC 3339 の時刻> <キー> <表題>` の形をしている（例: `==> 2026-11-18T03:00:01Z build Building images`）。キーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done`、成功後の後片付けの `cleanup`、失敗時は `failed`（表題に最終状態と理由）と `rollback`。UI はこの行でログを手順に分け、次の見出しまでをその手順の所要時間とする。ビルドも pull も不要なアプリではその手順の行は出ない。
 

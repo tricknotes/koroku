@@ -55,29 +55,34 @@ function isFailed(step: DeployStep): boolean {
   return step.state === 'failed';
 }
 
-function logLabel(step: DeployStep): string {
-  return `${stepLabel(step.key)}のログ`;
+function logLabel(step: DeployStep, rollback?: boolean): string {
+  return `${stepLabel(step.key, rollback)}のログ`;
 }
 
 /** Name, koroku's own title and the state / duration of one step. */
-const StepSummary: TOC<{ Args: { step: DeployStep } }> = <template>
-  <span class="step-name">{{stepLabel @step.key}}</span>
-  <span class="step-title">{{@step.title}}</span>
-  <span class="step-meta" data-test-step-meta>
-    {{#if (showsState @step)}}
-      <span class="step-state">{{stateLabel @step}}</span>
-    {{else}}
-      <span class="visually-hidden">{{stateLabel @step}}</span>
-    {{/if}}
-    {{#if (duration @step)}}
-      <span data-test-step-duration>{{duration @step}}</span>
-    {{/if}}
-  </span>
-</template>;
+const StepSummary: TOC<{ Args: { step: DeployStep; rollback?: boolean } }> =
+  <template>
+    <span class="step-name">{{stepLabel @step.key @rollback}}</span>
+    <span class="step-title">{{@step.title}}</span>
+    <span class="step-meta" data-test-step-meta>
+      {{#if (showsState @step)}}
+        <span class="step-state">{{stateLabel @step}}</span>
+      {{else}}
+        <span class="visually-hidden">{{stateLabel @step}}</span>
+      {{/if}}
+      {{#if (duration @step)}}
+        <span data-test-step-duration>{{duration @step}}</span>
+      {{/if}}
+    </span>
+  </template>;
 
 interface DeploymentStepsSignature {
   Element: HTMLOListElement;
-  Args: { steps: DeployStep[] };
+  Args: {
+    steps: DeployStep[];
+    /** The steps of a rollback, some of which have names of their own. */
+    rollback?: boolean;
+  };
 }
 
 /**
@@ -137,12 +142,12 @@ export default class DeploymentSteps extends Component<DeploymentStepsSignature>
                   data-test-step-toggle
                   {{on "click" (fn this.toggle step)}}
                 >
-                  <StepSummary @step={{step}} />
+                  <StepSummary @step={{step}} @rollback={{@rollback}} />
                   <Icon @name="chevron-down" class="step-chevron" />
                 </button>
               {{else}}
                 <div class="step-header">
-                  <StepSummary @step={{step}} />
+                  <StepSummary @step={{step}} @rollback={{@rollback}} />
                 </div>
               {{/if}}
 
@@ -150,7 +155,7 @@ export default class DeploymentSteps extends Component<DeploymentStepsSignature>
                 <StepLog
                   id="{{prefix}}-{{step.id}}"
                   @lines={{step.lines}}
-                  @label={{logLabel step}}
+                  @label={{logLabel step @rollback}}
                   @live={{isLive step}}
                   @highlightErrors={{isFailed step}}
                   @onUnfollow={{fn this.keepOpen step}}

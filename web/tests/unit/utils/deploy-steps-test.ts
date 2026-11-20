@@ -10,7 +10,7 @@ import type { Deployment } from 'koroku-console/utils/types';
 
 type Times = Pick<
   Deployment,
-  'status' | 'queued_at' | 'started_at' | 'finished_at'
+  'status' | 'queued_at' | 'started_at' | 'finished_at' | 'source_deployment_id'
 >;
 
 function times(overrides: Partial<Times> = {}): Times {
@@ -146,6 +146,46 @@ module('Unit | Utility | deploy-steps', function () {
         'start:pending',
         'check:pending',
         'done:pending',
+      ],
+    );
+  });
+
+  test('a rollback waits for its own steps: no fetch, build or pull', function (assert) {
+    const running = {
+      ...times({ status: 'running', finished_at: null }),
+      source_deployment_id: 10,
+    };
+    const lines = [
+      'Queued rollback to deployment #10 (9fceb02).',
+      head(1, 'prepare', 'Reusing the release of deployment #10'),
+      'Compose file: compose.yaml; images: [koroku-blog-web:r10]',
+    ];
+
+    assert.deepEqual(summary(lines, running), [
+      'queue:done',
+      'prepare:running',
+      'validate:pending',
+      'start:pending',
+      'check:pending',
+      'done:pending',
+    ]);
+
+    const finished = [
+      ...lines,
+      head(2, 'validate', 'Validating the release again'),
+      head(3, 'start', 'Starting containers'),
+      head(9, 'check', 'Checking http://127.0.0.1:20000/'),
+      head(10, 'done', 'Deployment succeeded'),
+    ];
+    assert.deepEqual(
+      summary(finished, { ...times(), source_deployment_id: 10 }),
+      [
+        'queue:done',
+        'prepare:done',
+        'validate:done',
+        'start:done',
+        'check:done',
+        'done:done',
       ],
     );
   });
@@ -375,6 +415,13 @@ module('Unit | Utility | deploy-steps', function () {
     assert.strictEqual(stepLabel('check'), '確認');
     assert.strictEqual(stepLabel('rollback'), 'ロールバック');
     assert.strictEqual(stepLabel('migrate'), 'migrate');
+    assert.strictEqual(stepLabel('prepare'), '生成');
+    assert.strictEqual(
+      stepLabel('prepare', true),
+      '準備',
+      'a rollback prepares a kept release, it generates nothing',
+    );
+    assert.strictEqual(stepLabel('check', true), '確認');
   });
 
   test('error lines are recognised and grouped into segments', function (assert) {

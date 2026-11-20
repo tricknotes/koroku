@@ -20,6 +20,10 @@ import (
 // Deployer is the part of the deploy engine the API drives.
 type Deployer interface {
 	Enqueue(ctx context.Context, app store.App, ref, sha, message string) (store.Deployment, error)
+	// EnqueueRollback and ReleaseAvailable start a kept release again
+	// without building it (ARCHITECTURE 7.1).
+	EnqueueRollback(ctx context.Context, app store.App, fromID int64) (store.Deployment, error)
+	ReleaseAvailable(app store.App, id int64) bool
 	Cancel(ctx context.Context, id int64) error
 	LogPath(slug string, id int64) string
 }
@@ -45,20 +49,31 @@ type deploymentJSON struct {
 	QueuedAt      time.Time  `json:"queued_at"`
 	StartedAt     *time.Time `json:"started_at"`
 	FinishedAt    *time.Time `json:"finished_at"`
+	// SourceDeploymentID is set on rollbacks; RollbackAvailable says
+	// whether this deployment's release can be started again.
+	SourceDeploymentID *int64 `json:"source_deployment_id"`
+	RollbackAvailable  bool   `json:"rollback_available"`
+}
+
+func (s *Server) deploymentToJSON(app store.App, d store.Deployment) deploymentJSON {
+	j := deploymentToJSON(d, app.Slug)
+	j.RollbackAvailable = d.Status == store.StatusSucceeded && s.deployer.ReleaseAvailable(app, deploy.RollbackTarget(d))
+	return j
 }
 
 func deploymentToJSON(d store.Deployment, slug string) deploymentJSON {
 	return deploymentJSON{
-		ID:            d.ID,
-		AppSlug:       slug,
-		Ref:           d.Ref,
-		CommitSHA:     d.CommitSHA,
-		CommitMessage: d.CommitMessage,
-		Status:        d.Status,
-		Error:         d.Error,
-		QueuedAt:      d.QueuedAt,
-		StartedAt:     d.StartedAt,
-		FinishedAt:    d.FinishedAt,
+		SourceDeploymentID: d.SourceDeploymentID,
+		ID:                 d.ID,
+		AppSlug:            slug,
+		Ref:                d.Ref,
+		CommitSHA:          d.CommitSHA,
+		CommitMessage:      d.CommitMessage,
+		Status:             d.Status,
+		Error:              d.Error,
+		QueuedAt:           d.QueuedAt,
+		StartedAt:          d.StartedAt,
+		FinishedAt:         d.FinishedAt,
 	}
 }
 
@@ -83,14 +98,15 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]deploymentJSON, 0, len(list))
 	for _, d := range list {
-		out = append(out, deploymentToJSON(d, app.Slug))
+		out = append(out, s.deploymentToJSON(app, d))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deployments": out})
 }
 
 type createDeploymentInput struct {
-	Ref string `json:"ref"`
-	SHA string `json:"sha"`
+	Ref        string `json:"ref"`
+	SHA        string `json:"sha"`
+	RollbackTo *int64 `json:"rollback_to"`
 }
 
 // handleCreateDeployment starts a deployment of {sha}, or of the commit that
@@ -108,6 +124,10 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	in.Ref, in.SHA = strings.TrimSpace(in.Ref), strings.ToLower(strings.TrimSpace(in.SHA))
+	if in.RollbackTo != nil {
+		s.createRollback(w, r, app, in)
+		return
+	}
 
 	errs := fieldErrors{}
 	if in.SHA != "" && !gitrepo.IsFullSHA(in.SHA) {
@@ -158,7 +178,7 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, deploymentToJSON(d, app.Slug))
+	writeJSON(w, http.StatusAccepted, s.deploymentToJSON(app, d))
 }
 
 // loadDeployment resolves the {id} path value together with its app.
@@ -190,7 +210,7 @@ func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, deploymentToJSON(d, app.Slug))
+	writeJSON(w, http.StatusOK, s.deploymentToJSON(app, d))
 }
 
 func (s *Server) handleCancelDeployment(w http.ResponseWriter, r *http.Request) {
@@ -213,7 +233,7 @@ func (s *Server) handleCancelDeployment(w http.ResponseWriter, r *http.Request) 
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, deploymentToJSON(current, app.Slug))
+	writeJSON(w, http.StatusAccepted, s.deploymentToJSON(app, current))
 }
 
 // logPollInterval is how often a live log stream checks for new output.
@@ -326,5 +346,25 @@ func streamLogLines(w io.Writer, path string, offset int64) (next int64, wrote b
 			return next, wrote, err
 		}
 		wrote = true
+	}
+}
+
+// createRollback queues a rollback to a kept release (ARCHITECTURE 7.1).
+func (s *Server) createRollback(w http.ResponseWriter, r *http.Request, app store.App, in createDeploymentInput) {
+	if in.Ref != "" || in.SHA != "" {
+		writeValidationError(w, fieldErrors{"rollback_to": "cannot be combined with ref or sha"})
+		return
+	}
+	d, err := s.deployer.EnqueueRollback(r.Context(), app, *in.RollbackTo)
+	switch {
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, deploy.ErrOtherApp):
+		writeValidationError(w, fieldErrors{"rollback_to": "no such deployment of this app"})
+	case errors.Is(err, deploy.ErrReleaseUnavailable):
+		writeError(w, http.StatusUnprocessableEntity, "release_unavailable",
+			"the release of this deployment is not kept any more; deploy its commit again instead")
+	case err != nil:
+		s.internalError(w, r, err)
+	default:
+		writeJSON(w, http.StatusAccepted, s.deploymentToJSON(app, d))
 	}
 }

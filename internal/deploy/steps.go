@@ -186,6 +186,11 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return true, fmt.Errorf("start containers: %w", err)
 	}
 
+	return e.routeAndCheck(ctx, app, log)
+}
+
+// routeAndCheck runs steps 7 and 8 once the containers are up.
+func (e *Engine) routeAndCheck(ctx context.Context, app store.App, log *deployLog) (touched bool, err error) {
 	// 7. Route.
 	if e.opts.Router != nil {
 		log.Step(StepRoute, "Updating routes")

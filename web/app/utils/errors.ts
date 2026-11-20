@@ -54,6 +54,8 @@ const MESSAGES: Record<string, string> = {
   policy_violation:
     '稼働中のリリースがポリシー検査を通らなくなっているため起動できません。再デプロイすると直ります。',
   file_too_large: 'ファイルが大きすぎて読み取れません。',
+  release_unavailable:
+    'この版のリリースはもう保持していないため、すぐには戻せません。戻すには、このコミットを再デプロイしてください。',
   ref_unresolvable: '指定したブランチまたはコミットが見つかりません。',
   disk_full: 'ディスク使用率が上限を超えているためデプロイできません。',
   internal:

@@ -16,6 +16,7 @@ import {
   type RollbackOutcome,
 } from 'koroku-console/utils/deploy-steps';
 import { formatDateTimeJst } from 'koroku-console/utils/format';
+import { isRollback, releaseId } from 'koroku-console/utils/rollback';
 import { isActiveDeployment } from 'koroku-console/utils/status';
 import type { Deployment } from 'koroku-console/utils/types';
 import Banner, { type BannerTone } from './banner';
@@ -88,6 +89,10 @@ interface DeploymentDetailSignature {
     /** The log reached its end: the deployment has a final status now. */
     onLogEnd?: () => unknown;
   };
+  Blocks: {
+    /** What can be done with this deployment's release, above its steps. */
+    default: [];
+  };
 }
 
 /**
@@ -139,12 +144,23 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
     return this.args.deployment.status === 'failed';
   }
 
+  get isRollback(): boolean {
+    return isRollback(this.args.deployment);
+  }
+
+  /** The deployment whose kept release a rollback starts again. */
+  get sourceId(): number {
+    return releaseId(this.args.deployment);
+  }
+
   /** "「確認」の手順で失敗しました。" when the log tells which step it was. */
   get failedStepText(): string {
     const step =
       this.log.failure?.step ??
       this.log.steps.find((entry) => entry.state === 'failed');
-    return step ? `「${stepLabel(step.key)}」の手順で失敗しました。` : '';
+    return step
+      ? `「${stepLabel(step.key, this.isRollback)}」の手順で失敗しました。`
+      : '';
   }
 
   get rollbackNotice():
@@ -209,7 +225,12 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
             <dt>デプロイ</dt>
             <dd>#{{@deployment.id}}</dd>
           </div>
-          {{#if @deployment.ref}}
+          {{#if this.isRollback}}
+            <div>
+              <dt>戻した版</dt>
+              <dd data-test-rollback-source>デプロイ #{{this.sourceId}}</dd>
+            </div>
+          {{else if @deployment.ref}}
             <div>
               <dt>ブランチ</dt>
               <dd>{{@deployment.ref}}</dd>
@@ -253,6 +274,15 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
           >全文を開く<Icon @name="external" /></a>
         </div>
       </div>
+
+      {{#if this.isRollback}}
+        <p class="deploy-note" data-test-rollback-summary>
+          デプロイ #{{this.sourceId}}
+          の版を、ビルドせずに起動し直すロールバックです。環境変数も、その版が動いていた時の値で起動します。
+        </p>
+      {{/if}}
+
+      {{yield}}
 
       {{#if this.isFailed}}
         <Banner @tone="error" @title="デプロイに失敗しました">
@@ -300,7 +330,10 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
       {{/if}}
 
       {{#if this.log.steps.length}}
-        <DeploymentSteps @steps={{this.log.steps}} />
+        <DeploymentSteps
+          @steps={{this.log.steps}}
+          @rollback={{this.isRollback}}
+        />
       {{else if this.isEmpty}}
         <p class="deploy-note" data-test-no-log>
           このデプロイのログは残っていません。

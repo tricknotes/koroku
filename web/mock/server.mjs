@@ -34,6 +34,7 @@ import {
   snapshots,
   startBackup,
   startDeployment,
+  startRollback,
 } from './fixtures.mjs';
 import { deploymentLog } from './deploy-log.mjs';
 import { LOG_SCENARIOS, registerLogRoutes } from './logs.mjs';
@@ -361,6 +362,30 @@ route('GET', '/api/apps/:slug/deployments', (context) => ({
 }));
 route('POST', '/api/apps/:slug/deployments', (context) => {
   const app = appOf(context);
+  // Deploying to production needs a recent login (ARCHITECTURE 10.3).
+  if (context.scenario === 'stale-login' && app.environment === 'production') {
+    throw new HttpError(403, 'reauth_required');
+  }
+  if (context.body.rollback_to !== undefined) {
+    if (context.body.ref || context.body.sha) {
+      throw new HttpError(422, 'validation_failed', {
+        rollback_to: 'cannot be combined with ref or sha',
+      });
+    }
+    // No build: the disk limit does not apply (ARCHITECTURE 7.1).
+    const result = startRollback(
+      context.state,
+      app.slug,
+      Number(context.body.rollback_to),
+    );
+    if (result.error === 'validation_failed') {
+      throw new HttpError(422, 'validation_failed', {
+        rollback_to: 'no such deployment of this app',
+      });
+    }
+    if (result.error) throw new HttpError(422, result.error);
+    return { status: 202, json: result.deployment };
+  }
   const { disk, disk_limit_percent: limit } = context.state.system;
   if (disk.used_percent > limit) {
     throw new HttpError(507, 'disk_full', {

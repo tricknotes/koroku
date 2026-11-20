@@ -336,6 +336,16 @@ export default class ApiService extends Service {
     return this.request('POST', `/api/apps/${seg(slug)}/deployments`, { body });
   }
 
+  /**
+   * Starts the kept release of a deployment again, without building it
+   * (ARCHITECTURE 7.1). The rollback is a deployment of its own.
+   */
+  rollBack(slug: string, deploymentId: number): Promise<Deployment> {
+    return this.request('POST', `/api/apps/${seg(slug)}/deployments`, {
+      body: { rollback_to: deploymentId },
+    });
+  }
+
   getDeployment(id: number): Promise<Deployment> {
     return this.request('GET', `/api/deployments/${id}`);
   }

@@ -68,8 +68,9 @@ function plan(entry, context) {
     : (entry.mockFinishAt ?? started + 70 * SECOND);
   const total = Math.max(8 * SECOND, finished - started);
   // A deployment started through the mock is over in seconds: every step
-  // shrinks with it.
-  const scale = Math.min(1, total / (45 * SECOND));
+  // shrinks with it. A rollback has no build and is short anyway.
+  const usual = (entry.source_deployment_id ? 15 : 45) * SECOND;
+  const scale = Math.min(1, total / usual);
   const url = `http://127.0.0.1:${context.hostPort}${context.healthPath}`;
   const out = [];
   let at = 0;
@@ -86,46 +87,70 @@ function plan(entry, context) {
   };
   const stamp = (time) => new Date(time).toISOString().replace('.000', '');
 
-  out.push({ at: -1, line: `Queued deployment of ${entry.commit_sha}.` });
-  step(
-    'fetch',
-    `Fetching ${entry.commit_sha}`,
-    [`Checked out ${entry.commit_sha.slice(0, 7)} ${entry.commit_message}`],
-    2 * SECOND * scale,
-  );
-  step(
-    'prepare',
-    'Preparing environment and Compose override',
-    ['Compose file: compose.yaml'],
-    1 * SECOND * scale,
-  );
-  step(
-    'validate',
-    'Validating the Compose project',
-    ['Services: [db web worker]'],
-    2 * SECOND * scale,
-  );
-  // The build takes whatever the other steps leave of the total.
-  const fixed = (context.backup ? 30 : 22) * SECOND * scale;
-  step(
-    'build',
-    'Building images',
-    buildLines(),
-    Math.max(4 * SECOND * scale, total - fixed),
-  );
-  step(
-    'pull',
-    'Pulling images',
-    [' db Pulling', ' db Pulled'],
-    3 * SECOND * scale,
-  );
-  if (context.backup && context.previousId !== null) {
+  if (entry.source_deployment_id) {
+    // A rollback starts a kept release again: no fetch, build or pull
+    // (internal/deploy/rollback.go).
+    const source = entry.source_deployment_id;
+    out.push({
+      at: -1,
+      line: `Queued rollback to deployment #${source} (${entry.commit_sha}).`,
+    });
     step(
-      'backup',
-      'Backing up before deploy',
-      ['Backup finished.'],
-      8 * SECOND * scale,
+      'prepare',
+      `Reusing the release of deployment #${source}`,
+      [
+        `Compose file: compose.yaml; images: [koroku-${context.slug}-web:r${source}]`,
+      ],
+      1 * SECOND * scale,
     );
+    step(
+      'validate',
+      'Validating the release again',
+      ['Services: [db web worker]'],
+      2 * SECOND * scale,
+    );
+  } else {
+    out.push({ at: -1, line: `Queued deployment of ${entry.commit_sha}.` });
+    step(
+      'fetch',
+      `Fetching ${entry.commit_sha}`,
+      [`Checked out ${entry.commit_sha.slice(0, 7)} ${entry.commit_message}`],
+      2 * SECOND * scale,
+    );
+    step(
+      'prepare',
+      'Preparing environment and Compose override',
+      ['Compose file: compose.yaml'],
+      1 * SECOND * scale,
+    );
+    step(
+      'validate',
+      'Validating the Compose project',
+      ['Services: [db web worker]'],
+      2 * SECOND * scale,
+    );
+    // The build takes whatever the other steps leave of the total.
+    const fixed = (context.backup ? 30 : 22) * SECOND * scale;
+    step(
+      'build',
+      'Building images',
+      buildLines(),
+      Math.max(4 * SECOND * scale, total - fixed),
+    );
+    step(
+      'pull',
+      'Pulling images',
+      [' db Pulling', ' db Pulled'],
+      3 * SECOND * scale,
+    );
+    if (context.backup && context.previousId !== null) {
+      step(
+        'backup',
+        'Backing up before deploy',
+        ['Backup finished.'],
+        8 * SECOND * scale,
+      );
+    }
   }
   if (canceled) {
     out.push({ at, line: '' });

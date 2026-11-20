@@ -108,7 +108,7 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 			return appJSON{}, err
 		}
 		if err == nil {
-			j := deploymentToJSON(d, app.Slug)
+			j := s.deploymentToJSON(app, d)
 			out.CurrentDeployment = &j
 		}
 	}
@@ -117,7 +117,7 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		return appJSON{}, err
 	}
 	if len(latest) == 1 {
-		j := deploymentToJSON(latest[0], app.Slug)
+		j := s.deploymentToJSON(app, latest[0])
 		out.LatestDeployment = &j
 	}
 	return out, nil

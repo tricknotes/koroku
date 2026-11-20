@@ -322,6 +322,39 @@
   font-size: var(--text-sm);
 }
 
+/* What can be done with the release of an earlier deployment: start it
+   again (kept) or deploy its commit again (not kept). */
+.deploy-release {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+}
+
+.deploy-release > p {
+  flex: 1 1 20rem;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.deploy-release-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* The rollback dialog: a few separate consequences, one per point. */
+.dialog-points > li + li {
+  margin-top: var(--space-1);
+}
+
 /* Steps: a vertical line of markers, each with a log that folds away. */
 
 .steps {

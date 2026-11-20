@@ -6,6 +6,7 @@
 // rollback) is read from the same log; the phrases matched below are written
 // by internal/deploy/engine.go and steps.go.
 
+import { isRollback } from './rollback';
 import type { Deployment } from './types';
 
 export type StepState = 'done' | 'running' | 'failed' | 'canceled' | 'pending';
@@ -61,7 +62,8 @@ export interface ParsedDeployLog {
 type DeploymentTimes = Pick<
   Deployment,
   'status' | 'queued_at' | 'started_at' | 'finished_at'
->;
+> &
+  Pick<Deployment, 'source_deployment_id'>;
 
 /** Lines written before the first step: queueing, an early cancel. */
 export const QUEUE_KEY = 'queue';
@@ -82,9 +84,24 @@ const STEP_LABELS: Record<string, string> = {
   cleanup: '後片付け',
 };
 
-/** Japanese name of a step; an unknown key is shown as it is. */
-export function stepLabel(key: string): string {
-  return STEP_LABELS[key] ?? key;
+/**
+ * Where a rollback's steps mean something else: its `prepare` generates
+ * nothing, it checks that the kept release is still there (ARCHITECTURE 7.1).
+ */
+const ROLLBACK_STEP_LABELS: Record<string, string> = {
+  prepare: '準備',
+};
+
+/**
+ * Japanese name of a step; an unknown key is shown as it is. `rollback`
+ * names the steps of a rollback deployment.
+ */
+export function stepLabel(key: string, rollback = false): string {
+  return (
+    (rollback ? ROLLBACK_STEP_LABELS[key] : undefined) ??
+    STEP_LABELS[key] ??
+    key
+  );
 }
 
 /** The order of a deployment that goes well (ARCHITECTURE chapter 7). */
@@ -107,6 +124,27 @@ const ORDER = [
  */
 const ALWAYS = new Set([
   'fetch',
+  'prepare',
+  'validate',
+  'start',
+  'check',
+  'done',
+]);
+
+/**
+ * A rollback starts a kept release again: no fetch, build, pull or backup
+ * (ARCHITECTURE 7.1). `route` still depends on the host.
+ */
+const ROLLBACK_ORDER = [
+  'prepare',
+  'validate',
+  'start',
+  'route',
+  'check',
+  'done',
+];
+
+const ROLLBACK_ALWAYS = new Set([
   'prepare',
   'validate',
   'start',
@@ -306,12 +344,15 @@ export function parseDeployLog(
   }
 
   if (active && !failure) {
+    const rollback = isRollback(deployment);
+    const order = rollback ? ROLLBACK_ORDER : ORDER;
+    const always = rollback ? ROLLBACK_ALWAYS : ALWAYS;
     const reached = Math.max(
       -1,
-      ...steps.map((step) => ORDER.indexOf(step.key)),
+      ...steps.map((step) => order.indexOf(step.key)),
     );
-    ORDER.forEach((key, index) => {
-      if (index <= reached || !ALWAYS.has(key)) return;
+    order.forEach((key, index) => {
+      if (index <= reached || !always.has(key)) return;
       steps.push({
         id: key,
         key,
