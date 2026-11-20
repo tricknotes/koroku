@@ -9,6 +9,7 @@ import Banner from 'koroku-console/components/banner';
 import { buttonClass } from 'koroku-console/components/button';
 import EmptyState from 'koroku-console/components/empty-state';
 import EnvironmentBadge from 'koroku-console/components/environment-badge';
+import ProtectionBadge from 'koroku-console/components/protection-badge';
 import HostStatus from 'koroku-console/components/host-status';
 import Icon from 'koroku-console/components/icon';
 import RelativeTime from 'koroku-console/components/relative-time';
@@ -222,6 +223,9 @@ export default class IndexTemplate extends Component {
                         @environment={{app.environment}}
                         data-test-environment
                       />
+                      {{#if app.access_protection}}
+                        <ProtectionBadge data-test-protected />
+                      {{/if}}
                     </span>
                     {{#if (openUrl app)}}
                       <span class="app-url" data-test-url>

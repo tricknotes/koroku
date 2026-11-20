@@ -168,6 +168,111 @@ module('Acceptance | settings', function (hooks) {
     assert.dom('[data-test-settings-saved]').doesNotExist();
   });
 
+  module('access protection', function () {
+    test('a protected app edits the paths that skip the protection', async function (assert) {
+      app = {
+        ...app,
+        access_protection: true,
+        protection_exempt_paths: ['/webhooks/'],
+      };
+      await visit('/apps/blog/settings');
+
+      assert.dom('[data-test-field="access_protection"]').isChecked();
+      assert.dom('[data-test-app-protected]').hasText('保護');
+      assert.dom('[data-test-exempt-path]').hasValue('/webhooks/');
+      assert.dom('[data-test-protection-public]').doesNotExist();
+
+      await click('[data-test-exempt-add]');
+      await fillIn(
+        '[data-test-exempt-row]:nth-child(2) [data-test-exempt-path]',
+        ' /api/hook ',
+      );
+      await click('[data-test-settings-save]');
+
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        protection_exempt_paths: ['/webhooks/', '/api/hook'],
+      });
+      assert.dom('[data-test-settings-saved]').exists();
+
+      await click(
+        '[data-test-exempt-row]:nth-child(1) [data-test-exempt-remove]',
+      );
+      await click('[data-test-settings-save]');
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[1]?.body, {
+        protection_exempt_paths: ['/api/hook'],
+      });
+    });
+
+    test('paths that would open too much are refused before saving', async function (assert) {
+      app = { ...app, access_protection: true, protection_exempt_paths: [] };
+      await visit('/apps/blog/settings');
+
+      for (const [path, message] of [
+        ['/', '保護そのものを無効に'],
+        ['webhooks', '/ で始まる'],
+        ['/hooks/*', '* や %'],
+        ['/.koroku/auth/', '/.koroku'],
+        ['/a/../b', '..'],
+      ]) {
+        if (!document.querySelector('[data-test-exempt-row]')) {
+          await click('[data-test-exempt-add]');
+        }
+        await fillIn('[data-test-exempt-path]', path!);
+        await click('[data-test-settings-save]');
+        assert
+          .dom(fieldError('protection_exempt_paths'))
+          .includesText(message!, path);
+        assert
+          .dom('[data-test-exempt-path]')
+          .hasAttribute('aria-invalid', 'true');
+      }
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
+    });
+
+    test('turning it off on a staging app saves at once and explains noindex', async function (assert) {
+      app = { ...app, access_protection: true };
+      await visit('/apps/blog/settings');
+
+      await click('[data-test-field="access_protection"]');
+      assert
+        .dom('[data-test-field-group="protection_exempt_paths"]')
+        .doesNotExist();
+      assert.dom('[data-test-protection-public]').includesText('noindex');
+      await click('[data-test-settings-save]');
+
+      assert.dom('[data-test-dialog]').doesNotExist();
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        access_protection: false,
+      });
+      assert.dom('[data-test-app-protected]').doesNotExist();
+    });
+
+    test('a production app asks before the protection changes', async function (assert) {
+      app = { ...app, environment: 'production', access_protection: false };
+      await visit('/apps/blog/settings');
+
+      await click('[data-test-field="access_protection"]');
+      await click('[data-test-settings-save]');
+      assert.dom('[data-test-protection-confirm="on"]').includesText('blog');
+      await click('[data-test-dialog-cancel]');
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
+
+      await click('[data-test-settings-save]');
+      await click('[data-test-dialog-confirm]');
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        access_protection: true,
+      });
+      assert.dom('[data-test-dialog]').doesNotExist();
+
+      await click('[data-test-field="access_protection"]');
+      await click('[data-test-settings-save]');
+      assert
+        .dom('[data-test-protection-confirm="off"]')
+        .includesText('誰でも開ける');
+      assert.dom('[data-test-dialog-confirm]').hasClass('button-danger');
+    });
+  });
+
   module('start, stop and restart', function () {
     test('restart is an ordinary action; stop sits in the danger zone and asks first', async function (assert) {
       fakes.api

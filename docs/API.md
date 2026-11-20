@@ -49,7 +49,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## API トークン（2026-11-21）
 
@@ -87,6 +87,20 @@ curl -fsS -H "Authorization: Bearer $KOROKU_TOKEN" "$KOROKU_URL/api/apps"
 - 期限切れ・失効・形式違い（`Bearer ` の後ろが空など）は `401 invalid_token`。
 - トークンごとに 1 分あたり 120 回まで。超えたら `429 rate_limited`（`Retry-After` は秒数）。
 - トークンのリクエストでは Cookie を見ない（両方を付けてもトークンとしてだけ扱う）。`Origin` は要らない（`GET` だけのため）。`Sec-Fetch-Site` の検査はそのまま掛かる。
+
+## アクセスの保護（2026-11-21）
+
+ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーのページ遷移と Caddy の `forward_auth` だけが使う。
+
+| メソッドとパス | 呼ばれるホスト | 内容 |
+| --- | --- | --- |
+| `GET /auth/gate?host=<ホスト名>&return=<パス>` | 管理 UI | `host` が保護しているアプリのホスト名でなければ `400 unknown_host`（HTML。リダイレクトしない）。未ログインなら `/auth/github/login?return_to=<このURL>` へ 303。ログイン済みなら 1 回限りのコード（60 秒）を発行し、`https://<host>/.koroku/auth/callback?code=<コード>&return=<パス>` へ 303。`return` は `/` で始まり `//` と `\` を含まない 2048 バイト以内のパスだけを受け付け、ほかは `/` にする。`--insecure-no-auth` ではコードを発行せず `https://<host><return>` へ 303 |
+| `GET /auth/gate/check` | アプリ（Caddy の `forward_auth`） | Caddy が元のリクエストの `Host`、`Cookie`、`X-Forwarded-Method`、`X-Forwarded-Uri` を付けて呼ぶ。`__Host-koroku_gate` が、このホスト名に発行され、元のセッションが有効なグラントなら 204。そうでなければ、元のメソッドが `GET` / `HEAD` なら `https://<console_host>/auth/gate?host=...&return=<元の URI>` へ 302、ほかは 401。保護していない、または未知のホスト名では 403。保護を外したアプリ（Caddy の設定がまだ古い間）は 204。`--insecure-no-auth` では常に 204 |
+| `GET /.koroku/auth/callback?code=<コード>&return=<パス>` | アプリ | コードを消費してグラントを作り、`__Host-koroku_gate`（`Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/`、期限は元のセッションと同じ）を発行して `return` へ 303。コードが無効・期限切れ・使用済み・別のホスト向け、または元のセッションがもうなければ 400 で、やり直しのリンクを載せた HTML を返す |
+| `GET` / `POST /.koroku/auth/logout` | アプリ | そのホストのグラントを消し、Cookie を削除して 200（HTML）。管理 UI からはログアウトしない |
+
+- アプリのホスト名で `koroku` に届くリクエストは、上の 3 つ（`/auth/gate/check` と `/.koroku/auth/*`）以外は 404。
+- `/.koroku/` で始まるその他のパスは Caddy が 404 を返し、アプリには届かない。
 
 ## システム（M0、prune は M5）
 
@@ -206,6 +220,8 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "service_memory_limits": { "db": "1g" },
   "env_source": "compose",
   "env_example_path": "",
+  "access_protection": true,
+  "protection_exempt_paths": ["/webhooks/"],
   "url": "https://blog.dev.example.com",
   "primary_url": "https://www.example.org",
   "pending_domains": 0,
@@ -222,6 +238,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - `compose_path` が空なら自動検出（`compose.yaml`、`compose.yml`、`docker-compose.yml`、`docker-compose.yaml` の順）。
 - `memory_limit` が空なら基盤の既定値。書式は数字 + 単位 `b` `k` `m` `g`（例 `512m`）。
 - 必要な環境変数の読み取り方（ARCHITECTURE 9.4）: `env_source` は `compose`（既定。Compose ファイルの `${VAR}`）/ `dotenv`（`.env.example`）/ `off`。`env_example_path` は `dotenv` で読むファイルのパスで、空なら `.env.example`。
+- アクセスの保護（ARCHITECTURE 8.3、2026-11-21）: `access_protection` が `true` なら、アプリのホスト名（自動割当と有効な独自ドメイン）を開けるのは管理 UI にログインした本人だけになる。`POST` で省略すると `environment` が `staging` なら `true`、`production` なら `false`。`protection_exempt_paths` は保護を外すパスの前方一致の一覧（既定は空）。各要素は `/` で始まり、英数字と `. _ ~ - / @ : +` だけからなる 200 文字以内で、20 件まで。`/` そのもの、`/.koroku` で始まるもの、`.` や `..` の区切り、`//` は `422 validation_failed`（`details.protection_exempt_paths`）。重複は 1 つにまとめる。どちらも変えると Caddy の設定を投入し直す。
 - バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。
 
 | メソッドとパス | 内容 |

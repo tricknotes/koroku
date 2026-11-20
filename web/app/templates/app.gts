@@ -10,6 +10,7 @@ import { pageTitle } from 'ember-page-title';
 import Banner from 'koroku-console/components/banner';
 import { buttonClass } from 'koroku-console/components/button';
 import EnvironmentBadge from 'koroku-console/components/environment-badge';
+import ProtectionBadge from 'koroku-console/components/protection-badge';
 import Icon from 'koroku-console/components/icon';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import Tabs from 'koroku-console/components/tabs';
@@ -154,6 +155,9 @@ export default class AppTemplate extends Component<Signature> {
                 @environment={{@model.app.environment}}
                 data-test-app-environment
               />
+              {{#if @model.app.access_protection}}
+                <ProtectionBadge data-test-app-protected />
+              {{/if}}
             </div>
             <div class="app-header-meta">
               <StatusIndicator

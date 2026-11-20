@@ -207,6 +207,14 @@
   color: var(--color-text-secondary);
 }
 
+/* Access protection: as quiet as staging, with a lock. */
+.badge-protected {
+  gap: 0.3em;
+  border-color: var(--color-border-hover);
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
 /* Status indicator: icon in the state colour plus a label. */
 
 .status {
@@ -442,6 +450,7 @@
 }
 
 .field-hint {
+  margin: 0;
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
 }

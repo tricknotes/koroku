@@ -103,7 +103,12 @@ func (r *Router) Build(ctx context.Context) ([]byte, error) {
 			Hostnames: []string{DefaultHostname(app.Slug, r.Settings.BaseDomain)},
 			// An app that was never deployed has nothing to proxy to; it
 			// gets the same fixed 503 page as a stopped one.
-			Stopped: app.DesiredState != store.DesiredRunning || app.CurrentDeploymentID == nil,
+			Stopped:     app.DesiredState != store.DesiredRunning || app.CurrentDeploymentID == nil,
+			Protected:   app.AccessProtection,
+			ExemptPaths: app.ProtectionExemptPaths,
+			// Staging apps stay out of search engines even when public
+			// (ARCHITECTURE 8.3).
+			NoIndex: app.Environment == store.EnvironmentStaging,
 		}
 		for _, d := range byApp[app.ID] {
 			route.Hostnames = append(route.Hostnames, d.Hostname)

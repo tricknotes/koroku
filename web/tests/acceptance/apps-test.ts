@@ -175,6 +175,26 @@ module('Acceptance | app list', function (hooks) {
       .hasClass('icon-spin', 'the deploying icon is the animated one');
   });
 
+  test('apps behind the access protection carry a badge', async function (assert) {
+    fakes.api.on('GET', '/api/apps', {
+      apps: [
+        makeApp({ slug: 'blog', environment: 'production' }),
+        makeApp({ slug: 'blog-staging', access_protection: true }),
+      ],
+    });
+
+    await visit('/');
+
+    assert.dom('[data-test-app="blog"] [data-test-protected]').doesNotExist();
+    assert
+      .dom('[data-test-app="blog-staging"] [data-test-protected]')
+      .hasText('保護')
+      .hasAttribute('title', /ログイン/);
+    assert
+      .dom('[data-test-app="blog-staging"] [data-test-protected] svg')
+      .hasAttribute('data-icon', 'lock');
+  });
+
   test('the row leads to the app, and "open" is the only other action', async function (assert) {
     const ok = makeDeployment({ id: 1 });
     fakes.api.on('GET', '/api/apps', {

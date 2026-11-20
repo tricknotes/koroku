@@ -194,6 +194,10 @@ export interface App {
   env_source?: EnvSource;
   /** The `.env.example` path in `dotenv` mode; '' for the default. */
   env_example_path?: string;
+  /** Only the logged-in console user can open the app (ARCHITECTURE 8.3). */
+  access_protection?: boolean;
+  /** Path prefixes that skip the access protection, e.g. `/webhooks/`. */
+  protection_exempt_paths?: string[] | null;
 }
 
 export interface AppPatch {
@@ -216,6 +220,8 @@ export interface AppPatch {
   post_load_command?: string;
   env_source?: EnvSource;
   env_example_path?: string;
+  access_protection?: boolean;
+  protection_exempt_paths?: string[];
 }
 
 export interface NewApp {

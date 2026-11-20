@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -70,7 +71,28 @@ func goldenInputs() map[string]Input {
 	local.ACMECA = "https://acme-staging-v02.api.letsencrypt.org/directory" // ignored
 	local.Apps = []App{{Slug: "blog", HostPort: 20001, Hostnames: []string{"blog.dev.localhost"}}}
 
+	// Access protection (ARCHITECTURE 8.3): a protected staging app with a
+	// custom domain and exempt paths, a protected production app, an
+	// unprotected staging app and a stopped protected one.
+	protected := baseInput()
+	protected.AccessLogDir = "/var/log/caddy/apps"
+	protected.Apps = []App{
+		{
+			Slug:        "shop-staging",
+			HostPort:    20002,
+			Hostnames:   []string{"shop-staging.dev.example.com", "staging.example.org", "www.staging.example.org"},
+			Primary:     "staging.example.org",
+			Protected:   true,
+			ExemptPaths: []string{"/webhooks/", "/api/callback", "/webhooks/"},
+			NoIndex:     true,
+		},
+		{Slug: "shop", HostPort: 20003, Hostnames: []string{"shop.dev.example.com"}, Protected: true},
+		{Slug: "demo", HostPort: 20004, Hostnames: []string{"demo.dev.example.com"}, NoIndex: true},
+		{Slug: "paused", HostPort: 20005, Hostnames: []string{"paused.dev.example.com"}, Protected: true, NoIndex: true, Stopped: true},
+	}
+
 	return map[string]Input{
+		"protected":        protected,
 		"local":            local,
 		"minimal":          minimal,
 		"apps":             apps,
@@ -377,6 +399,8 @@ func TestGenerateRejectsInvalid(t *testing.T) {
 		"duplicate within an app":  {app(func(a *App) { a.Hostnames = []string{"example.org", "EXAMPLE.org"} }), `hostname "example.org" is already served by app "blog"`},
 		"hostname is the console":  {app(func(a *App) { a.Hostnames = []string{"console.dev.example.com"} }), "is already served by the console"},
 		"primary not a hostname":   {app(func(a *App) { a.Primary = "www.example.org" }), `primary "www.example.org" is not one of its hostnames`},
+		"exempt path placeholder":  {app(func(a *App) { a.Protected, a.ExemptPaths = true, []string{"/{http.request.uri}"} }), "exempt path"},
+		"exempt path wildcard":     {app(func(a *App) { a.Protected, a.ExemptPaths = true, []string{"/hooks/*"} }), "exempt path"},
 		"duplicate slug": {
 			two(
 				App{Slug: "blog", HostPort: 20001, Hostnames: []string{"blog.dev.example.com"}},
@@ -421,6 +445,179 @@ func TestGenerateReportsAllProblems(t *testing.T) {
 	for _, want := range []string{"console host is required", "console upstream is required", "host port 0 is out of range", "at least one hostname is required"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
+func TestCheckExemptPath(t *testing.T) {
+	for _, p := range []string{"/webhooks/", "/api/callback", "/.well-known/acme", "/hooks/v1@x:y+z~a_b-c"} {
+		if err := CheckExemptPath(p); err != nil {
+			t.Errorf("CheckExemptPath(%q) = %v, want nil", p, err)
+		}
+	}
+	for p, want := range map[string]string{
+		"":                             "must start with /",
+		"webhooks/":                    "must start with /",
+		"/":                            "turn the protection off",
+		"/.koroku/auth/":               "/.koroku",
+		"/.KOROKU":                     "/.koroku",
+		"//evil":                       "//",
+		"/a/../b":                      ". or ..",
+		"/a/./b":                       ". or ..",
+		"/hooks/*":                     `"*"`,
+		"/a%2e":                        `"%"`,
+		"/{x}":                         `"{"`,
+		"/a b":                         `" "`,
+		"/a?b":                         `"?"`,
+		`/a\b`:                         `"\\"`,
+		"/" + strings.Repeat("a", 200): "200 characters",
+	} {
+		err := CheckExemptPath(p)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("CheckExemptPath(%q) = %v, want an error containing %q", p, err, want)
+		}
+	}
+}
+
+type testRoute struct {
+	Match    []map[string]json.RawMessage `json:"match"`
+	Handle   []map[string]json.RawMessage `json:"handle"`
+	Terminal bool                         `json:"terminal"`
+}
+
+func compactJSON(t *testing.T, raw json.RawMessage) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func handlerNames(r testRoute) []string {
+	var names []string
+	for _, h := range r.Handle {
+		var name string
+		_ = json.Unmarshal(h["handler"], &name)
+		names = append(names, name)
+	}
+	return names
+}
+
+// A protected app's route must keep koroku's paths away from the app, check
+// everything else except the exempt prefixes, and strip the gate cookie.
+// This follows the structure rather than the golden bytes.
+func TestGenerateProtectedRoutes(t *testing.T) {
+	out, err := Generate(goldenInputs()["protected"])
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var cfg struct {
+		Apps struct {
+			HTTP struct {
+				Servers map[string]struct {
+					Routes []testRoute `json:"routes"`
+				} `json:"servers"`
+			} `json:"http"`
+		} `json:"apps"`
+	}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	find := func(host string) testRoute {
+		t.Helper()
+		for _, r := range cfg.Apps.HTTP.Servers["https"].Routes {
+			if len(r.Match) == 1 && strings.Contains(string(r.Match[0]["host"]), `"`+host+`"`) {
+				return r
+			}
+		}
+		t.Fatalf("no route for %s", host)
+		return testRoute{}
+	}
+
+	// The redirect of the non-primary names comes before the gate.
+	if got := handlerNames(find("www.staging.example.org")); !slices.Equal(got, []string{"static_response"}) {
+		t.Errorf("redirect route handlers = %v", got)
+	}
+	served := find("staging.example.org")
+	if got := handlerNames(served); !slices.Equal(got, []string{"headers", "subroute"}) {
+		t.Fatalf("protected staging handlers = %v", got)
+	}
+	var sub []testRoute
+	if err := json.Unmarshal(served.Handle[1]["routes"], &sub); err != nil {
+		t.Fatal(err)
+	}
+	if len(sub) != 4 {
+		t.Fatalf("subroutes = %d", len(sub))
+	}
+	if m := compactJSON(t, sub[0].Match[0]["path"]); m != `["/.koroku/auth/*"]` || !sub[0].Terminal {
+		t.Errorf("first subroute must send /.koroku/auth/ to koroku: %s", m)
+	}
+	if m := compactJSON(t, sub[1].Match[0]["path"]); m != `["/.koroku","/.koroku/*"]` || !sub[1].Terminal {
+		t.Errorf("second subroute must refuse the rest of /.koroku: %s", m)
+	}
+	if m := compactJSON(t, sub[2].Match[0]["not"]); m != `[{"path":["/api/callback*","/webhooks/*"]}]` {
+		t.Errorf("forward_auth must skip exactly the exempt prefixes: %s", m)
+	}
+	if sub[2].Terminal {
+		t.Error("the check must fall through to the app on success")
+	}
+	if got := handlerNames(sub[3]); !slices.Equal(got, []string{"headers", "reverse_proxy"}) || len(sub[3].Match) != 0 {
+		t.Errorf("last subroute = %v", got)
+	}
+
+	// Production: protected without noindex. Public staging: noindex only.
+	// Stopped: the 503 page, not the gate.
+	if got := handlerNames(find("shop.dev.example.com")); !slices.Equal(got, []string{"subroute"}) {
+		t.Errorf("protected production handlers = %v", got)
+	}
+	if got := handlerNames(find("demo.dev.example.com")); !slices.Equal(got, []string{"headers", "reverse_proxy"}) {
+		t.Errorf("public staging handlers = %v", got)
+	}
+	if got := handlerNames(find("paused.dev.example.com")); !slices.Equal(got, []string{"headers", "static_response"}) {
+		t.Errorf("stopped protected handlers = %v", got)
+	}
+}
+
+// The two regular expressions that remove the gate cookie must leave every
+// other cookie intact, wherever the gate cookie sits in the header.
+func TestGateCookieStripping(t *testing.T) {
+	out, err := Generate(goldenInputs()["protected"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := regexp.MustCompile(`"search_regexp": ("(?:[^"\\]|\\.)*")`)
+	var exprs []*regexp.Regexp
+	seen := map[string]bool{}
+	for _, m := range re.FindAllStringSubmatch(string(out), -1) {
+		var expr string
+		if err := json.Unmarshal([]byte(m[1]), &expr); err != nil {
+			t.Fatal(err)
+		}
+		if !seen[expr] {
+			seen[expr] = true
+			exprs = append(exprs, regexp.MustCompile(expr))
+		}
+	}
+	if len(exprs) != 2 {
+		t.Fatalf("found %d distinct expressions, want 2", len(exprs))
+	}
+	for in, want := range map[string]string{
+		GateCookie + "=abc":                "",
+		GateCookie + "=abc; a=1":           "a=1",
+		"a=1; " + GateCookie + "=abc":      "a=1",
+		"a=1; " + GateCookie + "=abc; b=2": "a=1; b=2",
+		"a=1;" + GateCookie + "=abc;b=2":   "a=1;b=2",
+		"a=1; b=2":                         "a=1; b=2",
+		"x" + GateCookie + "=keep; a=1":    "x" + GateCookie + "=keep; a=1",
+		"a=1; my" + GateCookie + "=keep":   "a=1; my" + GateCookie + "=keep",
+	} {
+		got := in
+		for _, e := range exprs {
+			got = e.ReplaceAllString(got, "")
+		}
+		if got != want {
+			t.Errorf("strip(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

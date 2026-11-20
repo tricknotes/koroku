@@ -161,6 +161,9 @@ function app(slug, overrides = {}) {
     post_load_command: production ? '' : 'bin/rails db:anonymize',
     env_source: 'compose',
     env_example_path: '',
+    // Staging apps start protected (ARCHITECTURE 8.3).
+    access_protection: !production,
+    protection_exempt_paths: [],
     url,
     primary_url: url,
     pending_domains: 0,
@@ -341,6 +344,7 @@ function healthyApps() {
     {
       app: app('shop-staging', {
         host_port: 20003,
+        protection_exempt_paths: ['/webhooks/', '/api/payments/callback'],
         current_deployment: shopStaging,
         latest_deployment: shopStaging,
       }),

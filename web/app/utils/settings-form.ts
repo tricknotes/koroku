@@ -19,6 +19,46 @@ export class LimitRow {
   }
 }
 
+let nextExemptId = 0;
+
+export class ExemptRow {
+  readonly id = `exempt-${nextExemptId++}`;
+  @tracked path: string;
+
+  constructor(path = '') {
+    this.path = path;
+  }
+}
+
+/** The most paths an app may exempt; the API refuses more. */
+export const MAX_EXEMPT_PATHS = 20;
+
+const EXEMPT_CHARS = /^[A-Za-z0-9._~\-/@:+]+$/;
+
+/**
+ * Why a path prefix cannot skip the access protection, or null when it can.
+ * Mirrors the API (ARCHITECTURE 8.3): an absolute path of a few safe
+ * characters, neither the whole site nor koroku's own `/.koroku`.
+ */
+export function exemptPathProblem(path: string): string | null {
+  if (!path.startsWith('/')) return '/ で始まるパスを入力してください。';
+  if (path === '/') {
+    return '/ だけでは全体が外れます。保護そのものを無効にしてください。';
+  }
+  if (path.length > 200) return '200 文字以内で入力してください。';
+  if (path.toLowerCase().startsWith('/.koroku')) {
+    return '/.koroku は koroku が使うため指定できません。';
+  }
+  if (path.includes('//')) return '// を含むパスは指定できません。';
+  if (path.split('/').some((seg) => seg === '.' || seg === '..')) {
+    return '. や .. の区切りは指定できません。';
+  }
+  if (!EXEMPT_CHARS.test(path)) {
+    return '英数字と . _ ~ - / @ : + だけで入力してください（* や % は使えません）。';
+  }
+  return null;
+}
+
 const MEMORY_PATTERN = /^[0-9]+[bkmg]$/;
 
 /** Empty (use the default) or digits plus one of `b` `k` `m` `g`. */
@@ -53,6 +93,8 @@ export default class SettingsForm {
   @tracked limits: LimitRow[];
   @tracked envSource: EnvSource;
   @tracked envExamplePath: string;
+  @tracked accessProtection: boolean;
+  @tracked exemptPaths: ExemptRow[];
 
   constructor(app: App) {
     this.defaultBranch = app.default_branch;
@@ -68,6 +110,20 @@ export default class SettingsForm {
     );
     this.envSource = app.env_source ?? 'compose';
     this.envExamplePath = app.env_example_path ?? '';
+    this.accessProtection = app.access_protection ?? false;
+    this.exemptPaths = (app.protection_exempt_paths ?? []).map(
+      (path) => new ExemptRow(path),
+    );
+  }
+
+  /** The exempt paths as they would be saved: trimmed, no blanks or repeats. */
+  get exemptList(): string[] {
+    const paths: string[] = [];
+    for (const row of this.exemptPaths) {
+      const path = row.path.trim();
+      if (path && !paths.includes(path)) paths.push(path);
+    }
+    return paths;
   }
 
   get serviceLimits(): Record<string, string> {
@@ -95,6 +151,18 @@ export default class SettingsForm {
       const limit = row.limit.trim();
       if (row.service.trim() && (limit === '' || !isValidMemoryLimit(limit))) {
         errors['service_memory_limits'] = memoryHint;
+      }
+    }
+    const exempt = this.exemptList;
+    if (exempt.length > MAX_EXEMPT_PATHS) {
+      errors['protection_exempt_paths'] =
+        `${MAX_EXEMPT_PATHS} 件までにしてください。`;
+    }
+    for (const path of exempt) {
+      const problem = exemptPathProblem(path);
+      if (problem) {
+        errors['protection_exempt_paths'] = `${path}: ${problem}`;
+        break;
       }
     }
     return errors;
@@ -134,6 +202,17 @@ export default class SettingsForm {
     const envExamplePath = this.envExamplePath.trim();
     if (envExamplePath !== (app.env_example_path ?? '')) {
       patch.env_example_path = envExamplePath;
+    }
+    if (this.accessProtection !== (app.access_protection ?? false)) {
+      patch.access_protection = this.accessProtection;
+    }
+    const exempt = this.exemptList;
+    const saved = app.protection_exempt_paths ?? [];
+    if (
+      exempt.length !== saved.length ||
+      exempt.some((path, i) => path !== saved[i])
+    ) {
+      patch.protection_exempt_paths = exempt;
     }
     return patch;
   }

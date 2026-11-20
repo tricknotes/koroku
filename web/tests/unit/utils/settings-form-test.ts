@@ -1,6 +1,9 @@
 import { module, test } from 'qunit';
 import SettingsForm, {
+  ExemptRow,
   LimitRow,
+  MAX_EXEMPT_PATHS,
+  exemptPathProblem,
   isValidMemoryLimit,
 } from 'koroku-console/utils/settings-form';
 import { makeApp } from 'koroku-console/tests/helpers/fakes';
@@ -80,5 +83,69 @@ module('Unit | Utility | settings-form', function () {
     assert.false(isValidMemoryLimit('1.5g'));
     assert.false(isValidMemoryLimit('512'));
     assert.false(isValidMemoryLimit('512MB'));
+  });
+
+  test('exempt paths follow the rules of the API', function (assert) {
+    for (const ok of [
+      '/webhooks/',
+      '/api/callback',
+      '/.well-known/x',
+      '/a@b:c+d~e',
+    ]) {
+      assert.strictEqual(exemptPathProblem(ok), null, ok);
+    }
+    for (const bad of [
+      '',
+      'x',
+      '/',
+      '/.koroku',
+      '/.KOROKU/x',
+      '//x',
+      '/a/../b',
+      '/a/./b',
+      '/a*',
+      '/a%2e',
+      '/{x}',
+      '/a b',
+      `/${'a'.repeat(200)}`,
+    ]) {
+      assert.notStrictEqual(exemptPathProblem(bad), null, bad);
+    }
+  });
+
+  test('the protection and its exempt paths are patched only when changed', function (assert) {
+    const app = makeApp({
+      access_protection: true,
+      protection_exempt_paths: ['/webhooks/'],
+    });
+    const form = new SettingsForm(app);
+    assert.deepEqual(form.patch(app), {});
+
+    form.exemptPaths = [
+      ...form.exemptPaths,
+      new ExemptRow(' /webhooks/ '),
+      new ExemptRow(''),
+      new ExemptRow('/hook'),
+    ];
+    assert.deepEqual(form.patch(app), {
+      protection_exempt_paths: ['/webhooks/', '/hook'],
+    });
+
+    form.accessProtection = false;
+    assert.false(form.patch(app).access_protection);
+
+    form.exemptPaths = Array.from(
+      { length: MAX_EXEMPT_PATHS + 1 },
+      (_, i) => new ExemptRow(`/p${i}/`),
+    );
+    assert.ok(form.validate()['protection_exempt_paths']);
+  });
+
+  test('an app from an older backend reads as unprotected', function (assert) {
+    const app = makeApp();
+    const form = new SettingsForm(app);
+    assert.false(form.accessProtection);
+    assert.deepEqual(form.exemptPaths, []);
+    assert.deepEqual(form.patch(app), {});
   });
 });

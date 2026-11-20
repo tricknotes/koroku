@@ -20,6 +20,33 @@
   justify-self: start;
 }
 
+/* Access protection: what follows the switch sits apart from its hint. */
+.protection-exempt,
+.protection-public {
+  margin-top: var(--space-5);
+}
+
+/* The paths that skip the protection, one per row. */
+.exempt-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.exempt-row {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.exempt-row > .button {
+  justify-self: start;
+}
+
 .settings-operations {
   margin-top: var(--space-12);
 }

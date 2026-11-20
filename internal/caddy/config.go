@@ -98,6 +98,14 @@ type App struct {
 	Primary string
 	// Stopped keeps the route but answers 503 with a fixed page instead of proxying.
 	Stopped bool
+	// Protected lets only browsers with a valid gate cookie through; others
+	// are sent to the console to log in (ARCHITECTURE 8.3). koroku, at
+	// Input.ConsoleUpstream, decides. It does not apply to a stopped app.
+	Protected bool
+	// ExemptPaths are path prefixes of a protected app that skip the gate.
+	ExemptPaths []string
+	// NoIndex adds X-Robots-Tag: noindex to every response (staging apps).
+	NoIndex bool
 }
 
 // obj is a JSON object. encoding/json writes map keys in sorted order, which
@@ -114,7 +122,7 @@ func Generate(in Input) ([]byte, error) {
 
 	routes := []obj{consoleRoute(in)}
 	for _, app := range in.Apps {
-		routes = append(routes, appRoutes(app)...)
+		routes = append(routes, appRoutes(app, in.ConsoleUpstream)...)
 	}
 	// Requests that reach the HTTPS server with a Host header we do not serve.
 	routes = append(routes, notFoundRoute())
@@ -193,6 +201,9 @@ func normalize(in Input) Input {
 		slices.Sort(hostnames)
 		app.Hostnames = hostnames
 		app.Primary = strings.ToLower(app.Primary)
+		exempt := slices.Clone(app.ExemptPaths)
+		slices.Sort(exempt)
+		app.ExemptPaths = slices.Compact(exempt)
 		apps[i] = app
 	}
 	slices.SortStableFunc(apps, func(a, b App) int { return strings.Compare(a.Slug, b.Slug) })
@@ -278,6 +289,11 @@ func validate(in Input) error {
 		if app.Primary != "" && !slices.Contains(app.Hostnames, app.Primary) {
 			fail("%s: primary %q is not one of its hostnames", name, app.Primary)
 		}
+		for _, p := range app.ExemptPaths {
+			if err := CheckExemptPath(p); err != nil {
+				fail("%s: exempt path %q: %w", name, p, err)
+			}
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -297,7 +313,7 @@ func consoleRoute(in Input) obj {
 
 // appRoutes returns the routes of one app: an optional redirect of the
 // non-primary hostnames, then the route that serves the app.
-func appRoutes(app App) []obj {
+func appRoutes(app App, gateUpstream string) []obj {
 	served := app.Hostnames
 	var routes []obj
 	if app.Primary != "" {
@@ -323,9 +339,18 @@ func appRoutes(app App) []obj {
 		}
 	}
 
-	var handler obj
-	if app.Stopped {
-		handler = obj{
+	var handlers []obj
+	if app.NoIndex {
+		// Deferred so that it is set when the response is written and
+		// replaces whatever the app sends.
+		handlers = append(handlers, obj{
+			"handler":  "headers",
+			"response": obj{"set": obj{"X-Robots-Tag": []string{"noindex"}}, "deferred": true},
+		})
+	}
+	switch {
+	case app.Stopped:
+		handlers = append(handlers, obj{
 			"handler":     "static_response",
 			"status_code": 503,
 			"headers": obj{
@@ -333,21 +358,134 @@ func appRoutes(app App) []obj {
 				"Content-Type":  []string{"text/html; charset=utf-8"},
 			},
 			"body": stoppedPage,
-		}
-	} else {
-		handler = obj{
-			"handler":   "reverse_proxy",
-			"upstreams": []obj{{"dial": net.JoinHostPort("127.0.0.1", strconv.Itoa(app.HostPort))}},
-			// WebSocket and SSE work with the reverse proxy defaults (upgrades
-			// are passed through, event streams are flushed immediately).
-			"stream_close_delay": streamCloseDelay,
-		}
+		})
+	case app.Protected:
+		handlers = append(handlers, obj{"handler": "subroute", "routes": gateRoutes(app, gateUpstream)})
+	default:
+		handlers = append(handlers, appProxy(app))
 	}
 	return append(routes, obj{
 		"match":    []obj{{"host": served}},
-		"handle":   []obj{handler},
+		"handle":   handlers,
 		"terminal": true,
 	})
+}
+
+// appProxy forwards to the app's public service on its loopback port.
+func appProxy(app App) obj {
+	return obj{
+		"handler":   "reverse_proxy",
+		"upstreams": []obj{{"dial": net.JoinHostPort("127.0.0.1", strconv.Itoa(app.HostPort))}},
+		// WebSocket and SSE work with the reverse proxy defaults (upgrades
+		// are passed through, event streams are flushed immediately).
+		"stream_close_delay": streamCloseDelay,
+	}
+}
+
+// Paths and names of the access protection (ARCHITECTURE 8.3), shared with
+// the koroku handlers that answer them.
+const (
+	// GateCookie is the host-only cookie that admits a browser to one
+	// protected hostname.
+	GateCookie = "__Host-koroku_gate"
+	// GateCheckPath is the koroku endpoint forward_auth asks.
+	GateCheckPath = "/auth/gate/check"
+	// ReservedPrefix is the path prefix on app hosts that koroku owns.
+	ReservedPrefix = "/.koroku/"
+	// GateAuthPrefix is the part of ReservedPrefix that reaches koroku.
+	GateAuthPrefix = ReservedPrefix + "auth/"
+)
+
+// gateRoutes put a protected app behind koroku: its own login endpoints go
+// to koroku, the rest of /.koroku/ is refused, every other request outside
+// the exempt prefixes is checked with forward_auth, and what passes is
+// proxied to the app without the gate cookie.
+func gateRoutes(app App, gateUpstream string) []obj {
+	toKoroku := []obj{{"dial": gateUpstream}}
+	routes := []obj{
+		{
+			"match":    []obj{{"path": []string{GateAuthPrefix + "*"}}},
+			"handle":   []obj{{"handler": "reverse_proxy", "upstreams": toKoroku}},
+			"terminal": true,
+		},
+		{
+			"match":    []obj{{"path": []string{strings.TrimSuffix(ReservedPrefix, "/"), ReservedPrefix + "*"}}},
+			"handle":   []obj{{"handler": "static_response", "status_code": 404}},
+			"terminal": true,
+		},
+	}
+
+	// The expansion of Caddy's forward_auth directive: ask koroku with a
+	// GET (the body stays for the app), pass the original method and URI,
+	// and go on to the next route on a 2xx. Any other answer (a redirect to
+	// the console, 401, 403) goes to the browser as it is.
+	check := obj{
+		"handler":   "reverse_proxy",
+		"upstreams": toKoroku,
+		"rewrite":   obj{"method": "GET", "uri": GateCheckPath},
+		"headers": obj{"request": obj{"set": obj{
+			"X-Forwarded-Method": []string{"{http.request.method}"},
+			"X-Forwarded-Uri":    []string{"{http.request.uri}"},
+		}}},
+		"handle_response": []obj{{
+			"match":  obj{"status_code": []int{2}},
+			"routes": []obj{{"handle": []obj{{"handler": "vars"}}}},
+		}},
+	}
+	checkRoute := obj{"handle": []obj{check}}
+	if len(app.ExemptPaths) > 0 {
+		prefixes := make([]string, 0, len(app.ExemptPaths))
+		for _, p := range app.ExemptPaths {
+			prefixes = append(prefixes, p+"*")
+		}
+		// Caddy matches the cleaned path (.., //), so /webhooks/../admin
+		// is not exempt.
+		checkRoute["match"] = []obj{{"not": []obj{{"path": prefixes}}}}
+	}
+	routes = append(routes, checkRoute)
+
+	// The gate cookie is koroku's; the app never needs it. Browsers send
+	// one Cookie header (HTTP/2 joins its fields), so two replacements cover
+	// the cookie at the start and further along the list.
+	strip := obj{
+		"handler": "headers",
+		"request": obj{"replace": obj{"Cookie": []obj{
+			{"search_regexp": "^" + GateCookie + "=[^;]*(;\\s*)?", "replace": ""},
+			{"search_regexp": ";\\s*" + GateCookie + "=[^;]*", "replace": ""},
+		}}},
+	}
+	return append(routes, obj{"handle": []obj{strip, appProxy(app)}})
+}
+
+// CheckExemptPath accepts a path prefix that may skip the access protection:
+// an absolute path of a few safe characters, so that it is never read as a
+// Caddy wildcard, escape or placeholder, and neither the whole site nor
+// koroku's own prefix.
+func CheckExemptPath(p string) error {
+	switch {
+	case !strings.HasPrefix(p, "/"):
+		return errors.New("must start with /")
+	case p == "/":
+		return errors.New("must not be / (turn the protection off instead)")
+	case len(p) > 200:
+		return errors.New("must be at most 200 characters")
+	case strings.HasPrefix(strings.ToLower(p), strings.TrimSuffix(ReservedPrefix, "/")):
+		return errors.New("must not be under /.koroku")
+	case strings.Contains(p, "//"):
+		return errors.New("must not contain //")
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "." || seg == ".." {
+			return errors.New("must not contain . or .. segments")
+		}
+	}
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("._~-/@:+", c) >= 0) {
+			return fmt.Errorf("must not contain %q", string(c))
+		}
+	}
+	return nil
 }
 
 func notFoundRoute() obj {
