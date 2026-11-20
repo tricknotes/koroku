@@ -90,6 +90,8 @@ type Server struct {
 	volumes  AppVolumes
 	copier   DBCopier
 	envReqs  *envreq.Reader
+	// publicFiles reads public repositories anonymously (Options.PublicFiles).
+	publicFiles envreq.Files
 
 	routeStatus func() RouteStatus
 
@@ -114,27 +116,28 @@ func New(opts Options) *Server {
 		files = opts.Auth.GitHub
 	}
 	return &Server{
-		envReqs:  envreq.NewReader(files, opts.PublicFiles),
-		cfg:      opts.Config,
-		store:    opts.Store,
-		system:   opts.System,
-		web:      opts.Web,
-		log:      logger,
-		version:  opts.Version,
-		clock:    clk,
-		box:      opts.Box,
-		deployer: opts.Deployer,
-		promoter: opts.Promoter,
-		refs:     opts.Refs,
-		router:   opts.Router,
-		domains:  opts.Domains,
-		auth:     opts.Auth,
-		ops:      opts.Ops,
-		tasks:    opts.Tasks,
-		logs:     opts.Logs,
-		backups:  opts.Backups,
-		volumes:  opts.Volumes,
-		copier:   opts.Copier,
+		envReqs:     envreq.NewReader(files, opts.PublicFiles),
+		publicFiles: opts.PublicFiles,
+		cfg:         opts.Config,
+		store:       opts.Store,
+		system:      opts.System,
+		web:         opts.Web,
+		log:         logger,
+		version:     opts.Version,
+		clock:       clk,
+		box:         opts.Box,
+		deployer:    opts.Deployer,
+		promoter:    opts.Promoter,
+		refs:        opts.Refs,
+		router:      opts.Router,
+		domains:     opts.Domains,
+		auth:        opts.Auth,
+		ops:         opts.Ops,
+		tasks:       opts.Tasks,
+		logs:        opts.Logs,
+		backups:     opts.Backups,
+		volumes:     opts.Volumes,
+		copier:      opts.Copier,
 
 		routeStatus: opts.RouteStatus,
 

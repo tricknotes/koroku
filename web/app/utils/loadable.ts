@@ -62,6 +62,16 @@ export default class Loadable<T> {
     this.stale = false;
   }
 
+  /** Forgets the value and any request still running (back to not loaded). */
+  reset(): void {
+    this.sequence++;
+    this.value = null;
+    this.error = null;
+    this.loaded = false;
+    this.loading = false;
+    this.stale = false;
+  }
+
   get unavailable(): Unavailability | null {
     return unavailability(this.error);
   }

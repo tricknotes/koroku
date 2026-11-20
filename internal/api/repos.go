@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tricknotes/koroku/internal/compose"
+	"github.com/tricknotes/koroku/internal/envreq"
 	"github.com/tricknotes/koroku/internal/github"
 )
 
@@ -109,10 +110,6 @@ func (s *Server) handleListCommits(w http.ResponseWriter, r *http.Request) {
 // handleDetectCompose finds Compose files in the repository root and reads
 // service names and ports from one of them to prefill the create-app form.
 func (s *Server) handleDetectCompose(w http.ResponseWriter, r *http.Request) {
-	gh, ok := s.githubClient(w)
-	if !ok {
-		return
-	}
 	owner, repo := r.PathValue("owner"), r.PathValue("repo")
 	ref := r.URL.Query().Get("ref")
 	requested := strings.TrimSpace(r.URL.Query().Get("path"))
@@ -127,7 +124,24 @@ func (s *Server) handleDetectCompose(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), githubTimeout)
 	defer cancel()
 
-	names, err := gh.ListDir(ctx, owner, repo, "", ref)
+	// Through the App when it can see the repository; a public repository
+	// it cannot see (not installed, or installed on an account koroku does
+	// not use) is read anonymously.
+	var reader envreq.Files
+	var names []string
+	var err error
+	if s.auth.GitHub != nil {
+		reader = s.auth.GitHub
+		names, err = reader.ListDir(ctx, owner, repo, "", ref)
+	}
+	if (reader == nil || errors.Is(err, github.ErrNotFound)) && s.publicFiles != nil {
+		reader = s.publicFiles
+		names, err = reader.ListDir(ctx, owner, repo, "", ref)
+	}
+	if reader == nil {
+		writeError(w, http.StatusServiceUnavailable, "not_configured", "the GitHub App is not configured")
+		return
+	}
 	if err != nil {
 		s.writeGitHubError(w, r, err)
 		return
@@ -144,7 +158,7 @@ func (s *Server) handleDetectCompose(w http.ResponseWriter, r *http.Request) {
 	}
 	services := []map[string]any{}
 	if chosen != "" {
-		content, err := gh.ReadFile(ctx, owner, repo, chosen, ref)
+		content, err := reader.ReadFile(ctx, owner, repo, chosen, ref)
 		if err != nil {
 			s.writeGitHubError(w, r, err)
 			return

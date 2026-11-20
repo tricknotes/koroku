@@ -159,6 +159,62 @@ module('Acceptance | create app', function (hooks) {
     assert.dom('[data-test-compose-error]').exists();
   });
 
+  test('a public repository outside the list is given by URL', async function (assert) {
+    fakes.api
+      .on('GET', '/api/repos/rails/rails/compose', {
+        files: ['compose.yaml'],
+        path: 'compose.yaml',
+        services: [{ name: 'app', ports: [3000] }],
+      })
+      .on('POST', '/api/apps', (call: FakeCall) =>
+        makeApp(call.body as { slug: string }),
+      );
+
+    await visit('/apps/new');
+    await click('[data-test-repo-use-url]');
+    assert.dom('[data-test-unavailable]').doesNotExist('the App is there');
+    await fillIn(
+      '[data-test-field="repo_url"]',
+      'https://github.com/rails/rails.git',
+    );
+
+    assert.strictEqual(
+      fakes.api.callsTo('GET', '/api/repos/rails/rails/compose').length,
+      1,
+      'a github.com URL is detected like a listed repository',
+    );
+    assert.dom('[data-test-field="web_service"]').hasValue('app');
+    assert.dom('[data-test-field="web_port"]').hasValue('3000');
+    assert.dom('[data-test-field="slug"]').hasValue('rails');
+
+    await click('[data-test-submit]');
+    const body = fakes.api.callsTo('POST', '/api/apps')[0]?.body as Record<
+      string,
+      unknown
+    >;
+    assert.strictEqual(body['repo_url'], 'https://github.com/rails/rails.git');
+    assert.strictEqual(body['repo_full_name'], undefined);
+  });
+
+  test('a URL outside github.com is typed in by hand', async function (assert) {
+    await visit('/apps/new');
+    await click('[data-test-repo-use-url]');
+    await fillIn(
+      '[data-test-field="repo_url"]',
+      'https://git.example.com/octo/site.git',
+    );
+    assert.dom('[data-test-compose-manual]').includesText('GitHub 以外');
+    assert.dom('[data-test-field="web_port"]').exists();
+    assert.strictEqual(
+      fakes.api.calls.filter((c) => c.path.endsWith('/compose')).length,
+      0,
+    );
+
+    await click('[data-test-repo-use-list]');
+    assert.dom('[data-test-field="repo_full_name"]').exists();
+    assert.dom('[data-test-field="repo_url"]').doesNotExist();
+  });
+
   test('field errors of a 422 are shown next to the fields', async function (assert) {
     fakes.api.on('POST', '/api/apps', () => {
       throw apiError(422, 'validation_failed', {
