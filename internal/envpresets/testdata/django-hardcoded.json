@@ -1,0 +1,8 @@
+{
+  "compose_path": "",
+  "frameworks": [
+    "django"
+  ],
+  "presets": [],
+  "skipped": []
+}

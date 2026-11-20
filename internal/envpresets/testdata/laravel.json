@@ -1,0 +1,28 @@
+{
+  "compose_path": "docker-compose.yml",
+  "frameworks": [
+    "laravel"
+  ],
+  "presets": [
+    {
+      "key": "APP_ENV",
+      "value": "production",
+      "framework": "laravel",
+      "file": "composer.json",
+      "match": "laravel/framework"
+    },
+    {
+      "key": "APP_KEY",
+      "generator": "laravel_app_key",
+      "framework": "laravel",
+      "file": "composer.json",
+      "match": "laravel/framework"
+    }
+  ],
+  "skipped": [
+    {
+      "key": "APP_DEBUG",
+      "service": "app"
+    }
+  ]
+}

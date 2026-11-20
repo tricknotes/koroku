@@ -1,0 +1,15 @@
+{
+  "compose_path": "",
+  "frameworks": [
+    "elixir"
+  ],
+  "presets": [
+    {
+      "key": "MIX_ENV",
+      "value": "prod",
+      "framework": "elixir",
+      "file": "mix.exs"
+    }
+  ],
+  "skipped": []
+}

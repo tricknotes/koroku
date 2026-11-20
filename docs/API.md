@@ -246,12 +246,14 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps` | `{"apps": [アプリ, ...]}`（slug 順） |
-| `POST /api/apps` | 作成。必須は `slug`、`web_port`、リポジトリ（`repo_full_name` か `repo_url`）。ほかは既定値あり。201 でアプリ。`slug` は英小文字で始まる英小文字・数字・ハイフン 40 文字以内で、作成後は変えられない |
+| `POST /api/apps` | 作成。必須は `slug`、`web_port`、リポジトリ（`repo_full_name` か `repo_url`）。ほかは既定値あり。201 でアプリ。`slug` は英小文字で始まる英小文字・数字・ハイフン 40 文字以内で、作成後は変えられない。`env`（`[{"key": "...", "value": "..."}]`）を付けると、環境変数もアプリと同じトランザクションで保存する（下記） |
 | `GET /api/apps/{slug}` | アプリ |
 | `PATCH /api/apps/{slug}` | 送ったフィールドだけ更新。200 でアプリ |
 | `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204 |
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る） |
 | `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）と `memory_limit_bytes`（上限。無制限なら 0）も付く。取得できなければどちらも `null` |
+
+- 作成時の環境変数（ARCHITECTURE 9.8、2026-11-21）: `POST /api/apps` の `env` は `PUT /api/apps/{slug}/env` の `vars` と同じ形と検査（key の形式、`KOROKU_` で始まらない、重複なし、500 件まで、値は 64 KiB まで）。不正なら `422 validation_failed`（`details.env`）で、アプリも作らない。空でない `env` は環境変数の保存なので、直近 10 分以内のログインでなければ `403 reauth_required`（アプリは作らない）。`PATCH` では受け付けない（`400 invalid_json`）。
 
 ### メモリ使用量の履歴（2026-11-21）
 
@@ -515,6 +517,33 @@ ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose ru
 | `GET /api/repos/{owner}/{repo}/compose?ref=main&path=` | Compose ファイルの検出。`{"files": ["compose.yaml"], "path": "compose.yaml", "services": [{"name": "web", "ports": [3000]}, {"name": "db", "ports": [5432]}]}`。`files` はリポジトリ直下で見つかった候補、`path` は読んだファイル（`path` 指定がなければ最初の候補）、`services` はそこから読み取れたサービス名とコンテナ側ポート（読み取れなければ空配列。UI は手入力にフォールバックする） |
 
 GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイルがない、または GitHub App が未インストール）、`503 github_rate_limited`、`502 github_error`、GitHub App が未設定なら `503 not_configured`。
+
+### 環境変数の初期値（2026-11-21）
+
+`GET /api/repos/{owner}/{repo}/env-presets?ref=main&path=compose.yaml`: アプリの作成画面に並べる環境変数の初期値（ARCHITECTURE 9.8）。`ref` はブランチ（省くとリポジトリの既定のブランチ）、`path` は Compose ファイル（省くと直下から自動検出）。
+
+```json
+{
+  "status": "ok",
+  "reason": "",
+  "compose_path": "compose.yaml",
+  "frameworks": ["rails"],
+  "presets": [
+    {"key": "RAILS_ENV", "value": "production", "generated": false, "framework": "rails", "file": "Gemfile", "match": "rails"},
+    {"key": "SECRET_KEY_BASE", "value": "3f9c...", "generated": true, "framework": "rails", "file": "Gemfile", "match": "rails"},
+    {"key": "RAILS_LOG_TO_STDOUT", "value": "true", "generated": false, "framework": "rails", "file": "config/environments/production.rb", "match": "RAILS_LOG_TO_STDOUT"}
+  ],
+  "skipped": [
+    {"key": "RACK_ENV", "service": "web"}
+  ]
+}
+```
+
+- `frameworks` は判定したフレームワーク（`rails`、`rack`、`laravel`、`django`、`phoenix`、`elixir`、`node`）。`presets` は規則の順。`file` と `match` は判定の根拠（`match` が空なら、ファイルがあること自体が根拠）。
+- `generated: true` の値は `crypto/rand` で生成した秘密で、呼ぶたびに変わる。応答は `Cache-Control: no-store`。保存はされない（作成の `env` で送ったときに保存される）。
+- `skipped` は、規則には当たったが Compose ファイルの `environment:` が値を直接書いているので入れなかった変数と、そのサービス。
+- `status` は `ok` / `unavailable`。`unavailable` のとき `reason` は `repo_unavailable`（GitHub App からも認証なしでも読めない。ブランチがない場合も）、`rate_limited`、`github_error`、`not_configured`（GitHub App も認証なしの読み取りもない）のいずれかで、ほかは空。読めなくても 200 で返す（作成画面は欄を出さない）。1 MiB を超えるファイルは読まずに、ないものとして判定する。
+- `ref` か `path` の形が不正なら 422。
 
 ## 独自ドメイン（M2）
 

@@ -1,0 +1,16 @@
+{
+  "compose_path": "",
+  "frameworks": [
+    "rack"
+  ],
+  "presets": [
+    {
+      "key": "RACK_ENV",
+      "value": "production",
+      "framework": "rack",
+      "file": "Gemfile",
+      "match": "sinatra"
+    }
+  ],
+  "skipped": []
+}

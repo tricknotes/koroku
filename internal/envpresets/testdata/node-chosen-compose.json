@@ -1,0 +1,15 @@
+{
+  "compose_path": "deploy/compose.yaml",
+  "frameworks": [
+    "node"
+  ],
+  "presets": [
+    {
+      "key": "NODE_ENV",
+      "value": "production",
+      "framework": "node",
+      "file": "package.json"
+    }
+  ],
+  "skipped": []
+}

@@ -1,0 +1,30 @@
+{
+  "compose_path": "",
+  "frameworks": [
+    "rails"
+  ],
+  "presets": [
+    {
+      "key": "RAILS_ENV",
+      "value": "production",
+      "framework": "rails",
+      "file": "Gemfile",
+      "match": "rails"
+    },
+    {
+      "key": "RACK_ENV",
+      "value": "production",
+      "framework": "rails",
+      "file": "Gemfile",
+      "match": "rails"
+    },
+    {
+      "key": "SECRET_KEY_BASE",
+      "generator": "rails_secret_key_base",
+      "framework": "rails",
+      "file": "Gemfile",
+      "match": "rails"
+    }
+  ],
+  "skipped": []
+}
