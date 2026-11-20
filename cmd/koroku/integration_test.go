@@ -150,6 +150,7 @@ restic_password_file = %q
 		select {
 		case <-done:
 		case <-time.After(60 * time.Second):
+			dumpGoroutines(t)
 			t.Error("serve did not shut down")
 		}
 		if t.Failed() {
