@@ -430,3 +430,40 @@ func TestRunChecksPeriodically(t *testing.T) {
 		t.Errorf("domain = %+v, loads = %d", got, loader.count())
 	}
 }
+
+// Protection and noindex come from the app settings: the protected app gets
+// forward_auth with its exempt paths, staging apps get noindex whether
+// protected or not, and production apps get neither unless protected.
+func TestBuildAccessProtection(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	staging := createApp(t, st, "shop-staging")
+	public := createApp(t, st, "demo")
+	prod := createApp(t, st, "shop")
+	for _, a := range []store.App{staging, public, prod} {
+		markDeployed(t, st, a)
+	}
+	staging.AccessProtection = true
+	staging.ProtectionExemptPaths = []string{"/webhooks/"}
+	prod.Environment = store.EnvironmentProduction
+	for _, a := range []store.App{staging, prod} {
+		if err := st.UpdateApp(ctx, a, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	config, err := newRouter(st, &fakeLoader{}).Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	text := string(config)
+	if n := strings.Count(text, `"uri": "/auth/gate/check"`); n != 1 {
+		t.Errorf("forward_auth routes = %d, want 1", n)
+	}
+	if !strings.Contains(text, `"/webhooks/*"`) {
+		t.Error("the exempt path is missing")
+	}
+	if n := strings.Count(text, `"X-Robots-Tag"`); n != 2 {
+		t.Errorf("noindex headers = %d, want 2 (the staging apps)", n)
+	}
+}

@@ -67,10 +67,14 @@ type App struct {
 	// needs: "compose", "dotenv" or "off" (ARCHITECTURE 9.4).
 	EnvSource string
 	// EnvExamplePath is the .env.example path read in dotenv mode.
-	EnvExamplePath      string
-	CurrentDeploymentID *int64
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	EnvExamplePath string
+	// AccessProtection lets only the logged-in console user open the app
+	// (ARCHITECTURE 8.3); ProtectionExemptPaths are path prefixes that skip it.
+	AccessProtection      bool
+	ProtectionExemptPaths []string
+	CurrentDeploymentID   *int64
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // CloneURL is the URL git fetches from.
@@ -93,7 +97,8 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	relax_policy, memory_limit, service_memory_limits, current_deployment_id, created_at, updated_at,
 	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
 	env_source, env_example_path,
-	load_hook_service, load_hook_command, post_load_service, post_load_command`
+	load_hook_service, load_hook_command, post_load_service, post_load_command,
+	access_protection, protection_exempt_paths`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -106,6 +111,7 @@ func scanApp(row rowScanner) (App, error) {
 		currentID   sql.NullInt64
 		limitsJSON  string
 		excludeJSON string
+		exemptJSON  string
 		created     int64
 		updated     int64
 	)
@@ -114,7 +120,8 @@ func scanApp(row rowScanner) (App, error) {
 		&a.RelaxPolicy, &a.MemoryLimit, &limitsJSON, &currentID, &created, &updated,
 		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy,
 		&a.EnvSource, &a.EnvExamplePath,
-		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand)
+		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand,
+		&a.AccessProtection, &exemptJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -137,6 +144,12 @@ func scanApp(row rowScanner) (App, error) {
 	if excludeJSON != "" {
 		if err := json.Unmarshal([]byte(excludeJSON), &a.BackupExcludeVolumes); err != nil {
 			return App{}, fmt.Errorf("decode backup_exclude_volumes of app %s: %w", a.Slug, err)
+		}
+	}
+	a.ProtectionExemptPaths = []string{}
+	if exemptJSON != "" {
+		if err := json.Unmarshal([]byte(exemptJSON), &a.ProtectionExemptPaths); err != nil {
+			return App{}, fmt.Errorf("decode protection_exempt_paths of app %s: %w", a.Slug, err)
 		}
 	}
 	a.CreatedAt = fromMillis(created)
@@ -184,6 +197,10 @@ func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, 
 	if err != nil {
 		return App{}, err
 	}
+	exempt, err := encodeStrings(app.ProtectionExemptPaths)
+	if err != nil {
+		return App{}, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return App{}, fmt.Errorf("create app: %w", err)
@@ -217,14 +234,16 @@ func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, 
 			relax_policy, memory_limit, service_memory_limits, created_at, updated_at,
 			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
 			env_source, env_example_path,
-			load_hook_service, load_hook_command, post_load_service, post_load_command)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			load_hook_service, load_hook_command, post_load_service, post_load_command,
+			access_protection, protection_exempt_paths)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now),
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
 		app.EnvSource, app.EnvExamplePath,
-		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand)
+		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
+		app.AccessProtection, exempt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -314,20 +333,26 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	exempt, err := encodeStrings(app.ProtectionExemptPaths)
+	if err != nil {
+		return err
+	}
 	res, err := s.db.ExecContext(ctx, `UPDATE apps SET
 			repo_id = ?, repo_full_name = ?, repo_url = ?, default_branch = ?, compose_path = ?,
 			web_service = ?, web_port = ?, healthcheck_path = ?, environment = ?,
 			relax_policy = ?, memory_limit = ?, service_memory_limits = ?, updated_at = ?,
 			backup_exclude_volumes = ?, dump_hook_service = ?, dump_hook_command = ?, backup_before_deploy = ?,
 			env_source = ?, env_example_path = ?,
-			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?
+			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?,
+			access_protection = ?, protection_exempt_paths = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now),
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
 		app.EnvSource, app.EnvExamplePath,
-		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand, app.ID)
+		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
+		app.AccessProtection, exempt, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}

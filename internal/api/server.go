@@ -138,7 +138,7 @@ func New(opts Options) *Server {
 
 // Handler returns the root HTTP handler.
 func (s *Server) Handler() http.Handler {
-	return s.recoverPanics(s.logRequests(s.securityHeaders(s.guard(s.routes()))))
+	return s.recoverPanics(s.logRequests(s.securityHeaders(s.hostDispatch(s.guard(s.routes()), s.gateMux()))))
 }
 
 // routes registers every endpoint. The guard asks the same mux which route
@@ -149,6 +149,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("GET /auth/github/login", s.handleLogin)
 	mux.HandleFunc("GET /auth/github/callback", s.handleCallback)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /auth/gate", s.handleGateStart)
 	mux.HandleFunc("/auth/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 	})

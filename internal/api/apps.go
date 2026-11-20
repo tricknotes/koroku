@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tricknotes/koroku/internal/caddy"
 	"github.com/tricknotes/koroku/internal/envreq"
 	"github.com/tricknotes/koroku/internal/gitrepo"
 	"github.com/tricknotes/koroku/internal/store"
@@ -27,6 +28,9 @@ var (
 	servicePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	branchPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@+-]*$`)
 )
+
+// maxExemptPaths bounds the paths an app can exempt from access protection.
+const maxExemptPaths = 20
 
 // reservedSlugs cannot be used because their hostnames belong to the platform.
 var reservedSlugs = map[string]bool{"console": true, "www": true, "api": true}
@@ -56,6 +60,8 @@ type appJSON struct {
 	PostLoadCommand      string            `json:"post_load_command"`
 	EnvSource            string            `json:"env_source"`
 	EnvExamplePath       string            `json:"env_example_path"`
+	AccessProtection     bool              `json:"access_protection"`
+	ProtectionExempt     []string          `json:"protection_exempt_paths"`
 	URL                  string            `json:"url"`
 	PrimaryURL           string            `json:"primary_url"`
 	PendingDomains       int               `json:"pending_domains"`
@@ -91,6 +97,8 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		PostLoadCommand:      app.PostLoadCommand,
 		EnvSource:            app.EnvSource,
 		EnvExamplePath:       app.EnvExamplePath,
+		AccessProtection:     app.AccessProtection,
+		ProtectionExempt:     app.ProtectionExemptPaths,
 		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
 		CreatedAt:            app.CreatedAt,
 		UpdatedAt:            app.UpdatedAt,
@@ -157,6 +165,8 @@ type appInput struct {
 	PostLoadCommand      *string            `json:"post_load_command"`
 	EnvSource            *string            `json:"env_source"`
 	EnvExamplePath       *string            `json:"env_example_path"`
+	AccessProtection     *bool              `json:"access_protection"`
+	ProtectionExempt     *[]string          `json:"protection_exempt_paths"`
 }
 
 // fieldErrors collects validation problems keyed by JSON field name.
@@ -247,6 +257,17 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	if in.EnvExamplePath != nil {
 		app.EnvExamplePath = strings.TrimSpace(*in.EnvExamplePath)
 	}
+	if in.AccessProtection != nil {
+		app.AccessProtection = *in.AccessProtection
+	}
+	if in.ProtectionExempt != nil {
+		app.ProtectionExemptPaths = []string{}
+		for _, p := range *in.ProtectionExempt {
+			if p = strings.TrimSpace(p); p != "" && !slices.Contains(app.ProtectionExemptPaths, p) {
+				app.ProtectionExemptPaths = append(app.ProtectionExemptPaths, p)
+			}
+		}
+	}
 
 	if app.RepoFullName == "" && app.RepoURL == "" {
 		errs.add("repo_full_name", "a repository is required (repo_full_name or repo_url)")
@@ -302,6 +323,14 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	for _, name := range app.BackupExcludeVolumes {
 		if !servicePattern.MatchString(name) {
 			errs.add("backup_exclude_volumes", fmt.Sprintf("%q is not a valid volume name", truncateForError(name)))
+		}
+	}
+	if len(app.ProtectionExemptPaths) > maxExemptPaths {
+		errs.add("protection_exempt_paths", fmt.Sprintf("at most %d paths", maxExemptPaths))
+	}
+	for _, p := range app.ProtectionExemptPaths {
+		if err := caddy.CheckExemptPath(p); err != nil {
+			errs.add("protection_exempt_paths", fmt.Sprintf("%q %s", truncateForError(p), err))
 		}
 	}
 	validateHook(errs, "dump_hook", app.DumpHookService, app.DumpHookCommand)
@@ -434,6 +463,10 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		EnvSource:       envreq.SourceCompose,
 	}
 	errs := in.apply(&app, s.cfg.Deploy.AllowFileRepos)
+	if in.AccessProtection == nil {
+		// Staging apps start closed, production apps open (ARCHITECTURE 8.3).
+		app.AccessProtection = app.Environment == store.EnvironmentStaging
+	}
 	if in.Slug == nil {
 		errs.add("slug", "is required")
 	} else {
@@ -509,6 +542,9 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	// Protection, exempt paths and the environment (noindex) shape the
+	// proxy configuration; an unchanged one is not reloaded.
+	s.syncRoutes(r, "app updated")
 	updated, err := s.store.GetAppByID(r.Context(), app.ID)
 	if err != nil {
 		s.internalError(w, r, err)
@@ -524,7 +560,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 
 // touchesSafeguards reports whether an update touches a setting that guards
 // the app: the environment (production asks for confirmation), the policy
-// check, or the repository the code comes from. Such changes need a recent
+// check, the repository the code comes from, or who may open the app. Such changes need a recent
 // login (ARCHITECTURE 10.3).
 func touchesSafeguards(before, after store.App) bool {
 	sameRepoID := (before.RepoID == nil) == (after.RepoID == nil) &&
@@ -533,7 +569,10 @@ func touchesSafeguards(before, after store.App) bool {
 		before.RelaxPolicy != after.RelaxPolicy ||
 		before.RepoFullName != after.RepoFullName ||
 		before.RepoURL != after.RepoURL ||
-		!sameRepoID
+		!sameRepoID ||
+		// Opening the app to everyone (ARCHITECTURE 8.3).
+		(before.AccessProtection && !after.AccessProtection) ||
+		!slices.Equal(before.ProtectionExemptPaths, after.ProtectionExemptPaths)
 }
 
 // syncRoutes reloads the reverse proxy after a routing-relevant change. A
