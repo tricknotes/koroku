@@ -28,7 +28,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 
 | 項目 | 方式 | 理由 |
 | --- | --- | --- |
-| 実行基盤 | VPS 1 台（Ubuntu 24.04、x86_64）。Docker Engine + Compose v2.30 以上 | override で使う `!override` タグ（2.24.4 以上）と、ポリシー検査で使う `config --no-env-resolution`（2.30 以上、6 章）の要件（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)） |
+| 実行基盤 | VPS 1 台（Ubuntu 24.04 か 26.04、x86_64）。Docker Engine + Compose v2.30 以上 | override で使う `!override` タグ（2.24.4 以上）と、ポリシー検査で使う `config --no-env-resolution`（2.30 以上、6 章）の要件（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)） |
 | コントロールプレーン | Go 製シングルバイナリ `koroku`。systemd でホストに直置き、SQLite | 常駐メモリが小さく、配布と更新がファイル 1 つ。詳細は 4 章 |
 | フロントエンド | Ember SPA。ビルド成果物を `koroku` に埋め込んで配信 | 配信用の別プロセスが不要 |
 | リバースプロキシ | Caddy。ホストに直置きし、admin API で設定を投入 | ホスト名を渡すだけで証明書の取得と更新まで自動（[Automatic HTTPS](https://caddyserver.com/docs/automatic-https)） |
@@ -627,7 +627,7 @@ API はすべて JSON の REST で、ログとデプロイの進行は SSE で�
 - ユニット: override 生成、ポリシー検査、Caddy 設定生成、状態遷移、ログのマスク。入力と出力がファイルで決まる部分は golden file で固定する。
 - 結合（`-tags integration`）: 実 Docker と restic を使い、サンプル Compose をデプロイして HTTP 応答まで確認する。S3 互換 API はローカルの S3 互換サーバーで確かめる。
 - GitHub、Caddy、オブジェクトストレージ、時計はインターフェースにしてフェイクに差し替える。外部コマンド呼び出しは 1 つの `Runner` インターフェースに集約し、引数をテストで検証する。
-- プロビジョニングスクリプトは、使い捨ての `ubuntu:24.04` コンテナで通し実行して確かめる（`deploy/test/dry-run.sh`）。
+- プロビジョニングスクリプトは、対応する Ubuntu の版ごとに、使い捨てのコンテナで通し実行して確かめる（`deploy/test/dry-run.sh`）。
 
 ## 出典
 

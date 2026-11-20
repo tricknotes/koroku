@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Dry run of provision.sh in a disposable ubuntu:24.04 container.
+# Dry run of provision.sh in a disposable Ubuntu container.
 #
-#   deploy/test/dry-run.sh /path/to/koroku
+#   deploy/test/dry-run.sh /path/to/koroku            # ubuntu:24.04
+#   IMAGE=ubuntu:26.04 deploy/test/dry-run.sh /path/to/koroku
 #
-# What it proves: the package repositories resolve on 24.04, the installed
+# What it proves: the package repositories resolve on that release, the installed
 # versions pass the checks, files are merged and installed as intended, a
 # second and third run change nothing, and Caddy really comes back with the
 # configuration koroku loaded (--resume).
@@ -25,4 +26,4 @@ deploy_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 exec docker run --rm --init --name "koroku-provision-dry-run-$$" \
   --volume "$deploy_dir:/src/deploy:ro" \
   --volume "$binary:/src/koroku:ro" \
-  ubuntu:24.04 bash /src/deploy/test/in-container.sh
+  "${IMAGE:-ubuntu:24.04}" bash /src/deploy/test/in-container.sh

@@ -173,7 +173,11 @@ echo "######## run 1: fresh system ########"
 provision /src/koroku
 echo
 echo "######## checks after run 1 ########"
-check "apt's restic is older than 0.17 (reason for the release binary)" apt_restic_is_older_than_pinned
+# On 24.04 this is the reason for installing the release binary.
+# shellcheck source=/dev/null
+if [[ $(. /etc/os-release && printf '%s' "$VERSION_ID") == 24.04 ]]; then
+  check "apt's restic is older than 0.17 (reason for the release binary)" apt_restic_is_older_than_pinned
+fi
 check "daemon.json keeps dns" jq -e '.dns == ["192.0.2.53"]' /etc/docker/daemon.json
 check "daemon.json sets json-file with rotation and keeps other log options" \
   jq -e '.["log-driver"] == "json-file" and .["log-opts"] == {"labels": "app", "max-file": "3", "max-size": "10m"}' /etc/docker/daemon.json
@@ -269,6 +273,8 @@ echo "######## versions ########"
 /usr/bin/docker compose version
 caddy version
 restic version
+# shellcheck source=/dev/null
+. /etc/os-release && echo "system: $PRETTY_NAME"
 echo "apt candidate for restic: $(apt_candidate restic)"
 echo "apt candidate for caddy:  $(apt_candidate caddy)"
 echo "packaged caddy.service:"
