@@ -10,7 +10,7 @@ import (
 
 func TestAccessProtectionMigration(t *testing.T) {
 	ctx := context.Background()
-	// Roll the schema back to before migration 8 with two apps on it.
+	// Roll the schema back to before migration 13 with two apps on it.
 	migrations, err := loadMigrations()
 	if err != nil {
 		t.Fatal(err)
@@ -22,7 +22,7 @@ func TestAccessProtectionMigration(t *testing.T) {
 	defer func() { _ = fresh.Close() }()
 	if _, err := fresh.db.ExecContext(ctx, `DROP TABLE gate_grants; DROP TABLE gate_codes;
 		ALTER TABLE apps DROP COLUMN access_protection; ALTER TABLE apps DROP COLUMN protection_exempt_paths;
-		DELETE FROM schema_migrations WHERE version >= 8`); err != nil {
+		DELETE FROM schema_migrations WHERE version = 13`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fresh.db.ExecContext(ctx, `INSERT INTO apps (slug, web_port, host_port, environment, created_at, updated_at)
@@ -30,7 +30,7 @@ func TestAccessProtectionMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range migrations {
-		if m.version >= 8 {
+		if m.version == 13 {
 			if err := fresh.applyMigration(ctx, m); err != nil {
 				t.Fatalf("apply %s: %v", m.name, err)
 			}
