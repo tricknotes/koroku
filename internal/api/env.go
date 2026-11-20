@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/tricknotes/koroku/internal/deploy"
 	"github.com/tricknotes/koroku/internal/secrets"
@@ -132,6 +133,8 @@ func checkEnvVar(key, value string) (string, bool) {
 	switch {
 	case !deploy.ValidEnvKey(key):
 		return fmt.Sprintf("%q is not a valid variable name (letters, digits and underscores, not starting with a digit)", truncateForError(key)), false
+	case strings.HasPrefix(key, deploy.ProvidedEnvPrefix):
+		return fmt.Sprintf("%s is reserved: koroku sets variables starting with %s itself", truncateForError(key), deploy.ProvidedEnvPrefix), false
 	case len(value) > maxEnvValueLen:
 		return fmt.Sprintf("the value of %s is longer than %d bytes", key, maxEnvValueLen), false
 	}
@@ -241,7 +244,7 @@ func (s *Server) handlePutEnvVar(w http.ResponseWriter, r *http.Request) {
 	}
 	if msg, ok := checkEnvVar(key, value); !ok {
 		field := "value"
-		if !deploy.ValidEnvKey(key) {
+		if !deploy.ValidEnvKey(key) || strings.HasPrefix(key, deploy.ProvidedEnvPrefix) {
 			field = "key"
 		}
 		writeValidationError(w, fieldErrors{field: msg})

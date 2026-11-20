@@ -19,6 +19,26 @@ func ValidEnvKey(key string) bool {
 	return len(key) <= 255 && envKeyPattern.MatchString(key)
 }
 
+// ProvidedEnvPrefix starts the names of the variables koroku writes into
+// every release's env file itself. Apps cannot save variables with it.
+const ProvidedEnvPrefix = "KOROKU_"
+
+// ProvidedEnv returns the variables koroku adds to a release's env file:
+// the commit it was built from, so that a Compose file can name images a
+// CI built for that commit (`image: ...:sha-${KOROKU_COMMIT_SHORT}`) and
+// an app can report its release. They take part in interpolation and are
+// passed to every service like the app's own variables.
+func ProvidedEnv(commitSHA string) map[string]string {
+	short := commitSHA
+	if len(short) > 7 {
+		short = short[:7]
+	}
+	return map[string]string{
+		"KOROKU_COMMIT_SHA":   commitSHA,
+		"KOROKU_COMMIT_SHORT": short,
+	}
+}
+
 // RenderEnvFile renders variables in the dotenv dialect Compose reads for
 // both env_file and --env-file. Values are written so that Compose performs
 // no interpolation on them:

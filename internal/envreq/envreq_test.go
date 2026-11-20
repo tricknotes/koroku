@@ -201,3 +201,10 @@ func (limitedFiles) ListDir(context.Context, string, string, string, string) ([]
 func (limitedFiles) ReadFile(context.Context, string, string, string, string) ([]byte, error) {
 	return nil, fmt.Errorf("read: %w", github.ErrRateLimited)
 }
+
+func TestCompareTreatsProvidedVariablesAsSet(t *testing.T) {
+	set, _ := Compare([]Variable{{Key: "KOROKU_COMMIT_SHORT"}, {Key: "API_KEY"}}, nil)
+	if !set["KOROKU_COMMIT_SHORT"] || set["API_KEY"] {
+		t.Errorf("set = %v", set)
+	}
+}

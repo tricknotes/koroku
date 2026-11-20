@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -223,5 +224,18 @@ func TestEnvPendingWithoutFingerprints(t *testing.T) {
 	got := decode[envListOut](t, request(t, h, http.MethodGet, "/api/apps/blog/env", ""))
 	if got.Compared || len(got.pending()) != 0 {
 		t.Errorf("legacy release: %+v", got)
+	}
+}
+
+func TestEnvRefusesProvidedNames(t *testing.T) {
+	h := newTestServer(t, nil).Handler()
+	createApp(t, h, "blog")
+	for _, rec := range []*httptest.ResponseRecorder{
+		request(t, h, http.MethodPut, "/api/apps/blog/env/KOROKU_COMMIT_SHA", `{"value": "x"}`),
+		request(t, h, http.MethodPut, "/api/apps/blog/env", `{"vars": [{"key": "KOROKU_ANYTHING", "value": "1"}]}`),
+	} {
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "reserved") {
+			t.Errorf("%d %s", rec.Code, rec.Body)
+		}
 	}
 }

@@ -134,3 +134,15 @@ func TestHTTPHealthChecker(t *testing.T) {
 		t.Errorf("canceled context: err = %v", err)
 	}
 }
+
+func TestProvidedEnv(t *testing.T) {
+	got := ProvidedEnv("0123456789abcdef0123456789abcdef01234567")
+	if got["KOROKU_COMMIT_SHA"] != "0123456789abcdef0123456789abcdef01234567" || got["KOROKU_COMMIT_SHORT"] != "0123456" {
+		t.Errorf("ProvidedEnv = %v", got)
+	}
+	for k := range got {
+		if !strings.HasPrefix(k, ProvidedEnvPrefix) {
+			t.Errorf("%s does not start with %s", k, ProvidedEnvPrefix)
+		}
+	}
+}

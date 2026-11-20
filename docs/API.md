@@ -240,7 +240,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | --- | --- |
 | `GET /api/apps/{slug}/env` | 下の形（`vars` は key 順。値は平文で返るので、UI は既定でマスク表示する）。直近 10 分以内のログインでなければ、値をすべて `null` にして `values_hidden: true` を返す |
 | `PUT /api/apps/{slug}/env` | `{"vars": [{"key": "...", "value": "..."}]}` で全件を置き換える。200 で保存後の一覧（`GET` と同じ形） |
-| `PUT /api/apps/{slug}/env/{key}` | 1 件を追加または変更する。本文は `{"value": "..."}`。名前を変えるときは `{"key": "NEW_KEY"}` を足す（`value` を省くと値はそのまま）。名前の変更は 1 つのトランザクションで行う。200 で保存後の一覧。名前を変える元がなければ `404 env_var_not_found`、変えた先がすでにあれば `409 env_var_exists`。追加・変更で `value` がなければ 422 |
+| `PUT /api/apps/{slug}/env/{key}` | 1 件を追加または変更する。名前が `KOROKU_` で始まる変数は koroku が書くので保存できない（422、`KOROKU_COMMIT_SHA` と `KOROKU_COMMIT_SHORT` を koroku が env ファイルに足す。ARCHITECTURE 6 章）。本文は `{"value": "..."}`。名前を変えるときは `{"key": "NEW_KEY"}` を足す（`value` を省くと値はそのまま）。名前の変更は 1 つのトランザクションで行う。200 で保存後の一覧。名前を変える元がなければ `404 env_var_not_found`、変えた先がすでにあれば `409 env_var_exists`。追加・変更で `value` がなければ 422 |
 | `DELETE /api/apps/{slug}/env/{key}` | 1 件を削除する。200 で保存後の一覧。なければ `404 env_var_not_found` |
 
 ```json

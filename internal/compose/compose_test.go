@@ -566,3 +566,37 @@ func TestRepositoryCannotRaiseItsOwnMemoryLimit(t *testing.T) {
 		t.Errorf("the app setting must win:\n%s", got)
 	}
 }
+
+func TestMemswapLimitFollowsARaisedLimit(t *testing.T) {
+	p := Project{Services: map[string]Service{
+		// The repository forbids swap with memswap_limit equal to mem_limit.
+		"web":    {Image: "x", MemLimit: "536870912", MemswapLimit: "536870912"},
+		"worker": {Image: "x", MemLimit: "536870912", MemswapLimit: "4294967296"}, // allows swap up to 4g
+		"db":     {Image: "x", MemswapLimit: "-1"},
+	}}
+	got, err := Override(OverrideParams{
+		Project: p, WebService: "web", WebPort: 80, HostPort: 20000, EnvFile: "/env",
+		DefaultMemory: "512m", AppMemory: "1g",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	section := func(name string) string {
+		start := strings.Index(text, `  "`+name+`":`)
+		rest := text[start+1:]
+		if end := strings.Index(rest, "\n  \""); end >= 0 {
+			return rest[:end]
+		}
+		return rest
+	}
+	if !strings.Contains(section("web"), `memswap_limit: "1g"`) {
+		t.Errorf("memswap_limit below the raised limit must follow it:\n%s", section("web"))
+	}
+	if strings.Contains(section("worker"), "memswap_limit") {
+		t.Errorf("a memswap_limit above the limit must be left alone:\n%s", section("worker"))
+	}
+	if strings.Contains(section("db"), "memswap_limit") {
+		t.Errorf("memswap_limit -1 is the policy's business, not the override's:\n%s", section("db"))
+	}
+}
