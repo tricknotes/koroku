@@ -95,6 +95,9 @@ type harness struct {
 	mu sync.Mutex
 	// repoServices is what the repository's Compose file declares.
 	repoServices string
+	// servicesFor, when set, replaces repoServices per config call (to
+	// interpolate the env file the call was given).
+	servicesFor func(cmd runner.Cmd) string
 	// onCompose lets a test fail or delay a compose subcommand.
 	onCompose func(ctx context.Context, sub string, cmd runner.Cmd) error
 	// buildOutput is printed by `docker compose build`.
@@ -178,8 +181,11 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 	case "docker":
 		sub, merged := composeSubcommand(cmd.Args)
 		h.mu.Lock()
-		hook, services, buildOutput := h.onCompose, h.repoServices, h.buildOutput
+		hook, services, buildOutput, servicesFor := h.onCompose, h.repoServices, h.buildOutput, h.servicesFor
 		h.mu.Unlock()
+		if servicesFor != nil && sub == "config" {
+			services = servicesFor(cmd)
+		}
 		if hook != nil {
 			if err := hook(ctx, sub, cmd); err != nil {
 				return "", err

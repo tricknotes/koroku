@@ -72,9 +72,12 @@ type App struct {
 	// (ARCHITECTURE 8.3); ProtectionExemptPaths are path prefixes that skip it.
 	AccessProtection      bool
 	ProtectionExemptPaths []string
-	CurrentDeploymentID   *int64
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	// PromoteFromAppID is the staging app this (production) app promotes
+	// releases from (ARCHITECTURE 9.7). nil: not paired.
+	PromoteFromAppID    *int64
+	CurrentDeploymentID *int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // CloneURL is the URL git fetches from.
@@ -98,7 +101,7 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
 	env_source, env_example_path,
 	load_hook_service, load_hook_command, post_load_service, post_load_command,
-	access_protection, protection_exempt_paths`
+	access_protection, protection_exempt_paths, promote_from_app_id`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -109,6 +112,7 @@ func scanApp(row rowScanner) (App, error) {
 		a           App
 		repoID      sql.NullInt64
 		currentID   sql.NullInt64
+		promoteFrom sql.NullInt64
 		limitsJSON  string
 		excludeJSON string
 		exemptJSON  string
@@ -121,7 +125,7 @@ func scanApp(row rowScanner) (App, error) {
 		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy,
 		&a.EnvSource, &a.EnvExamplePath,
 		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand,
-		&a.AccessProtection, &exemptJSON)
+		&a.AccessProtection, &exemptJSON, &promoteFrom)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -133,6 +137,9 @@ func scanApp(row rowScanner) (App, error) {
 	}
 	if currentID.Valid {
 		a.CurrentDeploymentID = &currentID.Int64
+	}
+	if promoteFrom.Valid {
+		a.PromoteFromAppID = &promoteFrom.Int64
 	}
 	a.ServiceMemoryLimits = map[string]string{}
 	if limitsJSON != "" {
@@ -235,15 +242,15 @@ func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, 
 			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
 			env_source, env_example_path,
 			load_hook_service, load_hook_command, post_load_service, post_load_command,
-			access_protection, protection_exempt_paths)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			access_protection, protection_exempt_paths, promote_from_app_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now),
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
-		app.AccessProtection, exempt)
+		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -344,7 +351,7 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			backup_exclude_volumes = ?, dump_hook_service = ?, dump_hook_command = ?, backup_before_deploy = ?,
 			env_source = ?, env_example_path = ?,
 			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?,
-			access_protection = ?, protection_exempt_paths = ?
+			access_protection = ?, protection_exempt_paths = ?, promote_from_app_id = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
@@ -352,7 +359,7 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
-		app.AccessProtection, exempt, app.ID)
+		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID), app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}

@@ -272,3 +272,44 @@ func TestRollbackDeployment(t *testing.T) {
 		t.Errorf("read back: %+v", again)
 	}
 }
+
+func TestPromotionReferences(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	staging := mustCreateApp(t, s, "shop-staging")
+	prod := mustCreateApp(t, s, "shop")
+
+	prod.PromoteFromAppID = &staging.ID
+	if err := s.UpdateApp(ctx, prod, testNow); err != nil {
+		t.Fatalf("UpdateApp: %v", err)
+	}
+	got, err := s.GetApp(ctx, "shop")
+	if err != nil || got.PromoteFromAppID == nil || *got.PromoteFromAppID != staging.ID {
+		t.Fatalf("PromoteFromAppID = %v, %v", got.PromoteFromAppID, err)
+	}
+
+	source := enqueue(t, s, staging.ID, "aaa")
+	d, _, err := s.EnqueuePromotion(ctx, prod.ID, "", "aaa", "msg", &source.ID, testNow)
+	if err != nil {
+		t.Fatalf("EnqueuePromotion: %v", err)
+	}
+	if d.PromotedFromID == nil || *d.PromotedFromID != source.ID {
+		t.Fatalf("PromotedFromID = %v", d.PromotedFromID)
+	}
+	if plain := enqueue(t, s, staging.ID, "bbb"); plain.PromotedFromID != nil {
+		t.Errorf("ordinary deployment has PromotedFromID %v", *plain.PromotedFromID)
+	}
+
+	// Deleting the staging app removes the pairing and the reference.
+	if err := s.DeleteApp(ctx, staging.ID); err != nil {
+		t.Fatalf("DeleteApp: %v", err)
+	}
+	got, err = s.GetApp(ctx, "shop")
+	if err != nil || got.PromoteFromAppID != nil {
+		t.Errorf("after delete PromoteFromAppID = %v, %v", got.PromoteFromAppID, err)
+	}
+	after, err := s.GetDeployment(ctx, d.ID)
+	if err != nil || after.PromotedFromID != nil {
+		t.Errorf("after delete PromotedFromID = %v, %v", after.PromotedFromID, err)
+	}
+}

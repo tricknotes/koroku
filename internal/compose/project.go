@@ -67,6 +67,21 @@ type Build struct {
 	AdditionalContexts map[string]string `json:"additional_contexts"`
 	Network            string            `json:"network"`
 	Privileged         bool              `json:"privileged"`
+
+	// raw is the whole build section as Compose printed it, for comparing
+	// build definitions (see CompareBuilds). It may hold interpolated
+	// values of the app's variables and must never be logged.
+	raw json.RawMessage
+}
+
+// UnmarshalJSON decodes the fields koroku inspects and keeps the raw section.
+func (b *Build) UnmarshalJSON(data []byte) error {
+	type plain Build
+	if err := json.Unmarshal(data, (*plain)(b)); err != nil {
+		return err
+	}
+	b.raw = append(json.RawMessage(nil), data...)
+	return nil
 }
 
 // EnvFile is one env_file entry of a service.

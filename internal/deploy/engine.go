@@ -283,6 +283,10 @@ func (e *Engine) CheckDisk() error {
 // Enqueue records a deployment of the given commit and wakes the worker.
 // Older queued deployments of the same app are canceled.
 func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message string) (store.Deployment, error) {
+	return e.enqueue(ctx, app, ref, sha, message, nil)
+}
+
+func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message string, promotedFrom *int64) (store.Deployment, error) {
 	if !gitrepo.IsFullSHA(sha) {
 		return store.Deployment{}, fmt.Errorf("commit %q is not a full SHA", sha)
 	}
@@ -298,7 +302,7 @@ func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message s
 	}
 	e.queueing.Lock()
 	defer e.queueing.Unlock()
-	d, superseded, err := e.opts.Store.EnqueueDeployment(ctx, app.ID, ref, sha, message, e.opts.Clock.Now())
+	d, superseded, err := e.opts.Store.EnqueuePromotion(ctx, app.ID, ref, sha, message, promotedFrom, e.opts.Clock.Now())
 	if err != nil {
 		return store.Deployment{}, err
 	}
@@ -315,7 +319,11 @@ func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message s
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		e.opts.Logger.Warn("removing a stale deploy log failed", "path", path, "error", err)
 	}
-	appendLogLine(path, fmt.Sprintf("Queued deployment of %s.", sha))
+	if promotedFrom != nil {
+		appendLogLine(path, fmt.Sprintf("Queued deployment of %s, promoting deployment #%d.", sha, *promotedFrom))
+	} else {
+		appendLogLine(path, fmt.Sprintf("Queued deployment of %s.", sha))
+	}
 	e.notify()
 	return d, nil
 }
