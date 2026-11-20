@@ -36,6 +36,8 @@ type Options struct {
 	// Box encrypts environment variable values.
 	Box      *secrets.Box
 	Deployer Deployer
+	// Promoter queues promotions (ARCHITECTURE 9.5). Optional.
+	Promoter Promoter
 	// Refs resolves branch names for deployments. Optional.
 	Refs RefResolver
 	// PublicFiles reads public repositories without credentials, for
@@ -76,6 +78,7 @@ type Server struct {
 	clock    clock.Clock
 	box      *secrets.Box
 	deployer Deployer
+	promoter Promoter
 	refs     RefResolver
 	router   Router
 	domains  DomainChecker
@@ -121,6 +124,7 @@ func New(opts Options) *Server {
 		clock:    clk,
 		box:      opts.Box,
 		deployer: opts.Deployer,
+		promoter: opts.Promoter,
 		refs:     opts.Refs,
 		router:   opts.Router,
 		domains:  opts.Domains,
@@ -193,6 +197,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("DELETE /api/apps/{slug}/env/{key}", s.handleDeleteEnvVar)
 	mux.HandleFunc("GET /api/apps/{slug}/deployments", s.handleListDeployments)
 	mux.HandleFunc("POST /api/apps/{slug}/deployments", s.handleCreateDeployment)
+	mux.HandleFunc("GET /api/apps/{slug}/promotion", s.handlePromotionPreview)
 
 	mux.HandleFunc("GET /api/apps/{slug}/domains", s.handleListDomains)
 	mux.HandleFunc("POST /api/apps/{slug}/domains", s.handleAddDomain)

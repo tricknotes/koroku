@@ -53,11 +53,33 @@ type deploymentJSON struct {
 	// whether this deployment's release can be started again.
 	SourceDeploymentID *int64 `json:"source_deployment_id"`
 	RollbackAvailable  bool   `json:"rollback_available"`
+	// PromotedFrom names the staging deployment a promotion deployed.
+	PromotedFrom *promotedFromJSON `json:"promoted_from"`
 }
 
-func (s *Server) deploymentToJSON(app store.App, d store.Deployment) deploymentJSON {
+type promotedFromJSON struct {
+	DeploymentID int64  `json:"deployment_id"`
+	AppSlug      string `json:"app_slug"`
+}
+
+// deploymentToJSON is the package-level deploymentToJSON with what needs
+// the deployer and the database: whether the release can be started again
+// (ARCHITECTURE 7.1) and the promotion source (ARCHITECTURE 9.7).
+func (s *Server) deploymentToJSON(ctx context.Context, app store.App, d store.Deployment) deploymentJSON {
 	j := deploymentToJSON(d, app.Slug)
 	j.RollbackAvailable = d.Status == store.StatusSucceeded && s.deployer.ReleaseAvailable(app, deploy.RollbackTarget(d))
+	if d.PromotedFromID == nil {
+		return j
+	}
+	source, err := s.store.GetDeployment(ctx, *d.PromotedFromID)
+	if err != nil {
+		return j
+	}
+	sourceApp, err := s.store.GetAppByID(ctx, source.AppID)
+	if err != nil {
+		return j
+	}
+	j.PromotedFrom = &promotedFromJSON{DeploymentID: source.ID, AppSlug: sourceApp.Slug}
 	return j
 }
 
@@ -98,7 +120,7 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]deploymentJSON, 0, len(list))
 	for _, d := range list {
-		out = append(out, s.deploymentToJSON(app, d))
+		out = append(out, s.deploymentToJSON(r.Context(), app, d))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"deployments": out})
 }
@@ -107,6 +129,9 @@ type createDeploymentInput struct {
 	Ref        string `json:"ref"`
 	SHA        string `json:"sha"`
 	RollbackTo *int64 `json:"rollback_to"`
+	// PromoteFromDeployment promotes the source app's current release
+	// (ARCHITECTURE 9.7) instead of deploying ref or sha.
+	PromoteFromDeployment *int64 `json:"promote_from_deployment"`
 }
 
 // handleCreateDeployment starts a deployment of {sha}, or of the commit that
@@ -126,6 +151,15 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 	in.Ref, in.SHA = strings.TrimSpace(in.Ref), strings.ToLower(strings.TrimSpace(in.SHA))
 	if in.RollbackTo != nil {
 		s.createRollback(w, r, app, in)
+		return
+	}
+
+	if in.PromoteFromDeployment != nil {
+		if in.Ref != "" || in.SHA != "" {
+			writeValidationError(w, fieldErrors{"promote_from_deployment": "cannot be combined with ref or sha"})
+			return
+		}
+		s.handlePromote(w, r, app, *in.PromoteFromDeployment)
 		return
 	}
 
@@ -165,6 +199,14 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 	}
 
 	d, err := s.deployer.Enqueue(r.Context(), app, in.Ref, sha, message)
+	if s.writeEnqueueError(w, r, err) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, s.deploymentToJSON(r.Context(), app, d))
+}
+
+// writeEnqueueError answers a failed enqueue and reports whether it did.
+func (s *Server) writeEnqueueError(w http.ResponseWriter, r *http.Request, err error) bool {
 	var diskFull *deploy.DiskFullError
 	switch {
 	case errors.Is(err, deploy.ErrBusy):
@@ -176,12 +218,12 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 			Message: diskFull.Error(),
 			Details: map[string]any{"used_percent": diskFull.UsedPercent, "limit_percent": diskFull.LimitPercent},
 		}})
-		return
+		return true
 	case err != nil:
 		s.internalError(w, r, err)
-		return
+		return true
 	}
-	writeJSON(w, http.StatusAccepted, s.deploymentToJSON(app, d))
+	return false
 }
 
 // loadDeployment resolves the {id} path value together with its app.
@@ -213,7 +255,7 @@ func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.deploymentToJSON(app, d))
+	writeJSON(w, http.StatusOK, s.deploymentToJSON(r.Context(), app, d))
 }
 
 func (s *Server) handleCancelDeployment(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +278,7 @@ func (s *Server) handleCancelDeployment(w http.ResponseWriter, r *http.Request) 
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, s.deploymentToJSON(app, current))
+	writeJSON(w, http.StatusAccepted, s.deploymentToJSON(r.Context(), app, current))
 }
 
 // logPollInterval is how often a live log stream checks for new output.
@@ -363,8 +405,8 @@ func streamLogLines(w io.Writer, path string, offset int64) (next int64, wrote b
 
 // createRollback queues a rollback to a kept release (ARCHITECTURE 7.1).
 func (s *Server) createRollback(w http.ResponseWriter, r *http.Request, app store.App, in createDeploymentInput) {
-	if in.Ref != "" || in.SHA != "" {
-		writeValidationError(w, fieldErrors{"rollback_to": "cannot be combined with ref or sha"})
+	if in.Ref != "" || in.SHA != "" || in.PromoteFromDeployment != nil {
+		writeValidationError(w, fieldErrors{"rollback_to": "cannot be combined with ref, sha or promote_from_deployment"})
 		return
 	}
 	d, err := s.deployer.EnqueueRollback(r.Context(), app, *in.RollbackTo)
@@ -379,6 +421,6 @@ func (s *Server) createRollback(w http.ResponseWriter, r *http.Request, app stor
 	case err != nil:
 		s.internalError(w, r, err)
 	default:
-		writeJSON(w, http.StatusAccepted, s.deploymentToJSON(app, d))
+		writeJSON(w, http.StatusAccepted, s.deploymentToJSON(r.Context(), app, d))
 	}
 }
