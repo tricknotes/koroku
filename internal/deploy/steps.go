@@ -365,8 +365,9 @@ func (e *Engine) logContainerOutput(ctx context.Context, app store.App, log *dep
 // rollback brings the previous successful release back up after a failed
 // start. Without a previous release the half-started project is removed
 // (volumes are kept). Problems are logged, never returned: the deployment
-// has already failed.
-func (e *Engine) rollback(app store.App, log *deployLog) {
+// has already failed. restored reports whether the previous release runs
+// again.
+func (e *Engine) rollback(app store.App, log *deployLog) (restored bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.opts.WaitTimeout+time.Minute)
 	defer cancel()
 
@@ -376,7 +377,7 @@ func (e *Engine) rollback(app store.App, log *deployLog) {
 		if err := e.compose(ctx, inv, "", log, "down", "--remove-orphans"); err != nil {
 			log.Printf("Removing the containers failed: %v", err)
 		}
-		return
+		return false
 	}
 
 	prev := *app.CurrentDeploymentID
@@ -384,31 +385,32 @@ func (e *Engine) rollback(app store.App, log *deployLog) {
 	meta, err := e.readMeta(app.Slug, prev)
 	if err != nil {
 		log.Printf("Rollback is not possible: the previous release is no longer on disk.")
-		return
+		return false
 	}
 	prevDir := e.ReleaseDir(app.Slug, prev)
 	if _, err := os.Stat(filepath.Join(prevDir, compose.OverrideFileName)); err != nil {
 		log.Printf("Rollback is not possible: the previous release is no longer on disk.")
-		return
+		return false
 	}
 	env, err := os.ReadFile(filepath.Join(e.stateDir(app.Slug, prev), "env"))
 	if err != nil {
 		log.Printf("Rollback is not possible: the previous environment snapshot is missing.")
-		return
+		return false
 	}
 	if err := e.revalidate(ctx, app, prev, meta.ComposeFile); err != nil {
 		log.Printf("Rollback is not possible: the previous release no longer passes validation (%v).", err)
-		return
+		return false
 	}
 	if err := writeFileAtomic(e.EnvFile(app.Slug), env, 0o600); err != nil {
 		log.Printf("Rollback failed: the env file could not be restored: %v", err)
-		return
+		return false
 	}
 	if err := e.up(ctx, e.invocation(app, prev, meta.ComposeFile, true), prevDir, log); err != nil {
 		log.Printf("Rollback failed: %v", err)
-		return
+		return false
 	}
 	log.Printf("Rolled back: deployment #%d is running again.", prev)
+	return true
 }
 
 func ensureFile(path string) error {

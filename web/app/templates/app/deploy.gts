@@ -22,6 +22,7 @@ import StatusIndicator from 'koroku-console/components/status-indicator';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
+import type AppDeployController from 'koroku-console/controllers/app/deploy';
 import { inputValue, preventDefault, setValue } from 'koroku-console/utils/dom';
 import {
   firstLine,
@@ -106,7 +107,7 @@ const GONE_HINT =
   'この版のリリースはもう保持していないため、コミットを取得・ビルドし直してデプロイします。';
 
 interface Signature {
-  Args: { model: AppContext };
+  Args: { model: AppContext; controller: AppDeployController };
 }
 
 export default class AppDeployTemplate extends Component<Signature> {
@@ -253,8 +254,17 @@ export default class AppDeployTemplate extends Component<Signature> {
 
   private async loadHistory(): Promise<void> {
     await this.history.load();
-    // Open what most likely brought the reader here: a deployment that is
-    // in progress, or the latest one when it failed.
+    // A link to one deployment (from GitHub's deployments) opens it.
+    const linked = Number(this.args.controller.deployment);
+    if (
+      this.selectedId === null &&
+      linked > 0 &&
+      this.deployments.some((d) => d.id === linked)
+    ) {
+      this.selectedId = linked;
+    }
+    // Otherwise open what most likely brought the reader here: a deployment
+    // that is in progress, or the latest one when it failed.
     const head = this.deployments[0];
     if (
       this.selectedId === null &&

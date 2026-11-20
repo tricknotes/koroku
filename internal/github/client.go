@@ -1,13 +1,15 @@
 // Package github is koroku's GitHub App client. It covers the two things the
 // control plane needs from GitHub: signing the operator in through the web
 // application flow, and reading repositories (listing, commit lookup, file
-// contents, installation access tokens for git fetch).
+// contents, installation access tokens for git fetch). It also reports
+// deployments to GitHub (deployments.go).
 //
 // The package never logs. Credentials (the private key, app JWTs, the client
 // secret, user and installation tokens) are kept out of every error it returns.
 package github
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/json"
@@ -230,6 +232,8 @@ type call struct {
 	bearer string
 	// form, when set, is sent as an application/x-www-form-urlencoded body.
 	form url.Values
+	// body, when set, is encoded as JSON and sent as the request body.
+	body any
 	// secrets lists further values to scrub from error messages.
 	secrets []string
 }
@@ -249,6 +253,13 @@ func (c *Client) do(ctx context.Context, in call, out any) (http.Header, error) 
 	if in.form != nil {
 		body = strings.NewReader(in.form.Encode())
 	}
+	if in.body != nil {
+		data, err := json.Marshal(in.body)
+		if err != nil {
+			return nil, fmt.Errorf("encode request of %s %s: %w", in.method, in.path, err)
+		}
+		body = bytes.NewReader(data)
+	}
 	req, err := http.NewRequestWithContext(ctx, in.method, target, body)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
@@ -262,6 +273,9 @@ func (c *Client) do(ctx context.Context, in call, out any) (http.Header, error) 
 	}
 	if in.form != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	if in.body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	if in.bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+in.bearer)

@@ -305,8 +305,13 @@ func checkMasterKey(cfg config.Config) Result {
 	return ok(name, "%s exists (mode 0600)", cfg.MasterKeyFile)
 }
 
-// wantedPermissions are the permissions of the App (ARCHITECTURE 9).
+// wantedPermissions are the permissions the App needs (ARCHITECTURE 5).
 var wantedPermissions = map[string]string{"contents": "read", "metadata": "read"}
+
+// optionalPermissions are permissions the App may have; without them a
+// feature is off. deployments: write lets koroku record its deployments on
+// GitHub (ARCHITECTURE 5.1).
+var optionalPermissions = map[string]string{"deployments": "write"}
 
 func checkGitHub(ctx context.Context, d Deps) []Result {
 	cfg := d.Config.GitHub
@@ -354,7 +359,11 @@ func permissionResult(app github.App, consoleURL string) Result {
 		}
 	}
 	for perm, level := range app.Permissions {
-		if _, wanted := wantedPermissions[perm]; !wanted {
+		_, wanted := wantedPermissions[perm]
+		if optional, ok := optionalPermissions[perm]; ok && level == optional {
+			continue
+		}
+		if !wanted {
 			extra = append(extra, perm+": "+level)
 		}
 	}
@@ -366,10 +375,14 @@ func permissionResult(app github.App, consoleURL string) Result {
 			"App %q lacks %s", app.Slug, strings.Join(missing, ", "))
 	}
 	if len(extra) > 0 {
-		return warn(name, "koroku needs Contents and Metadata only; remove the rest (docs/SETUP.md 4)",
+		return warn(name, "koroku needs Contents and Metadata read-only and Deployments read and write only; remove the rest (docs/SETUP.md 4)",
 			"App %q also has %s", app.Slug, strings.Join(extra, ", "))
 	}
-	return ok(name, "App %q (ID %d), Contents and Metadata read-only; %s", app.Slug, app.ID, callback)
+	if app.Permissions["deployments"] != optionalPermissions["deployments"] {
+		return warn(name, "set Repository permissions > Deployments to Read and write, then accept the new permission on the installation (docs/SETUP.md 4)",
+			"App %q lacks deployments: write; GitHub deployments will not be updated", app.Slug)
+	}
+	return ok(name, "App %q (ID %d), Contents and Metadata read-only, Deployments read and write; %s", app.Slug, app.ID, callback)
 }
 
 func installationResult(ctx context.Context, gh GitHubApp, app github.App) Result {

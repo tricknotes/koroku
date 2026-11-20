@@ -78,7 +78,7 @@
 
 ## 4. GitHub App
 
-ログインと private リポジトリの取得に使う（ARCHITECTURE 5 章）。
+ログイン、private リポジトリの取得、デプロイの状態をリポジトリの Deployments に写すのに使う（ARCHITECTURE 5 章）。
 
 ### 4.1 登録
 
@@ -95,8 +95,11 @@
 | Webhook → Active | **オフ**（`koroku` は Webhook を受けない） |
 | Repository permissions → Contents | **Read-only** |
 | Repository permissions → Metadata | Read-only（自動で付く） |
+| Repository permissions → Deployments | **Read and write**（デプロイの状態をリポジトリの Deployments に出す。なくても動くが、反映されない） |
 | ほかの権限 | すべて No access |
 | Where can this GitHub App be installed? | **Only on this account**（別の org のリポジトリも使うなら **Any account**。4.5） |
+
+あとから Deployments の権限を足した場合は、App の設定画面の **Permissions & events** で変えて保存したあと、インストール先（**Install App** → 自分のアカウントの歯車）に出る権限の変更の依頼を **Accept** する。受け入れるまで、GitHub は koroku からの記録を 403 で断る（koroku は警告を出してデプロイを続ける）。
 
 **Create GitHub App** を押したあと、App の設定画面で次を行う。
 
@@ -248,7 +251,7 @@ sudo koroku check
 | `caddy` | Caddy の admin API が応答する |
 | `https` | 管理 UI に HTTPS で接続でき、証明書が信頼できる（staging の間は警告） |
 | `master_key` | `master.key` があり、0600 |
-| `github.app` | App ID と秘密鍵の組が正しく、Client ID が一致し、権限が Contents と Metadata の Read-only だけ |
+| `github.app` | App ID と秘密鍵の組が正しく、Client ID が一致し、権限が Contents と Metadata の Read-only と Deployments の Read and write だけ（Deployments がなければ警告） |
 | `github.install` | App が 1 つ以上のアカウントにインストールされている |
 | `github.user` | 許可するユーザー ID のアカウントが実在する |
 | `storage` | バケットに書き、読み、一覧し、消せる（`koroku-check/` に小さなファイルを書いてすぐ消す） |
