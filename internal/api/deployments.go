@@ -211,7 +211,7 @@ func (s *Server) writeEnqueueError(w http.ResponseWriter, r *http.Request, err e
 	switch {
 	case errors.Is(err, deploy.ErrBusy):
 		writeError(w, http.StatusConflict, "busy", "a command is running on the app; wait for it or cancel it")
-		return
+		return true
 	case errors.As(err, &diskFull):
 		writeJSON(w, http.StatusInsufficientStorage, errorBody{Error: errorDetail{
 			Code:    "disk_full",
