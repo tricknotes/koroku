@@ -101,12 +101,13 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 
 ## 5. GitHub 連携
 
-自分のアカウントに非公開の GitHub App を 1 つ登録し、UI ログインとリポジトリ取得の両方に使う。権限は Contents: Read-only と Metadata: Read-only のみ。
+自分のアカウントに非公開の GitHub App を 1 つ登録し、UI ログインとリポジトリ取得の両方に使う。権限は Contents: Read-only と Metadata: Read-only に、デプロイを GitHub に写すための Deployments: Read and write（5.1）を加えたもの。
 
 | 用途 | 方式 |
 | --- | --- |
 | UI ログイン | Web application flow でユーザーアクセストークンを得て `GET /user` の ID を許可 ID と照合し、自前のセッション Cookie を発行する。トークンは保存しない（[ユーザーアクセストークンの生成](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)） |
 | リポジトリ・ブランチ・コミット一覧 | installation access token で REST API を呼ぶ |
+| デプロイの反映 | installation access token で Deployments API を呼ぶ（5.1） |
 | clone | デプロイのたびに installation access token を発行し、HTTP パスワードとして使う。形式は `https://x-access-token:TOKEN@github.com/owner/repo.git`、有効期限は 1 時間（[installation としての認証](https://docs.github.com/en/enterprise-cloud@latest/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)） |
 
 - トークンは `.git/config` やデプロイログに残さない。`GIT_ASKPASS` か `http.extraheader` で渡し、fetch 後に破棄する。
@@ -121,6 +122,48 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 - リポジトリの指定が `repo_full_name`（`owner/name`）のアプリは installation token を使って取得する。GitHub App がそのリポジトリにインストールされていなければ、public リポジトリの可能性があるので認証なしで取得を試みる。`repo_url` を明示したアプリには token を使わない。
 - アプリ作成時の Compose ファイル検出（`GET /api/repos/{owner}/{repo}/compose`）は、サービス名とポートを画面に下書きするためのもので、YAML パーサーの依存を増やさず行ベースの簡易読み取りで済ませる（アンカーやフロースタイルは読めない。読めなければ手入力）。デプロイ時の判定は `docker compose config` の結果で行う。
 - fine-grained PAT は使わない。長寿命の秘密をサーバーに置くことになり、ログイン手段も別に要るため。
+
+### 5.1 GitHub の Deployments への反映
+
+koroku のデプロイを、リポジトリの GitHub Deployments（`POST /repos/{owner}/{repo}/deployments` と `.../deployments/{id}/statuses`）に写す。リポジトリのページの Deployments 欄とコミットの画面に、環境ごとに「いま何が出ているか」と最新の結果が出るようにするため。GitHub 側の記録は表示のためのもので、デプロイの判断には使わない（DB が唯一の正）。
+
+**対象**
+
+- GitHub App で取得するアプリ（`repo_full_name` を持ち、`repo_url` を明示していない）だけ。`repo_url` で指定したアプリと、App がインストールされていないリポジトリ（認証なしで取得する public リポジトリ）は対象外で、何も送らない。
+- 必要な権限は Repository permissions の **Deployments: Read and write**。Contents と Metadata だけの App でも koroku は動き、反映だけが止まる（`koroku check` が警告する。10.4）。
+
+**写し方**
+
+- koroku のデプロイ 1 件を、GitHub のデプロイ 1 件にする。`ref` は koroku がデプロイするコミットの完全な SHA、`environment` はアプリの slug（`blog`、`blog-staging` など。staging と本番は別アプリなので別の環境になる。8.2）、`production_environment` はアプリの `environment` が `production` のとき真、`transient_environment` は偽。`auto_merge` は偽、`required_contexts` は空にする（GitHub にブランチのマージやコミットのステータスの確認をさせない。koroku はすでに出すものを決めている）。ロールバック（7.1）と昇格（9.7）も 1 件のデプロイとして写る。
+- 状態は koroku の状態機械に合わせる。
+
+| koroku | GitHub の state | 説明文（`description`） |
+| --- | --- | --- |
+| `queued` | `queued` | `Deployment queued` |
+| `running` | `in_progress` | `Deployment in progress` |
+| `succeeded` | `success` | `Deployment succeeded` |
+| `failed` | `failure` | `Deployment failed`。自動ロールバックで前の版に戻ったときは `; the previous release was restored` を足す |
+| `failed (interrupted)` | `error` | `Deployment interrupted: koroku restarted` |
+| `canceled` | `error` | `Deployment canceled`。新しいデプロイに置き換わったときは `Deployment superseded by a newer one` |
+
+- 説明文の `Deployment` は、ロールバックなら `Rollback to koroku deployment #<id>`、昇格なら `Promotion from staging` になる。英語にするのは、GitHub の画面とデプロイログに合わせるため。
+- 説明文にエラーの本文は入れない。ホストのパスやコマンドが含まれうるうえ、public リポジトリでは誰でも読めるため。詳しい理由は管理 UI で見る。
+- 各状態の `log_url` は管理 UI のデプロイ画面（`<console_url>/apps/<slug>/deploy?deployment=<id>`。そのデプロイを開いた状態で表示する）。`success` には `environment_url` としてアプリのプライマリ URL（9.1 の `primary_url` と同じ規則）を付ける。
+- 古いデプロイの片付けは GitHub の `auto_inactive` に任せる。同じ環境で新しいデプロイが `success` になると、前のものは `inactive` になる。失敗したデプロイは前の成功を `inactive` にしないので、自動ロールバックで旧版が動き続けている間は、GitHub でも旧版が動いているように見える。
+- `queued` のまま取り消されたデプロイで、まだ GitHub に作っていないものは作らない（置き換えのたびに GitHub に `error` が並ばないように）。
+
+**デプロイを止めないこと**
+
+- GitHub への呼び出しはデプロイの経路に置かない。デプロイのワーカーは状態を DB に書いたあとで変化を知らせるだけで、送信は別の 1 つの goroutine が順に行う。知らせを溜める器（256 件）が溢れたら捨てて記録する。
+- 送信のたびに DB からデプロイの今の状態を読み直して送る。GitHub の状態は `queued` → `in_progress` → 終わりの状態、の順にしか進めないので、知らせの処理が遅れても逆戻りや二重送信は起きない。
+- 1 回の呼び出しは 10 秒で打ち切る。ネットワークのエラー、5xx、レート制限は 2 秒と 10 秒をおいて 2 回まで繰り返す。それ以外の 4xx は繰り返さずに記録する。ログに出すエラーは `internal/github` がトークンを取り除いたもの。
+- 403（App に Deployments の権限がない）は、アプリごとに 1 回だけ警告を出し、そのアプリを 1 時間送信の対象から外す。App がそのリポジトリを見られない（404）ときは警告しない（public リポジトリの通常の姿）。
+
+**再起動をまたぐ**
+
+- GitHub のデプロイ ID と、GitHub が最後に受け付けた状態を `github_deployments` に置く（koroku のデプロイ 1 件に 1 行。デプロイの削除で消える）。後続の状態は同じ GitHub のデプロイに送る。
+- 起動時と 10 分ごとに、24 時間以内に終わったデプロイのうち、GitHub に終わりの状態が届いていないもの（送信前に `koroku` が止まった、GitHub が落ちていた、など）を送り直す。`koroku` の停止と重なって `failed (interrupted)` になったデプロイも、次の起動でここから `error` になる。
+- GitHub でデプロイが消されていて状態の送信が 404 になったものは、以後送らない。
 
 ## 6. Compose の扱い
 
@@ -464,6 +507,7 @@ GET /page   ───────▶ forward_auth ──────────
 | `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、DB のコピーの設定（ロードフック、コピー後のコマンド。10.6）、必要な変数の読み方（`env_source`、`env_example_path`、9.4）、アクセスの保護（`access_protection`、`protection_exempt_paths`、8.3）、昇格元のアプリ（`promote_from_app_id`、9.7） |
 | `env_vars` | 環境変数。値は暗号化して保存（`app_id` + `key` で一意） |
 | `deployments` | ref、コミット、状態、エラー、時刻、環境変数の指紋（9.2）、ロールバックの戻す先（`source_deployment_id`、7.1）、昇格元のデプロイ（`promoted_from_deployment_id`、9.7） |
+| `github_deployments` | デプロイに対応する GitHub のデプロイ ID と、GitHub が最後に受け付けた状態（5.1） |
 | `app_domains` | 独自ドメイン（8.1） |
 | `backup_runs` | バックアップの実行記録（10.2） |
 | `db_copies` | DB のコピーの実行記録（10.6） |
@@ -906,7 +950,7 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
   - DNS: `console_host` と、登録していない名前（`koroku-check-<乱数>.<base_domain>`）が `public_ip` だけに解決されること。後者が解決されなければワイルドカードがないとして警告する（アプリごとの登録でも運用できるため）。判定は独自ドメインの検証（8 章）と同じ関数。
   - Caddy の admin API が応答すること。`console_url` に HTTPS で接続でき、証明書が信頼できること。`acme_ca` が Let's Encrypt の staging なら、信頼できない証明書は警告にとどめ、本番への切り替えを促す。
   - `master.key` があり 0600 であること（ないときは警告。初回起動で作られる）。
-  - GitHub App: App の JWT で `GET /app` が通り、`app_id`・`client_id` が一致し、権限が Contents と Metadata の read だけであること（足りなければ失敗、余分なら警告）。`GET /app/installations` で 1 つ以上インストールされていること。`allowed_user_id` が実在するアカウントであること（`GET /user/{id}`、認証なし）。callback URL は API で読めないので、正しい値を表示するだけにする。
+  - GitHub App: App の JWT で `GET /app` が通り、`app_id`・`client_id` が一致し、権限が Contents と Metadata の read（足りなければ失敗）と Deployments の write（なければ GitHub への反映が止まる旨の警告）で、それ以外がないこと（余分なら警告）。`GET /app/installations` で 1 つ以上インストールされていること。`allowed_user_id` が実在するアカウントであること（`GET /user/{id}`、認証なし）。callback URL は API で読めないので、正しい値を表示するだけにする。
   - オブジェクトストレージ: `koroku-check/<乱数>` に書き、読み、一覧し、消す。`logs/` と `restic/` の外なので、ライフサイクルルールにも restic にも触れない。トークンの権限不足をここで見つける。
   - restic: 基盤のスナップショットを一覧できること（パスワードの誤りはここで失敗する）。まだ 1 つもなければ警告（リポジトリは最初のバックアップで作られる）。最新が 26 時間より古ければ警告。
 - 外部への書き込みはストレージの確認用オブジェクト 1 つだけで、終わったら消す。DNS、GitHub、Caddy は読むだけ。秘密は表示しない。
