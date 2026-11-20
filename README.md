@@ -1,3 +1,5 @@
+<img src="docs/assets/logo.svg" alt="" width="72" height="72" align="right">
+
 # koroku
 
 koroku は、自分の VPS 1 台を Heroku のように使うための、個人用のホスティング基盤です。GitHub にある Docker Compose のアプリを、ブラウザーの管理画面からデプロイできます。
