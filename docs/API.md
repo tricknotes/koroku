@@ -194,7 +194,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る） |
 | `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）と `memory_limit_bytes`（上限。無制限なら 0）も付く。取得できなければどちらも `null` |
 
-## グループと接続（2026-11-20、ARCHITECTURE 6.1）
+## グループと接続（ARCHITECTURE 6.1）
 
 利用側のアプリは、自分の Compose の中で決めた名前（例: `auth`）で相手を呼ぶ。その名前がどのアプリのどのサービスを指すかを「接続」として登録すると、koroku が接続ごとのネットワークで両者をつなぐ。接続できるのは同じグループのアプリの間だけで、相手側は「公開するサービス」に入れたものだけ。
 
