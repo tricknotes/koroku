@@ -138,7 +138,7 @@ koroku でデプロイするリポジトリには、いくつかの前提があ�
 
 ## 運用
 
-koroku の更新、OS の更新、日常の確認、サーバーを失ったときの復旧は [docs/OPERATIONS.md](docs/OPERATIONS.md) にあります。koroku を再起動・更新しても、アプリのコンテナは止まりません。
+koroku の更新、OS の更新、日常の確認、証明書のトラブル、サーバーを失ったときの復旧、Heroku Postgres からのデータの移し方は [docs/OPERATIONS.md](docs/OPERATIONS.md) にあります。koroku を再起動・更新しても、アプリのコンテナは止まりません。
 
 ## セキュリティについて
 
