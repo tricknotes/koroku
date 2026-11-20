@@ -28,6 +28,7 @@ import {
   shortSha,
 } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import { isRollback, rollbackSummary } from 'koroku-console/utils/rollback';
 import {
   healthLabel,
   memoryUsage,
@@ -682,7 +683,13 @@ export default class AppOverviewTemplate extends Component<Signature> {
                                 class="overview-sha"
                                 title={{deployment.commit_sha}}
                               >{{shortSha deployment.commit_sha}}</span>
-                              {{#if deployment.ref}}
+                              {{#if (isRollback deployment)}}
+                                <span
+                                  data-test-recent-rollback
+                                >ロールバック（{{rollbackSummary
+                                    deployment
+                                  }}）</span>
+                              {{else if deployment.ref}}
                                 <span>{{deployment.ref}}</span>
                               {{/if}}
                             </span>

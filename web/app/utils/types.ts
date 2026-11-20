@@ -123,6 +123,12 @@ export interface Deployment {
   queued_at: string | null;
   started_at: string | null;
   finished_at: string | null;
+  // Added with the instant rollback (ARCHITECTURE 7.1); absent on older
+  // backends.
+  /** On a rollback: the deployment whose release it started again. */
+  source_deployment_id?: number | null;
+  /** The release can be started again without building it. */
+  rollback_available?: boolean;
 }
 
 export type Environment = 'production' | 'staging';

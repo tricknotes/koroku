@@ -250,6 +250,7 @@ const SHOTS = [
     wait: '[data-test-app-error]',
     themes: ['light'],
   },
+  ...rollbackShots(),
   ...appTabShots(),
   // Last, because it changes the scenario: a deployment started in the UI,
   // a few seconds in, with its log streaming.
@@ -263,6 +264,109 @@ const SHOTS = [
     themes: ['light'],
   },
 ];
+
+/** Going back to a kept release from the deploy history (ARCHITECTURE 7.1). */
+function rollbackShots() {
+  const STAGING = '/apps/blog-staging/deploy?scenario=rollback';
+  const PRODUCTION = '/apps/blog/deploy?scenario=rollback';
+  const ROLLBACK = '[data-test-rollback]';
+  // Rows, newest first: the rollback, a failed deploy, a kept release, the
+  // running release, another kept one, and one that is not kept any more.
+  const row = (n) => `${DEPLOYMENT}:nth-child(${n}) [data-test-show-log]`;
+  return [
+    { name: 'rollback-history', path: STAGING, wait: ROLLBACK },
+    {
+      name: 'rollback-history-phone',
+      path: STAGING,
+      wait: ROLLBACK,
+      ...PHONE,
+    },
+    {
+      name: 'rollback-confirm',
+      path: STAGING,
+      wait: ROLLBACK,
+      click: ROLLBACK,
+    },
+    {
+      name: 'rollback-confirm-production',
+      path: PRODUCTION,
+      wait: ROLLBACK,
+      click: ROLLBACK,
+    },
+    {
+      name: 'rollback-confirm-production-phone',
+      path: PRODUCTION,
+      wait: ROLLBACK,
+      click: ROLLBACK,
+      ...PHONE,
+      fullPage: false,
+    },
+    {
+      name: 'rollback-detail',
+      path: STAGING,
+      wait: ROLLBACK,
+      click: row(1),
+      then: '[data-test-step="done"]',
+      fullPage: true,
+    },
+    {
+      name: 'rollback-detail-phone',
+      path: STAGING,
+      wait: ROLLBACK,
+      click: row(1),
+      then: '[data-test-step="done"]',
+      ...PHONE,
+      themes: ['light'],
+    },
+    {
+      name: 'rollback-kept',
+      path: STAGING,
+      wait: ROLLBACK,
+      click: row(3),
+      then: '[data-test-release-kept]',
+      fullPage: true,
+      themes: ['light'],
+    },
+    {
+      name: 'rollback-unavailable',
+      path: STAGING,
+      wait: ROLLBACK,
+      click: row(6),
+      then: '[data-test-release-gone]',
+      fullPage: true,
+    },
+    {
+      name: 'rollback-unavailable-phone',
+      path: STAGING,
+      wait: ROLLBACK,
+      click: row(6),
+      then: '[data-test-release-gone]',
+      ...PHONE,
+      themes: ['light'],
+    },
+    // Production with a login older than 10 minutes: the re-login prompt.
+    {
+      name: 'rollback-reauth',
+      path: '/apps/blog/deploy?scenario=stale-login',
+      wait: ROLLBACK,
+      clicks: [ROLLBACK, '[data-test-dialog-confirm]'],
+      then: '[data-test-reauth-dialog]',
+      themes: ['light'],
+    },
+    // Confirmed: the rollback runs, its log streams in.
+    {
+      name: 'rollback-live',
+      path: STAGING,
+      wait: ROLLBACK,
+      clicks: [ROLLBACK, '[data-test-dialog-confirm]'],
+      then: '[data-test-rollback-summary]',
+      settle: 3000,
+      mutates: true,
+      fullPage: true,
+      themes: ['light'],
+    },
+  ];
+}
 
 /** Overview, environment and domains tabs of the app detail. */
 function appTabShots() {

@@ -46,6 +46,8 @@ export const SCENARIOS = {
     'blog compares with .env.example: one key is missing, one saved key is no longer listed',
   'env-unavailable':
     'blog compares with .env.example, which the repository does not have; shop is private and the GitHub App is not installed on it',
+  rollback:
+    'blog and blog-staging were rolled back to a kept release after a bad deploy; older releases are kept or already removed',
 };
 
 function ago(ms) {
@@ -79,8 +81,49 @@ function deployment(slug, message, finishedAgo, overrides = {}) {
     queued_at: ago(finishedAgo + duration + 1000),
     started_at: ago(finishedAgo + duration),
     finished_at: ago(finishedAgo),
+    source_deployment_id: null,
+    rollback_available: false,
     ...overrides,
   };
+}
+
+/** How many distinct releases koroku keeps per app (ARCHITECTURE 7.1). */
+const KEEP_RELEASES = 3;
+
+function releaseOf(entry) {
+  return entry.source_deployment_id ?? entry.id;
+}
+
+/**
+ * Marks which deployments can be rolled back to, as koroku's cleanup leaves
+ * them: the newest distinct releases of successful deployments, plus the
+ * one that runs.
+ */
+export function markKept(state, slug) {
+  const list = state.deployments.get(slug) ?? [];
+  const kept = new Set();
+  for (const entry of list) {
+    if (kept.size >= KEEP_RELEASES) break;
+    if (entry.status === 'succeeded') kept.add(releaseOf(entry));
+  }
+  const current = state.apps.get(slug)?.current_deployment;
+  if (current) kept.add(current.id);
+  for (const entry of list) {
+    entry.rollback_available =
+      entry.status === 'succeeded' && kept.has(releaseOf(entry));
+  }
+}
+
+/** A rollback record: the commit of `source`, started again in seconds. */
+function rollbackOf(source, finishedAgo, overrides = {}) {
+  return deployment(source.app_slug, source.commit_message, finishedAgo, {
+    ref: 'rollback',
+    commit_sha: source.commit_sha,
+    source_deployment_id: source.id,
+    queued_at: ago(finishedAgo + 15 * 1000),
+    started_at: ago(finishedAgo + 14 * 1000),
+    ...overrides,
+  });
 }
 
 function app(slug, overrides = {}) {
@@ -213,8 +256,31 @@ function scenario(apps, extra = {}) {
       );
     }
     state.deployments.set(slug, list);
+    markKept(state, slug);
   }
   return state;
+}
+
+/**
+ * An app that went back to an earlier release: a bad deploy, a fix that
+ * failed (and was rolled back automatically), then "この版に戻す". Its
+ * history has releases that are kept and one that is not any more.
+ */
+function rolledBack(state, slug) {
+  const initial = deployment(slug, 'Initial import', 6 * DAY);
+  const deps = deployment(slug, 'Update dependencies', 3 * DAY);
+  const footer = deployment(slug, 'Tidy up the footer', 1 * DAY);
+  const pipeline = deployment(slug, 'Try the new image pipeline', 50 * MINUTE);
+  const fix = deployment(slug, 'Fix the image cache key', 22 * MINUTE, {
+    status: 'failed',
+    error: 'health check did not pass within 1m0s (last result: HTTP 502)',
+  });
+  const back = rollbackOf(footer, 9 * MINUTE);
+  const target = state.apps.get(slug);
+  target.current_deployment = footer;
+  target.latest_deployment = back;
+  state.deployments.set(slug, [back, fix, pipeline, footer, deps, initial]);
+  markKept(state, slug);
 }
 
 function healthyApps() {
@@ -506,9 +572,37 @@ export function buildScenario(name) {
         ]),
       });
     }
+    case 'rollback': {
+      const state = scenario(healthyApps());
+      rolledBack(state, 'blog');
+      rolledBack(state, 'blog-staging');
+      return state;
+    }
     default:
       return scenario(healthyApps());
   }
+}
+
+/**
+ * Starts the kept release of deployment `id` again, as koroku does for
+ * `rollback_to`; `null` when that is not possible.
+ */
+export function startRollback(state, slug, id) {
+  const list = state.deployments.get(slug);
+  const from = list.find((entry) => entry.id === id);
+  if (!from) return { error: 'validation_failed' };
+  if (!from.rollback_available) return { error: 'release_unavailable' };
+  const source = list.find((entry) => entry.id === releaseOf(from));
+  const started = rollbackOf(source, 0, {
+    status: 'running',
+    queued_at: ago(1000),
+    started_at: ago(0),
+    finished_at: null,
+  });
+  started.mockFinishAt = Date.now() + 8 * 1000;
+  list.unshift(started);
+  state.apps.get(slug).latest_deployment = started;
+  return { deployment: started };
 }
 
 /** Starts a deployment that the mock finishes by itself a little later. */
@@ -537,10 +631,15 @@ export function settle(state) {
         entry.status = 'succeeded';
         entry.finished_at = new Date().toISOString();
         const target = state.apps.get(slug);
-        if (target) target.current_deployment = entry;
-        // The release now runs with what is saved.
-        state.deployedEnv ??= new Map();
-        state.deployedEnv.set(slug, [...(state.env?.get(slug) ?? ENV_VARS)]);
+        // A rollback runs the release it started again.
+        const release = list.find((older) => older.id === releaseOf(entry));
+        if (target) target.current_deployment = release ?? entry;
+        if (entry.source_deployment_id === null) {
+          // The release now runs with what is saved.
+          state.deployedEnv ??= new Map();
+          state.deployedEnv.set(slug, [...(state.env?.get(slug) ?? ENV_VARS)]);
+        }
+        markKept(state, slug);
       }
     }
   }
