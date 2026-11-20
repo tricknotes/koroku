@@ -20,6 +20,9 @@ import {
   COMPOSE,
   ENV_PRESETS,
   ENV_VARS,
+  MEMBER,
+  MEMBER_ROLES,
+  OWNER,
   REPOS,
   SCENARIOS,
   appVolumes,
@@ -28,6 +31,7 @@ import {
   composeRequirements,
   containerResources,
   dockerUsage,
+  members,
   newApp,
   newDomain,
   promotionPreview,
@@ -300,7 +304,9 @@ function envList(context) {
     ? (context.state.deployedEnv?.get(app.slug) ?? ENV_VARS)
     : null;
   const running = new Map((deployed ?? []).map((v) => [v.key, v.value]));
-  const hidden = context.scenario === 'stale-login';
+  // Below manage, a member sees the keys only (ARCHITECTURE 10.7).
+  const forbidden = !atLeast(roleOf(context.scenario, app.slug), 'manage');
+  const hidden = forbidden || context.scenario === 'stale-login';
   return {
     vars: vars.map(({ key, value }) => ({
       key,
@@ -318,6 +324,7 @@ function envList(context) {
       : [],
     compared: Boolean(deployed),
     values_hidden: hidden,
+    values_forbidden: forbidden,
   };
 }
 
@@ -448,6 +455,7 @@ route('POST', '/api/apps/:slug/deployments', (context) => {
   }
   const started = startDeployment(context.state, app.slug, context.body);
   if (!started) throw new HttpError(409, 'promotion_stale');
+  started.actor = userOf(context.scenario);
   return { status: 202, json: started };
 });
 // The preview has a `status` field of its own: wrap it so that the router
@@ -881,6 +889,160 @@ async function readBody(request) {
   }
 }
 
+// Members and roles (ARCHITECTURE 10.7). The `member` scenario logs in as
+// MEMBER with MEMBER_ROLES; every other scenario as the owner.
+
+const RANK = { view: 1, deploy: 2, manage: 3, owner: 4 };
+
+function roleOf(scenario, slug) {
+  if (scenario !== 'member') return 'owner';
+  return MEMBER_ROLES[slug] ?? null;
+}
+
+function atLeast(role, needed) {
+  return (RANK[role] ?? 0) >= RANK[needed];
+}
+
+function userOf(scenario) {
+  return scenario === 'member' ? MEMBER : OWNER;
+}
+
+/**
+ * What each route needs, as the server's route table says: `owner`, or a
+ * role on the app in the path. Routes not listed are open to every user.
+ */
+const ACCESS = [
+  ['owner', 'GET', /^\/api\/members$/],
+  ['owner', '*', /^\/api\/members\//],
+  ['owner', 'POST', /^\/api\/members$/],
+  ['owner', 'GET', /^\/api\/system\/./],
+  ['owner', 'POST', /^\/api\/system\//],
+  ['owner', 'GET', /^\/api\/repos$/],
+  ['owner', 'GET', /^\/api\/repos\/[^/]+\/[^/]+\/(compose|env-presets)$/],
+  ['owner', 'POST', /^\/api\/apps$/],
+  ['owner', 'DELETE', /^\/api\/apps\/[^/]+$/],
+  [
+    'deploy',
+    'POST',
+    /^\/api\/apps\/([^/]+)\/(start|stop|restart|deployments)$/,
+  ],
+  ['deploy', 'GET', /^\/api\/apps\/([^/]+)\/promotion$/],
+  ['manage', 'PATCH', /^\/api\/apps\/([^/]+)$/],
+  ['manage', 'PUT', /^\/api\/apps\/([^/]+)\/(env|tasks)(\/.*)?$/],
+  ['manage', 'DELETE', /^\/api\/apps\/([^/]+)\/env\//],
+  [
+    'manage',
+    'POST',
+    /^\/api\/apps\/([^/]+)\/(domains|task-runs|db-copies|backups\/restore)(\/.*)?$/,
+  ],
+  ['manage', 'PATCH', /^\/api\/apps\/([^/]+)\/domains\//],
+  ['manage', 'DELETE', /^\/api\/apps\/([^/]+)\/domains\//],
+  ['manage', 'GET', /^\/api\/apps\/([^/]+)\/backups\/[^/]+\/download$/],
+  ['view', 'GET', /^\/api\/apps\/([^/]+)(\/.*)?$/],
+];
+
+/** Refuses what the member scenario's roles do not allow. */
+function checkAccess(scenario, method, path) {
+  if (scenario !== 'member') return;
+  for (const [needed, m, pattern] of ACCESS) {
+    if (m !== '*' && m !== method) continue;
+    const match = pattern.exec(path);
+    if (!match) continue;
+    if (needed === 'owner') {
+      throw new HttpError(403, 'forbidden_role', { required: 'owner' });
+    }
+    const role = roleOf(scenario, decodeURIComponent(match[1]));
+    if (!role) throw notFound('app_not_found');
+    if (!atLeast(role, needed)) {
+      throw new HttpError(403, 'forbidden_role', { required: needed });
+    }
+    return;
+  }
+}
+
+/** Adds `role` to app JSON and leaves out the apps a member has none on. */
+function withRoles(scenario, result) {
+  const decorate = (app) => ({ ...app, role: roleOf(scenario, app.slug) });
+  if (Array.isArray(result?.apps)) {
+    return {
+      ...result,
+      apps: result.apps
+        .filter((app) => roleOf(scenario, app.slug))
+        .map(decorate),
+    };
+  }
+  if (result && typeof result.slug === 'string' && 'environment' in result) {
+    return decorate(result);
+  }
+  if (result?.json && typeof result.json.slug === 'string') {
+    return { ...result, json: decorate(result.json) };
+  }
+  return result;
+}
+
+function membersOf(context) {
+  context.state.members ??= members(context.scenario);
+  return context.state.members;
+}
+
+function memberOf(context) {
+  const found = membersOf(context).find(
+    (m) => m.github_user_id === Number(context.params.id),
+  );
+  if (!found) throw notFound('member_not_found');
+  return found;
+}
+
+route('GET', '/api/members', (context) => ({
+  owner: { github_user_id: OWNER.id },
+  members: membersOf(context),
+}));
+route('POST', '/api/members', (context) => {
+  const login = String(context.body.login ?? '').replace(/^@/, '');
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9]|-[A-Za-z0-9]){0,38}$/.test(login)) {
+    throw new HttpError(422, 'validation_failed', {
+      login: 'is not a GitHub user name',
+    });
+  }
+  if (login.toLowerCase() === OWNER.login) throw new HttpError(422, 'is_owner');
+  if (login.toLowerCase() === 'nobody') throw notFound('user_not_found');
+  const list = membersOf(context);
+  if (list.some((m) => m.login.toLowerCase() === login.toLowerCase())) {
+    throw new HttpError(409, 'member_exists');
+  }
+  const member = {
+    github_user_id: 1000 + list.length,
+    login,
+    avatar_url: '',
+    added_at: new Date().toISOString(),
+    roles: [],
+  };
+  list.push(member);
+  return { status: 201, json: member };
+});
+route('DELETE', '/api/members/:id', (context) => {
+  const member = memberOf(context);
+  context.state.members = membersOf(context).filter((m) => m !== member);
+  return { status: 204 };
+});
+route('PUT', '/api/members/:id/roles/:slug', (context) => {
+  const member = memberOf(context);
+  appOf(context);
+  if (!['view', 'deploy', 'manage'].includes(context.body.role)) {
+    throw new HttpError(422, 'validation_failed', { role: 'is invalid' });
+  }
+  member.roles = [
+    ...member.roles.filter((r) => r.app !== context.params.slug),
+    { app: context.params.slug, role: context.body.role },
+  ].sort((a, b) => a.app.localeCompare(b.app));
+  return member;
+});
+route('DELETE', '/api/members/:id/roles/:slug', (context) => {
+  const member = memberOf(context);
+  member.roles = member.roles.filter((r) => r.app !== context.params.slug);
+  return member;
+});
+
 // Sessions and login history (ARCHITECTURE 10.3). Made-up documentation
 // addresses only.
 const CHROME_MAC =
@@ -897,8 +1059,9 @@ function ago(ms) {
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
-function sessionsOf(state) {
-  state.sessions ??= [
+function sessionsOf(state, scenario) {
+  const me = userOf(scenario);
+  const own = [
     {
       id: '9f2c41d07a1b3e55',
       created_at: ago(3 * HOUR),
@@ -926,15 +1089,32 @@ function sessionsOf(state) {
       user_agent: FIREFOX_LINUX,
       current: false,
     },
-  ];
+  ].map((s) => ({ ...s, user: me }));
+  // The owner also sees the members' sessions (ARCHITECTURE 10.7).
+  const others =
+    scenario === 'member' || scenario === 'empty'
+      ? []
+      : [
+          {
+            id: '77aa66bb55cc44dd',
+            created_at: ago(9 * HOUR),
+            last_seen_at: ago(40 * 60 * 1000),
+            expires_at: ago(9 * HOUR - 7 * DAY),
+            ip: '198.51.100.23',
+            user_agent: FIREFOX_LINUX,
+            current: false,
+            user: MEMBER,
+          },
+        ];
+  state.sessions ??= [...own, ...others];
   return state.sessions;
 }
 
 route('GET', '/api/sessions', (context) => ({
-  sessions: sessionsOf(context.state),
+  sessions: sessionsOf(context.state, context.scenario),
 }));
 route('DELETE', '/api/sessions/:id', (context) => {
-  const sessions = sessionsOf(context.state);
+  const sessions = sessionsOf(context.state, context.scenario);
   if (!sessions.some((s) => s.id === context.params.id)) {
     throw notFound('session_not_found');
   }
@@ -942,12 +1122,23 @@ route('DELETE', '/api/sessions/:id', (context) => {
   return { status: 204 };
 });
 route('POST', '/api/sessions/revoke-others', (context) => {
-  const sessions = sessionsOf(context.state);
-  context.state.sessions = sessions.filter((s) => s.current);
+  const me = userOf(context.scenario);
+  const sessions = sessionsOf(context.state, context.scenario);
+  context.state.sessions = sessions.filter(
+    (s) => s.current || s.user.id !== me.id,
+  );
   return { revoked: sessions.length - context.state.sessions.length };
 });
-route('GET', '/api/login-events', () => ({
+route('GET', '/api/login-events', (context) => ({
   events: [
+    {
+      at: ago(9 * HOUR),
+      outcome: 'succeeded',
+      github_user_id: MEMBER.id,
+      login: MEMBER.login,
+      ip: '198.51.100.23',
+      user_agent: FIREFOX_LINUX,
+    },
     {
       at: ago(3 * HOUR),
       outcome: 'succeeded',
@@ -972,12 +1163,15 @@ route('GET', '/api/login-events', () => ({
       ip: '198.51.100.7',
       user_agent: SAFARI_IPHONE,
     },
-  ],
+  ].filter(
+    (ev) => context.scenario !== 'member' || ev.github_user_id === MEMBER.id,
+  ),
 }));
 
 // Read-only API tokens (ARCHITECTURE 10.5). The values are made up and
 // match the documented shape only.
 function tokensOf(state, scenario) {
+  const me = userOf(scenario);
   state.tokens ??=
     scenario === 'empty'
       ? []
@@ -998,7 +1192,7 @@ function tokensOf(state, scenario) {
             last_used_at: null,
             last_used_ip: '',
           },
-        ];
+        ].map((t) => ({ ...t, user: me }));
   return state.tokens;
 }
 
@@ -1032,6 +1226,7 @@ route('POST', '/api/tokens', (context) => {
     expires_at: ago(-days * DAY),
     last_used_at: null,
     last_used_ip: '',
+    user: userOf(context.scenario),
   };
   const tokens = tokensOf(context.state, context.scenario);
   context.state.tokens = [token, ...tokens];
@@ -1062,7 +1257,11 @@ const NEEDS_RECENT_LOGIN = [
 
 async function handleApi(request, response, url, scenario) {
   if (url.pathname === '/api/session') {
-    const user = { id: 1, login: 'octo', avatar_url: '' };
+    const user = {
+      ...userOf(scenario),
+      avatar_url: '',
+      owner: scenario !== 'member',
+    };
     const reauthUntil =
       scenario === 'stale-login'
         ? ago(3 * HOUR - 10 * 60 * 1000)
@@ -1083,6 +1282,7 @@ async function handleApi(request, response, url, scenario) {
   ) {
     throw new HttpError(403, 'reauth_required');
   }
+  checkAccess(scenario, request.method, url.pathname);
   if (scenario === 'loading') {
     await new Promise((done) => setTimeout(done, SLOW));
   }
@@ -1101,13 +1301,14 @@ async function handleApi(request, response, url, scenario) {
       names.map((name, index) => [name, decodeURIComponent(match[index + 1])]),
     );
     const body = method === 'GET' ? {} : await readBody(request);
-    const result = await handler({
+    const raw = await handler({
       state: stateOf(scenario),
       scenario,
       params,
       query: url.searchParams,
       body,
     });
+    const result = withRoles(scenario, raw);
     if (result?.sse) return sendEvents(request, response, result);
     if (result?.text !== undefined) {
       response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });

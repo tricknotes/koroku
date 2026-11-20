@@ -17,6 +17,7 @@ import FormField from 'koroku-console/components/form-field';
 import PromotionPanel from 'koroku-console/components/promotion-panel';
 import Icon from 'koroku-console/components/icon';
 import RelativeTime from 'koroku-console/components/relative-time';
+import RoleNote from 'koroku-console/components/role-note';
 import RowList from 'koroku-console/components/row-list';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import type ApiService from 'koroku-console/services/api';
@@ -33,6 +34,7 @@ import {
 } from 'koroku-console/utils/format';
 import { ApiError } from 'koroku-console/utils/errors';
 import Loadable from 'koroku-console/utils/loadable';
+import { can } from 'koroku-console/utils/roles';
 import {
   canRollBack,
   isReleaseGone,
@@ -173,6 +175,15 @@ export default class AppDeployTemplate extends Component<Signature> {
     this.poller.every(this, POLL_INTERVAL, () => this.poll());
   }
 
+  /** Deploying, rolling back, canceling and promoting need deploy. */
+  get canDeploy(): boolean {
+    return can(this.app, 'deploy');
+  }
+
+  get readOnly(): boolean {
+    return !this.canDeploy;
+  }
+
   get app(): App {
     return this.args.model.app;
   }
@@ -251,6 +262,9 @@ export default class AppDeployTemplate extends Component<Signature> {
   /** The detail says what can be done with the release of the deployment. */
   hasReleaseActions = (deployment: Deployment): boolean =>
     this.canRollBack(deployment) || this.isReleaseGone(deployment);
+
+  showsReleaseActions = (deployment: Deployment): boolean =>
+    this.canDeploy && this.hasReleaseActions(deployment);
 
   private async loadHistory(): Promise<void> {
     await this.history.load();
@@ -513,146 +527,157 @@ export default class AppDeployTemplate extends Component<Signature> {
 
   <template>
     {{#if @model.isProduction}}
-      <PromotionPanel @app={{this.app}} @onPromoted={{this.promoted}} />
+      {{#if this.canDeploy}}
+        <PromotionPanel @app={{this.app}} @onPromoted={{this.promoted}} />
+      {{/if}}
     {{/if}}
 
-    <section
-      class="deploy-form-section"
-      aria-labelledby="deploy-title"
-      data-test-deploy-panel
-    >
-      {{#if this.isEmpty}}
-        <div class="deploy-intro" data-test-no-deployments>
-          <h2 id="deploy-title">まだデプロイしていません</h2>
-          <p>
-            ブランチを選んでデプロイすると、<span
-              class="deploy-host"
-            >{{this.appHost}}</span>
-            で公開されます。
-          </p>
-        </div>
-      {{else}}
-        <h2 id="deploy-title" class="visually-hidden">デプロイする</h2>
-      {{/if}}
-
-      <form
-        class="deploy-form"
-        data-test-deploy-form
-        {{on "submit" (preventDefault this.submit)}}
+    {{#if this.canDeploy}}
+      <section
+        class="deploy-form-section"
+        aria-labelledby="deploy-title"
+        data-test-deploy-panel
       >
-        {{#if this.manual}}
-          <FormField
-            class="deploy-field-ref"
-            @label="ブランチ / タグ / コミット SHA"
-            @hint="ブランチとコミットの一覧を取得できないため、直接入力します。40 桁の SHA はそのコミットをデプロイします。"
-            as |field|
-          >
-            <input
-              id={{field.id}}
-              type="text"
-              class="mono"
-              spellcheck="false"
-              autocomplete="off"
-              aria-describedby={{field.describedBy}}
-              value={{this.manualRef}}
-              data-deploy-focus
-              data-test-deploy-ref
-              {{on "input" (setValue this "manualRef")}}
-              {{on "change" this.checkManual}}
-            />
-          </FormField>
+        {{#if this.isEmpty}}
+          <div class="deploy-intro" data-test-no-deployments>
+            <h2 id="deploy-title">まだデプロイしていません</h2>
+            <p>
+              ブランチを選んでデプロイすると、<span
+                class="deploy-host"
+              >{{this.appHost}}</span>
+              で公開されます。
+            </p>
+          </div>
         {{else}}
-          <FormField class="deploy-field-branch" @label="ブランチ" as |field|>
-            <select
-              id={{field.id}}
-              data-deploy-focus
-              data-test-deploy-branch
-              {{on "change" this.selectBranch}}
-            >
-              {{#each this.branchNames as |name|}}
-                <option value={{name}} selected={{eq name this.branch}}>
-                  {{name}}
-                </option>
-              {{/each}}
-            </select>
-          </FormField>
-
-          <FormField class="deploy-field-commit" @label="コミット" as |field|>
-            <select
-              id={{field.id}}
-              data-test-deploy-commit
-              {{on "change" this.selectCommit}}
-            >
-              <option value="" selected={{eq this.sha ""}}>
-                ブランチの先頭
-              </option>
-              {{#each this.commits.value key="sha" as |commit|}}
-                <option
-                  value={{commit.sha}}
-                  selected={{eq commit.sha this.sha}}
-                >
-                  {{commitLabel commit}}
-                </option>
-              {{/each}}
-            </select>
-          </FormField>
+          <h2 id="deploy-title" class="visually-hidden">デプロイする</h2>
         {{/if}}
 
-        <Button
-          @type="submit"
-          @variant="primary"
-          @busy={{this.deploying}}
-          @busyLabel="開始中…"
-          class="deploy-submit"
-          data-test-deploy-submit
-        >デプロイ</Button>
+        <form
+          class="deploy-form"
+          data-test-deploy-form
+          {{on "submit" (preventDefault this.submit)}}
+        >
+          {{#if this.manual}}
+            <FormField
+              class="deploy-field-ref"
+              @label="ブランチ / タグ / コミット SHA"
+              @hint="ブランチとコミットの一覧を取得できないため、直接入力します。40 桁の SHA はそのコミットをデプロイします。"
+              as |field|
+            >
+              <input
+                id={{field.id}}
+                type="text"
+                class="mono"
+                spellcheck="false"
+                autocomplete="off"
+                aria-describedby={{field.describedBy}}
+                value={{this.manualRef}}
+                data-deploy-focus
+                data-test-deploy-ref
+                {{on "input" (setValue this "manualRef")}}
+                {{on "change" this.checkManual}}
+              />
+            </FormField>
+          {{else}}
+            <FormField class="deploy-field-branch" @label="ブランチ" as |field|>
+              <select
+                id={{field.id}}
+                data-deploy-focus
+                data-test-deploy-branch
+                {{on "change" this.selectBranch}}
+              >
+                {{#each this.branchNames as |name|}}
+                  <option value={{name}} selected={{eq name this.branch}}>
+                    {{name}}
+                  </option>
+                {{/each}}
+              </select>
+            </FormField>
 
-        <div class="deploy-form-notes">
-          {{#if this.commits.error}}
-            <p data-test-commits-error>
-              コミット一覧を取得できませんでした。{{this.commits.errorMessage}}
-            </p>
-          {{else if this.targetCommit}}
-            <p class="deploy-target" data-test-deploy-target>
-              <span class="deploy-target-label">デプロイ対象</span>
-              <span class="deploy-sha" title={{this.targetCommit.sha}}>
-                {{shortSha this.targetCommit.sha}}
-              </span>
-              <span class="deploy-target-message">
-                {{firstLine this.targetCommit.message}}
-              </span>
-              <span class="deploy-target-meta">
-                {{this.targetCommit.author}}
-                <span class="deploy-target-dot" aria-hidden="true">·</span>
-                <RelativeTime @time={{this.targetCommit.date}} />
-              </span>
-              {{#if this.targetIsRunning}}
-                <span
-                  class="deploy-target-meta"
-                  data-test-target-running
-                >（稼働中のコミットと同じです）</span>
-              {{/if}}
-            </p>
+            <FormField class="deploy-field-commit" @label="コミット" as |field|>
+              <select
+                id={{field.id}}
+                data-test-deploy-commit
+                {{on "change" this.selectCommit}}
+              >
+                <option value="" selected={{eq this.sha ""}}>
+                  ブランチの先頭
+                </option>
+                {{#each this.commits.value key="sha" as |commit|}}
+                  <option
+                    value={{commit.sha}}
+                    selected={{eq commit.sha this.sha}}
+                  >
+                    {{commitLabel commit}}
+                  </option>
+                {{/each}}
+              </select>
+            </FormField>
           {{/if}}
-          {{#if @model.isProduction}}
-            <p data-test-production-hint>
-              本番アプリのため、開始前に確認します。
-            </p>
-          {{/if}}
+
+          <Button
+            @type="submit"
+            @variant="primary"
+            @busy={{this.deploying}}
+            @busyLabel="開始中…"
+            class="deploy-submit"
+            data-test-deploy-submit
+          >デプロイ</Button>
+
+          <div class="deploy-form-notes">
+            {{#if this.commits.error}}
+              <p data-test-commits-error>
+                コミット一覧を取得できませんでした。{{this.commits.errorMessage}}
+              </p>
+            {{else if this.targetCommit}}
+              <p class="deploy-target" data-test-deploy-target>
+                <span class="deploy-target-label">デプロイ対象</span>
+                <span class="deploy-sha" title={{this.targetCommit.sha}}>
+                  {{shortSha this.targetCommit.sha}}
+                </span>
+                <span class="deploy-target-message">
+                  {{firstLine this.targetCommit.message}}
+                </span>
+                <span class="deploy-target-meta">
+                  {{this.targetCommit.author}}
+                  <span class="deploy-target-dot" aria-hidden="true">·</span>
+                  <RelativeTime @time={{this.targetCommit.date}} />
+                </span>
+                {{#if this.targetIsRunning}}
+                  <span
+                    class="deploy-target-meta"
+                    data-test-target-running
+                  >（稼働中のコミットと同じです）</span>
+                {{/if}}
+              </p>
+            {{/if}}
+            {{#if @model.isProduction}}
+              <p data-test-production-hint>
+                本番アプリのため、開始前に確認します。
+              </p>
+            {{/if}}
+          </div>
+        </form>
+
+        <div class="deploy-env-warning" aria-live="polite">
+          <EnvRequirementsWarning
+            @slug={{this.app.slug}}
+            @requirements={{this.targetRequirementsValue}}
+          />
         </div>
-      </form>
 
-      <div class="deploy-env-warning" aria-live="polite">
-        <EnvRequirementsWarning
-          @slug={{this.app.slug}}
-          @requirements={{this.targetRequirementsValue}}
-        />
-      </div>
-
-      <div class="deploy-form-error" aria-live="polite">
-        <ErrorMessage @error={{this.error}} @showDetails={{true}} />
-      </div>
-    </section>
+        <div class="deploy-form-error" aria-live="polite">
+          <ErrorMessage @error={{this.error}} @showDetails={{true}} />
+        </div>
+      </section>
+    {{else}}
+      <RoleNote
+        @needed="deploy"
+        @what="デプロイ、ロールバック、キャンセル"
+        class="deploy-readonly"
+        data-test-deploy-readonly
+      />
+    {{/if}}
 
     {{#unless this.isEmpty}}
       <section class="deploy-history" aria-labelledby="history-title">
@@ -758,6 +783,13 @@ export default class AppDeployTemplate extends Component<Signature> {
                             >{{deployment.promoted_from.app_slug}}
                               から昇格</Badge>
                           {{/if}}
+                          {{#if deployment.actor}}
+                            <span
+                              class="deploy-actor"
+                              title="デプロイした人"
+                              data-test-deploy-actor
+                            >実行: {{deployment.actor.login}}</span>
+                          {{/if}}
                         </span>
                         {{#if deployment.error}}
                           <span class="deploy-row-error" data-test-row-error>
@@ -784,7 +816,9 @@ export default class AppDeployTemplate extends Component<Signature> {
                       </div>
 
                       <div class="deploy-cell-actions">
-                        {{#if (isActiveDeployment deployment)}}
+                        {{#if this.readOnly}}
+                          {{! Looking only: no actions. }}
+                        {{else if (isActiveDeployment deployment)}}
                           <Button
                             @size="small"
                             @disabled={{eq this.canceling deployment.id}}
@@ -826,7 +860,7 @@ export default class AppDeployTemplate extends Component<Signature> {
                         @deployment={{deployment}}
                         @onLogEnd={{this.refresh}}
                       >
-                        {{#if (this.hasReleaseActions deployment)}}
+                        {{#if (this.showsReleaseActions deployment)}}
                           <div class="deploy-release" data-test-release-actions>
                             {{#if (this.canRollBack deployment)}}
                               <p data-test-release-kept>

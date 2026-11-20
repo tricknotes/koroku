@@ -20,5 +20,6 @@ Router.map(function () {
   });
   this.route('system');
   this.route('security');
+  this.route('members');
   this.route('not-found', { path: '/*path' });
 });

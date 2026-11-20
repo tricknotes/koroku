@@ -184,6 +184,103 @@ const SHOTS = [
     fullPage: false,
     themes: ['dark'],
   },
+  // Members and their roles (ARCHITECTURE 10.7): the owner's screen, and
+  // what a member sees.
+  {
+    name: 'members',
+    path: '/members?scenario=healthy',
+    wait: '[data-test-members]',
+  },
+  {
+    name: 'members-phone',
+    path: '/members?scenario=healthy',
+    wait: '[data-test-members]',
+    ...PHONE,
+  },
+  {
+    name: 'members-empty',
+    path: '/members?scenario=empty',
+    wait: '[data-test-no-members]',
+  },
+  {
+    name: 'members-remove',
+    path: '/members?scenario=healthy',
+    wait: '[data-test-members]',
+    click: '[data-test-member-remove]',
+    themes: ['light'],
+  },
+  {
+    name: 'members-menu',
+    path: '/?scenario=healthy',
+    wait: LIST,
+    click: '[data-test-user-menu]',
+    themes: ['light'],
+  },
+  {
+    name: 'members-security-owner',
+    path: '/security?scenario=healthy',
+    wait: '[data-test-sessions]',
+  },
+  { name: 'member-list', path: '/?scenario=member', wait: LIST },
+  {
+    name: 'member-list-phone',
+    path: '/?scenario=member',
+    wait: LIST,
+    ...PHONE,
+  },
+  {
+    name: 'member-menu',
+    path: '/?scenario=member',
+    wait: LIST,
+    click: '[data-test-user-menu]',
+    themes: ['light'],
+  },
+  {
+    name: 'member-view-deploy',
+    path: '/apps/shop/deploy?scenario=member',
+    wait: DEPLOYMENT,
+  },
+  {
+    name: 'member-view-deploy-phone',
+    path: '/apps/shop/deploy?scenario=member',
+    wait: DEPLOYMENT,
+    ...PHONE,
+  },
+  {
+    name: 'member-deploy-env',
+    path: '/apps/blog/env?scenario=member',
+    wait: '[data-test-env-forbidden]',
+  },
+  {
+    name: 'member-deploy-env-phone',
+    path: '/apps/blog/env?scenario=member',
+    wait: '[data-test-env-forbidden]',
+    ...PHONE,
+  },
+  {
+    name: 'member-view-settings',
+    path: '/apps/shop/settings?scenario=member',
+    wait: '[data-test-settings-form]',
+    fullPage: true,
+  },
+  {
+    name: 'member-manage-settings',
+    path: '/apps/blog-staging/settings?scenario=member',
+    wait: '[data-test-settings-form]',
+    fullPage: true,
+  },
+  {
+    name: 'member-manage-settings-phone',
+    path: '/apps/blog-staging/settings?scenario=member',
+    wait: '[data-test-settings-form]',
+    ...PHONE,
+  },
+  {
+    name: 'member-security',
+    path: '/security?scenario=member',
+    wait: '[data-test-sessions]',
+    themes: ['light'],
+  },
   // App detail header and the deploy tab.
   {
     name: 'deploy-history',

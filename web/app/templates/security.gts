@@ -53,6 +53,15 @@ function device(item: { user_agent: string }): string {
 }
 
 /**
+ * The login of another user's session, which only the owner sees
+ * (ARCHITECTURE 10.7); '' for the user's own.
+ */
+function otherUser(item: LoginSession, me: number | undefined): string {
+  if (!item.user || item.user.id === me) return '';
+  return item.user.login;
+}
+
+/**
  * Who is logged in where, and who tried to log in. The place to notice a
  * stolen session and end it (ARCHITECTURE 10.3).
  */
@@ -77,8 +86,20 @@ export default class SecurityTemplate extends Component {
     void this.events.load();
   }
 
+  /** The user's own sessions in other browsers ("end the others" ends these). */
   get others(): number {
-    return (this.sessions.value ?? []).filter((s) => !s.current).length;
+    const me = this.session.user?.id;
+    return (this.sessions.value ?? []).filter(
+      (s) => !s.current && (!s.user || s.user.id === me),
+    ).length;
+  }
+
+  get me(): number | undefined {
+    return this.session.user?.id;
+  }
+
+  get isOwner(): boolean {
+    return this.session.isOwner;
   }
 
   /** Whole minutes left in which dangerous operations need no new login. */
@@ -158,7 +179,8 @@ export default class SecurityTemplate extends Component {
         </div>
         <p class="security-note">
           アプリの削除、本番アプリのデプロイ、環境変数の値の表示と保存、リストア、ダンプのダウンロード、環境やリポジトリの変更、API
-          トークンの作成には、直近 10 分以内のログインが必要です。
+          トークンの作成、メンバーの追加とロールの付与には、直近 10
+          分以内のログインが必要です。
         </p>
         <p class="security-reauth" data-test-reauth-state>
           {{#if this.reauthActive}}
@@ -189,8 +211,13 @@ export default class SecurityTemplate extends Component {
         {{/if}}
       </div>
       <p class="security-note">
-        このアカウントでログインしているブラウザーです。心当たりのないものがあれば終了し、GitHub
-        のパスワードも変えてください。
+        {{#if this.isOwner}}
+          ログインしているブラウザーです。オーナーには、メンバーのセッションも表示します。心当たりのないものがあれば終了し、GitHub
+          のパスワードも変えてください。
+        {{else}}
+          このアカウントでログインしているブラウザーです。心当たりのないものがあれば終了し、GitHub
+          のパスワードも変えてください。
+        {{/if}}
       </p>
 
       <div class="pane-notices" aria-live="polite">
@@ -225,6 +252,12 @@ export default class SecurityTemplate extends Component {
                 {{#each sessions key="id" as |item|}}
                   <Row data-test-session={{item.id}}>
                     <span class="session-device">
+                      {{#if (otherUser item this.me)}}
+                        <span
+                          class="session-user"
+                          data-test-session-user
+                        >{{otherUser item this.me}}</span>
+                      {{/if}}
                       <span
                         class="session-agent"
                         title={{item.user_agent}}
@@ -285,8 +318,13 @@ export default class SecurityTemplate extends Component {
         <h2 class="pane-title" id="events-title">ログイン履歴</h2>
       </div>
       <p class="security-note">
-        GitHub の認証まで進んだログインの記録です（新しい順に最大 50
-        件）。断ったログインも残ります。
+        {{#if this.isOwner}}
+          GitHub
+          の認証まで進んだログインの記録です（メンバーのものを含め、新しい順に最大
+          50 件）。断ったログインも残ります。
+        {{else}}
+          あなたのアカウントのログインの記録です（新しい順に最大 50 件）。
+        {{/if}}
       </p>
 
       <AsyncView

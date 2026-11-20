@@ -31,6 +31,8 @@ import type {
   LoginEvent,
   LoginSession,
   LogHistory,
+  Member,
+  MemberRole,
   MemoryHistory,
   MemoryRange,
   NewApp,
@@ -216,6 +218,37 @@ export default class ApiService extends Service {
 
   deleteToken(id: string): Promise<void> {
     return this.request('DELETE', `/api/tokens/${seg(id)}`);
+  }
+
+  // Members and their roles (the owner only, ARCHITECTURE 10.7)
+
+  async listMembers(): Promise<Member[]> {
+    const { members } = await this.request<{ members: Member[] | null }>(
+      'GET',
+      '/api/members',
+    );
+    return (members ?? []).map((m) => ({ ...m, roles: m.roles ?? [] }));
+  }
+
+  /** Resolves a GitHub login and adds the user without roles. */
+  addMember(login: string): Promise<Member> {
+    return this.request('POST', '/api/members', { body: { login } });
+  }
+
+  removeMember(userId: number): Promise<void> {
+    return this.request('DELETE', `/api/members/${userId}`);
+  }
+
+  /** Sets the member's role on the app; `null` takes it away. */
+  setMemberRole(
+    userId: number,
+    slug: string,
+    role: MemberRole | null,
+  ): Promise<Member> {
+    const path = `/api/members/${userId}/roles/${seg(slug)}`;
+    return role
+      ? this.request('PUT', path, { body: { role } })
+      : this.request('DELETE', path);
   }
 
   // System
@@ -700,6 +733,7 @@ interface EnvListJson {
   removed?: string[] | null;
   compared?: boolean;
   values_hidden?: boolean;
+  values_forbidden?: boolean;
 }
 
 function envList(json: EnvListJson): EnvList {
@@ -712,5 +746,6 @@ function envList(json: EnvListJson): EnvList {
     removed: json.removed ?? [],
     compared: json.compared === true,
     valuesHidden: json.values_hidden === true,
+    valuesForbidden: json.values_forbidden === true,
   };
 }

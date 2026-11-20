@@ -51,6 +51,12 @@ function isLifetime(days: TokenLifetime, chosen: TokenLifetime): boolean {
  * deployments and logs (ARCHITECTURE 10.5): list, create (shown once),
  * revoke.
  */
+/** The login of another user's token (only the owner sees them). */
+function tokenOwner(token: ApiToken, me: number | undefined): string {
+  if (!token.user || token.user.id === me) return '';
+  return token.user.login;
+}
+
 export default class ApiTokens extends Component {
   @service declare api: ApiService;
   @service declare session: SessionService;
@@ -216,6 +222,12 @@ export default class ApiTokens extends Component {
                 {{#each tokens key="id" as |token|}}
                   <Row data-test-token={{token.id}}>
                     <span class="token-name" data-test-token-name>
+                      {{#if (tokenOwner token this.session.user.id)}}
+                        <span
+                          class="session-user"
+                          data-test-token-user
+                        >{{tokenOwner token this.session.user.id}}</span>
+                      {{/if}}
                       {{token.name}}
                     </span>
                     <span class="session-time">

@@ -22,12 +22,14 @@ import { inputValue, preventDefault, setValue } from 'koroku-console/utils/dom';
 import { fieldErrors } from 'koroku-console/utils/errors';
 import { formatBytes, formatDuration } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import { can } from 'koroku-console/utils/roles';
 import type { StatusKind } from 'koroku-console/utils/status';
 import type { App, CopySourceKind, DbCopy } from 'koroku-console/utils/types';
 import Banner from './banner';
 import Button from './button';
 import ConfirmDialog from './confirm-dialog';
 import DbCopyDetail from './db-copy-detail';
+import RoleNote from './role-note';
 import EmptyState from './empty-state';
 import ErrorMessage from './error-message';
 import FormField from './form-field';
@@ -97,6 +99,11 @@ export default class DbCopyPanel extends Component<Signature> {
 
   apps = new Loadable<App[]>(() => this.api.listApps());
   copies = new Loadable<DbCopy[]>(() => this.api.listDbCopies(this.slug));
+
+  /** Copying and its settings need manage (ARCHITECTURE 10.7). */
+  get readOnly(): boolean {
+    return !can(this.args.model.app, 'manage');
+  }
 
   @tracked chosenSource = '';
   @tracked kind: CopySourceKind = 'live';
@@ -294,7 +301,9 @@ export default class DbCopyPanel extends Component<Signature> {
         のメジャーバージョンは揃えてください。
       </p>
 
-      {{#if this.form.available}}
+      {{#if this.readOnly}}
+        <RoleNote @needed="manage" @what="データのコピー" />
+      {{else if this.form.available}}
         <div class="box copy-start" data-test-copy-start>
           {{#if this.apps.loaded}}
             {{#if this.choices.length}}
@@ -493,6 +502,9 @@ export default class DbCopyPanel extends Component<Signature> {
         {{/if}}
 
         <h3 class="subsection-title" id="copy-settings-title">コピーの設定</h3>
+        {{#if this.readOnly}}
+          <RoleNote @needed="manage" @what="コピーの設定の変更" />
+        {{/if}}
         <form
           class="box copy-settings"
           novalidate
@@ -501,146 +513,149 @@ export default class DbCopyPanel extends Component<Signature> {
           {{on "submit" (preventDefault this.save)}}
           {{on "input" this.touch}}
         >
-          <div class="form-group">
-            <div>
-              <h4 class="form-group-title">ロードフック</h4>
-              <p class="form-group-description">
-                指定したサービスのコンテナでコマンドを実行し、標準入力からダンプを読ませます。コピー元のダンプフックと同じ種類の
-                DB にしてください。
-              </p>
-            </div>
-            <div class="form-group-body">
-              <FormField @label="種類から入力" as |field|>
-                <select
-                  id={{field.id}}
-                  data-test-load-preset
-                  {{on "change" this.applyPreset}}
-                >
-                  <option value="">選択すると下の欄を埋めます</option>
-                  {{#each HOOK_PRESETS key="id" as |preset|}}
-                    <option value={{preset.id}}>{{preset.label}}</option>
-                  {{/each}}
-                </select>
-              </FormField>
-              <div class="form-grid">
-                <FormField
-                  @label="サービス"
-                  @error={{this.errors.load_hook_service}}
-                  data-test-field-group="load_hook_service"
-                  as |field|
-                >
-                  <input
+          <fieldset class="role-fieldset" disabled={{this.readOnly}}>
+            <div class="form-group">
+              <div>
+                <h4 class="form-group-title">ロードフック</h4>
+                <p class="form-group-description">
+                  指定したサービスのコンテナでコマンドを実行し、標準入力からダンプを読ませます。コピー元のダンプフックと同じ種類の
+                  DB にしてください。
+                </p>
+              </div>
+              <div class="form-group-body">
+                <FormField @label="種類から入力" as |field|>
+                  <select
                     id={{field.id}}
-                    type="text"
-                    spellcheck="false"
-                    autocomplete="off"
-                    placeholder="db"
-                    value={{this.form.loadHookService}}
-                    aria-describedby={{field.describedBy}}
-                    aria-invalid={{field.invalid}}
-                    data-test-field="load_hook_service"
-                    {{on "input" (setValue this.form "loadHookService")}}
-                  />
+                    data-test-load-preset
+                    {{on "change" this.applyPreset}}
+                  >
+                    <option value="">選択すると下の欄を埋めます</option>
+                    {{#each HOOK_PRESETS key="id" as |preset|}}
+                      <option value={{preset.id}}>{{preset.label}}</option>
+                    {{/each}}
+                  </select>
                 </FormField>
-                <FormField
-                  class="field-wide"
-                  @label="コマンド"
-                  @error={{this.errors.load_hook_command}}
-                  data-test-field-group="load_hook_command"
-                  as |field|
-                >
-                  <input
-                    id={{field.id}}
-                    type="text"
-                    class="mono"
-                    spellcheck="false"
-                    autocomplete="off"
-                    placeholder="pg_restore --clean --if-exists --no-owner -d app"
-                    value={{this.form.loadHookCommand}}
-                    aria-describedby={{field.describedBy}}
-                    aria-invalid={{field.invalid}}
-                    data-test-field="load_hook_command"
-                    {{on "input" (setValue this.form "loadHookCommand")}}
-                  />
-                </FormField>
+                <div class="form-grid">
+                  <FormField
+                    @label="サービス"
+                    @error={{this.errors.load_hook_service}}
+                    data-test-field-group="load_hook_service"
+                    as |field|
+                  >
+                    <input
+                      id={{field.id}}
+                      type="text"
+                      spellcheck="false"
+                      autocomplete="off"
+                      placeholder="db"
+                      value={{this.form.loadHookService}}
+                      aria-describedby={{field.describedBy}}
+                      aria-invalid={{field.invalid}}
+                      data-test-field="load_hook_service"
+                      {{on "input" (setValue this.form "loadHookService")}}
+                    />
+                  </FormField>
+                  <FormField
+                    class="field-wide"
+                    @label="コマンド"
+                    @error={{this.errors.load_hook_command}}
+                    data-test-field-group="load_hook_command"
+                    as |field|
+                  >
+                    <input
+                      id={{field.id}}
+                      type="text"
+                      class="mono"
+                      spellcheck="false"
+                      autocomplete="off"
+                      placeholder="pg_restore --clean --if-exists --no-owner -d app"
+                      value={{this.form.loadHookCommand}}
+                      aria-describedby={{field.describedBy}}
+                      aria-invalid={{field.invalid}}
+                      data-test-field="load_hook_command"
+                      {{on "input" (setValue this.form "loadHookCommand")}}
+                    />
+                  </FormField>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="form-group">
-            <div>
-              <h4 class="form-group-title">コピー後のコマンド</h4>
-              <p class="form-group-description">
-                流し込んだあと、止めたサービスを起動する前に実行します。個人情報を消すのに使います。止めたサービスでは
-                1 回限りのコンテナで実行します。使わないときは両方を空にします。
-              </p>
-            </div>
-            <div class="form-group-body">
-              <div class="form-grid">
-                <FormField
-                  @label="サービス"
-                  @error={{this.errors.post_load_service}}
-                  data-test-field-group="post_load_service"
-                  as |field|
-                >
-                  <input
-                    id={{field.id}}
-                    type="text"
-                    spellcheck="false"
-                    autocomplete="off"
-                    placeholder="web"
-                    value={{this.form.postLoadService}}
-                    aria-describedby={{field.describedBy}}
-                    aria-invalid={{field.invalid}}
-                    data-test-field="post_load_service"
-                    {{on "input" (setValue this.form "postLoadService")}}
-                  />
-                </FormField>
-                <FormField
-                  class="field-wide"
-                  @label="コマンド"
-                  @error={{this.errors.post_load_command}}
-                  data-test-field-group="post_load_command"
-                  as |field|
-                >
-                  <input
-                    id={{field.id}}
-                    type="text"
-                    class="mono"
-                    spellcheck="false"
-                    autocomplete="off"
-                    placeholder="bin/rails db:anonymize"
-                    value={{this.form.postLoadCommand}}
-                    aria-describedby={{field.describedBy}}
-                    aria-invalid={{field.invalid}}
-                    data-test-field="post_load_command"
-                    {{on "input" (setValue this.form "postLoadCommand")}}
-                  />
-                </FormField>
+            <div class="form-group">
+              <div>
+                <h4 class="form-group-title">コピー後のコマンド</h4>
+                <p class="form-group-description">
+                  流し込んだあと、止めたサービスを起動する前に実行します。個人情報を消すのに使います。止めたサービスでは
+                  1
+                  回限りのコンテナで実行します。使わないときは両方を空にします。
+                </p>
+              </div>
+              <div class="form-group-body">
+                <div class="form-grid">
+                  <FormField
+                    @label="サービス"
+                    @error={{this.errors.post_load_service}}
+                    data-test-field-group="post_load_service"
+                    as |field|
+                  >
+                    <input
+                      id={{field.id}}
+                      type="text"
+                      spellcheck="false"
+                      autocomplete="off"
+                      placeholder="web"
+                      value={{this.form.postLoadService}}
+                      aria-describedby={{field.describedBy}}
+                      aria-invalid={{field.invalid}}
+                      data-test-field="post_load_service"
+                      {{on "input" (setValue this.form "postLoadService")}}
+                    />
+                  </FormField>
+                  <FormField
+                    class="field-wide"
+                    @label="コマンド"
+                    @error={{this.errors.post_load_command}}
+                    data-test-field-group="post_load_command"
+                    as |field|
+                  >
+                    <input
+                      id={{field.id}}
+                      type="text"
+                      class="mono"
+                      spellcheck="false"
+                      autocomplete="off"
+                      placeholder="bin/rails db:anonymize"
+                      value={{this.form.postLoadCommand}}
+                      aria-describedby={{field.describedBy}}
+                      aria-invalid={{field.invalid}}
+                      data-test-field="post_load_command"
+                      {{on "input" (setValue this.form "postLoadCommand")}}
+                    />
+                  </FormField>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div aria-live="polite">
-            <ErrorMessage @error={{this.saveError}} />
-          </div>
-          <div class="form-footer">
-            <Button
-              @type="submit"
-              @variant="primary"
-              @busy={{this.saving}}
-              @busyLabel="保存中…"
-              data-test-copy-settings-save
-            >保存</Button>
-            <p class="form-status" aria-live="polite">
-              {{#if this.saved}}
-                <span class="form-saved" data-test-copy-settings-saved>
-                  <Icon @name="check" />
-                  保存しました。
-                </span>
-              {{/if}}
-            </p>
-          </div>
+            <div aria-live="polite">
+              <ErrorMessage @error={{this.saveError}} />
+            </div>
+            <div class="form-footer">
+              <Button
+                @type="submit"
+                @variant="primary"
+                @busy={{this.saving}}
+                @busyLabel="保存中…"
+                data-test-copy-settings-save
+              >保存</Button>
+              <p class="form-status" aria-live="polite">
+                {{#if this.saved}}
+                  <span class="form-saved" data-test-copy-settings-saved>
+                    <Icon @name="check" />
+                    保存しました。
+                  </span>
+                {{/if}}
+              </p>
+            </div>
+          </fieldset>
         </form>
       {{else}}
         <p class="muted" data-test-copy-unavailable>

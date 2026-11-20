@@ -46,9 +46,9 @@ module('Acceptance | lifecycle', function (hooks) {
 
   for (const screen of SCREENS) {
     test(`${screen.name}: nothing is polled or streamed after leaving`, async function (assert) {
-      // The form to create an app is the one screen with nothing to
+      // The form to create an app and the members screen have nothing to
       // follow; everywhere else a tick asks for something.
-      const follows = screen.url !== '/apps/new';
+      const follows = screen.url !== '/apps/new' && screen.url !== '/members';
 
       await visit(screen.url);
       const polled = await requestsOfOneTick();

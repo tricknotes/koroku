@@ -66,6 +66,15 @@ export default class SessionService extends Service {
    * Whether a dangerous operation would be accepted now. Checked before a
    * plain link (a dump download) that cannot show the API's refusal.
    */
+  /**
+   * The owner may do everything and manages the members; a member only
+   * what its roles allow (ARCHITECTURE 10.7). Older backends let in the
+   * owner only and do not say so.
+   */
+  get isOwner(): boolean {
+    return this.user?.owner ?? true;
+  }
+
   get recentlyAuthenticated(): boolean {
     return this.reauthUntil === null || Date.now() < this.reauthUntil;
   }

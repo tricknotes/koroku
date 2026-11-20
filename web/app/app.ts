@@ -26,6 +26,7 @@ import './styles/db-copy.css';
 import './styles/settings.css';
 import './styles/system.css';
 import './styles/security.css';
+import './styles/members.css';
 import './styles/new-app.css';
 
 if (macroCondition(isDevelopingApp())) {
