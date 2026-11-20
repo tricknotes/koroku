@@ -240,6 +240,53 @@ export interface ServiceStatus {
   memory_limit_bytes?: number | null;
 }
 
+export type MemoryRange = '24h' | '7d' | '14d';
+
+/** One point of a service's memory history: a 5-minute bucket or several. */
+export interface MemoryPoint {
+  at: string;
+  max_bytes: number;
+  avg_bytes: number;
+  limit_bytes: number | null;
+}
+
+export type MemoryFlag = 'near_limit' | 'generous';
+
+/**
+ * The limit suggestion, from the data recorded under the current limit in
+ * the last 14 days (ARCHITECTURE 9.5).
+ */
+export interface MemorySuggestion {
+  basis_since: string;
+  basis_hours: number;
+  peak_bytes: number;
+  p95_bytes: number;
+  /** At least 24 hours of data; `limit` is null until then. */
+  ready: boolean;
+  limit_bytes: number | null;
+  /** The suggestion as a setting, e.g. `640m`. */
+  limit: string | null;
+  flag: MemoryFlag | null;
+}
+
+export interface MemoryServiceHistory {
+  name: string;
+  limit_bytes: number | null;
+  peak_bytes: number;
+  restarts: number;
+  points: MemoryPoint[];
+  suggestion: MemorySuggestion;
+}
+
+/** `GET /api/apps/{slug}/memory`. */
+export interface MemoryHistory {
+  range: MemoryRange;
+  step_seconds: number;
+  from: string;
+  to: string;
+  services: MemoryServiceHistory[];
+}
+
 /** How a saved variable differs from the running release. */
 export type EnvPending = 'added' | 'changed';
 

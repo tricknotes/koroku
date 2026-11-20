@@ -28,6 +28,8 @@ import type {
   LoginEvent,
   LoginSession,
   LogHistory,
+  MemoryHistory,
+  MemoryRange,
   NewApp,
   Repo,
   ServiceStatus,
@@ -278,6 +280,19 @@ export default class ApiService extends Service {
       services: ServiceStatus[] | null;
     }>('GET', `/api/apps/${seg(slug)}/services`);
     return services ?? [];
+  }
+
+  /** Memory use per service and the limit suggestion (ARCHITECTURE 9.5). */
+  async getMemoryHistory(
+    slug: string,
+    range: MemoryRange,
+  ): Promise<MemoryHistory> {
+    const history = await this.request<MemoryHistory>(
+      'GET',
+      `/api/apps/${seg(slug)}/memory`,
+      { query: { range } },
+    );
+    return { ...history, services: history.services ?? [] };
   }
 
   // Environment variables

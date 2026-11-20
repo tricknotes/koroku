@@ -21,11 +21,11 @@ const (
 {"BlockIO":"0B / 0B","CPUPerc":"12.00%","Container":"ddd","ID":"ddd","MemPerc":"10.00%","MemUsage":"300MiB / 512MiB","Name":"koroku-shop-web-1","NetIO":"0B / 0B","PIDs":"20"}
 {"BlockIO":"0B / 0B","CPUPerc":"--","Container":"eee","ID":"eee","MemPerc":"--","MemUsage":"-- / --","Name":"registry","NetIO":"--","PIDs":"--"}
 `
-	inspectOutput = `"aaa"	"/koroku-blog-web-1"	"koroku-blog"	"web"	536870912
-"bbb"	"/koroku-blog-db-1"	"koroku-blog"	"db"	536870912
-"ccc"	"/koroku-dev-caddy-1"	"koroku-dev"	"caddy"	0
-"ddd"	"/koroku-shop-web-1"	"koroku-shop"	"web"	536870912
-"eee"	"/registry"	""	""	0
+	inspectOutput = `"aaa"	"/koroku-blog-web-1"	"koroku-blog"	"web"	536870912	0
+"bbb"	"/koroku-blog-db-1"	"koroku-blog"	"db"	536870912	2
+"ccc"	"/koroku-dev-caddy-1"	"koroku-dev"	"caddy"	0	0
+"ddd"	"/koroku-shop-web-1"	"koroku-shop"	"web"	536870912	0
+"eee"	"/registry"	""	""	0	0
 `
 )
 

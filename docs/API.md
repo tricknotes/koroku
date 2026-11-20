@@ -234,6 +234,49 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る） |
 | `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）と `memory_limit_bytes`（上限。無制限なら 0）も付く。取得できなければどちらも `null` |
 
+### メモリ使用量の履歴（2026-11-21）
+
+`GET /api/apps/{slug}/memory?range=24h`: サービスごとのメモリ使用量の推移と、上限の目安（ARCHITECTURE 9.5）。`range` は `24h`（既定）/ `7d` / `14d`。ほかの値は `400 invalid_range`。
+
+```json
+{
+  "range": "24h",
+  "step_seconds": 300,
+  "from": "2026-11-20T03:00:00Z",
+  "to": "2026-11-21T03:00:00Z",
+  "services": [
+    {
+      "name": "web",
+      "limit_bytes": 536870912,
+      "peak_bytes": 501219328,
+      "restarts": 1,
+      "points": [
+        { "at": "2026-11-20T03:00:00Z", "max_bytes": 402653184, "avg_bytes": 380633088, "limit_bytes": 536870912 }
+      ],
+      "suggestion": {
+        "basis_since": "2026-11-17T09:20:00Z",
+        "basis_hours": 89.5,
+        "peak_bytes": 501219328,
+        "p95_bytes": 452984832,
+        "ready": true,
+        "limit_bytes": 805306368,
+        "limit": "768m",
+        "flag": "near_limit"
+      }
+    }
+  ]
+}
+```
+
+- `services` は期間内にデータがあるサービス（名前順）。記録がまだなければ空の配列。
+- `points` は期間内の点を古い順に並べたもの。`step_seconds`（24h は 300、7d は 1800、14d は 3600）ごとにまとめ、`at` はその区切りの始まり。データのない区切り（停止中、koroku が止まっていた）は含めないので、UI は `step_seconds` より離れた点の間を線で結ばない。`max_bytes` は区切り内の最大、`avg_bytes` は平均、`limit_bytes` はその区切りの上限（上限がなければ `null`）。
+- `limit_bytes`（サービス直下）は最後に記録した上限。`peak_bytes` と `restarts`（自動の再起動の回数）は表示期間内の値。
+- `suggestion` は表示期間によらず、いまの上限になってからの直近 14 日（根拠）から求める。
+  - `basis_since` は根拠の最初の区切り、`basis_hours` はデータのある時間の合計（5 分単位）。`peak_bytes` と `p95_bytes` は根拠の中の最大と、5 分ごとの最大の 95 パーセンタイル。
+  - `ready` は根拠が 24 時間分以上あるか。`false` の間、`limit_bytes` と `limit` は `null`。
+  - `limit_bytes` は根拠のピーク × 1.5 を 64MiB 単位に切り上げた値（128MiB 以上）。`limit` は同じ値を設定に書ける形にしたもの（`m` 単位）。
+  - `flag` は `near_limit`（根拠のピークが上限の 90% 以上。`ready` によらず出す）、`generous`（根拠が 7 日分以上あり、ピークが上限の 30% 未満）、どちらでもなければ `null`。上限がなければ常に `null`。
+
 ## 環境変数（M1）
 
 | メソッドとパス | 内容 |

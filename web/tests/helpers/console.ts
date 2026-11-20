@@ -236,6 +236,44 @@ export function serveConsole(
         },
       ],
     })
+    .on('GET', `${app}/memory`, {
+      range: '24h',
+      step_seconds: 300,
+      from: '2026-11-17T03:00:00Z',
+      to: '2026-11-18T03:00:00Z',
+      services: [
+        {
+          name: 'web',
+          limit_bytes: 512 * 1024 ** 2,
+          peak_bytes: 470 * 1024 ** 2,
+          restarts: 1,
+          points: [
+            {
+              at: '2026-11-18T02:50:00Z',
+              max_bytes: 470 * 1024 ** 2,
+              avg_bytes: 400 * 1024 ** 2,
+              limit_bytes: 512 * 1024 ** 2,
+            },
+            {
+              at: '2026-11-18T02:55:00Z',
+              max_bytes: 300 * 1024 ** 2,
+              avg_bytes: 290 * 1024 ** 2,
+              limit_bytes: 512 * 1024 ** 2,
+            },
+          ],
+          suggestion: {
+            basis_since: '2026-11-10T03:00:00Z',
+            basis_hours: 192,
+            peak_bytes: 470 * 1024 ** 2,
+            p95_bytes: 320 * 1024 ** 2,
+            ready: true,
+            limit_bytes: 768 * 1024 ** 2,
+            limit: '768m',
+            flag: 'near_limit',
+          },
+        },
+      ],
+    })
     .on('GET', `${app}/deployments`, () => ({
       deployments: state.deployments,
     }))

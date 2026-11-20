@@ -11,6 +11,7 @@ import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
+import MemoryHistory from 'koroku-console/components/memory-history';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import type ApiService from 'koroku-console/services/api';
 import type AppContext from 'koroku-console/utils/app-context';
@@ -161,6 +162,20 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   removeLimit = (row: LimitRow) => {
     this.form.limits = this.form.limits.filter((r) => r !== row);
+    this.touch();
+  };
+
+  /**
+   * Puts a suggested limit into the service's row (adding the row when the
+   * service has none). Like any edit, it is sent with 「保存」.
+   */
+  applySuggestion = (service: string, limit: string) => {
+    const row = this.form.limits.find((r) => r.service.trim() === service);
+    if (row) {
+      row.limit = limit;
+    } else {
+      this.form.limits = [...this.form.limits, new LimitRow(service, limit)];
+    }
     this.touch();
   };
 
@@ -646,6 +661,12 @@ export default class AppSettingsTemplate extends Component<Signature> {
               </p>
             {{/if}}
           </div>
+
+          <MemoryHistory
+            @slug={{this.app.slug}}
+            @limits={{this.form.serviceLimits}}
+            @onApply={{this.applySuggestion}}
+          />
         </div>
       </div>
 
