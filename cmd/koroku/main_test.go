@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -108,6 +109,7 @@ func TestServeAnswersSystemEndpoint(t *testing.T) {
 			t.Errorf("serve returned %v after shutdown", err)
 		}
 	case <-time.After(15 * time.Second):
+		dumpGoroutines(t)
 		t.Fatal("serve did not shut down")
 	}
 }
@@ -152,6 +154,7 @@ func TestServeIsLockedWithoutGitHubApp(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(15 * time.Second):
+		dumpGoroutines(t)
 		t.Fatal("serve did not shut down")
 	}
 }
@@ -228,6 +231,7 @@ func TestServeStartsWhileCaddyIsUnreachable(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(60 * time.Second):
+		dumpGoroutines(t)
 		t.Fatal("serve did not shut down")
 	}
 }
@@ -292,4 +296,13 @@ func TestInsecureNoAuthIsAllowedBehindLoopbackCaddy(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Errorf("serve: %v", err)
 	}
+}
+
+// dumpGoroutines logs the stack of every goroutine. Tests call it when serve
+// does not stop in time, so that a rare hang on CI shows where it waits.
+func dumpGoroutines(t *testing.T) {
+	t.Helper()
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+	t.Logf("goroutines when serve did not shut down:\n%s", buf[:n])
 }
