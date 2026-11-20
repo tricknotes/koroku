@@ -64,16 +64,16 @@ func (s *Server) deploymentToJSON(app store.App, d store.Deployment) deploymentJ
 func deploymentToJSON(d store.Deployment, slug string) deploymentJSON {
 	return deploymentJSON{
 		SourceDeploymentID: d.SourceDeploymentID,
-		ID:            d.ID,
-		AppSlug:       slug,
-		Ref:           d.Ref,
-		CommitSHA:     d.CommitSHA,
-		CommitMessage: d.CommitMessage,
-		Status:        d.Status,
-		Error:         d.Error,
-		QueuedAt:      d.QueuedAt,
-		StartedAt:     d.StartedAt,
-		FinishedAt:    d.FinishedAt,
+		ID:                 d.ID,
+		AppSlug:            slug,
+		Ref:                d.Ref,
+		CommitSHA:          d.CommitSHA,
+		CommitMessage:      d.CommitMessage,
+		Status:             d.Status,
+		Error:              d.Error,
+		QueuedAt:           d.QueuedAt,
+		StartedAt:          d.StartedAt,
+		FinishedAt:         d.FinishedAt,
 	}
 }
 
