@@ -61,7 +61,9 @@ module('Acceptance | auth', function (hooks) {
     assert.strictEqual(currentURL(), '/login');
     assert
       .dom('[data-test-login-error]')
-      .hasText('このアカウントはログインを許可されていません。')
+      .hasText(
+        'このアカウントはログインを許可されていません。メンバーなら、オーナーにアプリのロールを与えてもらってください。',
+      )
       .hasAttribute('role', 'alert');
     assert
       .dom('[data-test-login-hint]')

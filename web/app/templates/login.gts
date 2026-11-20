@@ -59,7 +59,8 @@ export default class LoginTemplate extends Component {
           {{/if}}
         {{else}}
           <p class="login-lead">
-            許可された GitHub アカウントだけが、このコンソールを使えます。
+            オーナーと、オーナーがアプリのロールを与えたメンバーの GitHub
+            アカウントだけが、このコンソールを使えます。
           </p>
         {{/if}}
 

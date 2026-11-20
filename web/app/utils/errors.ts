@@ -196,7 +196,8 @@ export const UNAVAILABLE_MESSAGES: Record<Unavailability, string> = {
 };
 
 const LOGIN_ERRORS: Record<string, string> = {
-  not_allowed: 'このアカウントはログインを許可されていません。',
+  not_allowed:
+    'このアカウントはログインを許可されていません。メンバーなら、オーナーにアプリのロールを与えてもらってください。',
   state_mismatch:
     'ログインの途中で状態が一致しなくなりました。もう一度やり直してください。',
   github_error:
