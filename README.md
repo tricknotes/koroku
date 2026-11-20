@@ -1,97 +1,156 @@
 # koroku
 
-VPS 1 台の上で、GitHub リポジトリの Docker Compose アプリを UI からデプロイする、個人用の Heroku ライクなホスティング基盤です。コントロールプレーンは Go 製シングルバイナリ `koroku`（SQLite、Ember 製 SPA を同梱）で、リバースプロキシに Caddy を使います。
+koroku は、自分の VPS 1 台を Heroku のように使うための、個人用のホスティング基盤です。GitHub にある Docker Compose のアプリを、ブラウザーの管理画面からデプロイできます。
 
-- 設計: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- HTTP API: [docs/API.md](docs/API.md)
-- 本番の初回セットアップ（サーバー、DNS、GitHub App、オブジェクトストレージ）: [docs/SETUP.md](docs/SETUP.md)
-- ホストの構築・更新・復旧: [docs/OPERATIONS.md](docs/OPERATIONS.md)
-- マイルストーンと実装規約: [CLAUDE.md](CLAUDE.md)
+- ブランチかコミットを選ぶと、取得・ビルド・起動・HTTP の確認まで自動で進みます。起動に失敗したら、直前に動いていた版へ自動で戻ります。
+- アプリごとに `https://<アプリ名>.<ベースドメイン>` の URL と TLS 証明書が付きます。独自ドメインも足せます。
+- 環境変数、デプロイと実行のログ、起動・停止、バックアップとリストアを、同じ画面で扱えます。
+
+コントロールプレーンは Go 製のバイナリ 1 つ（`koroku`。管理画面と SQLite を内蔵）で、前段のリバースプロキシに Caddy を使います。特定のホスティング事業者、DNS サービス、オブジェクトストレージには依存しません。
+
+## 向いている使い方
+
+- 自分が書いた 3〜5 個程度のアプリ（Web アプリ + DB など）を、1 台のサーバーで動かしたい
+- アプリはすでに Docker Compose で動く（あるいは、動くように直せる）
+- staging と本番を同じサーバーに並べ、本番の操作には確認を挟みたい
+
+次のことはしません。必要なら別の仕組みを選んでください。
+
+- `git push` でのデプロイ、push を契機にした自動デプロイ、buildpack、Addons
+- 複数のサーバー、複数のユーザー、オートスケール
+- 無停止デプロイ（デプロイ中のアプリは数秒止まります。ほかのアプリは止まりません）
+- サーバーの冗長化（サーバーが止まると全アプリが止まります）
+- 他人のコードを安全に動かすための隔離。デプロイするのは自分のリポジトリだけ、という前提です
+
+## しくみ
+
+```text
+            Internet
+               | 80 / 443
++--------------v-------------------------------------- サーバー --+
+|  Caddy          console.<ベースドメイン> -> koroku（管理画面）   |
+|                 <アプリ>.<ベースドメイン> -> 各アプリ             |
+|  koroku         API・管理画面・デプロイ・ログ・バックアップ        |
+|                 docker compose を操作し、Caddy に経路を設定する   |
+|  アプリ          1 アプリ = 1 Compose プロジェクト               |
++------------------------------------------------------------------+
+       |                     |                          |
+     GitHub          オブジェクトストレージ         Let's Encrypt
+ （ログイン・取得）   （ログの退避・バックアップ）    （TLS 証明書）
+```
+
+- 管理画面には GitHub アカウントでログインします。ログインできるのは、設定で許可した 1 人だけです。
+- アプリのリポジトリの Compose ファイルは書き換えません。koroku が生成した設定を重ねて、ポートを `127.0.0.1` に閉じ込め、環境変数とメモリ上限を付けます。アプリ同士は互いに見えません。
+- 詳しくは [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+## 必要なもの
+
+| もの | 条件 |
+| --- | --- |
+| サーバー | Ubuntu 24.04（amd64）の VPS 1 台。目安は 2 vCPU、メモリ 4GB、ディスク 40GB。固定のグローバル IPv4 アドレスと、外から届く 80/443 番ポート |
+| ドメイン | `*.<ベースドメイン>`（または管理画面とアプリごとの名前）を、サーバーの IP に向けられること |
+| GitHub | ログインとリポジトリの取得に使う GitHub App を、自分のアカウントに 1 つ登録する |
+| オブジェクトストレージ | S3 互換 API を持つもの（パス形式の URL に対応していること）。ログの退避とバックアップの置き場。なくても動きますが、バックアップが取れません |
+| 手元の環境 | `koroku` のバイナリをビルドするための Docker |
+
+## はじめかた
+
+1. **バイナリをビルドする。** 手元で次を実行すると、管理画面込みの `bin/koroku`（linux/amd64）ができます。必要なのは Docker だけです。
+
+   ```sh
+   bin/dev make build
+   ```
+
+2. **サーバー、DNS、GitHub App、オブジェクトストレージを用意する。** 外部サービス側で行う設定を、[docs/SETUP.md](docs/SETUP.md) に順番に書いてあります。
+3. **サーバーを構築する。** バイナリと `deploy/` ディレクトリをサーバーに送り、プロビジョニングスクリプトを実行します。Docker、Caddy、restic、swap、ファイアウォール、SSH の鍵認証化、`koroku` のサービス登録まで済みます。何度実行しても安全です。
+
+   ```sh
+   scp -r deploy bin/koroku <ユーザー>@<サーバー>:
+   ssh -t <ユーザー>@<サーバー> sudo ./deploy/provision.sh ./koroku
+   ```
+
+4. **設定を書いて起動する。** `/etc/koroku/config.toml` に、ベースドメイン、公開 IP、GitHub App、オブジェクトストレージの値を書き、`sudo systemctl restart koroku` で起動します（[docs/SETUP.md](docs/SETUP.md) の 7 節）。
+5. **設定を確かめる。** 次のコマンドで、DNS、証明書、GitHub App、オブジェクトストレージ、バックアップまでを 1 つずつ確かめます。問題があれば、直し方と読むべき節を表示します。
+
+   ```sh
+   sudo koroku check
+   ```
+
+6. `https://console.<ベースドメイン>` を開き、GitHub でログインします。
+
+最初は Let's Encrypt の staging（試験用）の証明書で動かし、一通り確かめてから本番の証明書に切り替えます（[docs/SETUP.md](docs/SETUP.md) の 9 節）。
+
+## 使い方
+
+### アプリを作ってデプロイする
+
+1. 管理画面で「アプリを作成」を押し、GitHub のリポジトリを選びます（public リポジトリは「URL を直接指定」でも指定できます）。
+2. Compose ファイルが自動で検出されるので、外に公開するサービスとそのポート、ヘルスチェックのパス（既定 `/`）を確かめます。
+3. 「環境変数」タブで、アプリに渡す変数を設定します。リポジトリが必要とする変数（Compose ファイルの `${VAR}` など）と照らし合わせ、足りないものを教えてくれます。
+4. 「デプロイ」タブでブランチかコミットを選んでデプロイします。進み具合とログがその場で流れます。
+5. デプロイが成功すると、`https://<アプリ名>.<ベースドメイン>` で開けます。
+
+デプロイの流れは「取得 → 設定の生成 → 検証 → ビルドか pull → 起動 → 経路の設定 → HTTP の確認」です。起動か確認で失敗すると、直前の成功した版を当時の環境変数で起動し直します（DB のマイグレーションは戻しません）。過去のコミットは履歴の「このコミットを再デプロイ」で出し直せます。
+
+### staging と本番
+
+同じリポジトリを、複数のアプリに紐づけられます。`myapp-staging` と `myapp` のように別のアプリとして作り、設定で本番にしたアプリでは、デプロイと削除の前に確認が入ります。環境変数と volume はアプリごとに独立しています。
+
+### 独自ドメイン
+
+「ドメイン」タブでホスト名を追加し、表示される DNS レコードを設定します。DNS がサーバーを向くと自動で有効になり、証明書が取られます。複数のホスト名を付けたときは、1 つをプライマリにすると、ほかはそこへリダイレクトされます。CDN を前段に置くなど DNS の確認が通らない構成では「強制有効化」が使えます。
+
+### ログ
+
+「ログ」タブで、サービスごとの出力と、アクセスログをライブで見られます。直近 14 日分はサーバー上で絞り込み検索でき、それより前のものはオブジェクトストレージに退避されたファイルをダウンロードできます。
+
+### バックアップとリストア
+
+毎日 03:00（JST）に、アプリの named volume と、koroku 自身の設定と DB をオブジェクトストレージにバックアップします。アプリの DB は「ダンプフック」（例: `pg_dump` を実行するコマンド）を設定すると、整合した形で取れます。「バックアップ」タブから手動での実行、volume のリストア、DB ダンプのダウンロードができます。サーバーを丸ごと失ったときの復旧手順は [docs/OPERATIONS.md](docs/OPERATIONS.md) にあります。
+
+### システム
+
+「システム」画面で、ディスク、メモリ、アプリごとの CPU とメモリ、Docker のディスク使用量、バックアップとログ退避の状況を確かめられます。不要なイメージやビルドキャッシュもここで消せます。ディスク使用率が一定（既定 85%）を超えると、新しいデプロイを断ります。
 
 ## アプリのリポジトリを koroku 向けに整える
 
-このリポジトリは Claude Code のプラグインマーケットプレイスを兼ねていて、デプロイしたいアプリのリポジトリを koroku の前提（公開サービス、環境変数の渡り方、ポリシー検査、named volume、バックアップのダンプフックなど）に合わせる Skill を配布しています。アプリのリポジトリで Claude Code を開き、次を実行します。
+koroku でデプロイするリポジトリには、いくつかの前提があります。
+
+- Compose ファイルがあり、HTTP を受けるサービスが 1 つあること。ヘルスチェックのパスが 5xx 以外をすぐ返すこと
+- 本番の設定で起動すること（開発用の設定は `compose.override.yaml` に分ける）
+- 権限の強い設定（`privileged`、ホストのネットワーク、Docker ソケットのマウント、書き込める bind mount など）を使わないこと。データは named volume に置くこと
+- ログは標準出力に出すこと。ワンショットのサービス（マイグレーションなど）は、ほかのサービスから `service_completed_successfully` で待たれていること
+
+詳しくは [plugins/koroku/skills/prepare-app/references/requirements.md](plugins/koroku/skills/prepare-app/references/requirements.md) にまとめてあります。
+
+このリポジトリは Claude Code のプラグインマーケットプレイスを兼ねていて、アプリのリポジトリをこの前提に合わせる Skill を配布しています。アプリのリポジトリで Claude Code を開き、次を実行します。
 
 ```text
 /plugin marketplace add tricknotes/koroku
 /plugin install koroku@koroku
 ```
 
-あとは「koroku で動くようにして」と頼むか、`/koroku:prepare-app` を実行します。Skill はリポジトリを調べて直し、手元の Docker で koroku と同じ形の override を重ねたリハーサル（`config` → build / pull → `up --wait` → HTTP 確認）を行い、koroku の画面に入れる値（公開サービスとポート、ヘルスチェックパス、環境変数、ダンプフック）をまとめます。中身は [plugins/koroku/skills/prepare-app/](plugins/koroku/skills/prepare-app/) にあります。
+あとは「koroku で動くようにして」と頼むか、`/koroku:prepare-app` を実行します。Skill はリポジトリを調べて直し、手元の Docker で koroku と同じ形の設定を重ねたリハーサル（`config` → build / pull → `up --wait` → HTTP 確認）を行い、管理画面に入れる値（公開サービスとポート、ヘルスチェックパス、環境変数、ダンプフック）をまとめます。
 
-## 開発
+## 運用
 
-必要なものは Docker だけです。Go、Node.js、pnpm、Chromium、restic などの道具は開発用イメージ（[dev/Dockerfile](dev/Dockerfile)）に入っていて、ホストには何も入れません。コマンドは `bin/dev` 経由でコンテナの中で実行します。イメージは初回と `dev/Dockerfile` を変えたときに自動でビルドされます。
+koroku の更新、OS の更新、日常の確認、サーバーを失ったときの復旧は [docs/OPERATIONS.md](docs/OPERATIONS.md) にあります。koroku を再起動・更新しても、アプリのコンテナは止まりません。
 
-```sh
-# ユニットテスト
-bin/dev go vet ./...
-bin/dev go test ./...
+## セキュリティについて
 
-# 実 Docker を使う結合テスト（ホストの Docker デーモンでコンテナを起動する）
-bin/dev go test -tags integration ./...
+koroku は Docker を操作できるので、サーバーの root と同じ力を持ちます。管理画面のログインが唯一の関門です。
 
-# フロントエンド
-bin/dev sh -c 'cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm test'
+- ログインは GitHub の 1 アカウントだけに許し、既定で GitHub の 2 段階認証を必須にします。削除や本番のデプロイなど危険な操作の前には、再ログインを求めます。
+- 外に開くポートは 22、80、443 だけです。アプリのポートと koroku 自身は `127.0.0.1` でだけ待ち受けます。
+- 環境変数の値は暗号化して保存し、ログには出しません。
+- 前提と限界は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) の 10 章に書いてあります。
 
-# 対話シェル
-bin/dev
-```
+## 文書
 
-`bin/dev` はリポジトリをホストと同じパスでマウントし、呼び出したユーザーの UID で動くので、生成物の所有者がずれません。Go と pnpm のキャッシュは Docker の named volume（`koroku-dev-*`）に置きます。コンテナはホストのネットワークを共有し、Docker ソケットをマウントしているので、結合テストが起動したアプリの `127.0.0.1:<port>` にそのまま届きます。
-
-### ローカルで動かす
-
-```sh
-docker compose up
-```
-
-リポジトリのルートで実行し、<http://localhost:4200> を開きます。[compose.yaml](compose.yaml) は開発専用で、次のサービスを起動します。
-
-| サービス | 内容 |
+| 文書 | 内容 |
 | --- | --- |
-| `web` | Vite の開発サーバー（development モード）。Ember アプリのソースを変えるとホットリロードされる。`/api` と `/auth` は `koroku` に転送する |
-| `koroku` | このチェックアウトからビルドしたコントロールプレーン。ログインなし（`--insecure-no-auth`）で `127.0.0.1:8080` で待ち受ける |
-| `caddy` | リバースプロキシ。`127.0.0.1` の 80 と 443 だけで待ち受け、`koroku` が本番と同じく設定を投入する。証明書は Caddy 内蔵の CA で出す |
-| `storage` | S3 互換のオブジェクトストレージ（[Versity S3 Gateway](https://github.com/versity/versitygw)）。本番のオブジェクトストレージの代わりに、ログの退避と restic のバックアップの置き場になる。`127.0.0.1:9000` で待ち受け、WebUI は <http://127.0.0.1:9001>（アクセスキー `koroku-dev`、シークレット `koroku-dev-secret`）。中身は volume `koroku-dev-s3-data` にファイルとして並ぶ |
-| `storage-setup` | `storage` にバケット `koroku` を作って終わる |
-
-- アプリは手元の Docker にデプロイされ、`https://<slug>.dev.localhost` で開けます（`*.localhost` は OS やブラウザがループバックに解決します）。管理 UI は Vite の <http://localhost:4200> のほか、`pnpm build` 済みなら `https://console.dev.localhost` でも開けます。
-- 証明書の警告を消すには、Caddy の CA のルート証明書をブラウザ側の OS に信頼させます。取り出しは `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt data/dev/caddy-root.crt`。WSL2 で Windows のブラウザから開く場合は、Windows 側で `certutil -user -addstore Root <root.crt のパス>` を実行します（確認ダイアログが出ます）。CA は volume `koroku-dev-caddy-data` にあり、消すと作り直されるので、入れ直しが必要です。
-- 既存の `data/dev/config.toml` は上書きされません。以前に作ったものは `[caddy]` を [dev/serve.sh](dev/serve.sh) が書き出す内容に合わせてください（`enabled = false` にすれば Caddy なしで動き、アプリには `http://127.0.0.1:<ホストポート>` で届きます）。
-- バックアップは本番と同じく日次 03:00 JST に走り、システム画面から手動でも実行できます。restic のパスワードは初回に [dev/serve.sh](dev/serve.sh) が `data/dev/restic.key` に作ります。消すと既存のバックアップが読めなくなるので、やり直すときは volume `koroku-dev-s3-data` も消してください。
-- ログの退避は、ローカルでは 1 時間ごと（毎時 10 分）に走ります（本番は 4 時間ごと）。`koroku` は起動時に、終わった時間枠までをすぐ退避するので、`docker compose restart koroku` のあと、アプリ詳細の「ログ」タブで過去ログの一覧とダウンロードを試せます。ダウンロードの URL は `http://127.0.0.1:9000/...` の presigned URL で、Windows のブラウザからも開けます。
-- アプリの volume のバックアップとリストアは、Docker が volume を置くディレクトリを `koroku` のコンテナから直接読み書きします。`docker info -f '{{.DockerRootDir}}'` が `/var/lib/docker` でない環境（snap 版の Docker など）では、リポジトリ直下の `.env`（git の管理外）に `KOROKU_DOCKER_ROOT=<その値>` を書いてください。Docker Desktop では volume が VM の中にあるので、volume のバックアップは失敗します（基盤のバックアップとログの退避は動きます）。
-- GitHub App を設定していないので、アプリ作成では「URL を直接指定」で public リポジトリの URL を入れます。手元のクローンを `file:///...` で指定することもできます（リポジトリのあるディレクトリの配下に限る。コンテナからはそこしか見えません）。
-- Go のコードを変えたら `docker compose restart koroku` でビルドし直します。
-- 設定と状態は `data/dev/`（git の管理外）に置きます。設定ファイル `data/dev/config.toml` は初回に [dev/serve.sh](dev/serve.sh) が書き出し、以後は上書きしません。以前に作ったものには、`dev/serve.sh` が書き出す `[storage]` と `[backup]` を足してください。`data/dev/` を消すと最初からやり直せます。
-- 別のバックエンドに向けるときは `KOROKU_URL=http://127.0.0.1:<port> docker compose up web` とします。
-- `bin/dev` が先にキャッシュ用の volume を作っていると、Compose が「volume already exists but was not created by Docker Compose」と警告しますが、同じキャッシュを共有しているだけで害はありません。
-
-`--insecure-no-auth` はログインを外す開発用のフラグです（到達できる相手は誰でも Docker を操作できるので、手元以外では使わないこと）。ループバックのホスト名（`*.localhost` を含む）でしか応答せず、Caddy が有効で `[caddy] listen_ip` がループバックでないときは起動を拒否します。`curl` で変更系の API を叩くときは `-H 'Content-Type: application/json'` を付けます。
-
-Compose を使わずに動かすこともできます。
-
-```sh
-bin/dev dev/serve.sh                                   # koroku（設定は data/dev/config.toml）
-bin/dev sh -c 'cd web && pnpm start --port 4200'       # Vite の開発サーバー
-```
-
-### 配布用バイナリ
-
-```sh
-bin/dev make build    # フロントエンド込みの bin/koroku（linux/amd64）
-```
-
-## ディレクトリ構成
-
-| パス | 内容 |
-| --- | --- |
-| `cmd/koroku/` | エントリポイント |
-| `internal/` | API、デプロイ、Compose、Caddy、GitHub、ストアなどの各パッケージ |
-| `web/` | Ember アプリ（管理 UI） |
-| `deploy/` | 設定例、プロビジョニング |
-| `dev/`、`bin/dev`、`compose.yaml` | 開発用の Docker イメージ、その中でコマンドを実行するラッパー、手元で動かすための Compose 設定 |
-| `docs/` | 設計資料 |
-| `testdata/` | サンプル Compose、golden file |
-| `.claude-plugin/`、`plugins/` | アプリのリポジトリ向けの Claude Code プラグイン（マーケットプレイスの定義と Skill） |
+| [docs/SETUP.md](docs/SETUP.md) | 初回セットアップ（サーバー、DNS、GitHub App、オブジェクトストレージ） |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | サーバーの構築、更新、復旧 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 設計 |
+| [docs/API.md](docs/API.md) | HTTP API |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | koroku 自体の開発 |

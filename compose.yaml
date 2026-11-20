@@ -14,7 +14,7 @@
 #           https://<slug>.dev.localhost and the console on
 #           https://console.dev.localhost. Certificates come from Caddy's own
 #           local CA; import its root certificate into the browser's trust
-#           store (see README.md).
+#           store (see docs/DEVELOPMENT.md).
 #
 #   storage S3-compatible object storage (Versity S3 Gateway) on
 #           127.0.0.1:9000, standing in for production object storage: log archives and

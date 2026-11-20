@@ -6,7 +6,7 @@ Management UI of koroku, written in Ember + TypeScript. The production build
 ## Development
 
 Nothing is installed on the host: run the commands inside the development
-container with `bin/dev` from the repository root (see the top-level README).
+container with `bin/dev` from the repository root (see docs/DEVELOPMENT.md).
 
 ```sh
 bin/dev sh -c 'cd web && pnpm install --frozen-lockfile'
