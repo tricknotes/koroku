@@ -271,14 +271,7 @@ func checkHTTPS(ctx context.Context, d Deps) Result {
 	}
 	resp, err := d.HTTP.Do(req)
 	if err != nil {
-		var unknownCA x509.UnknownAuthorityError
-		if staging && errors.As(err, &unknownCA) {
-			return warn(name, "when everything works, delete the acme_ca line and restart koroku (docs/SETUP.md 9)",
-				"%s serves a Let's Encrypt staging certificate (browsers will not trust it)", cfg.ConsoleHost)
-		}
-		return fail(name,
-			"Caddy obtains the certificate once DNS points here and 80/443 are open, also in the provider's firewall (docs/SETUP.md 2, 3); see journalctl -u caddy",
-			"%s: %v", cfg.ConsoleURL, err)
+		return httpsFailure(err, cfg.ConsoleURL, cfg.ConsoleHost, staging)
 	}
 	drain(resp)
 	if staging {
@@ -287,6 +280,43 @@ func checkHTTPS(ctx context.Context, d Deps) Result {
 			"%s answers over HTTPS, but acme_ca is still the staging directory", cfg.ConsoleHost)
 	}
 	return ok(name, "%s answers over HTTPS with a trusted certificate", cfg.ConsoleHost)
+}
+
+// stagingIssuer is part of the issuer names of Let's Encrypt staging
+// certificates ("(STAGING) Pretend Pear X1", "(STAGING) Let's Encrypt").
+const stagingIssuer = "(STAGING)"
+
+// httpsFailure explains a failed HTTPS request to the console. A
+// certificate from an unknown authority is told apart by its issuer: a
+// staging certificate while acme_ca still is the staging directory is
+// expected, one served after switching away from it is a certificate Caddy
+// still holds.
+func httpsFailure(err error, consoleURL, host string, staging bool) Result {
+	const name = "https"
+	var unknownCA x509.UnknownAuthorityError
+	if errors.As(err, &unknownCA) && unknownCA.Cert != nil {
+		issuer := unknownCA.Cert.Issuer.CommonName
+		if issuer == "" && len(unknownCA.Cert.Issuer.Organization) > 0 {
+			issuer = unknownCA.Cert.Issuer.Organization[0]
+		}
+		isStaging := strings.Contains(issuer, stagingIssuer) ||
+			slices.ContainsFunc(unknownCA.Cert.Issuer.Organization, func(o string) bool { return strings.Contains(o, stagingIssuer) })
+		switch {
+		case staging:
+			return warn(name, "when everything works, delete the acme_ca line and restart koroku (docs/SETUP.md 9)",
+				"%s serves a Let's Encrypt staging certificate (browsers will not trust it)", host)
+		case isStaging:
+			return fail(name,
+				"acme_ca is no longer the staging directory, but Caddy keeps the certificate it already has: run sudo systemctl restart caddy (docs/OPERATIONS.md 12)",
+				"%s still serves a Let's Encrypt staging certificate (issuer %q)", host, issuer)
+		default:
+			return fail(name, "see journalctl -u caddy (docs/OPERATIONS.md 12)",
+				"%s serves a certificate from an unknown authority (issuer %q)", host, issuer)
+		}
+	}
+	return fail(name,
+		"Caddy obtains the certificate once DNS points here and 80/443 are open, also in the provider's firewall (docs/SETUP.md 2, 3); see journalctl -u caddy",
+		"%s: %v", consoleURL, err)
 }
 
 func checkMasterKey(cfg config.Config) Result {

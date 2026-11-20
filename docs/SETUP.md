@@ -278,4 +278,4 @@ staging のままで、DNS、ログイン、デプロイ、バックアップま
 
 1. `sudo -e /etc/koroku/config.toml` で `[caddy]` の `acme_ca` の行を消す。
 2. `sudo systemctl restart koroku`。`koroku` が Caddy の設定を入れ直し、Caddy が本番の証明書を取り直す（数十秒）。
-3. `sudo koroku check` の `https` が `[ ok ]` になることを確かめる。ならなければ `journalctl -u caddy -n 100 --no-pager` を見る。
+3. `sudo koroku check` の `https` が `[ ok ]` になることを確かめる。staging の証明書が残っていると出たら `sudo systemctl restart caddy`。ほかの表示は OPERATIONS 12 章を見る。

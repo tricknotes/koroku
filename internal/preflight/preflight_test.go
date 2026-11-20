@@ -2,10 +2,14 @@ package preflight
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -346,4 +350,33 @@ type refusingStore struct{ objstore.Store }
 
 func (refusingStore) Put(context.Context, string, []byte, string) error {
 	return errors.New("403 AccessDenied")
+}
+
+func TestHTTPSFailureTellsCertificatesApart(t *testing.T) {
+	unknown := func(cn string, org ...string) error {
+		cert := &x509.Certificate{Issuer: pkix.Name{CommonName: cn, Organization: org}}
+		return &url.Error{Op: "Get", URL: "https://console.example.com/api/system",
+			Err: &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{Cert: cert}}}
+	}
+	cases := map[string]struct {
+		err     error
+		staging bool
+		want    Status
+		text    string
+		hint    string
+	}{
+		"staging while configured":      {unknown("(STAGING) Pretend Pear X1"), true, Warn, "staging certificate", "delete the acme_ca line"},
+		"staging after switching away":  {unknown("(STAGING) Pretend Pear X1"), false, Fail, "still serves", "systemctl restart caddy"},
+		"staging named by organization": {unknown("", "(STAGING) Let's Encrypt"), false, Fail, "still serves", "restart caddy"},
+		"some other authority":          {unknown("Example Private CA"), false, Fail, "Example Private CA", "journalctl -u caddy"},
+		"no answer at all":              {errors.New("dial tcp: connection refused"), false, Fail, "connection refused", "80/443"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := httpsFailure(tc.err, "https://console.example.com", "console.example.com", tc.staging)
+			if r.Status != tc.want || !strings.Contains(r.Message, tc.text) || !strings.Contains(r.Hint, tc.hint) {
+				t.Errorf("got %s %q (hint %q)", r.Status, r.Message, r.Hint)
+			}
+		})
+	}
 }

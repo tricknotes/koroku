@@ -242,6 +242,65 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 - 証明書は取り直しになる。Let's Encrypt は同じホスト名の組み合わせの証明書を週に 5 枚までしか出さないので、復旧の練習を繰り返すときは `acme_ca` を staging にしておく。
 - 最後のログ退避（4 時間ごと）以降のログと、最後のバックアップ（日次）以降のデータは戻らない。
 
+## 12. 証明書のトラブル
+
+`sudo koroku check` の `https` の行で、何が起きているかが分かる。
+
+| 表示 | 原因 | 直し方 |
+| --- | --- | --- |
+| `[warn] ... serves a Let's Encrypt staging certificate` | `acme_ca` が Let's Encrypt の staging のまま（構築中の設定。SETUP 9 節） | 一通り動いたら `config.toml` の `acme_ca` の行を消し、`sudo systemctl restart koroku` |
+| `[FAIL] ... still serves a Let's Encrypt staging certificate` | `acme_ca` は消したが、Caddy が手元にある staging の証明書を使い続けている（有効期限内の証明書は、設定を入れ替えても取り直さない） | `sudo systemctl restart caddy`。Caddy は `--resume` で最後の設定に戻り、本番の証明書を取り直す。数十秒後に `koroku check` をもう一度実行する |
+| `[FAIL] ... certificate from an unknown authority` | Let's Encrypt 以外の証明書が返っている（手前に別のプロキシや CDN がある、DNS がほかのホストを向いている、など） | `dig +short <ホスト名>` がこのサーバーの IP だけを返すか確かめる。`journalctl -u caddy -n 100 --no-pager` を見る |
+| `[FAIL] ... connection refused` / タイムアウト | DNS が向いていない、80/443 がどこかで閉じている、Caddy が止まっている | SETUP 2・3 節。`systemctl status caddy` |
+
+- `sudo systemctl restart caddy` でも staging の証明書が残るときは、staging の証明書を消してから再起動する: `sudo rm -r /var/lib/caddy/.local/share/caddy/certificates/acme-staging-v02.api.letsencrypt.org-directory && sudo systemctl restart caddy`。
+- 返っている証明書の発行者は `echo | openssl s_client -connect <ホスト名>:443 -servername <ホスト名> 2>/dev/null | openssl x509 -noout -issuer -dates` で確かめられる。staging なら発行者に `(STAGING)` が付く。
+- Let's Encrypt の本番は、同じホスト名の組に週 5 枚までしか証明書を出さない。取り直しを何度も繰り返さない。
+
+## 13. 他のサービスからデータを移す（Heroku Postgres）
+
+Heroku の PostgreSQL のデータを、koroku で動かすアプリの PostgreSQL に移す手順。使う頻度が低いので、koroku の機能にはせず手作業で行う。
+
+**前提**
+
+- koroku 側のアプリを一度デプロイし、DB のサービス（例: `db`）が動いていること。DB のコンテナ名は `docker ps` で確かめる（`koroku-<slug>-<サービス>-1`。例: `koroku-blog-db-1`）。
+- koroku 側の PostgreSQL のイメージの版が、Heroku 側と同じかそれより新しいこと。`pg_restore` は自分より新しい版のダンプを読めない。Heroku 側の版は `heroku pg:info -a <Heroku のアプリ名>` の `PG Version` で分かる。
+- 流し込む前に、koroku のアプリの「バックアップ」タブで一度バックアップを取っておく（失敗したときに戻せるように）。
+
+**手順**
+
+1. 手元で、Heroku のバックアップを取ってダウンロードする（カスタム形式のダンプになる）。
+
+   ```sh
+   heroku pg:backups:capture -a <Heroku のアプリ名>
+   curl -o latest.dump "$(heroku pg:backups:url -a <Heroku のアプリ名>)"
+   ```
+
+2. ダンプをサーバーに送る。
+
+   ```sh
+   scp latest.dump <ユーザー>@<サーバー>:
+   ```
+
+3. 書き込みが起きないよう、koroku の管理画面でアプリを止めるか、Web のサービスだけを止める（`sudo docker stop koroku-<slug>-web-1`）。DB のサービスは動かしたままにする。
+4. サーバー上で流し込む。`<DB 名>` と `-U` のユーザーは、アプリの Compose（`POSTGRES_DB`、`POSTGRES_USER`）に合わせる。
+
+   ```sh
+   sudo docker exec -i koroku-<slug>-db-1 pg_restore --clean --if-exists --no-owner --no-acl -U postgres -d <DB 名> < latest.dump
+   ```
+
+   - `--no-owner --no-acl` は、Heroku 側のロール名を持ち込まないため。
+   - Heroku の拡張（`pg_stat_statements` など）がないという警告は、アプリが使っていなければ無視してよい。
+5. アプリを起動し直し、動作を確かめる。終わったら手元とサーバーの `latest.dump` を消す（個人情報を含みうる）。
+
+**ダウンロードを挟まずに流し込む**
+
+サーバーから Heroku の署名付き URL を直接読める。URL の有効期限は 60 分。
+
+```sh
+curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug>-db-1 pg_restore --clean --if-exists --no-owner --no-acl -U postgres -d <DB 名>
+```
+
 ## 検証済みの範囲
 
 実機がないので、次の方法で確かめた（2026-11-18。SSH の手順は 2026-11-20、Ubuntu 26.04 は 2026-11-21）。
