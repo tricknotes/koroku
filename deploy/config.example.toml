@@ -63,10 +63,8 @@ access_log_dir = "/var/log/caddy/apps"
 # Numeric ID of the only GitHub user allowed to log in
 # (see https://api.github.com/users/<login>).
 # allowed_user_id = 0
-# Refuse logins unless GitHub reports two-factor authentication as enabled
-# for that user. Set to false only if GitHub does not report it (logins then
-# fail with "two_factor_unknown").
-# require_two_factor = true
+# Turn on two-factor authentication for that GitHub account: GitHub asks
+# for it when you sign in to the console. koroku cannot check it itself.
 
 [storage]
 # S3-compatible object storage for log archives (logs/) and restic backups

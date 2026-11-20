@@ -140,12 +140,13 @@ allowed_user_id = 42
 	if !cfg.GitHub.Configured() || cfg.GitHub.AllowedUserID != 42 || cfg.ConsoleURL != "http://localhost:8080" {
 		t.Errorf("config = %+v / %q", cfg.GitHub, cfg.ConsoleURL)
 	}
-	if !cfg.GitHub.RequireTwoFactor {
-		t.Error("two-factor authentication must be required by default")
-	}
-	cfg, err = Parse(full + "require_two_factor = false\n")
-	if err != nil || cfg.GitHub.RequireTwoFactor {
-		t.Errorf("require_two_factor = false: %v, %+v", err, cfg.GitHub)
+	// A config.toml written for an older version, with the obsolete
+	// require_two_factor key, still loads.
+	for _, v := range []string{"true", "false"} {
+		cfg, err = Parse(full + "require_two_factor = " + v + "\n")
+		if err != nil || cfg.GitHub.ObsoleteRequireTwoFactor == nil {
+			t.Errorf("require_two_factor = %s: %v, %+v", v, err, cfg.GitHub)
+		}
 	}
 
 	// A partly filled section is rejected instead of half-working.

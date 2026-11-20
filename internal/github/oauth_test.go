@@ -172,8 +172,6 @@ func TestUser(t *testing.T) {
 			"login":      "octo",
 			"avatar_url": "https://avatars.example.test/u/583231",
 			"email":      nil,
-
-			"two_factor_authentication": true,
 		})
 	})
 	c := f.client()
@@ -184,9 +182,6 @@ func TestUser(t *testing.T) {
 	}
 	if user.ID != 583231 || user.Login != "octo" || user.AvatarURL != "https://avatars.example.test/u/583231" {
 		t.Errorf("User = %+v", user)
-	}
-	if user.TwoFactor == nil || !*user.TwoFactor {
-		t.Errorf("TwoFactor = %v, want true", user.TwoFactor)
 	}
 
 	const revoked = "ghu_fake_revoked_token_987654"

@@ -8,33 +8,20 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/tricknotes/koroku/internal/github"
 )
 
-var twoFactorOff = false
-
-func TestLoginRequiresTwoFactor(t *testing.T) {
-	gh := defaultGitHub()
-	gh.codes["code-no2fa"], gh.users["token-no2fa"] = "token-no2fa", github.User{ID: 42, Login: "octo", TwoFactor: &twoFactorOff}
-	gh.codes["code-unknown"], gh.users["token-unknown"] = "token-unknown", github.User{ID: 42, Login: "octo"}
-	srv, _ := newAuthServer(t, gh)
-
-	for code, want := range map[string]string{"code-no2fa": "two_factor_required", "code-unknown": "two_factor_unknown"} {
-		b := newBrowser(t, srv.Handler())
-		final := b.login(code)
-		if loc := final.Header().Get("Location"); loc != "/?login_error="+want {
-			t.Errorf("%s: redirected to %q, want error %s", code, loc, want)
-		}
-		if _, ok := b.cookies[secureSessionCookie]; ok {
-			t.Errorf("%s: a session was issued", code)
-		}
-	}
-
-	// The rejected attempts are in the login history, newest first.
+// Rejected logins of a known GitHub user are in the login history, and
+// GitHub's answer about two-factor authentication plays no part (a GitHub App
+// is never told; GitHub enforces it at sign-in).
+func TestLoginHistory(t *testing.T) {
+	srv, _ := newAuthServer(t, defaultGitHub())
 	b := newBrowser(t, srv.Handler())
-	b.login("code-stranger")
-	b.login("code-owner")
+	if loc := b.login("code-stranger").Header().Get("Location"); loc != "/?login_error=not_allowed" {
+		t.Errorf("stranger: redirected to %q", loc)
+	}
+	if loc := b.login("code-owner").Header().Get("Location"); loc != "/" {
+		t.Errorf("owner: redirected to %q", loc)
+	}
 	rec := b.do(http.MethodGet, "/api/login-events", "", nil)
 	var body struct {
 		Events []loginEventJSON `json:"events"`
@@ -49,21 +36,8 @@ func TestLoginRequiresTwoFactor(t *testing.T) {
 			t.Errorf("event IP = %q", ev.IP)
 		}
 	}
-	got := strings.Join(outcomes, ",")
-	// Map iteration order decides the order of the two 2FA failures.
-	if !strings.HasPrefix(got, "succeeded,not_allowed,") || len(outcomes) != 4 {
+	if got := strings.Join(outcomes, ","); got != "succeeded,not_allowed" {
 		t.Errorf("outcomes = %s", got)
-	}
-}
-
-func TestTwoFactorCheckCanBeTurnedOff(t *testing.T) {
-	gh := defaultGitHub()
-	gh.codes["code-unknown"], gh.users["token-unknown"] = "token-unknown", github.User{ID: 42, Login: "octo"}
-	srv, _ := newAuthServer(t, gh)
-	srv.auth.RequireTwoFactor = false
-	b := newBrowser(t, srv.Handler())
-	if loc := b.login("code-unknown").Header().Get("Location"); loc != "/" {
-		t.Errorf("redirected to %q", loc)
 	}
 }
 

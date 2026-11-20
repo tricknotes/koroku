@@ -866,11 +866,11 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
 
 許可ユーザー以外はログインできない（5 章）。そのうえで、「許可ユーザーの GitHub アカウントか、koroku のセッション Cookie が盗まれた場合」の被害を小さくし、盗まれたことに気づけるように、次の 3 つを重ねる。管理 UI をネットワークの段階で閉じる仕組み（Tailscale、クライアント証明書など）は持たない。
 
-**GitHub の 2 段階認証を必須にする**
+**GitHub の 2 段階認証は GitHub に任せる**
 
-- ログイン時の `GET /user` の応答の `two_factor_authentication` が `true` のときだけセッションを発行する。`false` なら `two_factor_required` で拒否する。
-- この項目は GitHub のドキュメントでは「private user の応答」にだけあり、GitHub App のユーザーアクセストークンで返るかは書かれていない。項目がない応答は `two_factor_unknown` で拒否する（確かめられないものを通さない）。返らない環境で締め出されないよう、`[github] require_two_factor = false` で検査を外せる。既定は `true`。外したときは起動時に警告をログに出す。
-- 拒否したログインも、GitHub のユーザー ID が分かっているのでログイン履歴に残す（下記）。
+- 許可ユーザーの GitHub アカウントで 2 段階認証を有効にしておく（`docs/SETUP.md`）。koroku のログインは GitHub へのサインインを経るので、2 段階認証は GitHub がそこで求める。
+- koroku 自身は 2 段階認証の状態を確かめない。`GET /user` の `two_factor_authentication` は、`read:user` / `user` スコープを持つ OAuth App のトークンや classic な個人用アクセストークンへの応答（private user）にだけ含まれ、GitHub App のユーザーアクセストークンには返らないため。
+- 古い版の `config.toml` にある `[github] require_two_factor` は読み込めるが使わず、起動時に「消してよい」と警告を出す（知らないキーで起動を止めないため）。
 
 **危険な操作の前に再ログインを求める（step-up）**
 
@@ -892,7 +892,7 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
 
 - `sessions` は `id`（画面と API で使う識別子。乱数 8 バイトの 16 進。Cookie のハッシュは外に出さない）、`last_seen_at`、`ip`、`user_agent` を持つ。`last_seen_at` は 1 分以上たっていれば更新する（ポーリングのたびに書き込まないため）。
 - クライアントの IP: `koroku` はループバックで待ち受け、Caddy を経由して届く。接続元がループバックのときだけ `X-Forwarded-For` の最後の値を使う。Caddy は既定でクライアントから来た `X-Forwarded-For` を信用せず、接続元の IP で置き換えるので、偽装できない。User-Agent は 512 バイトで切る。
-- `login_events` テーブル: 時刻、結果（`succeeded`、`not_allowed`、`two_factor_required`、`two_factor_unknown`）、GitHub のユーザー ID と login、IP、User-Agent。GitHub のユーザーが分かったものだけを残し、state の不一致や GitHub の失敗は残さない。誰でも起こせて、記録が溢れるだけなので。新しい 200 件を残して古いものを消す。
+- `login_events` テーブル: 時刻、結果（`succeeded`、`not_allowed`。古い版が残した `two_factor_required`、`two_factor_unknown` もそのまま表示する）、GitHub のユーザー ID と login、IP、User-Agent。GitHub のユーザーが分かったものだけを残し、state の不一致や GitHub の失敗は残さない。誰でも起こせて、記録が溢れるだけなので。新しい 200 件を残して古いものを消す。
 - 画面: ユーザーメニューから「セキュリティ」を開き、セッションの一覧（このセッションを示す、個別に終了、ほかをすべて終了）と、ログイン履歴を見る。
 
 ### 10.4 設定の点検と SSH

@@ -167,12 +167,12 @@ func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) error 
 	return nil
 }
 
-// Login outcomes recorded in the login history.
+// Login outcomes recorded in the login history. Histories written by
+// older versions may also hold "two_factor_required" and
+// "two_factor_unknown"; they are kept and shown as they are.
 const (
-	LoginSucceeded         = "succeeded"
-	LoginNotAllowed        = "not_allowed"
-	LoginTwoFactorRequired = "two_factor_required"
-	LoginTwoFactorUnknown  = "two_factor_unknown"
+	LoginSucceeded  = "succeeded"
+	LoginNotAllowed = "not_allowed"
 )
 
 // LoginEvent is one login attempt by a known GitHub user.

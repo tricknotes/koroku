@@ -116,7 +116,7 @@ App の設定画面の左の **Install App** → 自分のアカウントの **I
 curl -s https://api.github.com/users/<自分の login> | grep '"id"'
 ```
 
-GitHub アカウントの 2 段階認証を有効にしておく。`koroku` は既定で、2 段階認証が無効なアカウントのログインを断る（ARCHITECTURE 10.3）。
+このアカウントの 2 段階認証を、GitHub の Settings → Password and authentication で有効にしておく。管理画面へのログインは GitHub へのサインインを経るので、2 段階認証は GitHub がそこで求める。koroku 自身はアカウントの 2 段階認証の状態を確かめられない（GitHub は GitHub App にそれを知らせない。ARCHITECTURE 10.3）。
 
 ### 4.4 サーバーに置く
 

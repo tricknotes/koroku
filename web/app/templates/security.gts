@@ -31,6 +31,7 @@ import { describeUserAgent } from 'koroku-console/utils/user-agent';
 const OUTCOME_LABELS: Record<LoginOutcome, string> = {
   succeeded: '成功',
   not_allowed: '許可されていないアカウント',
+  // Only in histories written by older versions.
   two_factor_required: '2 段階認証が無効',
   two_factor_unknown: '2 段階認証を確認できない',
 };

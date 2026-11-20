@@ -102,7 +102,7 @@ func newAuthServer(t *testing.T, gh *fakeGitHub) (*Server, *clock.Fake) {
 	clk := clock.NewFake(time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC))
 	srv := newTestServer(t, func(o *Options) {
 		o.Clock = clk
-		o.Auth = AuthOptions{AllowedUserID: 42, ConsoleURL: consoleURL, RequireTwoFactor: true}
+		o.Auth = AuthOptions{AllowedUserID: 42, ConsoleURL: consoleURL}
 		if gh != nil {
 			o.Auth.GitHub = gh
 		}
@@ -110,13 +110,11 @@ func newAuthServer(t *testing.T, gh *fakeGitHub) (*Server, *clock.Fake) {
 	return srv, clk
 }
 
-var twoFactorOn = true
-
 func defaultGitHub() *fakeGitHub {
 	return &fakeGitHub{
 		codes: map[string]string{"code-owner": "token-owner", "code-stranger": "token-stranger"},
 		users: map[string]github.User{
-			"token-owner":    {ID: 42, Login: "octo", AvatarURL: "https://example.com/octo.png", TwoFactor: &twoFactorOn},
+			"token-owner":    {ID: 42, Login: "octo", AvatarURL: "https://example.com/octo.png"},
 			"token-stranger": {ID: 7, Login: "stranger"},
 		},
 	}
