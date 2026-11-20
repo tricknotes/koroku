@@ -42,6 +42,23 @@ type TokenSource interface {
 	RepoToken(ctx context.Context, app store.App) (string, error)
 }
 
+// StatusReporter mirrors the status changes of deployments elsewhere (the
+// deployments of the GitHub repository, ARCHITECTURE 5.1). Report is called
+// after the change is recorded in the database and must return at once:
+// reporting never delays or fails a deployment.
+type StatusReporter interface {
+	Report(change StatusChange)
+}
+
+// StatusChange says that a deployment's status changed. The status itself
+// is read from the database.
+type StatusChange struct {
+	DeploymentID int64
+	// RolledBack is set on a failed deployment after which the previous
+	// release was started again automatically.
+	RolledBack bool
+}
+
 // Options are the dependencies and settings of the Engine.
 type Options struct {
 	Store   *store.Store
@@ -51,10 +68,11 @@ type Options struct {
 	System  system.Prober
 	Health  HealthChecker
 	Fetcher gitrepo.Fetcher
-	// Router, Tokens and Backup are optional.
+	// Router, Tokens, Backup and Status are optional.
 	Router Router
 	Tokens TokenSource
 	Backup PreDeployBackup
+	Status StatusReporter
 	// CopyBackups backs up the target of a database copy and reads dump
 	// snapshots. Optional.
 	CopyBackups CopyBackups
@@ -311,7 +329,9 @@ func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message s
 	}
 	for _, id := range superseded {
 		appendLogLine(e.LogPath(app.Slug, id), "Canceled: "+store.SupersededError+".")
+		e.report(StatusChange{DeploymentID: id})
 	}
+	e.report(StatusChange{DeploymentID: d.ID})
 	// A file under this ID can only be left over from an earlier database
 	// (the local state was reset but the data directory kept); the new
 	// deployment must not show its lines.
@@ -339,6 +359,7 @@ func (e *Engine) Cancel(ctx context.Context, id int64) error {
 		if app, appErr := e.opts.Store.GetAppByID(ctx, d.AppID); appErr == nil {
 			appendLogLine(e.LogPath(app.Slug, id), "Canceled before it started.")
 		}
+		e.report(StatusChange{DeploymentID: id})
 		return nil
 	}
 	if !errors.Is(err, store.ErrInvalidTransition) {
@@ -352,6 +373,13 @@ func (e *Engine) Cancel(ctx context.Context, id int64) error {
 	}
 	cancel(errCanceledByUser)
 	return nil
+}
+
+// report hands a status change to the reporter, if there is one.
+func (e *Engine) report(change StatusChange) {
+	if e.opts.Status != nil {
+		e.opts.Status.Report(change)
+	}
 }
 
 func (e *Engine) notify() {
@@ -381,6 +409,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	for _, id := range interrupted {
 		e.opts.Logger.Warn("deployment was interrupted by a restart", "deployment", id)
+		e.report(StatusChange{DeploymentID: id})
 		if d, err := e.opts.Store.GetDeployment(ctx, id); err == nil {
 			if app, err := e.opts.Store.GetAppByID(ctx, d.AppID); err == nil {
 				appendLogLine(e.LogPath(app.Slug, id), "Failed: "+store.InterruptedError+".")
@@ -433,14 +462,20 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 		}
 		return
 	}
+	e.report(StatusChange{DeploymentID: d.ID})
 
 	// Recording the result must work even while koroku is shutting down, so
 	// it gets its own context. The context is created when it is needed: a
 	// timeout started here would already have expired after a long deploy.
+	rolledBack := false
 	finish := func(status, message string) error {
 		finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), e.finishTimeout)
 		defer cancel()
-		return e.opts.Store.FinishDeployment(finishCtx, d.ID, status, message, e.opts.Clock.Now())
+		if err := e.opts.Store.FinishDeployment(finishCtx, d.ID, status, message, e.opts.Clock.Now()); err != nil {
+			return err
+		}
+		e.report(StatusChange{DeploymentID: d.ID, RolledBack: rolledBack})
+		return nil
 	}
 
 	app, err := e.opts.Store.GetAppByID(ctx, d.AppID)
@@ -484,7 +519,7 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 			if ctx.Err() != nil {
 				log.Printf("koroku is shutting down; the previous release is not restored automatically.")
 			} else {
-				e.rollback(app, log)
+				rolledBack = e.rollback(app, log)
 			}
 		}
 	}

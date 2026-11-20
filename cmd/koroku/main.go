@@ -306,6 +306,18 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		gitRefs.Tokens = tokens
 		apiOpts.Refs = deploy.GitHubRefResolver{Client: gh, Fallback: gitRefs}
 		apiOpts.Auth.GitHub = gh
+		// Mirror deployments into the repositories' GitHub deployments
+		// (ARCHITECTURE 5.1). Best effort, off the deploy path.
+		ghDeployments := deploy.NewGitHubDeployments(deploy.GitHubDeploymentsOptions{
+			Store:      st,
+			Client:     gh,
+			Clock:      clk,
+			Logger:     logger,
+			ConsoleURL: cfg.ConsoleURL,
+			BaseDomain: cfg.BaseDomain,
+		})
+		deployOpts.Status = ghDeployments
+		go ghDeployments.Run(ctx)
 		if cfg.GitHub.ObsoleteRequireTwoFactor != nil {
 			logger.Warn("github.require_two_factor is no longer used and can be removed from config.toml: " +
 				"GitHub does not report the two-factor status to a GitHub App, so GitHub enforces it at sign-in instead")

@@ -85,7 +85,9 @@ func (e *Engine) EnqueueRollback(ctx context.Context, app store.App, fromID int6
 	}
 	for _, id := range superseded {
 		appendLogLine(e.LogPath(app.Slug, id), "Canceled: "+store.SupersededError+".")
+		e.report(StatusChange{DeploymentID: id})
 	}
+	e.report(StatusChange{DeploymentID: d.ID})
 	path := e.LogPath(app.Slug, d.ID)
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		e.opts.Logger.Warn("removing a stale deploy log failed", "path", path, "error", err)
