@@ -102,6 +102,11 @@ type GitHub struct {
 	PrivateKeyFile string `toml:"private_key_file"`
 	// AllowedUserID is the numeric ID of the only GitHub user who may log in.
 	AllowedUserID int64 `toml:"allowed_user_id"`
+	// InstallationAccounts names the users and organizations (by login)
+	// whose installations of the App koroku uses, besides the account of
+	// AllowedUserID, which is always used. Needed when the App is installed
+	// on an organization (ARCHITECTURE 5).
+	InstallationAccounts []string `toml:"installation_accounts"`
 	// ObsoleteRequireTwoFactor is accepted, and ignored, so that a
 	// config.toml written for an older version still loads. GitHub does not
 	// report the two-factor status to a GitHub App, so koroku cannot check it

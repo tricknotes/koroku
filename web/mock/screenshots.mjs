@@ -954,6 +954,48 @@ SHOTS.push(
     themes: ['light'],
   },
   {
+    name: 'settings-env-requirements',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-settings-requirements]',
+    script: `document.querySelector('[data-test-env-source-group]').scrollIntoView()`,
+  },
+  {
+    name: 'settings-env-requirements-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-settings-requirements]',
+    script: `document.querySelector('[data-test-env-source-group]').scrollIntoView()`,
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
+    name: 'settings-unsaved-dialog',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    script: `(() => {
+      const input = document.querySelector('[data-test-field="healthcheck_path"]');
+      input.value = '/healthz';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(() => document.querySelector('[data-test-header-deploy]').click(), 300);
+    })()`,
+    then: '[data-test-unsaved-dialog]',
+  },
+  {
+    name: 'settings-unsaved-dialog-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    script: `(() => {
+      const input = document.querySelector('[data-test-field="healthcheck_path"]');
+      input.value = '/healthz';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(() => document.querySelector('[data-test-header-deploy]').click(), 300);
+    })()`,
+    then: '[data-test-unsaved-dialog]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
     name: 'settings-relaxed',
     path: '/apps/blog-staging/settings?scenario=healthy',
     wait: SETTINGS,
@@ -1280,6 +1322,74 @@ SHOTS.push(
     script: CHOOSE_REPOSITORY,
     then: '[data-test-submit]',
     fullPage: true,
+  },
+  {
+    name: 'new-app-branch',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      ${CHOOSE_REPOSITORY};
+      setTimeout(() => {
+        const branch = document.querySelector('[data-test-field="default_branch"]');
+        branch.value = 'feature/redis';
+        branch.dispatchEvent(new Event('input', { bubbles: true }));
+        branch.dispatchEvent(new Event('change', { bubbles: true }));
+      }, 400);
+    })()`,
+    then: '[data-test-submit]',
+    settle: 1200,
+    fullPage: true,
+  },
+  {
+    name: 'new-app-branch-phone',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    ...PHONE,
+    script: `(() => {
+      ${CHOOSE_REPOSITORY};
+      setTimeout(() => {
+        const branch = document.querySelector('[data-test-field="default_branch"]');
+        branch.value = 'feature/redis';
+        branch.dispatchEvent(new Event('input', { bubbles: true }));
+        branch.dispatchEvent(new Event('change', { bubbles: true }));
+      }, 400);
+    })()`,
+    then: '[data-test-submit]',
+    settle: 1200,
+    themes: ['light'],
+  },
+  {
+    name: 'new-app-url',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      document.querySelector('[data-test-repo-use-url]').click();
+      setTimeout(() => {
+        const url = document.querySelector('[data-test-field="repo_url"]');
+        url.value = 'https://github.com/octo/oss-tool';
+        url.dispatchEvent(new Event('input', { bubbles: true }));
+        url.dispatchEvent(new Event('change', { bubbles: true }));
+      }, 300);
+    })()`,
+    then: '[data-test-compose-path]',
+    fullPage: true,
+  },
+  {
+    name: 'new-app-url-phone',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      document.querySelector('[data-test-repo-use-url]').click();
+      setTimeout(() => {
+        const url = document.querySelector('[data-test-field="repo_url"]');
+        url.value = 'https://github.com/octo/oss-tool';
+        url.dispatchEvent(new Event('input', { bubbles: true }));
+        url.dispatchEvent(new Event('change', { bubbles: true }));
+      }, 300);
+    })()`,
+    then: '[data-test-compose-path]',
+    ...PHONE,
+    themes: ['light'],
   },
   {
     name: 'new-app-invalid',

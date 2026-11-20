@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/tricknotes/koroku/internal/github"
 )
 
 type envReqOut struct {
@@ -177,5 +179,39 @@ func TestEnvRequirementsPublicRepositories(t *testing.T) {
 		if got.Status != "ok" || len(got.Variables) != 1 {
 			t.Errorf("repo_url %s = %+v", repoURL, got)
 		}
+	}
+}
+
+// Compose detection on the create screen reads a public repository the App
+// cannot see anonymously, with or without the App.
+func TestDetectComposePublicRepositories(t *testing.T) {
+	public := &fakeGitHub{files: map[string]string{
+		"compose.yaml": "services:\n  web:\n    image: nginx\n    ports:\n      - \"8080:80\"\n",
+	}}
+	want := `{"files":["compose.yaml"],"path":"compose.yaml","services":[{"name":"web","ports":[80]}]}`
+
+	// Without the App.
+	h := newTestServer(t, func(o *Options) { o.PublicFiles = public }).Handler()
+	rec := request(t, h, http.MethodGet, "/api/repos/oss/tool/compose?ref=main", "")
+	if strings.TrimSpace(rec.Body.String()) != want {
+		t.Errorf("no App: %d %s", rec.Code, rec.Body)
+	}
+
+	// With an App that is not installed on the repository.
+	gh := defaultGitHub()
+	gh.err = github.ErrNotFound
+	srv, _ := newAuthServer(t, gh)
+	srv.publicFiles = public
+	b := newBrowser(t, srv.Handler())
+	b.login("code-owner")
+	rec = b.do(http.MethodGet, "/api/repos/oss/tool/compose?ref=main", "", nil)
+	if strings.TrimSpace(rec.Body.String()) != want {
+		t.Errorf("App not installed: %d %s", rec.Code, rec.Body)
+	}
+
+	// Other App errors are not hidden by the fallback.
+	gh.err = github.ErrRateLimited
+	if rec := b.do(http.MethodGet, "/api/repos/oss/tool/compose", "", nil); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("rate limited: %d %s", rec.Code, rec.Body)
 	}
 }

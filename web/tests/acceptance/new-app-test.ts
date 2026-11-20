@@ -97,6 +97,124 @@ module('Acceptance | create app', function (hooks) {
     assert.strictEqual(currentURL(), '/apps/blog-prod/deploy');
   });
 
+  test('compose files are detected again on the branch typed in', async function (assert) {
+    fakes.api.on('GET', '/api/repos/octo/blog/compose', (call: FakeCall) =>
+      call.query['ref'] === 'feature/redis'
+        ? {
+            files: ['compose.yaml', 'docker-compose.yml'],
+            path: 'compose.yaml',
+            services: [
+              { name: 'app', ports: [8080] },
+              { name: 'redis', ports: [6379] },
+            ],
+          }
+        : {
+            files: ['compose.yaml'],
+            path: 'compose.yaml',
+            services: [{ name: 'web', ports: [3000] }],
+          },
+    );
+
+    await visit('/apps/new');
+    await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
+    assert.dom('[data-test-compose-branch]').includesText('main');
+    assert.dom('[data-test-field="web_service"]').hasValue('web');
+
+    await fillIn('[data-test-field="default_branch"]', 'feature/redis');
+
+    const calls = fakes.api.callsTo('GET', '/api/repos/octo/blog/compose');
+    assert.strictEqual(
+      calls.length,
+      2,
+      'detected once more, not per keystroke',
+    );
+    assert.deepEqual(calls[1]?.query, { ref: 'feature/redis' });
+    assert.dom('[data-test-compose-branch]').includesText('feature/redis');
+    assert
+      .dom('[data-test-field="web_service"]')
+      .hasValue('app', 'the services of that branch are offered');
+    assert.dom('[data-test-field="web_port"]').hasValue('8080');
+
+    await fillIn('[data-test-field="default_branch"]', 'feature/redis');
+    assert.strictEqual(
+      fakes.api.callsTo('GET', '/api/repos/octo/blog/compose').length,
+      2,
+      'the same branch is not detected again',
+    );
+  });
+
+  test('a branch that does not exist is reported', async function (assert) {
+    fakes.api.on('GET', '/api/repos/octo/blog/compose', (call: FakeCall) => {
+      if (call.query['ref'] === 'nope') throw apiError(404, 'repo_not_found');
+      return {
+        files: ['compose.yaml'],
+        path: 'compose.yaml',
+        services: [{ name: 'web', ports: [3000] }],
+      };
+    });
+
+    await visit('/apps/new');
+    await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
+    await fillIn('[data-test-field="default_branch"]', 'nope');
+    assert.dom('[data-test-compose-error]').exists();
+  });
+
+  test('a public repository outside the list is given by URL', async function (assert) {
+    fakes.api
+      .on('GET', '/api/repos/rails/rails/compose', {
+        files: ['compose.yaml'],
+        path: 'compose.yaml',
+        services: [{ name: 'app', ports: [3000] }],
+      })
+      .on('POST', '/api/apps', (call: FakeCall) =>
+        makeApp(call.body as { slug: string }),
+      );
+
+    await visit('/apps/new');
+    await click('[data-test-repo-use-url]');
+    assert.dom('[data-test-unavailable]').doesNotExist('the App is there');
+    await fillIn(
+      '[data-test-field="repo_url"]',
+      'https://github.com/rails/rails.git',
+    );
+
+    assert.strictEqual(
+      fakes.api.callsTo('GET', '/api/repos/rails/rails/compose').length,
+      1,
+      'a github.com URL is detected like a listed repository',
+    );
+    assert.dom('[data-test-field="web_service"]').hasValue('app');
+    assert.dom('[data-test-field="web_port"]').hasValue('3000');
+    assert.dom('[data-test-field="slug"]').hasValue('rails');
+
+    await click('[data-test-submit]');
+    const body = fakes.api.callsTo('POST', '/api/apps')[0]?.body as Record<
+      string,
+      unknown
+    >;
+    assert.strictEqual(body['repo_url'], 'https://github.com/rails/rails.git');
+    assert.strictEqual(body['repo_full_name'], undefined);
+  });
+
+  test('a URL outside github.com is typed in by hand', async function (assert) {
+    await visit('/apps/new');
+    await click('[data-test-repo-use-url]');
+    await fillIn(
+      '[data-test-field="repo_url"]',
+      'https://git.example.com/octo/site.git',
+    );
+    assert.dom('[data-test-compose-manual]').includesText('GitHub 以外');
+    assert.dom('[data-test-field="web_port"]').exists();
+    assert.strictEqual(
+      fakes.api.calls.filter((c) => c.path.endsWith('/compose')).length,
+      0,
+    );
+
+    await click('[data-test-repo-use-list]');
+    assert.dom('[data-test-field="repo_full_name"]').exists();
+    assert.dom('[data-test-field="repo_url"]').doesNotExist();
+  });
+
   test('field errors of a 422 are shown next to the fields', async function (assert) {
     fakes.api.on('POST', '/api/apps', () => {
       throw apiError(422, 'validation_failed', {

@@ -67,6 +67,12 @@ type Config struct {
 	HTTP *http.Client
 	// Clock supplies the time for JWT claims and token expiry. Defaults to clock.System.
 	Clock clock.Clock
+	// AccountAllowed decides which installations the client uses, by the
+	// account (user or organization) they are on. An App that can be
+	// installed on any account can be installed by anyone; repositories of
+	// installations it refuses are not listed, and reading them behaves as
+	// if the App were not installed there. Nil allows every installation.
+	AccountAllowed func(accountID int64, login string) bool
 }
 
 // String renders the configuration without its secrets.
@@ -98,6 +104,7 @@ type Client struct {
 	webBase      string
 	http         *http.Client
 	clock        clock.Clock
+	allowed      func(accountID int64, login string) bool
 
 	mu            sync.Mutex
 	tokens        map[int64]*tokenSlot
@@ -140,9 +147,15 @@ func New(cfg Config) (*Client, error) {
 		webBase:       webBase,
 		http:          httpClient,
 		clock:         clk,
+		allowed:       cfg.AccountAllowed,
 		tokens:        make(map[int64]*tokenSlot),
 		installations: make(map[string]installationEntry),
 	}, nil
+}
+
+// accountAllowed applies Config.AccountAllowed.
+func (c *Client) accountAllowed(id int64, login string) bool {
+	return c.allowed == nil || c.allowed(id, login)
 }
 
 // NewAnonymous returns a client that sends no credentials. It can read

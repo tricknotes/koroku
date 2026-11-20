@@ -27,6 +27,9 @@ type Installation struct {
 	Account string
 	// RepositorySelection is "all" or "selected".
 	RepositorySelection string
+	// Allowed says whether the client uses this installation
+	// (Config.AccountAllowed).
+	Allowed bool
 }
 
 // App returns the App behind the configured app ID and private key. A key that
@@ -67,6 +70,7 @@ func (c *Client) Installations(ctx context.Context) ([]Installation, error) {
 	type apiInstallation struct {
 		ID      int64 `json:"id"`
 		Account struct {
+			ID    int64  `json:"id"`
 			Login string `json:"login"`
 		} `json:"account"`
 		RepositorySelection string `json:"repository_selection"`
@@ -79,7 +83,12 @@ func (c *Client) Installations(ctx context.Context) ([]Installation, error) {
 	}
 	out := make([]Installation, 0, len(list))
 	for _, in := range list {
-		out = append(out, Installation{ID: in.ID, Account: in.Account.Login, RepositorySelection: in.RepositorySelection})
+		out = append(out, Installation{
+			ID:                  in.ID,
+			Account:             in.Account.Login,
+			RepositorySelection: in.RepositorySelection,
+			Allowed:             c.accountAllowed(in.Account.ID, in.Account.Login),
+		})
 	}
 	return out, nil
 }

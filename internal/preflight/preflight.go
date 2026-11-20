@@ -398,11 +398,19 @@ func installationResult(ctx context.Context, gh GitHubApp, app github.App) Resul
 		}
 		return warn(name, hint, "the App is not installed anywhere: private repositories cannot be listed or fetched")
 	}
-	accounts := make([]string, 0, len(list))
+	var used, ignored []string
 	for _, in := range list {
-		accounts = append(accounts, fmt.Sprintf("%s (%s repositories)", in.Account, in.RepositorySelection))
+		if in.Allowed {
+			used = append(used, fmt.Sprintf("%s (%s repositories)", in.Account, in.RepositorySelection))
+		} else {
+			ignored = append(ignored, in.Account)
+		}
 	}
-	return ok(name, "installed on %s", strings.Join(accounts, ", "))
+	if len(ignored) > 0 {
+		return warn(name, "add an account you manage to [github] installation_accounts; uninstall the App from accounts you do not know (docs/SETUP.md 4)",
+			"installed on %s, which koroku ignores; used: %s", strings.Join(ignored, ", "), strings.Join(used, ", "))
+	}
+	return ok(name, "installed on %s", strings.Join(used, ", "))
 }
 
 func userResult(ctx context.Context, users GitHubUsers, id int64) Result {

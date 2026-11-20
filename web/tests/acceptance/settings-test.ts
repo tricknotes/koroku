@@ -112,6 +112,115 @@ module('Acceptance | settings', function (hooks) {
     });
   });
 
+  module('unsaved changes and deploying', function (hooks) {
+    hooks.beforeEach(function () {
+      fakes.api
+        .on('GET', '/api/apps/blog/deployments', { deployments: [] })
+        .on('GET', '/api/repos/octo/blog/branches', { branches: [] })
+        .on('GET', '/api/repos/octo/blog/commits', { commits: [] });
+    });
+
+    test('without changes the deploy button goes straight on', async function (assert) {
+      await visit('/apps/blog/settings');
+      await click('[data-test-header-deploy]');
+      assert.strictEqual(currentURL(), '/apps/blog/deploy');
+      assert.dom('[data-test-unsaved-dialog]').doesNotExist();
+    });
+
+    test('unsaved changes are saved first when asked', async function (assert) {
+      await visit('/apps/blog/settings');
+      await fillIn('[data-test-field="healthcheck_path"]', '/up');
+      await click('[data-test-header-deploy]');
+
+      assert.dom('[data-test-unsaved-dialog]').exists();
+      assert.strictEqual(currentURL(), '/apps/blog/settings', 'held back');
+
+      await click('[data-test-dialog-cancel]');
+      assert.dom('[data-test-unsaved-dialog]').doesNotExist();
+      assert.strictEqual(currentURL(), '/apps/blog/settings');
+      assert
+        .dom('[data-test-field="healthcheck_path"]')
+        .hasValue('/up', 'cancelling keeps the edit');
+
+      await click('[data-test-tab="deploy"]');
+      assert.dom('[data-test-unsaved-dialog]').exists('the tab asks too');
+      await click('[data-test-dialog-confirm]');
+
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        healthcheck_path: '/up',
+      });
+      assert.strictEqual(currentURL(), '/apps/blog/deploy');
+    });
+
+    test('unsaved changes can be dropped', async function (assert) {
+      await visit('/apps/blog/settings');
+      await fillIn('[data-test-field="healthcheck_path"]', '/up');
+      await click('[data-test-header-deploy]');
+      await click('[data-test-dialog-alt]');
+
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
+      assert.strictEqual(currentURL(), '/apps/blog/deploy');
+    });
+
+    test('a save that fails keeps the user on the settings', async function (assert) {
+      fakes.api.fail('PATCH', '/api/apps/blog', 422, 'validation_failed', {
+        healthcheck_path: 'must start with /',
+      });
+      await visit('/apps/blog/settings');
+      await fillIn('[data-test-field="healthcheck_path"]', '/up');
+      await click('[data-test-header-deploy]');
+      await click('[data-test-dialog-confirm]');
+
+      assert.strictEqual(currentURL(), '/apps/blog/settings');
+      assert.dom(fieldError('healthcheck_path')).exists();
+    });
+  });
+
+  test('the requirements check is shown and follows a saved change', async function (assert) {
+    fakes.api.on('GET', '/api/apps/blog/env/requirements', () => ({
+      source: 'compose',
+      status: 'ok',
+      reason: '',
+      ref: app.default_branch,
+      commit_sha: 'a'.repeat(40),
+      path: 'compose.yaml',
+      variables:
+        app.default_branch === 'next'
+          ? [
+              { key: 'DATABASE_URL', required: true, set: false },
+              { key: 'SECRET_KEY_BASE', required: true, set: true },
+            ]
+          : [{ key: 'SECRET_KEY_BASE', required: true, set: true }],
+      unlisted: [],
+    }));
+    await visit('/apps/blog/settings');
+    assert
+      .dom('[data-test-settings-requirements="default"]')
+      .includesText('1 件は、すべて設定済み');
+
+    await fillIn('[data-test-field="default_branch"]', 'next');
+    await click('[data-test-settings-save]');
+
+    assert.strictEqual(
+      fakes.api.callsTo('GET', '/api/apps/blog/env/requirements').length,
+      2,
+      'read again after the branch changed',
+    );
+    assert
+      .dom('[data-test-settings-requirements="warning"]')
+      .includesText('ブランチ next')
+      .includesText('2 件のうち、1 件が未設定');
+    assert.dom('[data-test-settings-requirements-link]').exists();
+
+    await fillIn('[data-test-field="healthcheck_path"]', '/up');
+    await click('[data-test-settings-save]');
+    assert.strictEqual(
+      fakes.api.callsTo('GET', '/api/apps/blog/env/requirements').length,
+      2,
+      'other settings do not read it again',
+    );
+  });
+
   test('relaxing the policy checks comes with a warning', async function (assert) {
     await visit('/apps/blog/settings');
 

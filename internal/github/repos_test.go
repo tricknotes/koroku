@@ -528,3 +528,76 @@ func TestCanceledContextIsReported(t *testing.T) {
 		t.Errorf("User: err = %v, want context.Canceled", err)
 	}
 }
+
+// Installations on accounts the client does not allow are neither listed
+// nor used to read repositories.
+func TestInstallationsOnOtherAccountsAreIgnored(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.serveInstallationTokens()
+	f.mux.HandleFunc("GET /app/installations", func(w http.ResponseWriter, r *http.Request) {
+		if !f.requireAppJWT(w, r) {
+			return
+		}
+		writeJSON(w, http.StatusOK, []map[string]any{
+			{"id": 21, "account": map[string]any{"id": 42, "login": "octo"}},
+			{"id": 22, "account": map[string]any{"id": 77, "login": "my-org"}},
+			{"id": 23, "account": map[string]any{"id": 99, "login": "stranger"}},
+		})
+	})
+	repos := map[int64]string{21: "octo/blog", 22: "my-org/api", 23: "stranger/thing"}
+	f.mux.HandleFunc("GET /installation/repositories", func(w http.ResponseWriter, r *http.Request) {
+		id, ok := f.installationOf(w, r)
+		if !ok {
+			return
+		}
+		owner, name, _ := strings.Cut(repos[id], "/")
+		writeJSON(w, http.StatusOK, map[string]any{"repositories": []map[string]any{{
+			"id": id, "name": name, "full_name": repos[id], "owner": map[string]any{"login": owner}, "default_branch": "main",
+		}}})
+	})
+	f.mux.HandleFunc("GET /repos/{owner}/{repo}/installation", func(w http.ResponseWriter, r *http.Request) {
+		if !f.requireAppJWT(w, r) {
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": 23, "account": map[string]any{"id": 99, "login": "stranger"}})
+	})
+
+	c, err := New(Config{
+		AppID: testAppID, PrivateKey: testKey(), ClientID: testClientID, ClientSecret: testClientSecret,
+		APIBaseURL: f.srv.URL, WebBaseURL: f.srv.URL, Clock: f.clock,
+		AccountAllowed: func(id int64, login string) bool { return id == 42 || login == "my-org" },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.ListRepos(context.Background())
+	if err != nil {
+		t.Fatalf("ListRepos: %v", err)
+	}
+	var names []string
+	for _, r := range got {
+		names = append(names, r.FullName)
+	}
+	if strings.Join(names, ",") != "my-org/api,octo/blog" {
+		t.Errorf("repos = %v", names)
+	}
+	if f.mintCount(23) != 0 {
+		t.Error("a token was issued for an installation that is not allowed")
+	}
+
+	if _, err := c.RepoToken(context.Background(), "stranger", "thing"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("RepoToken on a refused installation: err = %v, want ErrNotFound", err)
+	}
+
+	list, err := c.Installations(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{}
+	for _, in := range list {
+		allowed[in.Account] = in.Allowed
+	}
+	if !allowed["octo"] || !allowed["my-org"] || allowed["stranger"] {
+		t.Errorf("installations allowed = %v", allowed)
+	}
+}

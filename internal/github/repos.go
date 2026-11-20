@@ -97,6 +97,10 @@ func (c *Client) ListRepos(ctx context.Context) ([]Repo, error) {
 	type installation struct {
 		ID          int64      `json:"id"`
 		SuspendedAt *time.Time `json:"suspended_at"`
+		Account     struct {
+			ID    int64  `json:"id"`
+			Login string `json:"login"`
+		} `json:"account"`
 	}
 	installations, err := collect(ctx, c, call{
 		method: http.MethodGet,
@@ -125,6 +129,9 @@ func (c *Client) ListRepos(ctx context.Context) ([]Repo, error) {
 	for _, inst := range installations {
 		if inst.SuspendedAt != nil {
 			// GitHub refuses to issue tokens for suspended installations.
+			continue
+		}
+		if !c.accountAllowed(inst.Account.ID, inst.Account.Login) {
 			continue
 		}
 		tok, err := c.InstallationToken(ctx, inst.ID)

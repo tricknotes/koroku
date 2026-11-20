@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tricknotes/koroku/internal/config"
 )
 
 // A config straight from the example fails the check and says what to fix,
@@ -50,5 +52,23 @@ func TestCheckReportsABrokenConfig(t *testing.T) {
 	err := run(context.Background(), []string{"check", "--config", configPath}, &stdout, &bytes.Buffer{})
 	if err == nil || !strings.Contains(stdout.String(), "base_domain is required") {
 		t.Fatalf("err = %v, output %q", err, stdout.String())
+	}
+}
+
+func TestInstallationAccountFilter(t *testing.T) {
+	allowed := installationAccountFilter(config.GitHub{AllowedUserID: 42, InstallationAccounts: []string{" My-Org "}})
+	for _, tc := range []struct {
+		id    int64
+		login string
+		want  bool
+	}{
+		{42, "octo", true},  // the operator's own account, whatever its login
+		{7, "my-org", true}, // listed, case-insensitively
+		{7, "MY-ORG", true},
+		{99, "stranger", false},
+	} {
+		if got := allowed(tc.id, tc.login); got != tc.want {
+			t.Errorf("allowed(%d, %q) = %v, want %v", tc.id, tc.login, got, tc.want)
+		}
 	}
 }

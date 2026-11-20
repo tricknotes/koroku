@@ -96,6 +96,7 @@ sudo ./deploy/provision.sh ./koroku
 | `[github] app_id`、`client_id`、`client_secret` | GitHub App の値。権限は Contents と Metadata の Read-only と Deployments の Read and write、callback は `https://<console_host>/auth/github/callback` |
 | `[github] private_key_file` | `/etc/koroku/github-app.pem` |
 | `[github] allowed_user_id` | ログインを許可する GitHub ユーザーの数値 ID（1 件） |
+| `[github] installation_accounts` | 任意。App をインストールした別の org など、koroku が使うインストール先の login の一覧。許可ユーザー自身のアカウントは書かなくても使う（SETUP 4.5） |
 | `[github] require_two_factor` | 使われない（古い版の設定）。書いてあれば起動時に警告が出るので、消してよい。2 段階認証は GitHub アカウント側で有効にする（ARCHITECTURE 10.3） |
 | `[storage] endpoint`、`region`、`bucket`、`access_key_id`、`secret_access_key` | S3 互換のオブジェクトストレージ。endpoint と region は事業者の S3 互換 API のもの（region の概念がなければ `auto`）。パス形式（`https://<endpoint>/<bucket>/<key>`）で接続する。バケットは先に作っておく（`koroku` も restic もバケットは作らない）。このセクションがないと、ログは VPS 内にだけ残り、バックアップは無効になる |
 | `[backup] restic_password_file` | `/etc/koroku/restic.key`（0600）。中身は自分で決めたパスワード 1 行。ファイルがない、または他人が読める権限だとバックアップは無効になる |
