@@ -9,17 +9,20 @@ import type RouterService from '@ember/routing/router-service';
 import { pageTitle } from 'ember-page-title';
 import Banner from 'koroku-console/components/banner';
 import Button, { buttonClass } from 'koroku-console/components/button';
+import EnvPresetsEditor from 'koroku-console/components/env-presets-editor';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
 import type ApiService from 'koroku-console/services/api';
 import { inputValue, preventDefault, setValue } from 'koroku-console/utils/dom';
+import { EnvDraft } from 'koroku-console/utils/env-presets';
 import { errorMessage, fieldErrors } from 'koroku-console/utils/errors';
 import { isValidSlug, suggestSlug } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
 import type {
   ComposeDetection,
   ComposeService,
+  EnvPresets,
   Environment,
   NewApp,
   Repo,
@@ -35,6 +38,7 @@ const KNOWN_FIELDS = new Set([
   'web_port',
   'healthcheck_path',
   'environment',
+  'env',
 ]);
 
 /** The service most likely to be the public one. */
@@ -59,6 +63,18 @@ export default class NewAppTemplate extends Component {
       path: this.requestedComposePath,
     }),
   );
+
+  /** Variables to prefill, read on the branch of `presetsBranch`. */
+  presets = new Loadable<EnvPresets>(() =>
+    this.api.getEnvPresets(this.repoFullName, {
+      ref: this.presetsBranch,
+      path: this.requestedComposePath,
+    }),
+  );
+  draft = new EnvDraft();
+  /** The last detection that could read the repository, or null. */
+  @tracked presetResult: EnvPresets | null = null;
+  @tracked presetsBranch = '';
 
   @tracked repoFullName = '';
   @tracked repoUrl = '';
@@ -134,7 +150,22 @@ export default class NewAppTemplate extends Component {
     this.defaultBranch = repo?.default_branch ?? '';
     this.suggestSlugFrom(this.repoFullName);
     this.requestedComposePath = '';
-    if (repo) void this.detect();
+    this.draft.reset();
+    this.presetResult = null;
+    if (repo) {
+      void this.detect();
+      void this.loadPresets();
+    }
+  };
+
+  /**
+   * Reads the presets again on the branch typed in, once the field is left
+   * (not on every keystroke). Rows the user touched stay as they are.
+   */
+  changeBranch = () => {
+    if (this.manualRepo || this.repoFullName === '') return;
+    if (this.defaultBranch.trim() === this.presetsBranch) return;
+    void this.loadPresets();
   };
 
   setRepoUrl = (event: Event) => {
@@ -145,6 +176,8 @@ export default class NewAppTemplate extends Component {
   selectComposePath = (event: Event) => {
     this.requestedComposePath = inputValue(event);
     void this.detect();
+    // The Compose file decides which presets it already sets.
+    void this.loadPresets();
   };
 
   selectService = (event: Event) => {
@@ -179,6 +212,35 @@ export default class NewAppTemplate extends Component {
     this.webPort = port === undefined ? '' : String(port);
   }
 
+  /**
+   * The environment step: shown while reading the repository and when it
+   * could be read; without the GitHub App, or when the files cannot be
+   * read, there is nothing to suggest and the step stays out of the way.
+   */
+  get showEnv(): boolean {
+    return (
+      !this.manualRepo &&
+      (this.presets.loading ||
+        this.presetResult !== null ||
+        this.draft.rows.length > 0)
+    );
+  }
+
+  private async loadPresets(): Promise<void> {
+    const repo = this.repoFullName;
+    const branch = this.defaultBranch.trim();
+    this.presetsBranch = branch;
+    await this.presets.load();
+    if (repo !== this.repoFullName || branch !== this.presetsBranch) return;
+    const result = this.presets.error ? null : this.presets.value;
+    if (result?.status === 'ok') {
+      this.presetResult = result;
+      this.draft.applyPresets(result.presets);
+    } else {
+      this.presetResult = null;
+    }
+  }
+
   private validate(): Record<string, string> {
     const errors: Record<string, string> = {};
     if (!this.repoChosen) {
@@ -195,6 +257,9 @@ export default class NewAppTemplate extends Component {
     const port = Number(this.webPort);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       errors['web_port'] = '1〜65535 の整数を入力してください。';
+    }
+    if (!this.draft.valid) {
+      errors['env'] = '環境変数のキーを直してください。';
     }
     return errors;
   }
@@ -225,6 +290,8 @@ export default class NewAppTemplate extends Component {
     if (this.healthcheckPath.trim()) {
       body.healthcheck_path = this.healthcheckPath.trim();
     }
+    const env = this.draft.vars;
+    if (!this.manualRepo && env.length > 0) body.env = env;
 
     this.submitting = true;
     try {
@@ -350,6 +417,7 @@ export default class NewAppTemplate extends Component {
                 aria-invalid={{field.invalid}}
                 data-test-field="default_branch"
                 {{on "input" (setValue this "defaultBranch")}}
+                {{on "change" this.changeBranch}}
               />
             </FormField>
           {{/if}}
@@ -600,6 +668,25 @@ export default class NewAppTemplate extends Component {
             </fieldset>
           </div>
         </div>
+
+        {{#if this.showEnv}}
+          <div class="form-group" data-test-env-step>
+            <div>
+              <h2 class="form-group-title">4. 環境変数</h2>
+              <p class="form-group-description">
+                リポジトリのファイルから推し量った、本番で動かすのにたいてい要る変数です。アプリと一緒に保存され、最初のデプロイから使われます。作成後は「環境変数」タブで変えられます。
+              </p>
+            </div>
+            <div class="form-group-body">
+              <EnvPresetsEditor
+                @draft={{this.draft}}
+                @presets={{this.presetResult}}
+                @loading={{this.presets.loading}}
+                @error={{this.errors.env}}
+              />
+            </div>
+          </div>
+        {{/if}}
       {{/if}}
 
       <div aria-live="polite">

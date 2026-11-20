@@ -271,6 +271,8 @@ export interface NewApp {
   web_service?: string;
   healthcheck_path?: string;
   environment?: Environment;
+  /** Variables stored with the app (ARCHITECTURE 9.8). */
+  env?: { key: string; value: string }[];
 }
 
 export interface ServiceStatus {
@@ -415,6 +417,29 @@ export interface Commit {
 export interface ComposeService {
   name: string;
   ports: number[] | null;
+}
+
+/** One variable the create screen prefills (ARCHITECTURE 9.8). */
+export interface EnvPreset {
+  key: string;
+  value: string;
+  /** A secret koroku generated; masked until revealed. */
+  generated: boolean;
+  framework: string;
+  /** Why: the file read and what in it matched ('' = the file exists). */
+  file: string;
+  match: string;
+}
+
+/** `GET /api/repos/{owner}/{repo}/env-presets`. */
+export interface EnvPresets {
+  status: 'ok' | 'unavailable';
+  reason: string;
+  compose_path: string;
+  frameworks: string[];
+  presets: EnvPreset[];
+  /** Presets left out because the Compose file sets them itself. */
+  skipped: { key: string; service: string }[];
 }
 
 export interface ComposeDetection {
