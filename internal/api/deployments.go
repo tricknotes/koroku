@@ -253,8 +253,17 @@ func (s *Server) handleDeploymentLogs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	path := s.deployer.LogPath(app.Slug, d.ID)
+	serveJobLog(w, r, s.deployer.LogPath(app.Slug, d.ID), func(ctx context.Context) (string, bool, error) {
+		current, err := s.store.GetDeployment(ctx, d.ID)
+		return current.Status, store.IsTerminal(current.Status), err
+	})
+}
 
+// serveJobLog streams the log file of a job (a deployment, a database
+// copy) as Server-Sent Events, or as plain text with ?format=text. status
+// reports the job's status and whether it has ended.
+func serveJobLog(w http.ResponseWriter, r *http.Request, path string,
+	status func(context.Context) (string, bool, error)) {
 	if r.URL.Query().Get("format") == "text" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -282,9 +291,9 @@ func (s *Server) handleDeploymentLogs(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	lastWrite := time.Now()
 	for {
-		// Read the status before draining: a deployment that finishes
-		// between the two is caught by the next round.
-		current, err := s.store.GetDeployment(ctx, d.ID)
+		// Read the status before draining: a job that finishes between
+		// the two is caught by the next round.
+		current, ended, err := status(ctx)
 		if err != nil {
 			return
 		}
@@ -297,8 +306,8 @@ func (s *Server) handleDeploymentLogs(w http.ResponseWriter, r *http.Request) {
 			lastWrite = time.Now()
 			_ = rc.Flush()
 		}
-		if store.IsTerminal(current.Status) && !wrote {
-			_, _ = fmt.Fprintf(w, "event: end\ndata: %s\n\n", current.Status)
+		if ended && !wrote {
+			_, _ = fmt.Fprintf(w, "event: end\ndata: %s\n\n", current)
 			_ = rc.Flush()
 			return
 		}

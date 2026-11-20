@@ -49,7 +49,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## API トークン（2026-11-21）
 
@@ -426,3 +426,59 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
 - バックアップが未設定でも応答する。アプリがなければ `404 app_not_found`、Docker に問い合わせられなければ `500 internal`。
 
 バックアップが未設定（`[storage]` か restic のパスワードファイルがない）のとき、`GET /api/backups` は `configured: false` で応答し、`GET /api/apps/{slug}/volumes` は通常どおり応答し、それ以外は `503 not_configured`。そのアプリのものでないスナップショットや、種別が合わないスナップショット（volume のリストアにダンプを指定するなど）は `404 snapshot_not_found`。リストアはアプリを停止・起動するので、デプロイ中は `409 busy`。
+
+## DB のコピー（2026-11-21）
+
+本番アプリの DB を staging アプリへ流し込む（ARCHITECTURE 10.6）。パスの `{slug}` は受け側（staging）のアプリ。
+
+アプリの形に次の設定が加わる（`PATCH /api/apps/{slug}` で変える。ダンプフックと同じく、サービスとコマンドは両方を指定するか両方を空にする。コマンドは 1 行 1000 文字まで）。
+
+- `load_hook_service`、`load_hook_command`: ロードフック。コマンドは `sh -c` でそのサービスのコンテナの中で動き、標準入力からダンプを読む。
+- `post_load_service`、`post_load_command`: コピー後のコマンド（個人情報を消すなど）。ロードのあと、止めたサービスを起動する前に実行する。
+
+コピーの形:
+
+```json
+{
+  "id": 7,
+  "target_app": "blog-staging",
+  "source_app": "blog",
+  "source_kind": "live",
+  "status": "succeeded",
+  "error": "",
+  "bytes": 18350080,
+  "backup_snapshot_id": "4bba301e5d2c7a90",
+  "started_at": "2026-11-21T03:00:00Z",
+  "finished_at": "2026-11-21T03:01:12Z"
+}
+```
+
+- `source_app` は送り側の slug（送り側を削除したあとも残る）。`source_kind` は `live`（稼働中の送り側でダンプフックを実行）/ `snapshot`（送り側の最新のダンプのスナップショット）。
+- `status` は `running` / `succeeded` / `failed`。`bytes` は流したダンプの大きさ（実行中は 0）。`backup_snapshot_id` は流し込む前に取った受け側のダンプ（取らなかったら空文字）。
+
+| メソッドとパス | 内容 |
+| --- | --- |
+| `GET /api/apps/{slug}/db-copies?limit=20` | そのアプリへのコピーの履歴。`{"copies": [コピー, ...]}`（新しい順、`limit` は 1〜100） |
+| `POST /api/apps/{slug}/db-copies` | ボディ `{"source": "blog", "source_kind": "live", "confirm": "blog-staging"}`。202 でコピー（バックグラウンドで進む）。`source_kind` は省略時 `live` |
+| `GET /api/db-copies/{id}` | コピー。なければ `404 copy_not_found` |
+| `GET /api/db-copies/{id}/logs` | コピーのログの SSE。形はデプロイログと同じ（`id:` はバイト位置、終わると `event: end` で最終 `status`）。`?format=text` で全文 |
+
+`POST` の断り方:
+
+| ステータス | `code` | 意味 |
+| --- | --- | --- |
+| 403 | `reauth_required` | 直近 10 分以内のログインが要る |
+| 404 | `app_not_found`、`source_not_found` | 受け側か送り側のアプリがない |
+| 409 | `busy` | 受け側か（`live` では）送り側がデプロイ中・操作中・コピー中 |
+| 409 | `not_deployed` | 受け側が一度もデプロイされていない |
+| 409 | `target_not_running` | 受け側が停止中 |
+| 409 | `source_not_running` | `live` で送り側が稼働中でない |
+| 409 | `no_dump_snapshot` | `snapshot` で送り側のダンプのスナップショットがない |
+| 422 | `target_not_staging` | 受け側が本番アプリ |
+| 422 | `confirmation_mismatch` | `confirm` が受け側の slug と違う |
+| 422 | `source_dump_hook_missing` | 送り側にダンプフックがない |
+| 422 | `target_load_hook_missing` | 受け側にロードフックがない |
+| 422 | `validation_failed` | `source` が受け側と同じ、`source_kind` が不正など |
+| 503 | `not_configured` | `snapshot` でバックアップが未設定 |
+
+**ログの見出し行**: `==> <時刻> <キー> <表題>` の形で、キーは `check` `backup` `stop` `copy` `after` `start` `done`、失敗時は `failed`。UI はデプロイログと同じ方法で手順に分ける。

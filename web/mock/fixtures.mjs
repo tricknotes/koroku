@@ -48,6 +48,10 @@ export const SCENARIOS = {
     'blog compares with .env.example, which the repository does not have; shop is private and the GitHub App is not installed on it',
   rollback:
     'blog and blog-staging were rolled back to a kept release after a bad deploy; older releases are kept or already removed',
+  'copy-running':
+    'everything fine, and a copy of the production database into blog-staging is running',
+  'copy-failed':
+    'everything fine, but the last copy into blog-staging failed while loading and left its services stopped',
 };
 
 function ago(ms) {
@@ -148,6 +152,13 @@ function app(slug, overrides = {}) {
     dump_hook_service: 'db',
     dump_hook_command: 'pg_dump -U postgres app',
     backup_before_deploy: production,
+    // Staging apps take copies of the production database (10.5).
+    load_hook_service: production ? '' : 'db',
+    load_hook_command: production
+      ? ''
+      : 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
+    post_load_service: production ? '' : 'web',
+    post_load_command: production ? '' : 'bin/rails db:anonymize',
     env_source: 'compose',
     env_example_path: '',
     url,

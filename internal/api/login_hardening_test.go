@@ -97,6 +97,7 @@ func TestDangerousOperationsNeedRecentLogin(t *testing.T) {
 		{http.MethodPatch, "/api/apps/blog", `{"repo_full_name":"octo/other"}`},
 		{http.MethodPost, "/api/apps/blog/backups/restore", `{"snapshot_id":"4bba301e"}`},
 		{http.MethodGet, "/api/apps/blog/backups/4bba301e/download", ""},
+		{http.MethodPost, "/api/apps/blog/db-copies", `{"source":"blog-production","confirm":"blog"}`},
 	}
 	for _, c := range refused {
 		rec := b.do(c.method, c.target, c.body, origin)

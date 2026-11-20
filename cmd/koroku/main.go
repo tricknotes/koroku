@@ -340,6 +340,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 			return err
 		}
 		deployOpts.Backup = backups
+		deployOpts.CopyBackups = backups
 		apiOpts.Backups = backups
 	} else {
 		logger.Warn("backups are disabled: " + reason)
@@ -356,6 +357,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	}
 	apiOpts.Deployer = engine
 	apiOpts.Ops = engine
+	apiOpts.Copier = engine
 	go engine.RunMaintenance(ctx)
 	srv := api.New(apiOpts)
 	go checker.Run(ctx, routing.RecheckInterval)

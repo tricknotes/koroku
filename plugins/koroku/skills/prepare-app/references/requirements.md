@@ -142,4 +142,17 @@ services:
   - MySQL: `mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction "$MYSQL_DATABASE"`
   - SQLite（アプリのコンテナにある場合）: `sqlite3 /data/app.db .dump`（イメージに `sqlite3` が要る）
 - ダンプの流し込みは手動。リストアの手順を README などに残しておくとよい。
+
+## 本番の DB を staging にコピーする
+
+koroku は、本番アプリの DB を staging アプリへ流し込める（コピー元のダンプフックの出力を、コピー先の「ロードフック」の標準入力へつなぐ）。使うなら、リポジトリ側で次を揃える。
+
+- コピー元（本番）にダンプフック、コピー先（staging）にロードフックを設定する。どちらも `docker compose exec -T <サービス> sh -c '<コマンド>'` で実行される。画面の「種類から入力」に同じ既定値がある。
+  - PostgreSQL: ダンプ `pg_dump -Fc -U "$POSTGRES_USER" "$POSTGRES_DB"`、ロード `pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"`（ダンプは `-Fc` の形式にする）
+  - MySQL: ダンプ `mysqldump --single-transaction --routines --triggers -u root -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"`、ロード `mysql -u root -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"`
+  - MariaDB: `mariadb-dump` と `mariadb`（変数は `MARIADB_*`）
+  - SQLite: ダンプ `sqlite3 /data/app.sqlite3 .dump`、ロードは新しいファイルに読ませてから置き換える（`set -e; rm -f /data/app.sqlite3.load; sqlite3 /data/app.sqlite3.load; mv /data/app.sqlite3.load /data/app.sqlite3`）。ロードフックのサービスは止まらないので、コピーのあとアプリを再起動する。
+- ダンプとロードは各コンテナの中のクライアントで動く。**本番と staging の DB のメジャーバージョンを揃える**（同じ Compose ファイルなら揃う）。
+- ロードの間、koroku はロードフックのサービス以外を止め、終わったら起動する。アプリは DB の中身が入れ替わることに耐える必要はないが、起動時に DB のマイグレーションを流すなら、それは本番のスキーマのまま動く。
+- 個人情報を消すコマンド（例 `bin/rails db:anonymize`）をリポジトリに用意しておくと、「コピー後のコマンド」に設定できる。止めたサービスで設定すると、公開する前に 1 回限りのコンテナ（`docker compose run --rm --no-deps`）で実行される。失敗するとサービスは止めたままになるので、冪等で、DB に接続できれば完了する作りにする。
 - アップロードされたファイルなど、DB 以外のデータは named volume に置けばそのままバックアップされる。

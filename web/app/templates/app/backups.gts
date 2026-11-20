@@ -10,6 +10,7 @@ import Badge from 'koroku-console/components/badge';
 import Banner from 'koroku-console/components/banner';
 import Button, { buttonClass } from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import DbCopyPanel from 'koroku-console/components/db-copy-panel';
 import CopyButton from 'koroku-console/components/copy-button';
 import EmptyState from 'koroku-console/components/empty-state';
 import ErrorMessage from 'koroku-console/components/error-message';
@@ -29,6 +30,7 @@ import BackupForm, {
   type VolumeChoice,
 } from 'koroku-console/utils/backup-form';
 import { backupHealth } from 'koroku-console/utils/backup-status';
+import { findPreset, HOOK_PRESETS } from 'koroku-console/utils/db-copy';
 import {
   inputChecked,
   inputValue,
@@ -309,6 +311,17 @@ export default class AppBackupsTemplate extends Component<Signature> {
   touch = () => {
     this.saved = false;
     this.nothingToSave = false;
+  };
+
+  /** Fills the dump hook from a preset; the choice itself is not kept. */
+  applyDumpPreset = (event: Event) => {
+    const preset = findPreset(inputValue(event));
+    if (preset) {
+      this.form.dumpHookService = preset.service;
+      this.form.dumpHookCommand = preset.dump;
+    }
+    (event.target as HTMLSelectElement).value = '';
+    this.touch();
   };
 
   save = async () => {
@@ -724,10 +737,24 @@ export default class AppBackupsTemplate extends Component<Signature> {
                 <div>
                   <h3 class="form-group-title">ダンプフック</h3>
                   <p class="form-group-description">
-                    バックアップのたびに、指定したサービスのコンテナでコマンドを実行し、標準出力をダンプとして保存します。使わないときは両方を空にします。
+                    バックアップのたびに、指定したサービスのコンテナでコマンドを実行し、標準出力をダンプとして保存します。staging
+                    アプリへの DB
+                    のコピーでも、コピー元としてこのコマンドを使います。使わないときは両方を空にします。
                   </p>
                 </div>
                 <div class="form-group-body">
+                  <FormField @label="種類から入力" as |field|>
+                    <select
+                      id={{field.id}}
+                      data-test-dump-preset
+                      {{on "change" this.applyDumpPreset}}
+                    >
+                      <option value="">選択すると下の欄を埋めます</option>
+                      {{#each HOOK_PRESETS key="id" as |preset|}}
+                        <option value={{preset.id}}>{{preset.label}}</option>
+                      {{/each}}
+                    </select>
+                  </FormField>
                   <div class="form-grid">
                     <FormField
                       @label="サービス"
@@ -867,6 +894,13 @@ export default class AppBackupsTemplate extends Component<Signature> {
           </div>
         </div>
       {{/if}}
+
+      {{#unless @model.isProduction}}
+        <DbCopyPanel
+          @model={{@model}}
+          @backupsConfigured={{overview.configured}}
+        />
+      {{/unless}}
     </AsyncView>
 
     {{#if this.restoring}}

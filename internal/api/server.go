@@ -56,6 +56,8 @@ type Options struct {
 	Backups Backups
 	// Volumes lists the named volumes of an app. Optional.
 	Volumes AppVolumes
+	// Copier copies databases into staging apps. Optional.
+	Copier DBCopier
 	// RouteStatus reports the last proxy configuration load. Optional.
 	RouteStatus func() RouteStatus
 }
@@ -80,6 +82,7 @@ type Server struct {
 	logs     AppLogs
 	backups  Backups
 	volumes  AppVolumes
+	copier   DBCopier
 	envReqs  *envreq.Reader
 
 	routeStatus func() RouteStatus
@@ -123,6 +126,7 @@ func New(opts Options) *Server {
 		logs:     opts.Logs,
 		backups:  opts.Backups,
 		volumes:  opts.Volumes,
+		copier:   opts.Copier,
 
 		routeStatus: opts.RouteStatus,
 
@@ -201,6 +205,11 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/apps/{slug}/backups/restore", s.handleRestoreVolume)
 	mux.HandleFunc("GET /api/apps/{slug}/backups/{snapshot}/download", s.handleDownloadDump)
 	mux.HandleFunc("GET /api/apps/{slug}/volumes", s.handleListVolumes)
+
+	mux.HandleFunc("GET /api/apps/{slug}/db-copies", s.handleListDBCopies)
+	mux.HandleFunc("POST /api/apps/{slug}/db-copies", s.handleStartDBCopy)
+	mux.HandleFunc("GET /api/db-copies/{id}", s.handleGetDBCopy)
+	mux.HandleFunc("GET /api/db-copies/{id}/logs", s.handleDBCopyLogs)
 
 	mux.HandleFunc("GET /api/deployments/{id}", s.handleGetDeployment)
 	mux.HandleFunc("GET /api/deployments/{id}/logs", s.handleDeploymentLogs)

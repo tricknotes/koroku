@@ -149,6 +149,7 @@ type backupManager interface {
 	State() backup.State
 	Start(ctx context.Context, trigger backup.Trigger) (*backup.Run, error)
 	BackupApp(ctx context.Context, app backup.App) (backup.RunResult, error)
+	BackupDump(ctx context.Context, app backup.App) (string, error)
 	Snapshots(ctx context.Context, app backup.App) ([]backup.Snapshot, error)
 	RestoreVolume(ctx context.Context, app backup.App, snapshotID string) (backup.RestoreResult, error)
 	LookupDump(ctx context.Context, app backup.App, snapshotID string) (backup.DumpFile, error)
@@ -243,6 +244,42 @@ func (b *backupService) BackupApp(ctx context.Context, app store.App) error {
 		return errors.New(result.Error)
 	}
 	return nil
+}
+
+// BackupDump implements deploy.CopyBackups: the target of a database copy,
+// before its data is replaced.
+func (b *backupService) BackupDump(ctx context.Context, app store.App) (string, error) {
+	id, err := b.manager.BackupDump(ctx, toBackupApp(app))
+	if errors.Is(err, backup.ErrBusy) {
+		return "", errors.New("another backup is running; copy again when it has finished")
+	}
+	return id, err
+}
+
+// LatestDump implements deploy.CopyBackups: the newest dump of the source
+// of a database copy.
+func (b *backupService) LatestDump(ctx context.Context, app store.App) (deploy.DumpSnapshot, error) {
+	snapshots, err := b.manager.Snapshots(ctx, toBackupApp(app))
+	if err != nil {
+		return deploy.DumpSnapshot{}, err
+	}
+	for _, s := range snapshots { // newest first
+		if s.Kind != backup.KindDump {
+			continue
+		}
+		file, err := b.manager.LookupDump(ctx, toBackupApp(app), s.ID)
+		if err != nil {
+			return deploy.DumpSnapshot{}, err
+		}
+		return deploy.DumpSnapshot{
+			ID:   s.ID,
+			Time: s.Time,
+			Write: func(ctx context.Context, w io.Writer) error {
+				return b.manager.WriteDump(ctx, file, w)
+			},
+		}, nil
+	}
+	return deploy.DumpSnapshot{}, deploy.ErrNoDumpSnapshot
 }
 
 // backupDeps are the shared dependencies of the backup service.

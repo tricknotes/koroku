@@ -57,6 +57,12 @@ type App struct {
 	DumpHookService      string
 	DumpHookCommand      string
 	BackupBeforeDeploy   bool
+	// Database copy settings (ARCHITECTURE 10.6): the load hook reads a
+	// dump from stdin; the post-load command runs after a copy.
+	LoadHookService string
+	LoadHookCommand string
+	PostLoadService string
+	PostLoadCommand string
 	// EnvSource is where the console reads the variables the repository
 	// needs: "compose", "dotenv" or "off" (ARCHITECTURE 9.4).
 	EnvSource string
@@ -86,7 +92,8 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	web_service, web_port, host_port, healthcheck_path, desired_state, environment,
 	relax_policy, memory_limit, service_memory_limits, current_deployment_id, created_at, updated_at,
 	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
-	env_source, env_example_path`
+	env_source, env_example_path,
+	load_hook_service, load_hook_command, post_load_service, post_load_command`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -106,7 +113,8 @@ func scanApp(row rowScanner) (App, error) {
 		&a.WebService, &a.WebPort, &a.HostPort, &a.HealthcheckPath, &a.DesiredState, &a.Environment,
 		&a.RelaxPolicy, &a.MemoryLimit, &limitsJSON, &currentID, &created, &updated,
 		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy,
-		&a.EnvSource, &a.EnvExamplePath)
+		&a.EnvSource, &a.EnvExamplePath,
+		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -208,13 +216,15 @@ func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, 
 			web_service, web_port, host_port, healthcheck_path, desired_state, environment,
 			relax_policy, memory_limit, service_memory_limits, created_at, updated_at,
 			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
-			env_source, env_example_path)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			env_source, env_example_path,
+			load_hook_service, load_hook_command, post_load_service, post_load_command)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now),
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
-		app.EnvSource, app.EnvExamplePath)
+		app.EnvSource, app.EnvExamplePath,
+		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -309,13 +319,15 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			web_service = ?, web_port = ?, healthcheck_path = ?, environment = ?,
 			relax_policy = ?, memory_limit = ?, service_memory_limits = ?, updated_at = ?,
 			backup_exclude_volumes = ?, dump_hook_service = ?, dump_hook_command = ?, backup_before_deploy = ?,
-			env_source = ?, env_example_path = ?
+			env_source = ?, env_example_path = ?,
+			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now),
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
-		app.EnvSource, app.EnvExamplePath, app.ID)
+		app.EnvSource, app.EnvExamplePath,
+		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}

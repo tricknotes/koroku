@@ -182,6 +182,14 @@ export interface App {
   dump_hook_service?: string;
   dump_hook_command?: string;
   backup_before_deploy?: boolean;
+  /**
+   * The load hook reads a dump from stdin; the post-load command runs after
+   * a copy (ARCHITECTURE 10.6). Absent from older backends.
+   */
+  load_hook_service?: string;
+  load_hook_command?: string;
+  post_load_service?: string;
+  post_load_command?: string;
   /** Where the variables the repository needs are read (ARCHITECTURE 9.4). */
   env_source?: EnvSource;
   /** The `.env.example` path in `dotenv` mode; '' for the default. */
@@ -202,6 +210,10 @@ export interface AppPatch {
   dump_hook_service?: string;
   dump_hook_command?: string;
   backup_before_deploy?: boolean;
+  load_hook_service?: string;
+  load_hook_command?: string;
+  post_load_service?: string;
+  post_load_command?: string;
   env_source?: EnvSource;
   env_example_path?: string;
 }
@@ -388,6 +400,25 @@ export interface BackupOverview {
   /** Next scheduled run; `null` when backups are not configured. */
   next_run_at?: string | null;
   runs: BackupRun[] | null;
+}
+
+export type CopySourceKind = 'live' | 'snapshot';
+
+/** One copy of a database into a staging app (ARCHITECTURE 10.6). */
+export interface DbCopy {
+  id: number;
+  target_app: string;
+  /** The source's slug; kept after the source app is deleted. */
+  source_app: string;
+  source_kind: CopySourceKind;
+  status: 'running' | 'succeeded' | 'failed';
+  error: string;
+  /** Size of the dump that was streamed; 0 while it runs. */
+  bytes: number;
+  /** The target's dump taken before loading; '' when none was taken. */
+  backup_snapshot_id: string;
+  started_at: string;
+  finished_at: string | null;
 }
 
 export interface Snapshot {

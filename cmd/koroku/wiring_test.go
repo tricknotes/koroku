@@ -443,6 +443,11 @@ func (f *fakeBackupManager) BackupApp(_ context.Context, app backup.App) (backup
 	return f.result, f.backupErr
 }
 
+func (f *fakeBackupManager) BackupDump(_ context.Context, app backup.App) (string, error) {
+	f.apps = append(f.apps, app)
+	return "4bba301e5d2c7a90", f.backupErr
+}
+
 func (f *fakeBackupManager) Snapshots(context.Context, backup.App) ([]backup.Snapshot, error) {
 	return f.snapshots, nil
 }
@@ -559,6 +564,41 @@ func TestBackupBeforeDeployOutcome(t *testing.T) {
 	manager.backupErr = errors.New("restic: repository unreachable")
 	if err := svc.BackupApp(ctx, app); err == nil || !strings.Contains(err.Error(), "unreachable") {
 		t.Errorf("other errors: %v", err)
+	}
+}
+
+// TestDatabaseCopyBackups pins what a database copy sees: the newest dump
+// snapshot of the source, and the backup of the target.
+func TestDatabaseCopyBackups(t *testing.T) {
+	ctx := context.Background()
+	manager := &fakeBackupManager{}
+	svc := &backupService{manager: manager}
+	current := int64(1)
+	app := store.App{Slug: "blog", DesiredState: store.DesiredRunning, CurrentDeploymentID: &current,
+		DumpHookService: "db", DumpHookCommand: "pg_dump app"}
+
+	if _, err := svc.LatestDump(ctx, app); !errors.Is(err, deploy.ErrNoDumpSnapshot) {
+		t.Errorf("without snapshots: %v", err)
+	}
+	when := time.Date(2026, 11, 20, 18, 0, 0, 0, time.UTC)
+	manager.snapshots = []backup.Snapshot{
+		{ID: "4bba301e", Kind: backup.KindVolume, Target: "pgdata"},
+		{ID: "9c0ffee1", Time: when, Kind: backup.KindDump, Target: "db"},
+		{ID: "11111111", Kind: backup.KindDump, Target: "db"},
+	}
+	manager.dumped = "-- dump --"
+	latest, err := svc.LatestDump(ctx, app)
+	var out bytes.Buffer
+	if err != nil || latest.ID != "9c0ffee1" || !latest.Time.Equal(when) || latest.Write(ctx, &out) != nil || out.String() != "-- dump --" {
+		t.Errorf("LatestDump = %+v, %v, %q", latest, err, out.String())
+	}
+
+	if id, err := svc.BackupDump(ctx, app); err != nil || id == "" || manager.apps[0].DumpService != "db" {
+		t.Errorf("BackupDump = %q, %v (%+v)", id, err, manager.apps)
+	}
+	manager.backupErr = &backup.BusyError{}
+	if _, err := svc.BackupDump(ctx, app); err == nil || !strings.Contains(err.Error(), "another backup is running") {
+		t.Errorf("busy: %v", err)
 	}
 }
 

@@ -58,6 +58,10 @@ const (
 	TriggerScheduled Trigger = "scheduled"
 	TriggerManual    Trigger = "manual"
 	TriggerPreDeploy Trigger = "pre_deploy"
+	// TriggerPreCopy is the dump of a staging app taken before a database
+	// copy replaces its data (ARCHITECTURE 10.6). It is not recorded as a
+	// run; the copy keeps the snapshot ID.
+	TriggerPreCopy Trigger = "pre_copy"
 )
 
 // RunStatus is the state of a run.
@@ -230,7 +234,7 @@ func (o *Options) applyDefaults() {
 type Operation string
 
 const (
-	// OpRun is a backup run (RunAll, Start, BackupApp).
+	// OpRun is a backup run (RunAll, Start, BackupApp, BackupDump).
 	OpRun Operation = "run"
 	// OpRestore is a volume restore.
 	OpRestore Operation = "restore"

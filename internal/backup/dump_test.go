@@ -324,3 +324,31 @@ func TestSnapshotsClearsAStaleLockOnce(t *testing.T) {
 		"restic snapshots --json --tag app:blog --retry-lock 1m0s",
 	})
 }
+
+func TestBackupDumpStoresOnlyTheDump(t *testing.T) {
+	e := newEnv(t)
+	e.volume(blog, "uploads", nil)
+	e.host.set("docker compose", func(context.Context, runner.Cmd) (string, error) { return "dump\n", nil })
+	id, err := e.m.BackupDump(context.Background(), blogWithHook)
+	if err != nil || id == "" {
+		t.Fatalf("BackupDump = %q, %v", id, err)
+	}
+	// No volume and no recorded run.
+	if calls := e.host.calls("docker volume ls"); len(calls) != 0 {
+		t.Errorf("volumes were listed: %v", calls)
+	}
+	if got := e.rec.startedRuns(); len(got) != 0 {
+		t.Errorf("recorded runs = %v", got)
+	}
+	if st := e.m.State(); st.Busy {
+		t.Errorf("state after BackupDump = %+v", st)
+	}
+
+	if _, err := e.m.BackupDump(context.Background(), blog); err == nil {
+		t.Error("an app without a dump hook must be refused")
+	}
+	e.host.set("docker compose", func(context.Context, runner.Cmd) (string, error) { return "", exit("docker", 1) })
+	if _, err := e.m.BackupDump(context.Background(), blogWithHook); err == nil {
+		t.Error("a failing dump hook must fail BackupDump")
+	}
+}

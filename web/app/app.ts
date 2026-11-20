@@ -21,6 +21,7 @@ import './styles/overview.css';
 import './styles/env.css';
 import './styles/domains.css';
 import './styles/backups.css';
+import './styles/db-copy.css';
 import './styles/settings.css';
 import './styles/system.css';
 import './styles/security.css';

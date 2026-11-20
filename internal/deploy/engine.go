@@ -55,7 +55,10 @@ type Options struct {
 	Router Router
 	Tokens TokenSource
 	Backup PreDeployBackup
-	Logger *slog.Logger
+	// CopyBackups backs up the target of a database copy and reads dump
+	// snapshots. Optional.
+	CopyBackups CopyBackups
+	Logger      *slog.Logger
 
 	// AppsDir holds one directory per app (releases, env file, deploy logs).
 	AppsDir string
@@ -73,6 +76,10 @@ type Options struct {
 	KeepReleases int
 	// PruneImages runs `docker image prune -f` after a successful deploy.
 	PruneImages bool
+	// CopyTimeout bounds a whole database copy; CopyMaxBytes bounds the
+	// dump it streams (ARCHITECTURE 10.6).
+	CopyTimeout  time.Duration
+	CopyMaxBytes int64
 }
 
 func (o *Options) applyDefaults() {
@@ -106,6 +113,12 @@ func (o *Options) applyDefaults() {
 	if o.KeepReleases == 0 {
 		o.KeepReleases = 3
 	}
+	if o.CopyTimeout == 0 {
+		o.CopyTimeout = defaultCopyTimeout
+	}
+	if o.CopyMaxBytes == 0 {
+		o.CopyMaxBytes = defaultCopyMaxBytes
+	}
 }
 
 // Engine accepts deployments and runs them one at a time.
@@ -115,6 +128,9 @@ type Engine struct {
 
 	mu      sync.Mutex
 	cancels map[int64]context.CancelCauseFunc
+	// base is the context of Run; background work such as a database
+	// copy ends with it.
+	base context.Context
 
 	// locks serializes deployments and manual operations per app.
 	locks appLocks
@@ -312,7 +328,11 @@ func (e *Engine) notify() {
 // Run processes queued deployments until ctx is canceled. Only one
 // deployment runs at a time across all apps, which serializes build load.
 func (e *Engine) Run(ctx context.Context) error {
+	e.mu.Lock()
+	e.base = ctx
+	e.mu.Unlock()
 	now := e.opts.Clock.Now()
+	e.failInterruptedCopies(ctx, now)
 	interrupted, err := e.opts.Store.FailInterruptedDeployments(ctx, now)
 	if err != nil {
 		return fmt.Errorf("recover interrupted deployments: %w", err)

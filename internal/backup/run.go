@@ -130,6 +130,33 @@ func (m *Manager) BackupApp(ctx context.Context, app App) (RunResult, error) {
 	return run.Wait()
 }
 
+// BackupDump stores one snapshot of the app's dump hook output and waits
+// for it. It is taken before a database copy loads data into the app
+// (ARCHITECTURE 10.6) and is not recorded through the Recorder: the copy
+// keeps the snapshot ID. The error matches ErrBusy when another operation
+// holds the repository.
+func (m *Manager) BackupDump(ctx context.Context, app App) (snapshotID string, err error) {
+	if err := app.validate(); err != nil {
+		return "", err
+	}
+	if app.DumpService == "" {
+		return "", fmt.Errorf("backup: app %s has no dump hook", app.Slug)
+	}
+	release, err := m.begin(OpRun, TriggerPreCopy)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	if err := m.prepare(ctx, true); err != nil {
+		return "", err
+	}
+	res := m.backupDump(ctx, app)
+	if res.Err != nil {
+		return "", errors.New(m.masker.Mask(res.Err.Error()))
+	}
+	return res.SnapshotID, nil
+}
+
 func (m *Manager) start(ctx context.Context, trigger Trigger, p plan) (*Run, error) {
 	if p.apps == nil {
 		return nil, errors.New("backup: Options.Apps is required to back up every app")
