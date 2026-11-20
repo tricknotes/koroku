@@ -177,26 +177,22 @@ module('Acceptance | settings', function (hooks) {
   });
 
   test('the requirements check is shown and follows a saved change', async function (assert) {
-    fakes.api.on(
-      'GET',
-      '/api/apps/blog/env/requirements',
-      () => ({
-        source: 'compose',
-        status: 'ok',
-        reason: '',
-        ref: app.default_branch,
-        commit_sha: 'a'.repeat(40),
-        path: 'compose.yaml',
-        variables:
-          app.default_branch === 'next'
-            ? [
-                { key: 'DATABASE_URL', required: true, set: false },
-                { key: 'SECRET_KEY_BASE', required: true, set: true },
-              ]
-            : [{ key: 'SECRET_KEY_BASE', required: true, set: true }],
-        unlisted: [],
-      }),
-    );
+    fakes.api.on('GET', '/api/apps/blog/env/requirements', () => ({
+      source: 'compose',
+      status: 'ok',
+      reason: '',
+      ref: app.default_branch,
+      commit_sha: 'a'.repeat(40),
+      path: 'compose.yaml',
+      variables:
+        app.default_branch === 'next'
+          ? [
+              { key: 'DATABASE_URL', required: true, set: false },
+              { key: 'SECRET_KEY_BASE', required: true, set: true },
+            ]
+          : [{ key: 'SECRET_KEY_BASE', required: true, set: true }],
+      unlisted: [],
+    }));
     await visit('/apps/blog/settings');
     assert
       .dom('[data-test-settings-requirements="default"]')
