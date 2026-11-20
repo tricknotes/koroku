@@ -127,7 +127,12 @@ export default class AppTemplate extends Component<Signature> {
   };
 
   private async focusDeployForm(): Promise<void> {
-    await this.router.transitionTo(DEPLOY_ROUTE, this.args.model.slug);
+    try {
+      await this.router.transitionTo(DEPLOY_ROUTE, this.args.model.slug);
+    } catch {
+      // Held back (unsaved settings ask first); the tab goes on by itself.
+      return;
+    }
     // After the tab has rendered. A run loop queue, so tests wait for it.
     // eslint-disable-next-line ember/no-runloop
     schedule('afterRender', () => {

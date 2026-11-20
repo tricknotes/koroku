@@ -954,6 +954,48 @@ SHOTS.push(
     themes: ['light'],
   },
   {
+    name: 'settings-env-requirements',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-settings-requirements]',
+    script: `document.querySelector('[data-test-env-source-group]').scrollIntoView()`,
+  },
+  {
+    name: 'settings-env-requirements-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-settings-requirements]',
+    script: `document.querySelector('[data-test-env-source-group]').scrollIntoView()`,
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
+    name: 'settings-unsaved-dialog',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    script: `(() => {
+      const input = document.querySelector('[data-test-field="healthcheck_path"]');
+      input.value = '/healthz';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(() => document.querySelector('[data-test-header-deploy]').click(), 300);
+    })()`,
+    then: '[data-test-unsaved-dialog]',
+  },
+  {
+    name: 'settings-unsaved-dialog-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    script: `(() => {
+      const input = document.querySelector('[data-test-field="healthcheck_path"]');
+      input.value = '/healthz';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(() => document.querySelector('[data-test-header-deploy]').click(), 300);
+    })()`,
+    then: '[data-test-unsaved-dialog]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
     name: 'settings-relaxed',
     path: '/apps/blog-staging/settings?scenario=healthy',
     wait: SETTINGS,

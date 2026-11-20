@@ -4,7 +4,9 @@ import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { eq, fn } from '@ember/helper';
 import type Owner from '@ember/owner';
+import { LinkTo } from '@ember/routing';
 import type RouterService from '@ember/routing/router-service';
+import type Transition from '@ember/routing/transition';
 import Banner from 'koroku-console/components/banner';
 import Button from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
@@ -21,6 +23,7 @@ import {
   setChecked,
   setValue,
 } from 'koroku-console/utils/dom';
+import { missingVariables } from 'koroku-console/utils/env-requirements';
 import { fieldErrors, policyViolations } from 'koroku-console/utils/errors';
 import Loadable from 'koroku-console/utils/loadable';
 import SettingsForm, {
@@ -38,9 +41,20 @@ import {
 import type {
   App,
   AppPatch,
+  EnvRequirements,
   EnvSource,
   Environment,
 } from 'koroku-console/utils/types';
+
+/** Settings that change what the requirements check reads. */
+const REQUIREMENT_FIELDS: (keyof AppPatch)[] = [
+  'default_branch',
+  'compose_path',
+  'env_source',
+  'env_example_path',
+];
+
+const DEPLOY_ROUTE = 'app.deploy';
 
 const KNOWN_FIELDS = new Set([
   'default_branch',
@@ -132,12 +146,105 @@ export default class AppSettingsTemplate extends Component<Signature> {
   /** The other apps, for the promotion source (ARCHITECTURE 9.7). */
   apps = new Loadable<App[]>(() => this.api.listApps());
 
+  /**
+   * What the requirements check finds with the saved settings (ARCHITECTURE
+   * 9.4). Read again whenever a save changes where it reads from.
+   */
+  requirements = new Loadable<EnvRequirements>(() =>
+    this.api.getEnvRequirements(this.app.slug),
+  );
+
+  /** A move to the deploy tab held back because of unsaved changes. */
+  @tracked pendingLeave: Transition | null = null;
+  /** The held move goes ahead once the save it waits for succeeds. */
+  private leaveAfterSave: Transition | null = null;
+  private leaveApproved = false;
+
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
     this.form = new SettingsForm(this.app);
+    void this.requirements.load();
+    this.router.on('routeWillChange', this.guardLeave);
     if (this.app.environment === 'production' || this.app.promote_from) {
       void this.apps.load();
     }
+  }
+
+  willDestroy(): void {
+    super.willDestroy();
+    this.router.off('routeWillChange', this.guardLeave);
+  }
+
+  get hasUnsavedChanges(): boolean {
+    return Object.keys(this.form.patch(this.app)).length > 0;
+  }
+
+  /**
+   * Going to the deploy tab (its tab or the header's button) with unsaved
+   * changes would deploy the old settings and drop the edits: ask first.
+   */
+  guardLeave = (transition: Transition) => {
+    if (this.leaveApproved || transition.isAborted) return;
+    if (transition.to?.name !== DEPLOY_ROUTE) return;
+    if (!this.hasUnsavedChanges) return;
+    transition.abort();
+    this.pendingLeave = transition;
+  };
+
+  saveAndLeave = async () => {
+    const transition = this.pendingLeave;
+    if (!transition) return;
+    this.leaveAfterSave = transition;
+    this.pendingLeave = null;
+    await this.save();
+    // A production protection change asks once more; the move then waits
+    // for that confirmation (see confirmProtection).
+    if (!this.pendingProtection) this.continueLeave();
+  };
+
+  leaveWithoutSaving = () => {
+    const transition = this.pendingLeave;
+    this.pendingLeave = null;
+    if (!transition) return;
+    this.leaveApproved = true;
+    transition.retry();
+  };
+
+  cancelLeave = () => {
+    this.pendingLeave = null;
+  };
+
+  private continueLeave(): void {
+    const transition = this.leaveAfterSave;
+    this.leaveAfterSave = null;
+    if (!transition || !this.saved) return;
+    this.leaveApproved = true;
+    transition.retry();
+  }
+
+  get requirementsSummary(): {
+    tone: 'default' | 'warning';
+    text: string;
+  } | null {
+    const req = this.requirements.value;
+    if (this.requirements.loading || !req) return null;
+    if (req.status === 'off') return null;
+    if (req.status !== 'ok') {
+      return { tone: 'warning', text: '必要な環境変数を読めませんでした。' };
+    }
+    const required = req.variables.filter((v) => v.required).length;
+    const missing = missingVariables(req).required.length;
+    const where = req.ref ? `ブランチ ${req.ref} の` : '';
+    if (missing > 0) {
+      return {
+        tone: 'warning',
+        text: `${where}リポジトリが必須とする環境変数 ${required} 件のうち、${missing} 件が未設定です。`,
+      };
+    }
+    return {
+      tone: 'default',
+      text: `${where}リポジトリが必須とする環境変数 ${required} 件は、すべて設定済みです。`,
+    };
   }
 
   get isProductionForm(): boolean {
@@ -305,10 +412,12 @@ export default class AppSettingsTemplate extends Component<Signature> {
     if (!patch) return;
     await this.commit(patch);
     this.pendingProtection = null;
+    this.continueLeave();
   };
 
   cancelProtection = () => {
     this.pendingProtection = null;
+    this.leaveAfterSave = null;
   };
 
   commit = async (patch: AppPatch) => {
@@ -318,6 +427,9 @@ export default class AppSettingsTemplate extends Component<Signature> {
       this.args.model.set(app);
       this.form = new SettingsForm(app);
       this.saved = true;
+      if (REQUIREMENT_FIELDS.some((field) => field in patch)) {
+        void this.requirements.load();
+      }
     } catch (error) {
       this.error = error;
       this.errors = fieldErrors(error);
@@ -828,6 +940,29 @@ export default class AppSettingsTemplate extends Component<Signature> {
           {{#if this.errors.env_source}}
             <p class="field-error">{{this.errors.env_source}}</p>
           {{/if}}
+          <p class="settings-requirements" aria-live="polite">
+            {{#if this.requirements.loading}}
+              <span data-test-settings-requirements-loading>
+                <Icon @name="spinner" />
+                必要な環境変数を確かめています…
+              </span>
+            {{else if this.requirementsSummary}}
+              <span
+                class="settings-requirements-{{this.requirementsSummary.tone}}"
+                data-test-settings-requirements={{this.requirementsSummary.tone}}
+              >
+                {{#if (eq this.requirementsSummary.tone "warning")}}
+                  <Icon @name="warning" />
+                {{/if}}
+                {{this.requirementsSummary.text}}
+              </span>
+              <LinkTo
+                @route="app.env"
+                @model={{this.app.slug}}
+                data-test-settings-requirements-link
+              >環境変数を開く</LinkTo>
+            {{/if}}
+          </p>
         </div>
       </div>
 
@@ -1142,6 +1277,22 @@ export default class AppSettingsTemplate extends Component<Signature> {
         </li>
       </ul>
     </section>
+
+    {{#if this.pendingLeave}}
+      <ConfirmDialog
+        @title="保存していない変更があります"
+        @confirmLabel="保存して進む"
+        @altLabel="保存せずに進む"
+        @busy={{this.saving}}
+        @onConfirm={{this.saveAndLeave}}
+        @onAlt={{this.leaveWithoutSaving}}
+        @onCancel={{this.cancelLeave}}
+      >
+        <p data-test-unsaved-dialog>
+          設定に保存していない変更があります。デプロイは保存済みの設定で行われます。保存してからデプロイの画面に進みますか？保存せずに進むと、変更は破棄されます。
+        </p>
+      </ConfirmDialog>
+    {{/if}}
 
     {{#if this.pendingProtection}}
       <ConfirmDialog
