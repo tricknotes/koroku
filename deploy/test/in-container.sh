@@ -155,7 +155,7 @@ refuses_invalid_daemon_json() {
 }
 
 snapshot() {
-  sha256sum /etc/docker/daemon.json /etc/koroku/* /etc/fstab \
+  sha256sum /etc/docker/daemon.json /etc/koroku/* /etc/fstab /etc/ssh/sshd_config.d/02-koroku-keepalive.conf \
     /etc/systemd/system/koroku.service /etc/systemd/system/caddy.service.d/koroku.conf \
     /etc/caddy/koroku-initial.json /etc/apt/sources.list.d/docker.list \
     /etc/apt/sources.list.d/caddy-stable.list /etc/apt/keyrings/docker.asc \
@@ -198,6 +198,9 @@ check "ufw: 443/udp stays closed by default" not called "ufw allow 443/udp"
 check "koroku enabled" called "systemctl enable koroku.service"
 check "koroku not started while the config holds example values" not koroku_start_requested
 check "ssh: password login left alone while root has no authorized key" not test -e /etc/ssh/sshd_config.d/01-koroku.conf
+check "ssh: keepalive set even without a key" grep -qx 'ClientAliveInterval 30' /etc/ssh/sshd_config.d/02-koroku-keepalive.conf
+check "ssh: keepalive drops a dead client after 4 tries" grep -qx 'ClientAliveCountMax 4' /etc/ssh/sshd_config.d/02-koroku-keepalive.conf
+check "ssh: sshd reloaded for the keepalive" called "systemctl try-reload-or-restart ssh.service"
 
 # What the human does next: real values and keys.
 sed -i -e 's/dev\.example\.com/koroku.test/' -e 's/203\.0\.113\.10/192.0.2.10/' \
