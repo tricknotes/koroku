@@ -12,7 +12,7 @@ import (
 // of live API tokens.
 var ErrTooManyTokens = errors.New("too many api tokens")
 
-// APIToken is a read-only API token (ARCHITECTURE 10.4). Only a hash of its
+// APIToken is a read-only API token (ARCHITECTURE 10.5). Only a hash of its
 // value is stored, so a leaked database does not yield usable tokens.
 type APIToken struct {
 	// ID names the token in the console; unlike the hash it may be shown.

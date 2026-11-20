@@ -16,7 +16,7 @@ export interface SessionResponse {
   reauth_until?: string | null;
 }
 
-/** A read-only API token (`GET /api/tokens`, ARCHITECTURE 10.4). */
+/** A read-only API token (`GET /api/tokens`, ARCHITECTURE 10.5). */
 export interface ApiToken {
   id: string;
   name: string;

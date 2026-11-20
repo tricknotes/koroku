@@ -53,7 +53,7 @@
 
 ## API トークン（2026-11-21）
 
-手元の Claude Code などが koroku の状態を読むための、読み取り専用のトークン（ARCHITECTURE 10.4）。管理 UI の「セキュリティ」画面で発行する。
+手元の Claude Code などが koroku の状態を読むための、読み取り専用のトークン（ARCHITECTURE 10.5）。管理 UI の「セキュリティ」画面で発行する。
 
 **管理（セッション Cookie でだけ使える）**
 

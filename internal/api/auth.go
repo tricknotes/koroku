@@ -232,7 +232,7 @@ func isMutating(method string) bool {
 
 // guard protects the API: mutating requests must come from the console's
 // own origin, and everything under /api/ except /api/session needs a session
-// or, for a few read-only routes, an API token (ARCHITECTURE 10.4).
+// or, for a few read-only routes, an API token (ARCHITECTURE 10.5).
 func (s *Server) guard(mux *http.ServeMux) http.Handler {
 	var next http.Handler = mux
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

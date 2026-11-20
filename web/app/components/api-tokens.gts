@@ -48,7 +48,7 @@ function isLifetime(days: TokenLifetime, chosen: TokenLifetime): boolean {
 
 /**
  * Read-only API tokens that let Claude Code on the developer's machine read
- * deployments and logs (ARCHITECTURE 10.4): list, create (shown once),
+ * deployments and logs (ARCHITECTURE 10.5): list, create (shown once),
  * revoke.
  */
 export default class ApiTokens extends Component {

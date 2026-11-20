@@ -14,7 +14,7 @@ import (
 	"github.com/tricknotes/koroku/internal/store"
 )
 
-// Read-only API tokens (ARCHITECTURE 10.4) let tools on the developer's
+// Read-only API tokens (ARCHITECTURE 10.5) let tools on the developer's
 // machine, such as Claude Code, read why a deployment failed. They are
 // accepted only as an Authorization: Bearer header and only for the GET
 // routes in tokenRoutes.
