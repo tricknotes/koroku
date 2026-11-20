@@ -444,7 +444,7 @@ staging アプリの稼働中のリリースを、組み合わせた本番アプ
 - `source_deployment` は staging の稼働中リリース、`current_deployment` は本番の稼働中リリース（なければ `null`）。昇格の `POST` には `source_deployment.id` を送る。
 - `commits.status` は `ok` か `unknown`。`ok` の `list` は staging の SHA から本番の SHA の手前までの新しい順（同じ SHA なら空）。GitHub App で読めない、本番にリリースがない、30 件さかのぼっても本番の SHA が見つからない、のいずれかなら `unknown` で `list` は空。UI は両方の SHA とメッセージだけを出す。
 - `env` は片方にだけある環境変数のキー（key 順）。`only_in_source` は staging にだけ、`only_in_target` は本番にだけある。
-- `images.status` は `checked` か `unavailable`（Docker で判定できなかった。デプロイ時にもう一度判定する）。`services` は `build:` を持つサービスだけ（サービス名順。`image:` だけのサービスは常に pull）。`reason` は `args_differ`（`differing_args` に補間後の値が違った `build.args` のキー）、`build_differs`（引数以外のビルド定義が違う）、`not_built_in_source`、`image_missing`（staging のイメージがもうない）、`source_missing`（staging のリリースのファイルがもうない）。
+- `images.status` は `checked` か `unavailable`（Docker で判定できなかったか、staging のリリースのファイルがもう残っていない。デプロイ時にもう一度判定する）。`services` は `build:` を持つサービスだけ（サービス名順。`image:` だけのサービスは常に pull）。`reason` は `args_differ`（`differing_args` に補間後の値が違った `build.args` のキー）、`build_differs`（引数以外のビルド定義が違う）、`not_built_in_source`、`image_missing`（staging のイメージがもうない）。`source_missing`（staging のリリースのファイルがもうない）はデプロイログの判定にだけ現れる。
 - 昇格のデプロイログは、手順 5 で `==> <時刻> reuse Reusing images of <slug> deployment #<id>` の見出しのあと、サービスごとに `<service>: reusing <image>` か `<service>: building (<理由>)` の行を書く（理由の例 `build args differ: ASSET_HOST`）。ビルドに回ったサービスがあれば、続く `build` の手順でそれだけをビルドする。
 
 **デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。

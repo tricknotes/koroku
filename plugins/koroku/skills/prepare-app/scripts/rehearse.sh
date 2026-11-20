@@ -142,6 +142,26 @@ else
   echo "    (this Compose cannot list them: docker compose config --variables failed)"
 fi
 
+# When koroku promotes a staging release to production, it reuses the
+# staging image unless the interpolated build args differ. Args that read
+# variables usually differ per environment and force a rebuild (and bake
+# the value into the image): list them so they can be moved to runtime.
+echo "==> Build args that read variables"
+if raw="$("${base[@]}" config --no-interpolate 2>/dev/null)"; then
+  args="$(printf '%s\n' "$raw" | awk '
+    /^      args:/ { on = 1; next }
+    on && !/^        / { on = 0 }
+    on && /\$/ { sub(/^ +/, ""); print }')"
+  if [ -n "$args" ]; then
+    printf '%s\n' "$args" | sed 's/^/    /'
+    echo "    (environment-specific values here are baked into the image; read them at runtime instead)"
+  else
+    echo "    (none)"
+  fi
+else
+  echo "    (docker compose config --no-interpolate failed)"
+fi
+
 echo "==> Normalizing $file"
 services="$("${base[@]}" config --services)" || die "docker compose config failed (see above)"
 printf '%s\n' "$services" | grep -qx -- "$service" ||
