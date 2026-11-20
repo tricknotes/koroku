@@ -25,6 +25,7 @@ const (
 	StepFetch    = "fetch"
 	StepPrepare  = "prepare"
 	StepValidate = "validate"
+	StepReuse    = "reuse"
 	StepBuild    = "build"
 	StepPull     = "pull"
 	StepBackup   = "backup"

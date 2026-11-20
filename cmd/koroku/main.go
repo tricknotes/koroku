@@ -357,6 +357,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		}()
 	}
 	apiOpts.Deployer = engine
+	apiOpts.Promoter = engine
 	apiOpts.Ops = engine
 	apiOpts.Copier = engine
 	apiOpts.Tasks = engine

@@ -149,9 +149,17 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 
 	// 5. Build and pull.
 	if project.NeedsBuild() {
-		log.Step(StepBuild, "Building images")
-		if err := e.compose(ctx, merged, releaseDir, log, "build"); err != nil {
-			return false, fmt.Errorf("build: %w", err)
+		build := []string{"build"}
+		if d.PromotedFromID != nil {
+			// A promotion tags the promoted release's images where that is
+			// safe and builds only the rest (ARCHITECTURE 9.7).
+			build = append(build, e.reuseImages(ctx, d, app, repoProject, releaseDir, log)...)
+		}
+		if d.PromotedFromID == nil || len(build) > 1 {
+			log.Step(StepBuild, "Building images")
+			if err := e.compose(ctx, merged, releaseDir, log, build...); err != nil {
+				return false, fmt.Errorf("build: %w", err)
+			}
 		}
 	}
 	if project.NeedsPull() {

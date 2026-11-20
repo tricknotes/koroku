@@ -52,6 +52,8 @@ export const SCENARIOS = {
     'everything fine, and a copy of the production database into blog-staging is running',
   'copy-failed':
     'everything fine, but the last copy into blog-staging failed while loading and left its services stopped',
+  'promote-unpaired':
+    'everything fine, but blog has no promotion source (shop still promotes from shop-staging)',
 };
 
 function ago(ms) {
@@ -164,6 +166,7 @@ function app(slug, overrides = {}) {
     // Staging apps start protected (ARCHITECTURE 8.3).
     access_protection: !production,
     protection_exempt_paths: [],
+    promote_from: '',
     url,
     primary_url: url,
     pending_domains: 0,
@@ -316,6 +319,7 @@ function healthyApps() {
         environment: 'production',
         host_port: 20000,
         primary_url: 'https://www.example.org',
+        promote_from: 'blog-staging',
         current_deployment: blog,
         latest_deployment: blog,
       }),
@@ -336,6 +340,7 @@ function healthyApps() {
         environment: 'production',
         host_port: 20002,
         primary_url: 'https://shop.example.org',
+        promote_from: 'shop-staging',
         current_deployment: shop,
         latest_deployment: shop,
       }),
@@ -571,6 +576,11 @@ export function buildScenario(name) {
       state.apps.get('blog').env_source = 'dotenv';
       return state;
     }
+    case 'promote-unpaired': {
+      const state = scenario(healthyApps());
+      state.apps.get('blog').promote_from = '';
+      return state;
+    }
     case 'env-pending': {
       // Saved: one value changed and one variable added since the release
       // was deployed; the release still has one that was deleted since.
@@ -620,9 +630,115 @@ export function startRollback(state, slug, id) {
   return { deployment: started };
 }
 
+/**
+ * How a promotion to each production app turns out (ARCHITECTURE 9.7):
+ * blog reuses every image of blog-staging; shop bakes ASSET_HOST into its
+ * assets, so web is built again with production's value.
+ */
+const PROMOTIONS = {
+  blog: {
+    commits: [
+      'Try the new image pipeline',
+      'Cache rendered pages for anonymous visitors',
+    ],
+    env: { only_in_source: [], only_in_target: ['SENTRY_DSN'] },
+    images: [
+      { service: 'web', reuse: true, reason: '', differing_args: [] },
+      { service: 'worker', reuse: true, reason: '', differing_args: [] },
+    ],
+  },
+  shop: {
+    // Production is too far behind to count within the limit.
+    commits: null,
+    env: {
+      only_in_source: ['DEBUG_TOOLBAR'],
+      only_in_target: ['SENTRY_DSN', 'STRIPE_LIVE_KEY'],
+    },
+    images: [
+      {
+        service: 'web',
+        reuse: false,
+        reason: 'args_differ',
+        differing_args: ['ASSET_HOST'],
+      },
+      { service: 'worker', reuse: true, reason: '', differing_args: [] },
+    ],
+  },
+};
+
+/** `GET /api/apps/{slug}/promotion` for one app. */
+export function promotionPreview(state, target) {
+  const empty = {
+    status: 'ready',
+    reason: '',
+    source_app: target.promote_from ?? '',
+    source_deployment: null,
+    current_deployment: null,
+    commits: { status: 'unknown', list: [] },
+    env: { only_in_source: [], only_in_target: [] },
+    images: { status: 'unavailable', services: [] },
+  };
+  if (!target.promote_from) return { ...empty, status: 'not_paired' };
+  const source = state.apps.get(target.promote_from);
+  if (target.environment !== 'production') {
+    return { ...empty, status: 'unavailable', reason: 'not_production' };
+  }
+  if (!source) return { ...empty, status: 'not_paired', source_app: '' };
+  if (!source.current_deployment) {
+    return { ...empty, status: 'unavailable', reason: 'no_source_release' };
+  }
+  const plan = PROMOTIONS[target.slug] ?? PROMOTIONS.blog;
+  const same =
+    target.current_deployment?.commit_sha ===
+    source.current_deployment.commit_sha;
+  const list = same
+    ? []
+    : (plan.commits ?? []).map((message, index) => ({
+        sha:
+          index === 0 ? source.current_deployment.commit_sha : sha(700 + index),
+        message,
+        author: 'octo',
+        date: ago((index * 7 + 1) * HOUR),
+      }));
+  return {
+    ...empty,
+    source_deployment: source.current_deployment,
+    current_deployment: target.current_deployment,
+    commits: { status: same || plan.commits ? 'ok' : 'unknown', list },
+    env: plan.env,
+    images: { status: 'checked', services: plan.images },
+  };
+}
+
 /** Starts a deployment that the mock finishes by itself a little later. */
-export function startDeployment(state, slug, { ref, sha: wanted }) {
+export function startDeployment(
+  state,
+  slug,
+  { ref, sha: wanted, promote_from_deployment: promotedId },
+) {
   const target = state.apps.get(slug);
+  if (promotedId !== undefined) {
+    const source = state.apps.get(target.promote_from)?.current_deployment;
+    if (!source || source.id !== promotedId) return null;
+    const plan = PROMOTIONS[slug] ?? PROMOTIONS.blog;
+    const started = deployment(slug, source.commit_message, 0, {
+      ref: '',
+      commit_sha: source.commit_sha,
+      status: 'running',
+      queued_at: ago(1000),
+      started_at: ago(0),
+      finished_at: null,
+      promoted_from: {
+        deployment_id: source.id,
+        app_slug: target.promote_from,
+      },
+    });
+    started.mockImages = plan.images;
+    started.mockFinishAt = Date.now() + 12 * 1000;
+    state.deployments.get(slug).unshift(started);
+    target.latest_deployment = started;
+    return started;
+  }
   const started = deployment(slug, 'Deploy from the mock console', 0, {
     ref: ref || target.default_branch,
     status: 'running',

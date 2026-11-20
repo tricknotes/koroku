@@ -62,6 +62,7 @@ type appJSON struct {
 	EnvExamplePath       string            `json:"env_example_path"`
 	AccessProtection     bool              `json:"access_protection"`
 	ProtectionExempt     []string          `json:"protection_exempt_paths"`
+	PromoteFrom          string            `json:"promote_from"`
 	URL                  string            `json:"url"`
 	PrimaryURL           string            `json:"primary_url"`
 	PendingDomains       int               `json:"pending_domains"`
@@ -106,6 +107,11 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 	// The primary URL and the number of domains waiting for DNS let the app
 	// list render without one domain request per app.
 	out.PrimaryURL = out.URL
+	promoteFrom, err := s.promoteFromSlug(r.Context(), app)
+	if err != nil {
+		return appJSON{}, err
+	}
+	out.PromoteFrom = promoteFrom
 	domainList, err := s.store.ListDomains(r.Context(), app.ID)
 	if err != nil {
 		return appJSON{}, err
@@ -124,7 +130,7 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 			return appJSON{}, err
 		}
 		if err == nil {
-			j := s.deploymentToJSON(app, d)
+			j := s.deploymentToJSON(r.Context(), app, d)
 			out.CurrentDeployment = &j
 		}
 	}
@@ -133,7 +139,7 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		return appJSON{}, err
 	}
 	if len(latest) == 1 {
-		j := s.deploymentToJSON(app, latest[0])
+		j := s.deploymentToJSON(r.Context(), app, latest[0])
 		out.LatestDeployment = &j
 	}
 	return out, nil
@@ -167,6 +173,7 @@ type appInput struct {
 	EnvExamplePath       *string            `json:"env_example_path"`
 	AccessProtection     *bool              `json:"access_protection"`
 	ProtectionExempt     *[]string          `json:"protection_exempt_paths"`
+	PromoteFrom          *string            `json:"promote_from"`
 }
 
 // fieldErrors collects validation problems keyed by JSON field name.
@@ -478,6 +485,10 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	if in.WebPort == nil {
 		errs["web_port"] = "is required"
 	}
+	if err := s.applyPromoteFrom(r.Context(), in, &app, errs); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if len(errs) > 0 {
 		writeValidationError(w, errs)
 		return
@@ -530,6 +541,10 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	if in.Slug != nil && *in.Slug != app.Slug {
 		// The slug names the Compose project, its volumes and the hostname.
 		errs.add("slug", "cannot be changed")
+	}
+	if err := s.applyPromoteFrom(r.Context(), in, &app, errs); err != nil {
+		s.internalError(w, r, err)
+		return
 	}
 	if len(errs) > 0 {
 		writeValidationError(w, errs)

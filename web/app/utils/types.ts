@@ -149,6 +149,8 @@ export interface Deployment {
   source_deployment_id?: number | null;
   /** The release can be started again without building it. */
   rollback_available?: boolean;
+  /** The staging release a promotion deployed (ARCHITECTURE 9.7). */
+  promoted_from?: { deployment_id: number; app_slug: string } | null;
 }
 
 /** A named command kept for one-click runs (ARCHITECTURE 9.6). */
@@ -226,6 +228,8 @@ export interface App {
   access_protection?: boolean;
   /** Path prefixes that skip the access protection, e.g. `/webhooks/`. */
   protection_exempt_paths?: string[] | null;
+  /** The staging app a production app promotes from; '' when none. */
+  promote_from?: string;
 }
 
 export interface AppPatch {
@@ -250,6 +254,7 @@ export interface AppPatch {
   env_example_path?: string;
   access_protection?: boolean;
   protection_exempt_paths?: string[];
+  promote_from?: string;
 }
 
 export interface NewApp {
@@ -509,4 +514,39 @@ export interface Snapshot {
   target: string;
   /** What restic processed for it; `null` when it did not record a size. */
   size_bytes?: number | null;
+}
+
+/** Why a promotion cannot happen (`GET /api/apps/{slug}/promotion`). */
+export type PromotionReason =
+  | 'not_production'
+  | 'source_not_staging'
+  | 'repository_mismatch'
+  | 'no_source_release';
+
+/** Why a built service is built again instead of reusing staging's image. */
+export type ImageRebuildReason =
+  | 'args_differ'
+  | 'build_differs'
+  | 'not_built_in_source'
+  | 'image_missing'
+  | 'source_missing';
+
+export interface PromotionImage {
+  service: string;
+  reuse: boolean;
+  reason: ImageRebuildReason | '';
+  /** Keys of `build.args` whose values differ between the apps. */
+  differing_args: string[];
+}
+
+/** What promoting the paired staging release would do (ARCHITECTURE 9.7). */
+export interface Promotion {
+  status: 'ready' | 'not_paired' | 'unavailable';
+  reason: PromotionReason | '';
+  source_app: string;
+  source_deployment: Deployment | null;
+  current_deployment: Deployment | null;
+  commits: { status: 'ok' | 'unknown'; list: Commit[] };
+  env: { only_in_source: string[]; only_in_target: string[] };
+  images: { status: 'checked' | 'unavailable'; services: PromotionImage[] };
 }

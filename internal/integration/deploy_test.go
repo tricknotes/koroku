@@ -108,6 +108,7 @@ func newEnv(t *testing.T) *env {
 		Clock:    clock.System{},
 		Box:      box,
 		Deployer: engine,
+		Promoter: engine,
 		Ops:      engine,
 		Copier:   engine,
 		Tasks:    engine,
@@ -258,7 +259,7 @@ func (e *env) setEnv(slug string, vars map[string]string) {
 }
 
 // deploy starts a deployment and waits for its final status.
-func (e *env) deploy(slug string, body map[string]string) deployment {
+func (e *env) deploy(slug string, body any) deployment {
 	e.t.Helper()
 	var d deployment
 	if status := e.call(http.MethodPost, "/api/apps/"+slug+"/deployments", body, &d); status != http.StatusAccepted {

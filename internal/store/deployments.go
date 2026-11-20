@@ -61,13 +61,16 @@ type Deployment struct {
 	// SourceDeploymentID is set on a rollback: the deployment whose kept
 	// release it starts again (ARCHITECTURE 7.1).
 	SourceDeploymentID *int64
+	// PromotedFromID is the staging deployment this one promoted
+	// (ARCHITECTURE 9.7); nil for ordinary deployments.
+	PromotedFromID *int64
 }
 
 // RollbackRef is the ref recorded on rollbacks.
 const RollbackRef = "rollback"
 
 const deploymentColumns = `id, app_id, ref, commit_sha, commit_message, status, error,
-	queued_at, started_at, finished_at, source_deployment_id`
+	queued_at, started_at, finished_at, source_deployment_id, promoted_from_deployment_id`
 
 func scanDeployment(row rowScanner) (Deployment, error) {
 	var (
@@ -76,9 +79,10 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 		started  sql.NullInt64
 		finished sql.NullInt64
 		source   sql.NullInt64
+		promoted sql.NullInt64
 	)
 	err := row.Scan(&d.ID, &d.AppID, &d.Ref, &d.CommitSHA, &d.CommitMessage, &d.Status, &d.Error,
-		&queued, &started, &finished, &source)
+		&queued, &started, &finished, &source, &promoted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -91,6 +95,9 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 	if source.Valid {
 		d.SourceDeploymentID = &source.Int64
 	}
+	if promoted.Valid {
+		d.PromotedFromID = &promoted.Int64
+	}
 	return d, nil
 }
 
@@ -98,17 +105,24 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 // of the same app are canceled because only the newest request matters; their
 // IDs are returned.
 func (s *Store) EnqueueDeployment(ctx context.Context, appID int64, ref, sha, message string, now time.Time) (Deployment, []int64, error) {
-	return s.enqueue(ctx, appID, ref, sha, message, nil, now)
+	return s.enqueue(ctx, appID, ref, sha, message, nil, nil, now)
+}
+
+// EnqueuePromotion is EnqueueDeployment for a deployment that promotes
+// another app's deployment (ARCHITECTURE 9.7). promotedFrom may be nil.
+func (s *Store) EnqueuePromotion(ctx context.Context, appID int64, ref, sha, message string, promotedFrom *int64, now time.Time) (Deployment, []int64, error) {
+	return s.enqueue(ctx, appID, ref, sha, message, nil, promotedFrom, now)
 }
 
 // EnqueueRollback records a queued rollback to the kept release of source
 // (ARCHITECTURE 7.1), with source's commit. Like EnqueueDeployment, it
-// supersedes the app's other queued deployments.
+// supersedes the app's other queued deployments. A rollback is not a
+// promotion even when source was one.
 func (s *Store) EnqueueRollback(ctx context.Context, source Deployment, now time.Time) (Deployment, []int64, error) {
-	return s.enqueue(ctx, source.AppID, RollbackRef, source.CommitSHA, source.CommitMessage, &source.ID, now)
+	return s.enqueue(ctx, source.AppID, RollbackRef, source.CommitSHA, source.CommitMessage, &source.ID, nil, now)
 }
 
-func (s *Store) enqueue(ctx context.Context, appID int64, ref, sha, message string, source *int64, now time.Time) (Deployment, []int64, error) {
+func (s *Store) enqueue(ctx context.Context, appID int64, ref, sha, message string, source, promotedFrom *int64, now time.Time) (Deployment, []int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
@@ -138,8 +152,10 @@ func (s *Store) enqueue(ctx context.Context, appID int64, ref, sha, message stri
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
 	}
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO deployments (app_id, ref, commit_sha, commit_message, status, queued_at, source_deployment_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`, appID, ref, sha, message, StatusQueued, toMillis(now), nullInt(source))
+		`INSERT INTO deployments (app_id, ref, commit_sha, commit_message, status, queued_at,
+			source_deployment_id, promoted_from_deployment_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, appID, ref, sha, message, StatusQueued, toMillis(now),
+		nullInt(source), nullInt(promotedFrom))
 	if err != nil {
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
 	}

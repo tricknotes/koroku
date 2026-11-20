@@ -28,6 +28,7 @@ import {
   dockerUsage,
   newApp,
   newDomain,
+  promotionPreview,
   services,
   settle,
   settleBackups,
@@ -418,11 +419,16 @@ route('POST', '/api/apps/:slug/deployments', (context) => {
       limit_percent: limit,
     });
   }
-  return {
-    status: 202,
-    json: startDeployment(context.state, app.slug, context.body),
-  };
+  const started = startDeployment(context.state, app.slug, context.body);
+  if (!started) throw new HttpError(409, 'promotion_stale');
+  return { status: 202, json: started };
 });
+// The preview has a `status` field of its own: wrap it so that the router
+// does not take it for the HTTP status.
+route('GET', '/api/apps/:slug/promotion', (context) => ({
+  status: 200,
+  json: promotionPreview(context.state, appOf(context)),
+}));
 route('GET', '/api/deployments/:id', ({ state, params }) =>
   findDeployment(state, params.id),
 );

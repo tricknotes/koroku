@@ -27,7 +27,7 @@
 | 403 | `token_not_allowed` | API トークンでは使えない API（API トークンの節） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
 | 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found` | 対象がない |
-| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens`、`not_deployed` | 状態の衝突 |
+| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens`、`not_deployed`、`promotion_unavailable`、`promotion_stale` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
 | 429 | `rate_limited` | API トークンの利用回数の上限（1 分あたり 120 回）を超えた。`Retry-After` あり |
 | 507 | `disk_full`（`details.used_percent`、`details.limit_percent`） | ディスク使用率が上限超過でデプロイ拒否 |
@@ -222,6 +222,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "env_example_path": "",
   "access_protection": true,
   "protection_exempt_paths": ["/webhooks/"],
+  "promote_from": "",
   "url": "https://blog.dev.example.com",
   "primary_url": "https://www.example.org",
   "pending_domains": 0,
@@ -239,6 +240,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - `memory_limit` が空なら基盤の既定値。書式は数字 + 単位 `b` `k` `m` `g`（例 `512m`）。
 - 必要な環境変数の読み取り方（ARCHITECTURE 9.4）: `env_source` は `compose`（既定。Compose ファイルの `${VAR}`）/ `dotenv`（`.env.example`）/ `off`。`env_example_path` は `dotenv` で読むファイルのパスで、空なら `.env.example`。
 - アクセスの保護（ARCHITECTURE 8.3、2026-11-21）: `access_protection` が `true` なら、アプリのホスト名（自動割当と有効な独自ドメイン）を開けるのは管理 UI にログインした本人だけになる。`POST` で省略すると `environment` が `staging` なら `true`、`production` なら `false`。`protection_exempt_paths` は保護を外すパスの前方一致の一覧（既定は空）。各要素は `/` で始まり、英数字と `. _ ~ - / @ : +` だけからなる 200 文字以内で、20 件まで。`/` そのもの、`/.koroku` で始まるもの、`.` や `..` の区切り、`//` は `422 validation_failed`（`details.protection_exempt_paths`）。重複は 1 つにまとめる。どちらも変えると Caddy の設定を投入し直す。
+- `promote_from` は昇格元の staging アプリの slug（ARCHITECTURE 9.7）。空なら組み合わせなし。`PATCH` で設定できるのは、自分が `production`（同じリクエストで変える値を含む）で、相手が同じリポジトリの `staging` アプリのときだけ。違えば 422 `validation_failed`（`details.promote_from`）。空文字で外す。
 - バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。
 
 | メソッドとパス | 内容 |
@@ -367,23 +369,27 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
   "started_at": "2026-11-18T03:00:01Z",
   "finished_at": "2026-11-18T03:01:10Z",
   "source_deployment_id": null,
-  "rollback_available": true
+  "rollback_available": true,
+  "promoted_from": null
 }
 ```
 
 `status` は `queued` / `running` / `succeeded` / `failed` / `canceled`。`source_deployment_id` は、ロールバック（ARCHITECTURE 7.1）の記録なら戻す先のデプロイの ID（`ref` は `rollback`）、通常のデプロイなら `null`。`rollback_available` は、そのデプロイのリリースへ再ビルドなしで戻せるか（成功していて、ファイルが残っている。ロールバックの記録なら戻す先について）。
 
+`promoted_from` は昇格（ARCHITECTURE 9.7）で積んだデプロイのとき `{"deployment_id": 12, "app_slug": "blog-staging"}`、それ以外（ロールバックの記録を含む）と、昇格元のアプリを削除したあとは `null`。
+
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/deployments?limit=50` | `{"deployments": [デプロイ, ...]}`（新しい順、`limit` は 1〜200） |
-| `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}` か `{"sha": "<40 桁>"}`（両方あれば `sha` をデプロイし `ref` は表示用）。202 でデプロイ。保持しているリリースへ再ビルドなしで戻すときは `{"rollback_to": <デプロイの ID>}`（ほかのフィールドと同時には指定できない）。戻せなければ `422 release_unavailable`、別のアプリのデプロイなら `422 validation_failed`（`details.rollback_to`）。保持していない古い版へは、過去の `sha` を指定して再デプロイする。そのアプリでコマンドを実行中なら `409 busy` |
+| `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}` か `{"sha": "<40 桁>"}`（両方あれば `sha` をデプロイし `ref` は表示用）。202 でデプロイ。保持しているリリースへ再ビルドなしで戻すときは `{"rollback_to": <デプロイの ID>}`（ほかのフィールドと同時には指定できない）。戻せなければ `422 release_unavailable`、別のアプリのデプロイなら `422 validation_failed`（`details.rollback_to`）。保持していない古い版へは、過去の `sha` を指定して再デプロイする。そのアプリでコマンドを実行中なら `409 busy`。昇格は `{"promote_from_deployment": <昇格元のデプロイ ID>}`（下記） |
+| `GET /api/apps/{slug}/promotion` | 昇格の確認に出す差分（下記） |
 | `GET /api/deployments/{id}` | デプロイ |
 | `POST /api/deployments/{id}/cancel` | 202 でその時点のデプロイ。実行中のものは非同期に止まる。終了済みは `409 not_cancelable` |
 | `GET /api/deployments/{id}/logs` | デプロイログの SSE（下記）。`?format=text` を付けると、その時点までの全文を `text/plain` で返す |
 
 **ロールバックのログ**: `rollback_to` で作ったデプロイは `Queued rollback to deployment #<id> (<sha>).` で始まり、手順は `prepare` `validate` `start` `route` `check` `done`（取得、ビルド、pull はない）。
 
-**手順の見出し行**: デプロイログのうち `==> ` で始まる行は手順の区切りで、`==> <RFC 3339 の時刻> <キー> <表題>` の形をしている（例: `==> 2026-11-18T03:00:01Z build Building images`）。キーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done`、成功後の後片付けの `cleanup`、失敗時は `failed`（表題に最終状態と理由）と `rollback`。UI はこの行でログを手順に分け、次の見出しまでをその手順の所要時間とする。ビルドも pull も不要なアプリではその手順の行は出ない。
+**手順の見出し行**: デプロイログのうち `==> ` で始まる行は手順の区切りで、`==> <RFC 3339 の時刻> <キー> <表題>` の形をしている（例: `==> 2026-11-18T03:00:01Z build Building images`）。キーは `fetch` `prepare` `validate` `reuse`（昇格でのイメージの再利用、下記） `build` `pull` `backup` `start` `route` `check` `done`、成功後の後片付けの `cleanup`、失敗時は `failed`（表題に最終状態と理由）と `rollback`。UI はこの行でログを手順に分け、次の見出しまでをその手順の所要時間とする。ビルドも pull も不要なアプリではその手順の行は出ない。
 
 **失敗とロールバックの行**: 専用の API は持たず、UI は同じログから「旧版に戻ったか」を読み取る。次の行は UI が解釈するので、変えるときは `web/app/utils/deploy-steps.ts` と同時に直す。
 
@@ -398,6 +404,48 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | `koroku is shutting down; the previous release is not restored automatically.` | `koroku` の停止と重なり、ロールバックを実行しなかった |
 
 最初の見出しより前の行（`Queued deployment of <sha>.` など）は受付の記録。`koroku` の再起動で中断されたデプロイには `failed` の見出しがなく、末尾に `Failed: ...` の行だけが付く。
+
+### 昇格（2026-11-21）
+
+staging アプリの稼働中のリリースを、組み合わせた本番アプリ（`promote_from`）へ出す（ARCHITECTURE 9.7）。
+
+`POST /api/apps/{slug}/deployments` に `{"promote_from_deployment": 12}` を送ると、昇格元のデプロイの SHA を通常のデプロイとして積み、202 でデプロイ（`promoted_from` 付き）を返す。`ref`・`sha` と一緒には送れない（422）。本番アプリなので直近 10 分以内のログインが要る。
+
+| エラー | 意味 |
+| --- | --- |
+| `409 promotion_unavailable` | 昇格できない。`details.reason` は `not_paired`、`not_production`、`source_not_staging`、`repository_mismatch`、`no_source_release`（下の `reason` と同じ） |
+| `409 promotion_stale` | 指定したデプロイが、昇格元のアプリの今の稼働中リリースではない（確認のあとで staging が更新された）。UI は差分を読み直す |
+
+`GET /api/apps/{slug}/promotion` は確認画面のための差分。何も変えない。値は扱わないので、再ログインから 10 分を過ぎていても応答する。
+
+```json
+{
+  "status": "ready",
+  "reason": "",
+  "source_app": "blog-staging",
+  "source_deployment": { "id": 12, "commit_sha": "...", "...": "デプロイの形" },
+  "current_deployment": { "id": 9, "commit_sha": "...", "...": "デプロイの形" },
+  "commits": {
+    "status": "ok",
+    "list": [{"sha": "...", "message": "Fix login", "author": "octo", "date": "2026-11-20T03:00:00Z"}]
+  },
+  "env": { "only_in_source": ["DEBUG_TOOLBAR"], "only_in_target": ["SENTRY_DSN"] },
+  "images": {
+    "status": "checked",
+    "services": [
+      {"service": "web", "reuse": false, "reason": "args_differ", "differing_args": ["ASSET_HOST"]},
+      {"service": "worker", "reuse": true, "reason": "", "differing_args": []}
+    ]
+  }
+}
+```
+
+- `status` は `ready` / `not_paired` / `unavailable`。`not_paired` は `promote_from` が空で、ほかの項目は空か `null`。`unavailable` のとき `reason` は `not_production`（このアプリが本番でない）、`source_not_staging`、`repository_mismatch`（組み合わせたあとで環境やリポジトリを変えた）、`no_source_release`（staging が一度も成功していない）で、`source_deployment` 以降は `null` か空。
+- `source_deployment` は staging の稼働中リリース、`current_deployment` は本番の稼働中リリース（なければ `null`）。昇格の `POST` には `source_deployment.id` を送る。
+- `commits.status` は `ok` か `unknown`。`ok` の `list` は staging の SHA から本番の SHA の手前までの新しい順（同じ SHA なら空）。GitHub App で読めない、本番にリリースがない、30 件さかのぼっても本番の SHA が見つからない、のいずれかなら `unknown` で `list` は空。UI は両方の SHA とメッセージだけを出す。
+- `env` は片方にだけある環境変数のキー（key 順）。`only_in_source` は staging にだけ、`only_in_target` は本番にだけある。
+- `images.status` は `checked` か `unavailable`（Docker で判定できなかったか、staging のリリースのファイルがもう残っていない。デプロイ時にもう一度判定する）。`services` は `build:` を持つサービスだけ（サービス名順。`image:` だけのサービスは常に pull）。`reason` は `args_differ`（`differing_args` に補間後の値が違った `build.args` のキー）、`build_differs`（引数以外のビルド定義が違う）、`not_built_in_source`、`image_missing`（staging のイメージがもうない）。`source_missing`（staging のリリースのファイルがもうない）はデプロイログの判定にだけ現れる。
+- 昇格のデプロイログは、手順 5 で `==> <時刻> reuse Reusing images of <slug> deployment #<id>` の見出しのあと、サービスごとに `<service>: reusing <image>` か `<service>: building (<理由>)` の行を書く（理由の例 `build args differ: ASSET_HOST`）。ビルドに回ったサービスがあれば、続く `build` の手順でそれだけをビルドする。
 
 **デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。
 

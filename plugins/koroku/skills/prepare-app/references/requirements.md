@@ -88,6 +88,26 @@ services:
 - `.env.example` を使いたいリポジトリは、アプリ設定で照合元を「.env.example」に切り替えられる（パスも変えられる）。この場合はキーをすべて必須として扱い、キーの直前のコメント行を説明として出す。必須と任意を分けたいなら Compose の `${VAR}` を使う。
 - 照合元は利用者が koroku の画面（設定タブ）で選ぶ。リポジトリ側では決められない。
 
+## ビルド時と実行時の設定
+
+staging と本番は同じリポジトリを別々の koroku アプリとして動かす。本番アプリに昇格元の staging アプリを設定すると、本番のデプロイ画面から「staging で稼働中のリリースを本番へ昇格」できる。昇格では、`build:` を持つサービスごとに次を比べ、同じなら staging でビルドしたイメージにタグを付け直して使い、ビルドしない。
+
+- 同じコミット（ビルドコンテキストの中身が同じ）
+- 正規化したビルド定義（`context`、`dockerfile`、`target`、`additional_contexts` など）
+- **`build.args` の補間後の値**。`args: { ASSET_HOST: ${ASSET_HOST} }` のように環境変数から渡す引数は、staging と本番それぞれの環境変数で補間して比べる。違えばそのサービスは本番の値でビルドし直し、デプロイログと確認画面に違ったキーの名前（値は出さない）を出す。
+
+つまり koroku が見つけられるのは `build.args` の違いまで。Dockerfile の `RUN` には koroku の env ファイルは渡らないので、イメージに環境ごとの値が入る道は `build.args` と、リポジトリにコミットしたファイルだけ。どちらにも環境ごとの値を置かないようにすると、昇格でビルドが省け、staging で確かめたものと同じイメージが本番で動く。
+
+| よくある書き方 | 問題 | 直し方 |
+| --- | --- | --- |
+| Rails の `config.asset_host` をビルド時の値（`ARG ASSET_HOST` → `ENV`）で決め、`assets:precompile` で焼き込む | 本番でも staging の CDN を指す（koroku は引数の違いを見つけてビルドし直すが、ビルドは省けない） | `asset_host` は実行時に読む（`config.asset_host = ENV["ASSET_HOST"]` を production の設定に置き、`assets:precompile` の結果に URL を含めない）。プリコンパイルには `SECRET_KEY_BASE_DUMMY=1` など環境に依存しない値だけを渡す |
+| `.erb` のアセット（`application.js.erb` など）で `ENV` や環境ごとの設定を読む | ビルド時の値が焼き込まれる | `.erb` で環境ごとの値を読まない。値はレイアウトの `<meta>` や `data-*` 属性に実行時に書き出し、JS から読む |
+| JS のバンドラーが `process.env.API_URL` などをビルド時に埋め込む（Vite の `import.meta.env`、webpack の `DefinePlugin`、Next.js の `NEXT_PUBLIC_*` など） | ビルドした環境の値がバンドルに残る | 環境ごとの値はサーバーがページに実行時に書き出す（`<meta name="api-url" content="...">`、`window.__CONFIG__` を返すエンドポイントなど）。バンドルに埋め込むのは環境に依存しない値だけ |
+| `build.args` に `RAILS_ENV` や `NODE_ENV` を環境変数から渡す | staging と本番で値が違えば毎回ビルドし直しになる | staging も本番も同じ値（`production`）でビルドする。環境の違いは実行時の環境変数で表す |
+
+- 環境ごとの値を `build.args` に渡していても壊れはしない（koroku が違いを見つけてビルドし直す）。ただ、ビルドの時間と負荷がかかり、staging で確かめたイメージとは別物になる。
+- `build.args` に固定値（`NODE_VERSION: "22"` など）を書くのは問題ない。両方で同じ値になる。
+
 ## ポリシー検査（違反するとデプロイを拒否）
 
 正規化した `config` に対して検査する。アプリ設定の「検査を緩める」で個別に許可できる項目と、できない項目がある。

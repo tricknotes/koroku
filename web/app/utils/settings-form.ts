@@ -95,6 +95,8 @@ export default class SettingsForm {
   @tracked envExamplePath: string;
   @tracked accessProtection: boolean;
   @tracked exemptPaths: ExemptRow[];
+  /** Slug of the staging app to promote from; '' for none. */
+  @tracked promoteFrom: string;
 
   constructor(app: App) {
     this.defaultBranch = app.default_branch;
@@ -114,6 +116,7 @@ export default class SettingsForm {
     this.exemptPaths = (app.protection_exempt_paths ?? []).map(
       (path) => new ExemptRow(path),
     );
+    this.promoteFrom = app.promote_from ?? '';
   }
 
   /** The exempt paths as they would be saved: trimmed, no blanks or repeats. */
@@ -213,6 +216,9 @@ export default class SettingsForm {
       exempt.some((path, i) => path !== saved[i])
     ) {
       patch.protection_exempt_paths = exempt;
+    }
+    if (this.promoteFrom !== (app.promote_from ?? '')) {
+      patch.promote_from = this.promoteFrom;
     }
     return patch;
   }

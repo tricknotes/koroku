@@ -2,7 +2,7 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
-import { fn } from '@ember/helper';
+import { eq, fn } from '@ember/helper';
 import type Owner from '@ember/owner';
 import type RouterService from '@ember/routing/router-service';
 import Banner from 'koroku-console/components/banner';
@@ -22,6 +22,7 @@ import {
   setValue,
 } from 'koroku-console/utils/dom';
 import { fieldErrors, policyViolations } from 'koroku-console/utils/errors';
+import Loadable from 'koroku-console/utils/loadable';
 import SettingsForm, {
   ExemptRow,
   LimitRow,
@@ -54,6 +55,7 @@ const KNOWN_FIELDS = new Set([
   'env_example_path',
   'access_protection',
   'protection_exempt_paths',
+  'promote_from',
 ]);
 
 type ControlAction = 'start' | 'stop' | 'restart';
@@ -90,6 +92,15 @@ function repositoryName(app: App): string {
   return app.repo_full_name || app.repo_url;
 }
 
+/** Whether two apps deploy from the same repository. */
+function sameRepository(a: App, b: App): boolean {
+  const repo = (app: App) =>
+    app.repo_full_name
+      ? `https://github.com/${app.repo_full_name}.git`.toLowerCase()
+      : app.repo_url.toLowerCase();
+  return repo(a) !== '' && repo(a) === repo(b);
+}
+
 interface Signature {
   Args: { model: AppContext };
 }
@@ -118,9 +129,35 @@ export default class AppSettingsTemplate extends Component<Signature> {
   @tracked deleting = false;
   @tracked deleteError: unknown = null;
 
+  /** The other apps, for the promotion source (ARCHITECTURE 9.7). */
+  apps = new Loadable<App[]>(() => this.api.listApps());
+
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
     this.form = new SettingsForm(this.app);
+    if (this.app.environment === 'production' || this.app.promote_from) {
+      void this.apps.load();
+    }
+  }
+
+  get isProductionForm(): boolean {
+    return this.form.environment === 'production';
+  }
+
+  /** Staging apps of the same repository, which this app can promote from. */
+  get promotionSources(): App[] {
+    return (this.apps.value ?? []).filter(
+      (other) =>
+        other.slug !== this.app.slug &&
+        other.environment === 'staging' &&
+        sameRepository(other, this.app),
+    );
+  }
+
+  /** The saved source, kept as an option even when it no longer fits. */
+  get savedSourceMissing(): boolean {
+    const saved = this.app.promote_from ?? '';
+    return saved !== '' && !this.promotionSources.some((a) => a.slug === saved);
   }
 
   get app(): App {
@@ -165,6 +202,12 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   setEnvironment = (event: Event) => {
     this.form.environment = inputValue(event) as Environment;
+    if (this.form.environment === 'production') void this.apps.load();
+  };
+
+  setPromoteFrom = (event: Event) => {
+    this.form.promoteFrom = inputValue(event);
+    this.touch();
   };
 
   setEnvSource = (event: Event) => {
@@ -642,6 +685,62 @@ export default class AppSettingsTemplate extends Component<Signature> {
           {{/if}}
         </div>
       </div>
+
+      {{#if this.isProductionForm}}
+        <div class="form-group" data-test-promotion-group>
+          <div>
+            <h2 class="form-group-title">昇格元</h2>
+            <p class="form-group-description">
+              同じリポジトリのステージングアプリを選ぶと、デプロイの画面から、そのアプリで稼働中のリリースを本番へ昇格できます。ビルド引数が同じなら、ビルドしたイメージも再利用します。
+            </p>
+          </div>
+          <div class="form-group-body">
+            <FormField
+              class="field-wide"
+              @label="昇格元のステージングアプリ"
+              @hint={{if
+                this.apps.error
+                "アプリの一覧を取得できませんでした。"
+                ""
+              }}
+              @error={{this.errors.promote_from}}
+              data-test-field-group="promote_from"
+              as |field|
+            >
+              <select
+                id={{field.id}}
+                aria-describedby={{field.describedBy}}
+                aria-invalid={{field.invalid}}
+                data-test-field="promote_from"
+                {{on "change" this.setPromoteFrom}}
+              >
+                <option value="" selected={{eq this.form.promoteFrom ""}}>
+                  なし
+                </option>
+                {{#if this.savedSourceMissing}}
+                  <option
+                    value={{this.app.promote_from}}
+                    selected={{eq this.form.promoteFrom this.app.promote_from}}
+                  >{{this.app.promote_from}}（条件に合いません）</option>
+                {{/if}}
+                {{#each this.promotionSources key="slug" as |other|}}
+                  <option
+                    value={{other.slug}}
+                    selected={{eq this.form.promoteFrom other.slug}}
+                  >{{other.slug}}</option>
+                {{/each}}
+              </select>
+            </FormField>
+            {{#if this.apps.loaded}}
+              {{#unless this.promotionSources.length}}
+                <p class="readout-note" data-test-no-promotion-sources>
+                  同じリポジトリのステージングアプリがありません。
+                </p>
+              {{/unless}}
+            {{/if}}
+          </div>
+        </div>
+      {{/if}}
 
       <div class="form-group" data-test-env-source-group>
         <div>

@@ -131,12 +131,29 @@ function plan(entry, context) {
     );
     // The build takes whatever the other steps leave of the total.
     const fixed = (context.backup ? 30 : 22) * SECOND * scale;
-    step(
-      'build',
-      'Building images',
-      buildLines(),
-      Math.max(4 * SECOND * scale, total - fixed),
-    );
+    const promoted = entry.promoted_from;
+    const images = entry.mockImages ?? [];
+    if (promoted) {
+      const source = `koroku-${promoted.app_slug}`;
+      step(
+        'reuse',
+        `Reusing images of ${promoted.app_slug} deployment #${promoted.deployment_id}`,
+        images.map((image) =>
+          image.reuse
+            ? `${image.service}: reusing ${source}-${image.service}:r${promoted.deployment_id}`
+            : `${image.service}: building (build args differ: ${image.differing_args.join(', ')})`,
+        ),
+        2 * SECOND * scale,
+      );
+    }
+    if (!promoted || images.some((image) => !image.reuse)) {
+      step(
+        'build',
+        'Building images',
+        buildLines(),
+        Math.max(4 * SECOND * scale, total - fixed),
+      );
+    }
     step(
       'pull',
       'Pulling images',
