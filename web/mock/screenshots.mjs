@@ -122,7 +122,7 @@ const SHOTS = [
     click: '[data-test-revoke-others]',
     themes: ['light'],
   },
-  // API tokens for Claude Code (ARCHITECTURE 10.4).
+  // API tokens for Claude Code (ARCHITECTURE 10.5).
   {
     name: 'security-tokens-empty',
     path: '/security?scenario=empty',

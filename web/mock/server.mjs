@@ -719,7 +719,7 @@ route('GET', '/api/login-events', () => ({
   ],
 }));
 
-// Read-only API tokens (ARCHITECTURE 10.4). The values are made up and
+// Read-only API tokens (ARCHITECTURE 10.5). The values are made up and
 // match the documented shape only.
 function tokensOf(state, scenario) {
   state.tokens ??=
