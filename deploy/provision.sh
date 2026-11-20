@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Provision a fresh host for koroku: Ubuntu 24.04, amd64, run as root.
+# Provision a fresh host for koroku: Ubuntu 24.04 or 26.04, amd64, run as root.
 #
 #   sudo ./provision.sh [options] /path/to/koroku
 #
@@ -28,6 +28,9 @@ readonly MIN_CADDY_VERSION=2.7.0
 # checksum is in the SHA256SUMS file of that release.
 readonly RESTIC_VERSION=0.19.1
 readonly RESTIC_SHA256=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c
+
+# Ubuntu releases (VERSION_ID) the script is tested on, amd64 only.
+readonly SUPPORTED_UBUNTU_VERSIONS=(24.04 26.04)
 
 readonly SWAP_FILE=/swapfile
 readonly SWAP_SIZE_MIB=2048
@@ -62,7 +65,7 @@ usage() {
 Usage: provision.sh [options] /path/to/koroku
 
 Sets up Docker, Caddy, restic, swap, the firewall, key-only SSH and the koroku
-service on a fresh Ubuntu 24.04 (amd64) host. Run it as root. It can be run
+service on a fresh Ubuntu 24.04 or 26.04 (amd64) host. Run it as root. It can be run
 again safely.
 
 Options:
@@ -74,7 +77,8 @@ Options:
   --keep-ssh-password
                   Leave SSH password login as it is. By default it is turned
                   off once the user who ran sudo has an authorized SSH key.
-  --force         Run on a system other than Ubuntu 24.04 amd64 (untested).
+  --force         Run on a system other than Ubuntu 24.04 or 26.04 amd64
+                  (untested).
   -h, --help      Show this help.
 EOF
 }
@@ -164,9 +168,15 @@ check_host() {
     arch=$(dpkg --print-architecture)
   fi
   info "system: ${id:-unknown} ${version:-unknown} (${codename:-unknown}), ${arch:-unknown}"
-  if [[ $id != ubuntu || $version != 24.04 || $arch != amd64 ]]; then
+  local supported=0 v
+  for v in "${SUPPORTED_UBUNTU_VERSIONS[@]}"; do
+    if [[ $version == "$v" ]]; then
+      supported=1
+    fi
+  done
+  if [[ $id != ubuntu || $supported != 1 || $arch != amd64 ]]; then
     if [[ $FORCE != 1 ]]; then
-      die "this script supports Ubuntu 24.04 amd64 only (use --force to try anyway)"
+      die "this script supports Ubuntu ${SUPPORTED_UBUNTU_VERSIONS[*]} on amd64 only (use --force to try anyway)"
     fi
     note "running on an unsupported system because of --force"
   fi

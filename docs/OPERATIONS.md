@@ -11,7 +11,7 @@
 3. DNS を向け、`/etc/koroku/config.toml` と鍵ファイルを用意する（[SETUP.md](SETUP.md)）。
 4. `koroku` を起動し、`koroku check` で外部サービスまで含めて確かめる。必要なら再起動（カーネル更新の反映）する。
 
-対象は Ubuntu 24.04（amd64）の新規 VPS 1 台。それ以外の OS ではスクリプトが止まる（`--force` で続行できるが未確認）。
+対象は Ubuntu 24.04 か 26.04（amd64）の新規 VPS 1 台。それ以外の OS ではスクリプトが止まる（`--force` で続行できるが未確認）。
 
 ## 2. ビルド
 
@@ -38,7 +38,7 @@ sudo ./deploy/provision.sh ./koroku
 | `--skip-upgrade` | 導入済みパッケージを更新しない。アプリが動いているホストで設定だけ当て直すときに使う（Docker が更新されると全コンテナが再起動するため） |
 | `--http3` | `443/udp` も開ける（既定は閉じたまま。8.2 節） |
 | `--keep-ssh-password` | SSH のパスワードログインを止める手順（13）を飛ばす |
-| `--force` | Ubuntu 24.04 amd64 以外でも続行する（未確認） |
+| `--force` | Ubuntu 24.04、26.04 の amd64 以外でも続行する（未確認） |
 
 ### スクリプトがすること
 
@@ -134,7 +134,7 @@ sudo ./deploy/provision.sh ./koroku
 
 ### 8.1 restic は公式リリースのバイナリを使う
 
-Ubuntu 24.04 の apt が配る restic は 0.16.4（2024 年初めの版）で、24.04 の間は 0.16 系のまま変わらない。`restore <snapshot>:<subpath>` と `backup --stdin --stdin-filename` は 0.16 でも使えるが、バックアップは「復元できること」がすべてなので、修正が入り続けている現行版に固定するほうを選んだ。
+Ubuntu 24.04 の apt が配る restic は 0.16.4（2024 年初めの版）で、24.04 の間は 0.16 系のまま変わらない（26.04 は 0.18.1）。`restore <snapshot>:<subpath>` と `backup --stdin --stdin-filename` は 0.16 でも使えるが、バックアップは「復元できること」がすべてなので、修正が入り続けている現行版に固定するほうを選んだ。OS の版によって restic の版が変わらないことも利点になる。
 
 - `provision.sh` の `RESTIC_VERSION` と `RESTIC_SHA256` に版とチェックサムを固定し、ダウンロードしたファイルを照合してから `/usr/local/bin/restic` に置く。
 - 欠点は、更新が自動で届かないこと。上げるときは 2 つの値を書き換えてスクリプトを再実行する（チェックサムはそのリリースの `SHA256SUMS` にある）。固定した版より新しいものが入っていれば、スクリプトは何もしない。
@@ -241,18 +241,18 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 
 ## 検証済みの範囲
 
-実機がないので、次の方法で確かめた（2026-11-18。SSH の手順は 2026-11-20）。
+実機がないので、次の方法で確かめた（2026-11-18。SSH の手順は 2026-11-20、Ubuntu 26.04 は 2026-11-21）。
 
 | 確認 | 方法 | 結果 |
 | --- | --- | --- |
 | シェルの構文と静的検査 | 使い捨ての `ubuntu:24.04` コンテナで `bash -n` と `shellcheck`（0.9.0） | 指摘なし |
 | unit ファイル | `systemd-analyze verify`（systemd 255）。`koroku.service` と、パッケージの `caddy.service` に drop-in を重ねたもの | 警告なし |
 | Caddy の初期設定 | `caddy validate`（Caddy 2.11.9） | `Valid configuration` |
-| スクリプトの通し実行 | `deploy/test/dry-run.sh`。使い捨ての `ubuntu:24.04` コンテナで 3 回続けて実行 | 42 項目すべて成功 |
+| スクリプトの通し実行 | `deploy/test/dry-run.sh`。使い捨ての `ubuntu:24.04`（24.04.5）と `ubuntu:26.04`（26.04.1）のコンテナで、それぞれ 3 回続けて実行 | 24.04 は 42 項目、26.04 は 41 項目（apt の restic が古いことの確認は 24.04 だけ）すべて成功 |
 
 通し実行で確かめたこと:
 
-- Docker、Caddy の apt リポジトリが 24.04 で解決でき、Docker 29.10.0、Compose 5.8.0、Caddy 2.11.9 が入り、版の確認を通る。restic 0.19.1 はチェックサムが一致する。Ubuntu 自身の apt が配るのは Caddy 2.6.2、restic 0.16.4。
+- Docker、Caddy の apt リポジトリが 24.04（noble）と 26.04（resolute）の両方で解決でき、どちらでも Docker 29.10.0、Compose 5.8.0、Caddy 2.11.9 が入り、版の確認を通る。restic 0.19.1 はチェックサムが一致する。24.04 の Ubuntu 自身の apt が配るのは Caddy 2.6.2、restic 0.16.4。26.04 の apt の restic は 0.18.1。
 - 既存の `daemon.json`（無関係な設定と別のログオプション入り）に合成され、元の設定が残る。壊れた `daemon.json` は上書きせずに止まる。
 - 2 回目、3 回目の実行で、管理対象のファイル、鍵、権限が 1 バイトも変わらない。Docker と Caddy を再起動しない。swap と ufw を二重に有効化しない。
 - `config.toml` に例の値がある間は `koroku` を起動せず、書き換えたあとの実行で起動する。
@@ -266,7 +266,7 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 
 最初の VPS で、上から順に確かめる。
 
-- [ ] **スクリプトの通し実行**: 事業者の Ubuntu 24.04 イメージで最後まで通るか。特に、初回起動直後の `unattended-upgrades` と apt のロックが競合したときの待ち合わせ、`full-upgrade` 中に対話プロンプトで止まらないこと。
+- [ ] **スクリプトの通し実行**: 事業者の Ubuntu 24.04 と 26.04 のイメージで最後まで通るか（26.04 は、対応に加える前に `--force` を付けて最後まで通ることを確かめた。2026-11-21）。特に、初回起動直後の `unattended-upgrades` と apt のロックが競合したときの待ち合わせ、`full-upgrade` 中に対話プロンプトで止まらないこと。
 - [ ] **カーネル更新**: `REBOOT REQUIRED` が表示されるか。再起動後に Docker、Caddy、`koroku`、アプリのコンテナ、swap が自動で戻るか。
 - [ ] **`koroku.service`**: systemd の下で起動するか。hardening を付けた状態で、`docker compose` の `build` / `pull` / `up` / `logs` / `exec`、`git fetch`、`restic` の `backup` / `restore`（volume への書き戻しを含む）が通るか。
 - [ ] **停止動作**: デプロイ中に `systemctl restart koroku` したとき、8.4 節のとおりになるか（デプロイは `failed (interrupted)`、子プロセスは残らない、アプリのコンテナは動き続ける）。

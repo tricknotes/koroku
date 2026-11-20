@@ -17,8 +17,9 @@ bin/dev go test -tags integration ./...
 # フロントエンド
 bin/dev sh -c 'cd web && pnpm install --frozen-lockfile && pnpm lint && pnpm test'
 
-# プロビジョニングスクリプトの通し実行（使い捨ての ubuntu:24.04 コンテナで）
+# プロビジョニングスクリプトの通し実行（使い捨ての Ubuntu コンテナで。既定は 24.04）
 bin/dev make build && deploy/test/dry-run.sh bin/koroku
+IMAGE=ubuntu:26.04 deploy/test/dry-run.sh bin/koroku
 
 # 対話シェル
 bin/dev
