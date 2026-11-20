@@ -756,6 +756,30 @@ func TestNewerDeploymentSupersedesQueued(t *testing.T) {
 	}
 }
 
+// TestPushDeploymentSupersedesQueued: a deployment started by a push
+// (ARCHITECTURE 5.2) is recorded as such and replaces an older queued one.
+func TestPushDeploymentSupersedesQueued(t *testing.T) {
+	h := newHarness(t, nil)
+	app := h.createApp("blog")
+
+	first := h.enqueue("blog", shaA)
+	pushed, err := h.engine.EnqueuePush(context.Background(), app, "main", shaB, "Fix", "octo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+	got := h.wait(pushed.ID)
+	if got.Status != store.StatusSucceeded || got.Trigger != store.TriggerPush || got.Pusher != "octo" || got.Ref != "main" {
+		t.Fatalf("pushed = %+v", got)
+	}
+	if old, _ := h.store.GetDeployment(context.Background(), first.ID); old.Status != store.StatusCanceled {
+		t.Errorf("first = %+v", old)
+	}
+	if !strings.Contains(h.log("blog", pushed.ID), "pushed to main by octo") {
+		t.Errorf("log:\n%s", h.log("blog", pushed.ID))
+	}
+}
+
 func TestCancelQueuedDeployment(t *testing.T) {
 	h := newHarness(t, nil)
 	h.createApp("blog")

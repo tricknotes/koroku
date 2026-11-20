@@ -70,6 +70,12 @@ access_log_dir = "/var/log/caddy/apps"
 # installations on accounts not listed here (or the allowed user's own) are
 # ignored.
 # installation_accounts = ["my-org"]
+# Secret of the App's webhook, for automatic deployment on push (an app
+# setting, off by default). Set the same value in the App's settings with
+# Webhook Active, URL https://<console_host>/webhooks/github and the Push
+# event. At least 20 characters; generate one with: openssl rand -hex 32
+# Without it every webhook delivery is refused.
+# webhook_secret = "..."
 # Turn on two-factor authentication for that GitHub account: GitHub asks
 # for it when you sign in to the console. koroku cannot check it itself.
 

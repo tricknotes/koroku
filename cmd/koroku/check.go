@@ -15,6 +15,7 @@ import (
 	"github.com/tricknotes/koroku/internal/objstore"
 	"github.com/tricknotes/koroku/internal/preflight"
 	"github.com/tricknotes/koroku/internal/runner"
+	"github.com/tricknotes/koroku/internal/store"
 )
 
 // checkTimeout bounds the whole of `koroku check`; restic on a slow link is
@@ -39,6 +40,8 @@ func check(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	defer cancel()
 
 	deps := preflight.Deps{Config: cfg}
+	// Read-only: check never migrates or writes the database.
+	deps.AutoDeployApps, deps.AutoDeployErr = store.AutoDeployApps(ctx, cfg.DBPath())
 	if cfg.GitHub.Configured() {
 		if gh, err := newGitHubClient(cfg.GitHub); err != nil {
 			deps.GitHubErr = err

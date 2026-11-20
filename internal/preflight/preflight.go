@@ -73,6 +73,12 @@ type GitHubApp interface {
 	Installations(ctx context.Context) ([]github.Installation, error)
 }
 
+// GitHubWebhook reads the App's webhook settings. The client of Deps.GitHub
+// implements it; a fake may not.
+type GitHubWebhook interface {
+	WebhookConfig(ctx context.Context) (github.WebhookConfig, error)
+}
+
 // GitHubUsers looks up public accounts.
 type GitHubUsers interface {
 	UserByID(ctx context.Context, id int64) (github.User, error)
@@ -101,6 +107,10 @@ type Deps struct {
 	GitHub    GitHubApp
 	GitHubErr error
 	Users     GitHubUsers
+	// AutoDeployApps are the apps that deploy on push (ARCHITECTURE 5.2);
+	// AutoDeployErr says why they could not be read.
+	AutoDeployApps []string
+	AutoDeployErr  error
 
 	// Objects is the bucket of [storage], nil when it is not configured.
 	Objects objstore.Store
@@ -347,7 +357,56 @@ func checkGitHub(ctx context.Context, d Deps) []Result {
 		out = append(out, installationResult(ctx, d.GitHub, app))
 	}
 	out = append(out, userResult(ctx, d.Users, cfg.AllowedUserID))
+	out = append(out, webhookResult(ctx, d, app, err == nil))
 	return out
+}
+
+// webhookResult checks what automatic deployment on push needs
+// (ARCHITECTURE 5.2): the webhook secret, the App's subscription to the
+// push event and the webhook URL. Nothing is needed while no app uses it.
+func webhookResult(ctx context.Context, d Deps, app github.App, appKnown bool) Result {
+	const name = "github.webhook"
+	const hint = "docs/SETUP.md 4"
+	wantURL := d.Config.ConsoleURL + "/webhooks/github"
+	if d.AutoDeployErr != nil {
+		return warn(name, "", "could not read which apps deploy on push: %v", d.AutoDeployErr)
+	}
+	apps := d.AutoDeployApps
+	secret := d.Config.GitHub.WebhookSecret != ""
+	if len(apps) == 0 && !secret {
+		return skip(name, "no app deploys on push")
+	}
+	if !secret {
+		return warn(name, "set [github] webhook_secret to the App's webhook secret and restart koroku ("+hint+")",
+			"%s deploy on push, but [github] webhook_secret is not set: every push is refused", strings.Join(apps, ", "))
+	}
+	if !appKnown {
+		return skip(name, "webhook secret is set; the App could not be read to check its events")
+	}
+	if !slices.Contains(app.Events, "push") {
+		if len(apps) == 0 {
+			return ok(name, "webhook secret is set; no app deploys on push (the App does not subscribe to push events)")
+		}
+		return warn(name, "subscribe the App to the Push event under Permissions & events > Subscribe to events ("+hint+")",
+			"App %q does not subscribe to push events: %s will not deploy on push", app.Slug, strings.Join(apps, ", "))
+	}
+	if hooks, ok := d.GitHub.(GitHubWebhook); ok {
+		hook, err := hooks.WebhookConfig(ctx)
+		switch {
+		case err != nil:
+			return warn(name, "", "could not read the App's webhook settings: %v", err)
+		case hook.URL != wantURL:
+			return warn(name, "set Webhook URL to "+wantURL+" and Active on ("+hint+")",
+				"the App delivers its webhook to %q", hook.URL)
+		case hook.ContentType != "json":
+			return warn(name, "the App's webhook must send application/json ("+hint+")",
+				"the App's webhook content type is %q", hook.ContentType)
+		}
+	}
+	if len(apps) == 0 {
+		return ok(name, "the App delivers push events to %s; no app deploys on push yet", wantURL)
+	}
+	return ok(name, "the App delivers push events to %s (keep the webhook Active); %s deploy on push", wantURL, strings.Join(apps, ", "))
 }
 
 func permissionResult(app github.App, consoleURL string) Result {

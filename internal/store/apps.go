@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -74,7 +77,11 @@ type App struct {
 	ProtectionExemptPaths []string
 	// PromoteFromAppID is the staging app this (production) app promotes
 	// releases from (ARCHITECTURE 9.7). nil: not paired.
-	PromoteFromAppID    *int64
+	PromoteFromAppID *int64
+	// AutoDeploy deploys the head of AutoDeployBranch when it is pushed
+	// (ARCHITECTURE 5.2). AutoDeployBranch "" follows DefaultBranch.
+	AutoDeploy          bool
+	AutoDeployBranch    string
 	CurrentDeploymentID *int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -91,6 +98,20 @@ func (a App) CloneURL() string {
 	return ""
 }
 
+// EffectiveAutoDeployBranch is the branch whose pushes deploy the app
+// when AutoDeploy is on.
+func (a App) EffectiveAutoDeployBranch() string {
+	if a.AutoDeployBranch != "" {
+		return a.AutoDeployBranch
+	}
+	return a.DefaultBranch
+}
+
+// UsesGitHubApp reports whether the app's repository is fetched through
+// the GitHub App (repo_full_name without an explicit repo_url). Only such
+// apps are mirrored to GitHub deployments and can deploy on push.
+func (a App) UsesGitHubApp() bool { return a.RepoFullName != "" && a.RepoURL == "" }
+
 // ProjectName is the Compose project name, which isolates the app's
 // containers, networks and volumes.
 func (a App) ProjectName() string { return "koroku-" + a.Slug }
@@ -101,7 +122,8 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
 	env_source, env_example_path,
 	load_hook_service, load_hook_command, post_load_service, post_load_command,
-	access_protection, protection_exempt_paths, promote_from_app_id`
+	access_protection, protection_exempt_paths, promote_from_app_id,
+	auto_deploy, auto_deploy_branch`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -125,7 +147,8 @@ func scanApp(row rowScanner) (App, error) {
 		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy,
 		&a.EnvSource, &a.EnvExamplePath,
 		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand,
-		&a.AccessProtection, &exemptJSON, &promoteFrom)
+		&a.AccessProtection, &exemptJSON, &promoteFrom,
+		&a.AutoDeploy, &a.AutoDeployBranch)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -251,15 +274,17 @@ func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEn
 			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
 			env_source, env_example_path,
 			load_hook_service, load_hook_command, post_load_service, post_load_command,
-			access_protection, protection_exempt_paths, promote_from_app_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			access_protection, protection_exempt_paths, promote_from_app_id,
+			auto_deploy, auto_deploy_branch)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now),
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
-		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID))
+		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
+		app.AutoDeploy, app.AutoDeployBranch)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -376,7 +401,8 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			backup_exclude_volumes = ?, dump_hook_service = ?, dump_hook_command = ?, backup_before_deploy = ?,
 			env_source = ?, env_example_path = ?,
 			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?,
-			access_protection = ?, protection_exempt_paths = ?, promote_from_app_id = ?
+			access_protection = ?, protection_exempt_paths = ?, promote_from_app_id = ?,
+			auto_deploy = ?, auto_deploy_branch = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
@@ -384,7 +410,8 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
-		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID), app.ID)
+		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
+		app.AutoDeploy, app.AutoDeployBranch, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}
@@ -408,6 +435,45 @@ func (s *Store) DeleteApp(ctx context.Context, appID int64) error {
 		return fmt.Errorf("delete app: %w", err)
 	}
 	return requireOneRow(res, "delete app")
+}
+
+// AutoDeployApps returns the slugs of the apps that deploy on push
+// (ARCHITECTURE 5.2), reading the database at path without changing it:
+// it opens the file read-only and applies no migrations. `koroku check`
+// uses it next to a running koroku. A missing database, or one from before
+// the feature, has no such apps.
+func AutoDeployApps(ctx context.Context, path string) ([]string, error) {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	query := url.Values{}
+	query.Add("mode", "ro")
+	query.Add("_pragma", "busy_timeout(5000)")
+	db, err := sql.Open("sqlite", "file:"+(&url.URL{Path: path}).EscapedPath()+"?"+query.Encode())
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+	rows, err := db.QueryContext(ctx, `SELECT slug FROM apps WHERE auto_deploy = 1 ORDER BY slug`)
+	if err != nil {
+		if msg := err.Error(); strings.Contains(msg, "no such column") || strings.Contains(msg, "no such table") {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list apps that deploy on push: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, fmt.Errorf("list apps that deploy on push: %w", err)
+		}
+		out = append(out, slug)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list apps that deploy on push: %w", err)
+	}
+	return out, nil
 }
 
 func requireOneRow(res sql.Result, op string) error {
