@@ -22,11 +22,14 @@
 | --- | --- | --- |
 | 400 | `invalid_json`、`invalid_limit` など | リクエストの形が不正 |
 | 401 | `unauthenticated` | 未ログイン（M3 以降、`/auth/*` と `GET /api/session` 以外のすべて） |
+| 401 | `invalid_token` | `Authorization: Bearer` の API トークンが期限切れ・失効・形式違い（API トークンの節） |
 | 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない（M3） |
+| 403 | `token_not_allowed` | API トークンでは使えない API（API トークンの節） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
 | 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found` | 対象がない |
-| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy` | 状態の衝突 |
+| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
+| 429 | `rate_limited` | API トークンの利用回数の上限（1 分あたり 120 回）を超えた。`Retry-After` あり |
 | 507 | `disk_full`（`details.used_percent`、`details.limit_percent`） | ディスク使用率が上限超過でデプロイ拒否 |
 | 500 | `internal` | サーバー側の失敗（詳細はサーバーログ） |
 | 503 | `not_configured` | その機能に必要な設定（GitHub App、オブジェクトストレージなど）がない |
@@ -47,6 +50,43 @@
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
 再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+
+## API トークン（2026-11-21）
+
+手元の Claude Code などが koroku の状態を読むための、読み取り専用のトークン（ARCHITECTURE 10.4）。管理 UI の「セキュリティ」画面で発行する。
+
+**管理（セッション Cookie でだけ使える）**
+
+トークンの形: `{"id": "3fa9c2d17b40e815", "name": "ノート PC の Claude Code", "created_at": "...", "expires_at": "...", "last_used_at": null, "last_used_ip": ""}`。`last_used_at` は 1 分単位の目安で、まだ使われていなければ `null`。
+
+| メソッドとパス | 内容 |
+| --- | --- |
+| `GET /api/tokens` | 期限内のトークンの一覧（新しい順）。`{"tokens": [トークン, ...]}` |
+| `POST /api/tokens` | 発行。ボディ `{"name": "...", "expires_in_days": 30}`。`name` は 1〜100 文字、`expires_in_days` は `7` / `30` / `90` のいずれか（それ以外は 422）。直近 10 分以内のログインでなければ `403 reauth_required`。有効なトークンが 20 個あれば `409 too_many_tokens`。201 で `{"token": トークン, "value": "koroku_ro_..."}`。**`value` はこの応答でしか返らない** |
+| `DELETE /api/tokens/{id}` | 204。失効させる（再ログインは要らない）。なければ `404 token_not_found` |
+
+**使い方**: `Authorization: Bearer koroku_ro_...` を付けて `GET` する。クエリパラメーターや Cookie では受けない。
+
+```sh
+curl -fsS -H "Authorization: Bearer $KOROKU_TOKEN" "$KOROKU_URL/api/apps"
+```
+
+トークンで使えるのは次の `GET` だけ。
+
+| パス | 内容 |
+| --- | --- |
+| `/api/apps`、`/api/apps/{slug}` | アプリ |
+| `/api/apps/{slug}/services` | サービスの状態 |
+| `/api/apps/{slug}/deployments`、`/api/deployments/{id}` | デプロイ |
+| `/api/deployments/{id}/logs` | デプロイログ（SSE、`?format=text` で全文） |
+| `/api/apps/{slug}/logs/history`、`/api/apps/{slug}/logs` | 実行ログ（過去分の検索と、ライブの SSE） |
+| `/api/apps/{slug}/env/requirements` | 必要な環境変数との照合（キーと設定の有無だけ） |
+| `/api/system` | ホストの状態 |
+
+- それ以外（環境変数の値 `GET /api/apps/{slug}/env`、DB ダンプのダウンロード、退避済みログの URL、セッション、トークンの管理、すべての変更系）は、トークンが有効でも `403 token_not_allowed`。
+- 期限切れ・失効・形式違い（`Bearer ` の後ろが空など）は `401 invalid_token`。
+- トークンごとに 1 分あたり 120 回まで。超えたら `429 rate_limited`（`Retry-After` は秒数）。
+- トークンのリクエストでは Cookie を見ない（両方を付けてもトークンとしてだけ扱う）。`Origin` は要らない（`GET` だけのため）。`Sec-Fetch-Site` の検査はそのまま掛かる。
 
 ## システム（M0、prune は M5）
 
