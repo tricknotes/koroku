@@ -1051,6 +1051,38 @@ func TestDeployLogStartsEmpty(t *testing.T) {
 	}
 }
 
+// TestWorkerWaitsForTheQueuedLine: the worker may pick a deployment up as
+// soon as its row exists (it polls, and other deployments wake it), which is
+// before Enqueue has removed a stale log file and written the queued line.
+// It must wait for that; otherwise its first lines are deleted with the
+// stale file or come before the queued line.
+func TestWorkerWaitsForTheQueuedLine(t *testing.T) {
+	h := newHarness(t, nil)
+	h.createApp("blog")
+	h.start()
+	// Wake the worker right after the insert and give it time to run.
+	h.engine.afterInsert = func() {
+		h.engine.notify()
+		time.Sleep(100 * time.Millisecond)
+	}
+	stale := h.engine.LogPath("blog", 1)
+	if err := os.MkdirAll(filepath.Dir(stale), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("left over from an earlier database\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d := h.deploy("blog", shaA)
+	got := h.log("blog", d.ID)
+	if !strings.HasPrefix(got, "Queued deployment of "+shaA) || strings.Contains(got, "left over") {
+		t.Errorf("log:\n%s", got)
+	}
+	if !strings.Contains(got, " fetch Fetching ") {
+		t.Errorf("the worker's lines are missing:\n%s", got)
+	}
+}
+
 // TestFirstDeployIsRouted: the router builds the proxy configuration from
 // the database, and an app without a current deployment gets the 503 page.
 // The last sync must therefore see the new deployment as current and the app
