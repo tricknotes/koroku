@@ -76,21 +76,20 @@ function logLabel(
 /** Name, koroku's own title and the state / duration of one step. */
 const StepSummary: TOC<{
   Args: { step: DeployStep; label?: Labeler; rollback?: boolean };
-}> =
-  <template>
-    <span class="step-name">{{nameOf @step @label @rollback}}</span>
-    <span class="step-title">{{@step.title}}</span>
-    <span class="step-meta" data-test-step-meta>
-      {{#if (showsState @step)}}
-        <span class="step-state">{{stateLabel @step}}</span>
-      {{else}}
-        <span class="visually-hidden">{{stateLabel @step}}</span>
-      {{/if}}
-      {{#if (duration @step)}}
-        <span data-test-step-duration>{{duration @step}}</span>
-      {{/if}}
-    </span>
-  </template>;
+}> = <template>
+  <span class="step-name">{{nameOf @step @label @rollback}}</span>
+  <span class="step-title">{{@step.title}}</span>
+  <span class="step-meta" data-test-step-meta>
+    {{#if (showsState @step)}}
+      <span class="step-state">{{stateLabel @step}}</span>
+    {{else}}
+      <span class="visually-hidden">{{stateLabel @step}}</span>
+    {{/if}}
+    {{#if (duration @step)}}
+      <span data-test-step-duration>{{duration @step}}</span>
+    {{/if}}
+  </span>
+</template>;
 
 interface DeploymentStepsSignature {
   Element: HTMLOListElement;
