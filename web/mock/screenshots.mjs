@@ -1324,6 +1324,41 @@ SHOTS.push(
     fullPage: true,
   },
   {
+    name: 'new-app-branch',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      ${CHOOSE_REPOSITORY};
+      setTimeout(() => {
+        const branch = document.querySelector('[data-test-field="default_branch"]');
+        branch.value = 'feature/redis';
+        branch.dispatchEvent(new Event('input', { bubbles: true }));
+        branch.dispatchEvent(new Event('change', { bubbles: true }));
+      }, 400);
+    })()`,
+    then: '[data-test-submit]',
+    settle: 1200,
+    fullPage: true,
+  },
+  {
+    name: 'new-app-branch-phone',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    ...PHONE,
+    script: `(() => {
+      ${CHOOSE_REPOSITORY};
+      setTimeout(() => {
+        const branch = document.querySelector('[data-test-field="default_branch"]');
+        branch.value = 'feature/redis';
+        branch.dispatchEvent(new Event('input', { bubbles: true }));
+        branch.dispatchEvent(new Event('change', { bubbles: true }));
+      }, 400);
+    })()`,
+    then: '[data-test-submit]',
+    settle: 1200,
+    themes: ['light'],
+  },
+  {
     name: 'new-app-invalid',
     path: '/apps/new?scenario=healthy',
     wait: REPOSITORY,
