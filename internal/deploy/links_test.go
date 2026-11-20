@@ -203,6 +203,59 @@ func TestDeployAttachesTheTargetUnderTheLinkName(t *testing.T) {
 	}
 }
 
+// A rollback to a kept release recreates containers too, so it attaches the
+// links like a deploy (ARCHITECTURE 6.1, 7.1).
+func TestRollbackAttachesTheConsumer(t *testing.T) {
+	h, fc := newLinkHarness(t)
+	h.start()
+	_, _, l := linkedPair(h)
+	network := h.network(l)
+	fc.set("koroku-shop", "c-web\tkoroku-shop-web-1\tweb\tkoroku-shop_default")
+
+	first := h.deploy("shop", shaA)
+	second := h.deploy("shop", shaB)
+	if first.Status != store.StatusSucceeded || second.Status != store.StatusSucceeded {
+		t.Fatalf("deploys: %s %s", first.Status, second.Status)
+	}
+
+	h.runner.Reset()
+	rb := h.rollback("shop", first.ID)
+	if rb.Status != store.StatusSucceeded {
+		t.Fatalf("rollback %s: %s\n%s", rb.Status, rb.Error, h.log("shop", rb.ID))
+	}
+	ups := h.upCalls()
+	if len(ups) != 2 || !strings.HasPrefix(ups[0], "up --no-start") || !strings.Contains(ups[1], "--wait") {
+		t.Errorf("up calls = %v, want create then start", ups)
+	}
+	if got := h.calls("network", "connect"); !slices.Equal(got, []string{"network connect " + network + " c-web"}) {
+		t.Errorf("connect calls = %v", got)
+	}
+}
+
+// A kept release that now breaks a link rule is not started again.
+func TestRollbackRefusesLinkProblems(t *testing.T) {
+	h, _ := newLinkHarness(t)
+	h.start()
+	shop := h.createApp("shop")
+	first := h.deploy("shop", shaA)
+	if first.Status != store.StatusSucceeded {
+		t.Fatalf("deploy: %s", first.Error)
+	}
+	h.expose(h.reload(shop.Slug), "team", "cache")
+
+	h.runner.Reset()
+	rb := h.rollback("shop", first.ID)
+	if rb.Status != store.StatusFailed {
+		t.Fatalf("status = %s, want failed", rb.Status)
+	}
+	if log := h.log("shop", rb.ID); !strings.Contains(log, "[link_service]") {
+		t.Errorf("log lacks the violation:\n%s", log)
+	}
+	if len(h.upCalls()) != 0 {
+		t.Errorf("containers were started: %v", h.upCalls())
+	}
+}
+
 func TestDeployRefusesLinkProblems(t *testing.T) {
 	cases := map[string]func(h *harness){
 		// A link named like one of the app's own services.

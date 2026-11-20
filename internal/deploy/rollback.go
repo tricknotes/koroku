@@ -119,7 +119,8 @@ func (e *Engine) executeRollback(ctx context.Context, d store.Deployment, app st
 	log.Printf("Compose file: %s; images: %v", meta.ComposeFile, meta.Images)
 
 	log.Step(StepValidate, "Validating the release again")
-	if err := e.revalidate(ctx, app, src, meta.ComposeFile); err != nil {
+	inv, err := e.revalidate(ctx, app, src, meta.ComposeFile)
+	if err != nil {
 		return false, err
 	}
 
@@ -127,7 +128,8 @@ func (e *Engine) executeRollback(ctx context.Context, d store.Deployment, app st
 	if err := writeFileAtomic(e.EnvFile(app.Slug), env, 0o600); err != nil {
 		return false, fmt.Errorf("write env file: %w", err)
 	}
-	if err := e.up(ctx, e.invocation(app, src, meta.ComposeFile, true), e.ReleaseDir(app.Slug, src), log); err != nil {
+	// up also attaches the app's links (ARCHITECTURE 6.1), as a deploy does.
+	if err := e.up(ctx, app, inv, e.ReleaseDir(app.Slug, src), log); err != nil {
 		e.logContainerOutput(ctx, app, log)
 		return true, fmt.Errorf("start containers: %w", err)
 	}
