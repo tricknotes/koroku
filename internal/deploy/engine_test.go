@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -100,6 +101,9 @@ type harness struct {
 	buildOutput string
 	// onFetch lets a test add files to the checkout, as a repository would.
 	onFetch func(dir string) error
+	// dockerOutput answers docker commands other than compose (ps,
+	// network ...); ok=false falls back to an empty success.
+	dockerOutput func(args []string) (out string, ok bool, err error)
 }
 
 const defaultRepoServices = `{
@@ -177,8 +181,13 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 	case "docker":
 		sub, merged := composeSubcommand(cmd.Args)
 		h.mu.Lock()
-		hook, services, buildOutput := h.onCompose, h.repoServices, h.buildOutput
+		hook, services, buildOutput, dockerOutput := h.onCompose, h.repoServices, h.buildOutput, h.dockerOutput
 		h.mu.Unlock()
+		if dockerOutput != nil && cmd.Args[0] != "compose" {
+			if out, ok, err := dockerOutput(cmd.Args); ok {
+				return out, err
+			}
+		}
 		if hook != nil {
 			if err := hook(ctx, sub, cmd); err != nil {
 				return "", err
@@ -194,10 +203,10 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 				}
 				services = strings.ReplaceAll(services,
 					`"ports": [{"target": 5432, "published": "5432", "protocol": "tcp"}]`, `"ports": null`)
-				if strings.Contains(string(override), `"127.0.0.1:20000:3000"`) {
+				if m := loopbackBinding.FindStringSubmatch(string(override)); m != nil {
 					services = strings.ReplaceAll(services,
 						`"ports": [{"target": 3000, "published": "3000", "protocol": "tcp"}]`,
-						`"ports": [{"host_ip": "127.0.0.1", "target": 3000, "published": "20000", "protocol": "tcp"}]`)
+						`"ports": [{"host_ip": "127.0.0.1", "target": 3000, "published": "`+m[1]+`", "protocol": "tcp"}]`)
 				}
 			}
 			return `{"name": "koroku-blog", "services": ` + services + `}`, nil
@@ -208,6 +217,9 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 	}
 	return "", fmt.Errorf("unexpected command %s", cmd.Name)
 }
+
+// loopbackBinding finds the web service's port in a generated override.
+var loopbackBinding = regexp.MustCompile(`"127\.0\.0\.1:(\d+):3000"`)
 
 // composeSubcommand extracts the subcommand of a `docker compose` call and
 // whether the override file is part of it.

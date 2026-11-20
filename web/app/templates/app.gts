@@ -72,6 +72,27 @@ export default class AppTemplate extends Component<Signature> {
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
     this.poller.every(this, POLL_INTERVAL, () => this.refresh());
+    void this.lookUpGroup();
+  }
+
+  /** The group whose name was last asked for, so it is asked for once. */
+  private groupLookedUp: number | null = null;
+
+  /**
+   * Reads the groups when the app is in one whose name is not known yet:
+   * the header names it. A failure leaves the name out.
+   */
+  private async lookUpGroup(): Promise<void> {
+    const context = this.args.model;
+    if (!context.loaded || !context.groupUnknown) return;
+    const id = context.app.group_id ?? null;
+    if (id === this.groupLookedUp) return;
+    this.groupLookedUp = id;
+    try {
+      await context.loadGroups();
+    } catch {
+      // The header simply goes without the group's name.
+    }
   }
 
   get isFullSize(): boolean {
@@ -108,6 +129,7 @@ export default class AppTemplate extends Component<Signature> {
     }
     if (this.args.model !== context) return;
     if (JSON.stringify(app) !== JSON.stringify(context.app)) context.set(app);
+    await this.lookUpGroup();
   }
 
   /** Opens the deploy tab and puts the focus on what to deploy. */
@@ -175,6 +197,18 @@ export default class AppTemplate extends Component<Signature> {
                 ><span>{{hostOf (openUrl @model.app)}}</span><Icon
                     @name="external"
                   /></a>
+              {{/if}}
+              {{#if @model.group}}
+                <LinkTo
+                  @route="app.settings"
+                  @model={{@model.slug}}
+                  class="app-header-group"
+                  title="グループの設定を開く"
+                  data-test-app-group
+                ><span class="app-header-group-label">グループ</span>
+                  <span
+                    class="app-header-group-name"
+                  >{{@model.group.name}}</span></LinkTo>
               {{/if}}
             </div>
           </div>

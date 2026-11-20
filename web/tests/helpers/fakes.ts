@@ -14,6 +14,7 @@ import type {
   AppVolume,
   BackupOverview,
   Deployment,
+  Group,
   SystemInfo,
 } from 'koroku-console/utils/types';
 
@@ -400,6 +401,18 @@ export function makeBackups(
     warning: false,
     next_run_at: '2026-11-18T18:00:00Z',
     runs: [],
+    ...overrides,
+  };
+}
+
+/** A staging group without members. */
+export function makeGroup(overrides: Partial<Group> = {}): Group {
+  return {
+    id: 3,
+    name: 'shop',
+    environment: 'staging',
+    members: [],
+    created_at: '2026-11-20T03:00:00Z',
     ...overrides,
   };
 }

@@ -136,6 +136,11 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		HostPort:    app.HostPort,
 		Relax:       app.RelaxPolicy,
 	})
+	linkProblems, err := e.linkViolations(ctx, app, project)
+	if err != nil {
+		return false, err
+	}
+	policy.Violations = append(policy.Violations, linkProblems...)
 	for _, v := range policy.Waived {
 		log.Printf("Policy waived for this app: %s", v)
 	}
@@ -181,7 +186,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, fmt.Errorf("write env file: %w", err)
 	}
 	live := e.invocation(app, d.ID, composeFile, true)
-	if err := e.up(ctx, live, releaseDir, log); err != nil {
+	if err := e.up(ctx, app, live, releaseDir, log); err != nil {
 		e.logContainerOutput(ctx, app, log)
 		return true, fmt.Errorf("start containers: %w", err)
 	}
@@ -281,12 +286,15 @@ func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, di
 // its files are used for another `up` (start, rollback). The files live in
 // the checkout; an app that was allowed a writable bind mount, or anything
 // else that got write access to the release directory, could have changed
-// them since the deploy that checked them.
-func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, composeFile string) error {
+// them since the deploy that checked them. What the app's links ask of the
+// release is checked too. It returns the invocation
+// to `up` with.
+func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, composeFile string) (compose.Invocation, error) {
 	dir := e.ReleaseDir(app.Slug, id)
-	project, err := e.composeConfigTo(ctx, e.invocation(app, id, composeFile, true), dir, io.Discard)
+	inv := e.invocation(app, id, composeFile, true)
+	project, err := e.composeConfigTo(ctx, inv, dir, io.Discard)
 	if err != nil {
-		return err
+		return inv, err
 	}
 	policy := compose.CheckPolicy(project, compose.PolicyParams{
 		ReleaseDir:  dir,
@@ -297,10 +305,15 @@ func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, compos
 		HostPort:    app.HostPort,
 		Relax:       app.RelaxPolicy,
 	})
-	if !policy.OK() {
-		return &compose.PolicyError{Violations: policy.Violations}
+	linkProblems, err := e.linkViolations(ctx, app, project)
+	if err != nil {
+		return inv, err
 	}
-	return nil
+	policy.Violations = append(policy.Violations, linkProblems...)
+	if !policy.OK() {
+		return inv, &compose.PolicyError{Violations: policy.Violations}
+	}
+	return inv, nil
 }
 
 func (e *Engine) compose(ctx context.Context, inv compose.Invocation, dir string, log *deployLog, sub ...string) error {
@@ -313,9 +326,8 @@ func (e *Engine) compose(ctx context.Context, inv compose.Invocation, dir string
 	})
 }
 
-func (e *Engine) up(ctx context.Context, inv compose.Invocation, dir string, log *deployLog) error {
-	wait := strconv.Itoa(int(e.opts.WaitTimeout / time.Second))
-	return e.compose(ctx, inv, dir, log, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)
+func (e *Engine) up(ctx context.Context, app store.App, inv compose.Invocation, dir string, log *deployLog) error {
+	return e.upApp(ctx, app, func(sub ...string) error { return e.compose(ctx, inv, dir, log, sub...) })
 }
 
 // containerOutputLines is how many lines of each container are copied into
@@ -376,7 +388,8 @@ func (e *Engine) rollback(app store.App, log *deployLog) {
 		log.Printf("Rollback is not possible: the previous environment snapshot is missing.")
 		return
 	}
-	if err := e.revalidate(ctx, app, prev, meta.ComposeFile); err != nil {
+	inv, err := e.revalidate(ctx, app, prev, meta.ComposeFile)
+	if err != nil {
 		log.Printf("Rollback is not possible: the previous release no longer passes validation (%v).", err)
 		return
 	}
@@ -384,7 +397,7 @@ func (e *Engine) rollback(app store.App, log *deployLog) {
 		log.Printf("Rollback failed: the env file could not be restored: %v", err)
 		return
 	}
-	if err := e.up(ctx, e.invocation(app, prev, meta.ComposeFile, true), prevDir, log); err != nil {
+	if err := e.up(ctx, app, inv, prevDir, log); err != nil {
 		log.Printf("Rollback failed: %v", err)
 		return
 	}

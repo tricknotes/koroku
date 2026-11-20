@@ -61,7 +61,11 @@ type App struct {
 	// needs: "compose", "dotenv" or "off" (ARCHITECTURE 9.4).
 	EnvSource string
 	// EnvExamplePath is the .env.example path read in dotenv mode.
-	EnvExamplePath      string
+	EnvExamplePath string
+	// GroupID is the group whose network GroupServices join (ARCHITECTURE
+	// 6.1). Membership is changed with SetAppGroup only.
+	GroupID             *int64
+	GroupServices       []string
 	CurrentDeploymentID *int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -86,7 +90,7 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	web_service, web_port, host_port, healthcheck_path, desired_state, environment,
 	relax_policy, memory_limit, service_memory_limits, current_deployment_id, created_at, updated_at,
 	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
-	env_source, env_example_path`
+	env_source, env_example_path, group_id, group_services`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -97,6 +101,8 @@ func scanApp(row rowScanner) (App, error) {
 		a           App
 		repoID      sql.NullInt64
 		currentID   sql.NullInt64
+		groupID     sql.NullInt64
+		groupJSON   string
 		limitsJSON  string
 		excludeJSON string
 		created     int64
@@ -106,7 +112,7 @@ func scanApp(row rowScanner) (App, error) {
 		&a.WebService, &a.WebPort, &a.HostPort, &a.HealthcheckPath, &a.DesiredState, &a.Environment,
 		&a.RelaxPolicy, &a.MemoryLimit, &limitsJSON, &currentID, &created, &updated,
 		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy,
-		&a.EnvSource, &a.EnvExamplePath)
+		&a.EnvSource, &a.EnvExamplePath, &groupID, &groupJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -118,6 +124,15 @@ func scanApp(row rowScanner) (App, error) {
 	}
 	if currentID.Valid {
 		a.CurrentDeploymentID = &currentID.Int64
+	}
+	if groupID.Valid {
+		a.GroupID = &groupID.Int64
+	}
+	a.GroupServices = []string{}
+	if groupJSON != "" {
+		if err := json.Unmarshal([]byte(groupJSON), &a.GroupServices); err != nil {
+			return App{}, fmt.Errorf("decode group_services of app %s: %w", a.Slug, err)
+		}
 	}
 	a.ServiceMemoryLimits = map[string]string{}
 	if limitsJSON != "" {
@@ -303,6 +318,18 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 	exclude, err := encodeStrings(app.BackupExcludeVolumes)
 	if err != nil {
 		return err
+	}
+	// A group keeps one environment (ARCHITECTURE 6.1); the app has to
+	// leave its group before its environment changes.
+	var groupEnv string
+	err = s.db.QueryRowContext(ctx, `SELECT g.environment FROM apps a JOIN app_groups g ON g.id = a.group_id
+		WHERE a.id = ?`, app.ID).Scan(&groupEnv)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return fmt.Errorf("update app: %w", err)
+	case groupEnv != app.Environment:
+		return ErrGroupEnvironment
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE apps SET
 			repo_id = ?, repo_full_name = ?, repo_url = ?, default_branch = ?, compose_path = ?,

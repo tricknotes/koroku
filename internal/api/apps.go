@@ -52,6 +52,8 @@ type appJSON struct {
 	BackupBeforeDeploy   bool              `json:"backup_before_deploy"`
 	EnvSource            string            `json:"env_source"`
 	EnvExamplePath       string            `json:"env_example_path"`
+	GroupID              *int64            `json:"group_id"`
+	GroupServices        []string          `json:"group_services"`
 	URL                  string            `json:"url"`
 	PrimaryURL           string            `json:"primary_url"`
 	PendingDomains       int               `json:"pending_domains"`
@@ -83,6 +85,8 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		BackupBeforeDeploy:   app.BackupBeforeDeploy,
 		EnvSource:            app.EnvSource,
 		EnvExamplePath:       app.EnvExamplePath,
+		GroupID:              app.GroupID,
+		GroupServices:        app.GroupServices,
 		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
 		CreatedAt:            app.CreatedAt,
 		UpdatedAt:            app.UpdatedAt,
@@ -473,6 +477,10 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.UpdateApp(r.Context(), app, s.clock.Now()); err != nil {
+		if errors.Is(err, store.ErrGroupEnvironment) {
+			writeValidationError(w, fieldErrors{"environment": "cannot be changed while the app is in a group; leave the group first"})
+			return
+		}
 		s.internalError(w, r, err)
 		return
 	}

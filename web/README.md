@@ -70,8 +70,15 @@ The page URL selects what the API answers and, optionally, the theme:
 | `...&theme=dark`        | pins the theme (`light`, `dark`, or `system` to unpin)                                                        |
 
 Further scenarios cover single screens (`host-trouble`, `unconfigured`,
-`fresh`, `backups-down`, `volumes-down`, `stale-login`, `rollback`); `/__mock` lists every scenario with
-what it shows.
+`fresh`, `backups-down`, `volumes-down`, `stale-login`, `rollback`, `groups`); `/__mock` lists every scenario with
+what it shows. In `groups`, the apps `accounts` (production) and
+`accounts-staging` expose their `auth` service (staging also a `mailer`),
+and `shop` and `shop-staging` link to them under the names `auth` and
+`mailer`. `blog-staging` is alone in the group `search` (nothing to link
+to), `blog` is in no group, and the staging group `media` has no members.
+The `db` of `blog-staging` sets `container_name`, so the API refuses to
+expose it. Leaving a group or un-exposing a service deletes the links that
+depend on it, as the API does. The `links-` screenshots cover these states.
 
 The scenario is kept in a cookie, so it stays while navigating; changes made
 in the UI (deploying, adding a domain, ...) are kept in memory until the mock

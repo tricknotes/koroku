@@ -10,6 +10,7 @@ import Banner from 'koroku-console/components/banner';
 import Button from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import ErrorMessage from 'koroku-console/components/error-message';
+import GroupList from 'koroku-console/components/group-list';
 import Icon from 'koroku-console/components/icon';
 import Meter, { type MeterTone } from 'koroku-console/components/meter';
 import RelativeTime from 'koroku-console/components/relative-time';
@@ -943,6 +944,8 @@ export default class SystemTemplate extends Component {
         </section>
       {{/let}}
     {{/if}}
+
+    <GroupList />
 
     {{#if this.system.value}}
       {{#let this.system.value as |system|}}

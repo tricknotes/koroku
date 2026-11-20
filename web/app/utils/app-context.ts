@@ -1,7 +1,7 @@
 import { tracked } from '@glimmer/tracking';
 import { assert } from '@ember/debug';
 import type ApiService from 'koroku-console/services/api';
-import type { App } from 'koroku-console/utils/types';
+import type { App, Group } from 'koroku-console/utils/types';
 
 /**
  * Model of the `app` route, shared by every tab: the app as last seen and a
@@ -10,6 +10,8 @@ import type { App } from 'koroku-console/utils/types';
 export default class AppContext {
   @tracked private current: App | null = null;
   @tracked error: unknown = null;
+  /** The groups as last read; `null` until something asked for them. */
+  @tracked groups: Group[] | null = null;
 
   constructor(
     private readonly api: ApiService,
@@ -27,6 +29,24 @@ export default class AppContext {
 
   get isProduction(): boolean {
     return this.current?.environment === 'production';
+  }
+
+  /** The group the app belongs to, once the groups have been read. */
+  get group(): Group | null {
+    const id = this.current?.group_id ?? null;
+    if (id === null) return null;
+    return this.groups?.find((group) => group.id === id) ?? null;
+  }
+
+  /** The app is in a group whose name is not known yet. */
+  get groupUnknown(): boolean {
+    return (this.current?.group_id ?? null) !== null && this.group === null;
+  }
+
+  async loadGroups(): Promise<Group[]> {
+    const groups = await this.api.listGroups();
+    this.groups = groups;
+    return groups;
   }
 
   async load(): Promise<void> {

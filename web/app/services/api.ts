@@ -4,6 +4,8 @@ import { ApiError } from 'koroku-console/utils/errors';
 import type SessionService from './session';
 import type {
   App,
+  AppGroupChange,
+  AppLink,
   AppPatch,
   AppVolume,
   BackupOverview,
@@ -20,11 +22,13 @@ import type {
   EnvRequirements,
   EnvPending,
   EnvVar,
+  Group,
   LogArchive,
   LoginEvent,
   LoginSession,
   LogHistory,
   NewApp,
+  NewAppLink,
   Repo,
   ServiceStatus,
   SessionResponse,
@@ -250,6 +254,56 @@ export default class ApiService extends Service {
       services: ServiceStatus[] | null;
     }>('GET', `/api/apps/${seg(slug)}/services`);
     return services ?? [];
+  }
+
+  // Groups (ARCHITECTURE 6.1)
+
+  async listGroups(): Promise<Group[]> {
+    const { groups } = await this.request<{ groups: Group[] | null }>(
+      'GET',
+      '/api/groups',
+    );
+    return groups ?? [];
+  }
+
+  createGroup(body: {
+    name: string;
+    environment: Group['environment'];
+  }): Promise<Group> {
+    return this.request('POST', '/api/groups', { body });
+  }
+
+  renameGroup(id: number, name: string): Promise<Group> {
+    return this.request('PATCH', `/api/groups/${id}`, { body: { name } });
+  }
+
+  deleteGroup(id: number): Promise<void> {
+    return this.request('DELETE', `/api/groups/${id}`);
+  }
+
+  /**
+   * Joins or leaves a group, or changes the exposed services. Leaving or
+   * un-exposing deletes the links that depend on it.
+   */
+  setAppGroup(slug: string, body: AppGroupChange): Promise<App> {
+    return this.request('PUT', `/api/apps/${seg(slug)}/group`, { body });
+  }
+
+  /** The links the app is the consumer of, by name. */
+  async listLinks(slug: string): Promise<AppLink[]> {
+    const { links } = await this.request<{ links: AppLink[] | null }>(
+      'GET',
+      `/api/apps/${seg(slug)}/links`,
+    );
+    return links ?? [];
+  }
+
+  createLink(slug: string, body: NewAppLink): Promise<AppLink> {
+    return this.request('POST', `/api/apps/${seg(slug)}/links`, { body });
+  }
+
+  deleteLink(slug: string, id: number): Promise<void> {
+    return this.request('DELETE', `/api/apps/${seg(slug)}/links/${id}`);
   }
 
   // Environment variables

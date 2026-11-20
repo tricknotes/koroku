@@ -166,6 +166,11 @@ export interface App {
   env_source?: EnvSource;
   /** The `.env.example` path in `dotenv` mode; '' for the default. */
   env_example_path?: string;
+  // Groups (ARCHITECTURE 6.1); absent on older backends.
+  /** The group the app belongs to; `null` when it is in none. */
+  group_id?: number | null;
+  /** The services other members may link to (公開するサービス). */
+  group_services?: string[] | null;
 }
 
 export interface AppPatch {
@@ -184,6 +189,59 @@ export interface AppPatch {
   backup_before_deploy?: boolean;
   env_source?: EnvSource;
   env_example_path?: string;
+}
+
+/**
+ * One link (ARCHITECTURE 6.1): in the consumer app, `name` points at
+ * `target_service` of `target_app`, for the consumer's `services`.
+ */
+export interface AppLink {
+  id: number;
+  /** The name the consumer's own Compose file calls the target by. */
+  name: string;
+  target_app: string;
+  /** An exposed service of the target app. */
+  target_service: string;
+  /** The consumer's services that use the name; at least one. */
+  services: string[];
+  /** The Docker network; only in `GET /api/apps/{slug}/links`. */
+  network?: string;
+  created_at?: string;
+}
+
+/** `POST /api/apps/{slug}/links`. */
+export interface NewAppLink {
+  name: string;
+  target_app: string;
+  target_service: string;
+  services: string[];
+}
+
+/** One app of a group, what it exposes and its links (`GET /api/groups`). */
+export interface GroupMember {
+  slug: string;
+  /** The services other members may link to. */
+  services: string[] | null;
+  /** The links this app is the consumer of. */
+  links: AppLink[] | null;
+}
+
+/** The apps that may link to each other (ARCHITECTURE 6.1). */
+export interface Group {
+  id: number;
+  name: string;
+  /** Members are apps of this environment only; it never changes. */
+  environment: Environment;
+  /** In slug order. */
+  members: GroupMember[] | null;
+  created_at: string;
+}
+
+/** `PUT /api/apps/{slug}/group`; leaving is `{group_id: null, services: []}`. */
+export interface AppGroupChange {
+  group_id: number | null;
+  /** The services to expose. */
+  services: string[];
 }
 
 export interface NewApp {

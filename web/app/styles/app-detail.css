@@ -74,6 +74,33 @@
   white-space: nowrap;
 }
 
+.app-header-group {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: baseline;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.app-header-group:hover {
+  color: var(--color-text);
+}
+
+.app-header-group-name {
+  overflow: hidden;
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-header-group:hover > .app-header-group-name {
+  text-decoration: underline;
+}
+
 .app-tabs {
   margin-bottom: var(--space-6);
 }

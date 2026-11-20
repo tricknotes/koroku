@@ -26,6 +26,10 @@ import {
   composeRequirements,
   containerResources,
   dockerUsage,
+  groupJson,
+  groupsOf,
+  linkJson,
+  linksOf,
   newApp,
   newDomain,
   services,
@@ -206,7 +210,9 @@ route('PATCH', '/api/apps/:slug', (context) =>
   Object.assign(appOf(context), context.body),
 );
 route('DELETE', '/api/apps/:slug', (context) => {
-  context.state.apps.delete(appOf(context).slug);
+  const { slug } = appOf(context);
+  context.state.apps.delete(slug);
+  dropLinks(context.state, touches(slug));
   return { status: 204 };
 });
 for (const [action, desired] of [
@@ -226,6 +232,240 @@ route('GET', '/api/apps/:slug/services', (context) => ({
     context.state.services?.get(context.params.slug) ??
     services(appOf(context)),
 }));
+
+// Groups (ARCHITECTURE 6.1).
+
+const SERVICE_LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+function groupOf(state, id) {
+  const found = (state.groups ?? []).find((group) => group.id === Number(id));
+  if (!found) throw notFound('group_not_found');
+  return found;
+}
+
+function groupName(state, body, except) {
+  const name = String(body.name ?? '').trim();
+  if (name === '' || [...name].length > 40) {
+    throw new HttpError(422, 'validation_failed', {
+      name: 'must be 1 to 40 characters',
+    });
+  }
+  if ((state.groups ?? []).some((g) => g.name === name && g !== except)) {
+    throw new HttpError(409, 'group_name_taken');
+  }
+  return name;
+}
+
+function serviceNames(state, target) {
+  return (state.services?.get(target.slug) ?? services(target)).map(
+    (service) => service.name,
+  );
+}
+
+route('GET', '/api/groups', ({ state }) => ({ groups: groupsOf(state) }));
+route('POST', '/api/groups', ({ state, body }) => {
+  const name = groupName(state, body);
+  if (body.environment !== 'production' && body.environment !== 'staging') {
+    throw new HttpError(422, 'validation_failed', {
+      environment: 'must be production or staging',
+    });
+  }
+  state.groups ??= [];
+  state.nextGroupId ??= 1;
+  const group = {
+    id: state.nextGroupId++,
+    name,
+    environment: body.environment,
+    created_at: new Date().toISOString(),
+  };
+  state.groups.push(group);
+  return { status: 201, json: groupJson(state, group) };
+});
+route('PATCH', '/api/groups/:id', ({ state, params, body }) => {
+  const group = groupOf(state, params.id);
+  group.name = groupName(state, body, group);
+  return groupJson(state, group);
+});
+route('DELETE', '/api/groups/:id', ({ state, params }) => {
+  const group = groupOf(state, params.id);
+  if ([...state.apps.values()].some((a) => a.group_id === group.id)) {
+    throw new HttpError(409, 'group_not_empty');
+  }
+  state.groups = state.groups.filter((g) => g !== group);
+  return { status: 204 };
+});
+/** Deletes the links `drop` picks; the API disconnects them first. */
+function dropLinks(state, drop) {
+  state.links = (state.links ?? []).filter((entry) => !drop(entry));
+}
+
+/** Changing what can reach what waits for a running deployment. */
+function refuseWhileDeploying(state, target) {
+  const latest = (state.deployments.get(target.slug) ?? [])[0];
+  if (latest && ['queued', 'running'].includes(latest.status)) {
+    throw new HttpError(409, 'busy');
+  }
+}
+
+/** The app's own links and every link to it. */
+function touches(slug) {
+  return (entry) => entry.app === slug || entry.target_app === slug;
+}
+
+route('PUT', '/api/apps/:slug/group', (context) => {
+  const { state, body } = context;
+  const target = appOf(context);
+  refuseWhileDeploying(state, target);
+  const id = body.group_id ?? null;
+  const wanted = body.services ?? [];
+  if (id === null) {
+    if (wanted.length > 0) {
+      throw new HttpError(422, 'validation_failed', {
+        services: 'must be empty without a group',
+      });
+    }
+    // Leaving deletes the links that depend on the app.
+    dropLinks(state, touches(target.slug));
+    return Object.assign(target, { group_id: null, group_services: [] });
+  }
+  const group = (state.groups ?? []).find((g) => g.id === id);
+  if (!group) {
+    throw new HttpError(422, 'validation_failed', {
+      group_id: 'no such group',
+    });
+  }
+  if (group.environment !== target.environment) {
+    throw new HttpError(422, 'validation_failed', {
+      group_id: `is a ${group.environment} group; the app is ${target.environment}`,
+    });
+  }
+  const own = serviceNames(state, target);
+  const bad = wanted.find(
+    (name, index) =>
+      !SERVICE_LABEL.test(name) ||
+      wanted.indexOf(name) !== index ||
+      (target.current_deployment && !own.includes(name)),
+  );
+  if (bad !== undefined) {
+    throw new HttpError(422, 'validation_failed', {
+      services: `"${bad}" is not a service of the running release`,
+    });
+  }
+  // A service with a fixed container name or someone else's network stack
+  // cannot be connected to a link network.
+  const fixed = state.fixedServices?.get(target.slug) ?? {};
+  const refused = wanted.find((name) => fixed[name]);
+  if (refused !== undefined) {
+    throw new HttpError(422, 'validation_failed', {
+      services: `"${refused}" sets ${fixed[refused]} and cannot be exposed`,
+    });
+  }
+  if (target.group_id !== id) {
+    // Moving to another group leaves the old one first.
+    dropLinks(state, touches(target.slug));
+  } else {
+    // Un-exposing a service deletes the links to it.
+    dropLinks(
+      state,
+      (entry) =>
+        entry.target_app === target.slug &&
+        !wanted.includes(entry.target_service),
+    );
+  }
+  return Object.assign(target, {
+    group_id: id,
+    group_services: [...wanted].sort(),
+  });
+});
+
+route('GET', '/api/apps/:slug/links', (context) => ({
+  links: linksOf(context.state, appOf(context).slug).map(linkJson),
+}));
+route('POST', '/api/apps/:slug/links', (context) => {
+  const { state, body } = context;
+  const consumer = appOf(context);
+  refuseWhileDeploying(state, consumer);
+  const name = String(body.name ?? '');
+  if (!SERVICE_LABEL.test(name) || name.length > 63) {
+    throw new HttpError(422, 'validation_failed', {
+      name: 'must be a DNS label: lowercase letters, digits and hyphens',
+    });
+  }
+  if (linksOf(state, consumer.slug).some((entry) => entry.name === name)) {
+    throw new HttpError(409, 'link_name_taken');
+  }
+  const own = serviceNames(state, consumer);
+  if (consumer.current_deployment && own.includes(name)) {
+    throw new HttpError(422, 'validation_failed', {
+      name: `"${name}" is a service of this app; it would resolve to the target while that service is down`,
+    });
+  }
+  const groupId = consumer.group_id ?? null;
+  const targetApp = state.apps.get(body.target_app);
+  if (
+    groupId === null ||
+    !targetApp ||
+    targetApp === consumer ||
+    targetApp.group_id !== groupId
+  ) {
+    throw new HttpError(422, 'validation_failed', {
+      target_app:
+        groupId === null
+          ? 'this app is in no group'
+          : 'must be another app of the same group',
+    });
+  }
+  if (!(targetApp.group_services ?? []).includes(body.target_service)) {
+    throw new HttpError(422, 'validation_failed', {
+      target_service: `"${body.target_service}" is not exposed by ${targetApp.slug}`,
+    });
+  }
+  const wanted = Array.isArray(body.services) ? body.services : [];
+  const fixed = state.fixedServices?.get(consumer.slug) ?? {};
+  if (wanted.length === 0) {
+    throw new HttpError(422, 'validation_failed', {
+      services: 'must name at least one service',
+    });
+  }
+  const bad = wanted.find(
+    (service, index) =>
+      !SERVICE_LABEL.test(service) ||
+      wanted.indexOf(service) !== index ||
+      (consumer.current_deployment && !own.includes(service)) ||
+      fixed[service],
+  );
+  if (bad !== undefined) {
+    throw new HttpError(422, 'validation_failed', {
+      services: fixed[bad]
+        ? `"${bad}" sets ${fixed[bad]} and cannot use a link`
+        : `"${bad}" is not a service of the running release`,
+    });
+  }
+  state.links ??= [];
+  state.nextLinkId ??= 1;
+  const entry = {
+    id: state.nextLinkId++,
+    app: consumer.slug,
+    name,
+    target_app: targetApp.slug,
+    target_service: body.target_service,
+    services: [...wanted].sort(),
+    created_at: new Date().toISOString(),
+  };
+  state.links.push(entry);
+  return { status: 201, json: linkJson(entry) };
+});
+route('DELETE', '/api/apps/:slug/links/:id', (context) => {
+  const { state, params } = context;
+  const consumer = appOf(context);
+  refuseWhileDeploying(state, consumer);
+  const found = linksOf(state, consumer.slug).find(
+    (entry) => entry.id === Number(params.id),
+  );
+  if (!found) throw notFound('link_not_found');
+  dropLinks(state, (entry) => entry === found);
+  return { status: 204 };
+});
 
 function savedEnv(context) {
   return context.state.env?.get(context.params.slug) ?? ENV_VARS;
@@ -722,6 +962,10 @@ route('GET', '/api/login-events', () => ({
 /** What the API refuses without a recent login (ARCHITECTURE 10.3). */
 const NEEDS_RECENT_LOGIN = [
   ['DELETE', /^\/api\/apps\/[^/]+$/],
+  // Only for production apps; the mock's stale login asks for every app.
+  ['PUT', /^\/api\/apps\/[^/]+\/group$/],
+  ['POST', /^\/api\/apps\/[^/]+\/links$/],
+  ['DELETE', /^\/api\/apps\/[^/]+\/links\/[^/]+$/],
   ['PUT', /^\/api\/apps\/[^/]+\/env(\/[^/]+)?$/],
   ['DELETE', /^\/api\/apps\/[^/]+\/env\/[^/]+$/],
   ['POST', /^\/api\/apps\/[^/]+\/backups\/restore$/],

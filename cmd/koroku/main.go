@@ -347,6 +347,11 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 
 	engine := deploy.New(deployOpts)
 	controller.engine = engine
+	// Before the worker starts: link networks must exist and only the
+	// containers the database allows may be on them (ARCHITECTURE 6.1).
+	if err := engine.ReconcileLinks(ctx); err != nil {
+		logger.Error("reconciling the link networks failed", "error", err)
+	}
 	if backups != nil {
 		go func() {
 			if err := backups.scheduler.Run(ctx); err != nil && ctx.Err() == nil {
@@ -356,6 +361,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	}
 	apiOpts.Deployer = engine
 	apiOpts.Ops = engine
+	apiOpts.Groups = engine
 	go engine.RunMaintenance(ctx)
 	srv := api.New(apiOpts)
 	go checker.Run(ctx, routing.RecheckInterval)
