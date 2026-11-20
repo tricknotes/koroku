@@ -47,6 +47,41 @@
   justify-self: start;
 }
 
+/* Automatic deployment (ARCHITECTURE 5.2): the branch, the warning and the
+   GitHub App setup sit apart from the switch. */
+.auto-deploy-group .field,
+.auto-deploy-group .banner,
+.auto-deploy-setup {
+  margin-top: var(--space-5);
+}
+
+.auto-deploy-setup .field-hint {
+  margin: 0;
+}
+
+.auto-deploy-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* The URL wraps anywhere rather than widening the page on a phone. */
+.auto-deploy-url {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-1);
+}
+
+.auto-deploy-url code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .settings-operations {
   margin-top: var(--space-12);
 }

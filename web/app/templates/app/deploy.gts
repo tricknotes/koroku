@@ -40,6 +40,7 @@ import {
   releaseId,
   rollbackSummary,
 } from 'koroku-console/utils/rollback';
+import { isPush, pushTitle } from 'koroku-console/utils/trigger';
 import {
   DEPLOYMENT_STATUS_KINDS,
   DEPLOYMENT_STATUS_LABELS,
@@ -757,6 +758,13 @@ export default class AppDeployTemplate extends Component<Signature> {
                               data-test-promoted-from
                             >{{deployment.promoted_from.app_slug}}
                               から昇格</Badge>
+                          {{/if}}
+                          {{#if (isPush deployment)}}
+                            <Badge
+                              @tone="info"
+                              title={{pushTitle deployment}}
+                              data-test-push-badge
+                            >push で自動デプロイ</Badge>
                           {{/if}}
                         </span>
                         {{#if deployment.error}}

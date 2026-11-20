@@ -54,6 +54,8 @@ export const SCENARIOS = {
     'everything fine, but the last copy into blog-staging failed while loading and left its services stopped',
   'promote-unpaired':
     'everything fine, but blog has no promotion source (shop still promotes from shop-staging)',
+  'webhook-unset':
+    'everything fine, but blog-staging deploys on push while the webhook secret is not set in config.toml',
 };
 
 function ago(ms) {
@@ -89,6 +91,8 @@ function deployment(slug, message, finishedAgo, overrides = {}) {
     finished_at: ago(finishedAgo),
     source_deployment_id: null,
     rollback_available: false,
+    trigger: 'manual',
+    pusher: '',
     ...overrides,
   };
 }
@@ -167,6 +171,8 @@ function app(slug, overrides = {}) {
     access_protection: !production,
     protection_exempt_paths: [],
     promote_from: '',
+    auto_deploy: false,
+    auto_deploy_branch: '',
     url,
     primary_url: url,
     pending_domains: 0,
@@ -214,6 +220,10 @@ function system(overrides = {}) {
       next_run_at: new Date(Date.now() + 2 * HOUR + 48 * MINUTE).toISOString(),
     },
     caddy: { enabled: true, last_loaded_at: ago(3 * HOUR), last_error: '' },
+    webhook: {
+      url: `https://console.${BASE_DOMAIN}/webhooks/github`,
+      secret_configured: true,
+    },
     ...overrides,
   };
 }
@@ -302,10 +312,12 @@ function rolledBack(state, slug) {
 
 function healthyApps() {
   const blog = deployment('blog', 'Add reading time to post pages', 3 * HOUR);
+  // blog-staging deploys every push to main (ARCHITECTURE 5.2).
   const blogStaging = deployment(
     'blog-staging',
     'Try the new image pipeline',
     26 * MINUTE,
+    { trigger: 'push', pusher: 'octo' },
   );
   const shop = deployment('shop', 'Fix rounding of tax amounts', 2 * DAY);
   const shopStaging = deployment(
@@ -331,6 +343,7 @@ function healthyApps() {
     {
       app: app('blog-staging', {
         host_port: 20001,
+        auto_deploy: true,
         current_deployment: blogStaging,
         latest_deployment: blogStaging,
       }),
@@ -462,6 +475,11 @@ export function buildScenario(name) {
       };
       return state;
     }
+    case 'webhook-unset': {
+      const state = scenario(healthyApps());
+      state.system.webhook.secret_configured = false;
+      return state;
+    }
     case 'backups-down':
       return scenario(healthyApps(), { backupsDown: true });
     case 'volumes-down':
@@ -477,6 +495,10 @@ export function buildScenario(name) {
             next_run_at: null,
           },
           caddy: { enabled: false, last_loaded_at: null, last_error: '' },
+          webhook: {
+            url: `https://console.${BASE_DOMAIN}/webhooks/github`,
+            secret_configured: false,
+          },
         }),
         backups: {
           configured: false,

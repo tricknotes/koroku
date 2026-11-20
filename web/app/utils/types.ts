@@ -112,6 +112,11 @@ export interface SystemInfo {
   };
   /** Host swap; `null` on a host without swap, absent on older backends. */
   swap?: { total_bytes: number; used_bytes: number } | null;
+  /**
+   * Where the GitHub App delivers pushes for automatic deployment
+   * (ARCHITECTURE 5.2); absent on older backends.
+   */
+  webhook?: { url: string; secret_configured: boolean };
 }
 
 /** One line of `docker system df` (`GET /api/system/docker`). */
@@ -175,7 +180,14 @@ export interface Deployment {
   rollback_available?: boolean;
   /** The staging release a promotion deployed (ARCHITECTURE 9.7). */
   promoted_from?: { deployment_id: number; app_slug: string } | null;
+  /** What started it (ARCHITECTURE 5.2); absent on older backends. */
+  trigger?: DeploymentTrigger;
+  /** The GitHub login that pushed, for a push-triggered deployment. */
+  pusher?: string;
 }
+
+/** `manual`: the console or the API (rollbacks and promotions too). */
+export type DeploymentTrigger = 'manual' | 'push';
 
 /** A named command kept for one-click runs (ARCHITECTURE 9.6). */
 export interface Task {
@@ -254,6 +266,10 @@ export interface App {
   protection_exempt_paths?: string[] | null;
   /** The staging app a production app promotes from; '' when none. */
   promote_from?: string;
+  /** Deploy pushes to `auto_deploy_branch` (ARCHITECTURE 5.2). */
+  auto_deploy?: boolean;
+  /** The branch whose pushes deploy; '' follows `default_branch`. */
+  auto_deploy_branch?: string;
 }
 
 export interface AppPatch {
@@ -279,6 +295,8 @@ export interface AppPatch {
   access_protection?: boolean;
   protection_exempt_paths?: string[];
   promote_from?: string;
+  auto_deploy?: boolean;
+  auto_deploy_branch?: string;
 }
 
 export interface NewApp {
