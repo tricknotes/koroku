@@ -55,6 +55,21 @@ type deploymentJSON struct {
 	RollbackAvailable  bool   `json:"rollback_available"`
 	// PromotedFrom names the staging deployment a promotion deployed.
 	PromotedFrom *promotedFromJSON `json:"promoted_from"`
+	// Actor is who asked for the deployment; null when nobody did.
+	Actor *actorJSON `json:"actor"`
+}
+
+// actorJSON names the user who started an operation.
+type actorJSON struct {
+	ID    int64  `json:"id"`
+	Login string `json:"login"`
+}
+
+func actorToJSON(a *store.Actor) *actorJSON {
+	if a == nil {
+		return nil
+	}
+	return &actorJSON{ID: a.UserID, Login: a.Login}
 }
 
 type promotedFromJSON struct {
@@ -96,6 +111,7 @@ func deploymentToJSON(d store.Deployment, slug string) deploymentJSON {
 		QueuedAt:           d.QueuedAt,
 		StartedAt:          d.StartedAt,
 		FinishedAt:         d.FinishedAt,
+		Actor:              actorToJSON(d.Actor),
 	}
 }
 

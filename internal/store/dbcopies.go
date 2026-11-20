@@ -38,10 +38,12 @@ type DBCopy struct {
 	BackupSnapshotID string
 	StartedAt        time.Time
 	FinishedAt       *time.Time
+	// Actor is who started the copy; nil for older records.
+	Actor *Actor
 }
 
 const dbCopyColumns = `id, target_app_id, source_app_id, source_slug, source_kind, status, error,
-	bytes, backup_snapshot_id, started_at, finished_at`
+	bytes, backup_snapshot_id, started_at, finished_at, actor_user_id, actor_login`
 
 func scanDBCopy(row rowScanner) (DBCopy, error) {
 	var (
@@ -49,9 +51,11 @@ func scanDBCopy(row rowScanner) (DBCopy, error) {
 		sourceID sql.NullInt64
 		started  int64
 		finished sql.NullInt64
+		actorID  sql.NullInt64
+		actor    string
 	)
 	err := row.Scan(&c.ID, &c.TargetAppID, &sourceID, &c.SourceSlug, &c.SourceKind, &c.Status, &c.Error,
-		&c.Bytes, &c.BackupSnapshotID, &started, &finished)
+		&c.Bytes, &c.BackupSnapshotID, &started, &finished, &actorID, &actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DBCopy{}, ErrNotFound
 	}
@@ -63,15 +67,18 @@ func scanDBCopy(row rowScanner) (DBCopy, error) {
 	}
 	c.StartedAt = fromMillis(started)
 	c.FinishedAt = fromNullMillis(finished)
+	c.Actor = actorFromColumns(actorID, actor)
 	return c, nil
 }
 
 // StartDBCopy records the beginning of a copy.
 func (s *Store) StartDBCopy(ctx context.Context, target, source App, kind string, now time.Time) (DBCopy, error) {
+	actorID, actorLogin := actorColumns(ctx)
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO db_copies (target_app_id, source_app_id, source_slug, source_kind, status, started_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		target.ID, source.ID, source.Slug, kind, CopyRunning, toMillis(now))
+		`INSERT INTO db_copies (target_app_id, source_app_id, source_slug, source_kind, status, started_at,
+			actor_user_id, actor_login)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		target.ID, source.ID, source.Slug, kind, CopyRunning, toMillis(now), actorID, actorLogin)
 	if err != nil {
 		return DBCopy{}, fmt.Errorf("start database copy: %w", err)
 	}

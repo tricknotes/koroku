@@ -47,6 +47,7 @@ type taskRunJSON struct {
 	Error        string     `json:"error"`
 	StartedAt    time.Time  `json:"started_at"`
 	FinishedAt   *time.Time `json:"finished_at"`
+	Actor        *actorJSON `json:"actor"`
 }
 
 func taskRunToJSON(run store.TaskRun, slug string) taskRunJSON {
@@ -62,6 +63,7 @@ func taskRunToJSON(run store.TaskRun, slug string) taskRunJSON {
 		Error:        run.Error,
 		StartedAt:    run.StartedAt,
 		FinishedAt:   run.FinishedAt,
+		Actor:        actorToJSON(run.Actor),
 	}
 }
 

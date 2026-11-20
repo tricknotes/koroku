@@ -237,7 +237,7 @@ func TestLoginAsAllowedUser(t *testing.T) {
 	}
 
 	session := b.do(http.MethodGet, "/api/session", "", nil)
-	want := `{"authenticated":true,"reauth_until":"2026-11-18T03:10:00Z","user":{"avatar_url":"https://example.com/octo.png","id":42,"login":"octo"}}`
+	want := `{"authenticated":true,"reauth_until":"2026-11-18T03:10:00Z","user":{"avatar_url":"https://example.com/octo.png","id":42,"login":"octo","owner":true}}`
 	if strings.TrimSpace(session.Body.String()) != want {
 		t.Errorf("session = %s", session.Body)
 	}

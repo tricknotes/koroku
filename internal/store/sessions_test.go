@@ -138,7 +138,7 @@ func TestLoginEvents(t *testing.T) {
 	if count != loginEventsKept {
 		t.Errorf("events kept = %d, want %d", count, loginEventsKept)
 	}
-	got, err := s.ListLoginEvents(ctx, 3)
+	got, err := s.ListLoginEvents(ctx, AllUsers, 3)
 	if err != nil {
 		t.Fatalf("ListLoginEvents: %v", err)
 	}

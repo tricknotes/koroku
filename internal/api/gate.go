@@ -91,9 +91,24 @@ func (s *Server) consoleGateURL(host, back string) string {
 	return s.auth.ConsoleURL + "/auth/gate?" + url.Values{"host": {host}, "return": {back}}.Encode()
 }
 
+// mayOpenApp reports whether a console user may open a protected app: the
+// owner, or a member with any role on it (ARCHITECTURE 10.7).
+func (s *Server) mayOpenApp(ctx context.Context, userID int64, app store.App) bool {
+	if s.auth.AllowedUserID != 0 && userID == s.auth.AllowedUserID {
+		return true
+	}
+	role, err := s.store.AppRole(ctx, app.ID, userID)
+	if err != nil {
+		s.log.Error("loading the role for the gate failed", "error", err)
+		return false
+	}
+	return role != ""
+}
+
 // gateGranted reports whether the request carries a gate cookie for host
-// whose console session is still valid and belongs to the allowed user.
-func (s *Server) gateGranted(r *http.Request, host string) bool {
+// whose console session is still valid and belongs to a user who may open
+// the app.
+func (s *Server) gateGranted(r *http.Request, host string, app store.App) bool {
 	cookie, err := r.Cookie(caddy.GateCookie)
 	if err != nil || cookie.Value == "" {
 		return false
@@ -105,7 +120,7 @@ func (s *Server) gateGranted(r *http.Request, host string) bool {
 		}
 		return false
 	}
-	return s.auth.AllowedUserID != 0 && sess.GitHubUserID == s.auth.AllowedUserID
+	return s.mayOpenApp(r.Context(), sess.GitHubUserID, app)
 }
 
 // handleGateCheck answers Caddy's forward_auth for a protected hostname:
@@ -125,7 +140,7 @@ func (s *Server) handleGateCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	// The database is the truth: an app whose protection was just turned
 	// off passes even before Caddy's configuration catches up.
-	if !app.AccessProtection || s.auth.InsecureNoAuth || s.gateGranted(r, host) {
+	if !app.AccessProtection || s.auth.InsecureNoAuth || s.gateGranted(r, host, app) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -146,7 +161,7 @@ func (s *Server) handleGateStart(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	host := strings.ToLower(query.Get("host"))
 	back := gateReturnPath(query.Get("return"))
-	_, protected, err := s.protectedApp(r.Context(), host)
+	app, protected, err := s.protectedApp(r.Context(), host)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -170,6 +185,13 @@ func (s *Server) handleGateStart(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/auth/github/login?"+url.Values{"return_to": {here}}.Encode(), http.StatusSeeOther)
 		return
 	}
+	if !s.mayOpenApp(r.Context(), sess.GitHubUserID, app) {
+		writeGatePage(w, http.StatusForbidden, gatePage{
+			Title:   "このアプリを開く権限がありません",
+			Message: "このアプリのロールを持っていません。オーナーにロールの追加を頼んでください。",
+		})
+		return
+	}
 	code, err := randomToken()
 	if err != nil {
 		s.internalError(w, r, err)
@@ -191,10 +213,12 @@ func (s *Server) handleGateCallback(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	host := requestHostname(r)
-	if _, protected, err := s.protectedApp(r.Context(), host); err != nil {
+	app, protected, err := s.protectedApp(r.Context(), host)
+	if err != nil {
 		s.internalError(w, r, err)
 		return
-	} else if !protected {
+	}
+	if !protected {
 		http.NotFound(w, r)
 		return
 	}
@@ -225,8 +249,9 @@ func (s *Server) handleGateCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess, err := s.store.GetSession(r.Context(), sessionHash, now)
-	if errors.Is(err, store.ErrNotFound) || (err == nil && sess.GitHubUserID != s.auth.AllowedUserID) {
-		// The console session ended between the code and its use.
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !s.mayOpenApp(r.Context(), sess.GitHubUserID, app)) {
+		// The console session ended between the code and its use, or the
+		// user lost its role on the app.
 		writeGatePage(w, http.StatusBadRequest, retry)
 		return
 	}

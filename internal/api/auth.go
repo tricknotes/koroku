@@ -55,7 +55,8 @@ type AuthOptions struct {
 	// GitHub performs the login flow. Nil means login is not configured;
 	// the API then stays locked unless InsecureNoAuth is set.
 	GitHub GitHub
-	// AllowedUserID is the only GitHub user that may log in.
+	// AllowedUserID is the owner: the GitHub user who may do everything
+	// and manages the members (ARCHITECTURE 10.7).
 	AllowedUserID int64
 	// ConsoleURL is the public origin of the console, e.g.
 	// https://console.dev.example.com. It defines the OAuth callback URL,
@@ -187,8 +188,12 @@ func (s *Server) lookupSession(r *http.Request) (store.Session, bool) {
 		}
 		return store.Session{}, false
 	}
-	// The allowed user may have been changed in the configuration.
-	if sess.GitHubUserID != s.auth.AllowedUserID {
+	// The owner may have been changed in the configuration, and a
+	// member may have lost its last role.
+	if allowed, err := s.userAllowed(r.Context(), sess.GitHubUserID); err != nil || !allowed {
+		if err != nil {
+			s.log.Error("checking the session's user failed", "error", err)
+		}
 		return store.Session{}, false
 	}
 	if now := s.clock.Now(); now.Sub(sess.LastSeenAt) >= touchInterval {
@@ -277,7 +282,7 @@ func (s *Server) guard(mux *http.ServeMux) http.Handler {
 				writeError(w, http.StatusForbidden, "forbidden_origin", "the request does not come from the console")
 				return
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, withActor(r, actor{Login: "local", Owner: true}))
 			return
 		}
 		if isMutating(r.Method) && (isAPI || strings.HasPrefix(path, "/auth/")) {
@@ -292,6 +297,10 @@ func (s *Server) guard(mux *http.ServeMux) http.Handler {
 		sess, ok := s.lookupSession(r)
 		if ok {
 			r = r.WithContext(context.WithValue(r.Context(), sessionKey{}, sess))
+			r = withActor(r, actor{
+				UserID: sess.GitHubUserID, Login: sess.Login,
+				Owner: sess.GitHubUserID == s.auth.AllowedUserID,
+			})
 		}
 		if isAPI && path != "/api/session" && !ok {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "login required")
@@ -351,7 +360,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	if s.auth.InsecureNoAuth {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"authenticated": true,
-			"user":          map[string]any{"id": 0, "login": "local", "avatar_url": ""},
+			"user":          map[string]any{"id": 0, "login": "local", "avatar_url": "", "owner": true},
 			"reauth_until":  nil,
 		})
 		return
@@ -363,8 +372,11 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
-		"user":          map[string]any{"id": sess.GitHubUserID, "login": sess.Login, "avatar_url": sess.AvatarURL},
-		"reauth_until":  sess.CreatedAt.Add(ReauthWindow),
+		"user": map[string]any{
+			"id": sess.GitHubUserID, "login": sess.Login, "avatar_url": sess.AvatarURL,
+			"owner": sess.GitHubUserID == s.auth.AllowedUserID,
+		},
+		"reauth_until": sess.CreatedAt.Add(ReauthWindow),
 	})
 }
 
@@ -435,11 +447,27 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		loginErrorRedirect(w, r, "github_error")
 		return
 	}
-	if s.auth.AllowedUserID == 0 || user.ID != s.auth.AllowedUserID {
-		s.log.Warn("login rejected: not the allowed user", "github_user_id", user.ID, "login", user.Login)
+	// The owner, and members with a role on at least one app, may log in
+	// (ARCHITECTURE 10.7). Nobody may when the owner is not configured.
+	allowed := false
+	if s.auth.AllowedUserID != 0 {
+		allowed, err = s.userAllowed(ctx, user.ID)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+	}
+	if !allowed {
+		s.log.Warn("login rejected: neither the owner nor a member with a role", "github_user_id", user.ID, "login", user.Login)
 		s.recordLogin(ctx, r, user, store.LoginNotAllowed)
 		loginErrorRedirect(w, r, store.LoginNotAllowed)
 		return
+	}
+	if user.ID != s.auth.AllowedUserID {
+		// The login may have been renamed since the member was added.
+		if err := s.store.UpdateMemberProfile(ctx, user.ID, user.Login, user.AvatarURL); err != nil {
+			s.log.Warn("updating the member's profile failed", "error", err)
+		}
 	}
 
 	sessionToken, err := randomToken()

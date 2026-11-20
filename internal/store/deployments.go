@@ -64,13 +64,17 @@ type Deployment struct {
 	// PromotedFromID is the staging deployment this one promoted
 	// (ARCHITECTURE 9.7); nil for ordinary deployments.
 	PromotedFromID *int64
+	// Actor is who asked for the deployment; nil when nobody did (records
+	// from before members existed, or koroku itself).
+	Actor *Actor
 }
 
 // RollbackRef is the ref recorded on rollbacks.
 const RollbackRef = "rollback"
 
 const deploymentColumns = `id, app_id, ref, commit_sha, commit_message, status, error,
-	queued_at, started_at, finished_at, source_deployment_id, promoted_from_deployment_id`
+	queued_at, started_at, finished_at, source_deployment_id, promoted_from_deployment_id,
+	actor_user_id, actor_login`
 
 func scanDeployment(row rowScanner) (Deployment, error) {
 	var (
@@ -80,9 +84,11 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 		finished sql.NullInt64
 		source   sql.NullInt64
 		promoted sql.NullInt64
+		actorID  sql.NullInt64
+		actor    string
 	)
 	err := row.Scan(&d.ID, &d.AppID, &d.Ref, &d.CommitSHA, &d.CommitMessage, &d.Status, &d.Error,
-		&queued, &started, &finished, &source, &promoted)
+		&queued, &started, &finished, &source, &promoted, &actorID, &actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -92,6 +98,7 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 	d.QueuedAt = fromMillis(queued)
 	d.StartedAt = fromNullMillis(started)
 	d.FinishedAt = fromNullMillis(finished)
+	d.Actor = actorFromColumns(actorID, actor)
 	if source.Valid {
 		d.SourceDeploymentID = &source.Int64
 	}
@@ -151,11 +158,12 @@ func (s *Store) enqueue(ctx context.Context, appID int64, ref, sha, message stri
 		StatusCanceled, SupersededError, toMillis(now), appID, StatusQueued); err != nil {
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
 	}
+	actorID, actorLogin := actorColumns(ctx)
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO deployments (app_id, ref, commit_sha, commit_message, status, queued_at,
-			source_deployment_id, promoted_from_deployment_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, appID, ref, sha, message, StatusQueued, toMillis(now),
-		nullInt(source), nullInt(promotedFrom))
+			source_deployment_id, promoted_from_deployment_id, actor_user_id, actor_login)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, appID, ref, sha, message, StatusQueued, toMillis(now),
+		nullInt(source), nullInt(promotedFrom), actorID, actorLogin)
 	if err != nil {
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
 	}

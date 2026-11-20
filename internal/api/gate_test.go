@@ -449,3 +449,39 @@ func TestAccessProtectionChangesNeedRecentLogin(t *testing.T) {
 		t.Errorf("turning protection on: %d %s", rec.Code, rec.Body)
 	}
 }
+
+// TestGateLetsMembersOfTheAppIn: a member opens the protected apps it has a
+// role on, and no others (ARCHITECTURE 10.7).
+func TestGateLetsMembersOfTheAppIn(t *testing.T) {
+	f := newGateFixture(t)
+	ctx := context.Background()
+	staging, err := f.srv.store.GetApp(ctx, "shop-staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.srv.store.AddMember(ctx, store.Member{GitHubUserID: 7, Login: "stranger", AddedAt: f.clk.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.srv.store.SetAppRole(ctx, staging.ID, 7, store.RoleView); err != nil {
+		t.Fatal(err)
+	}
+	f.console = newBrowser(t, f.h)
+	if rec := f.console.login("code-stranger"); rec.Header().Get("Location") != "/" {
+		t.Fatalf("member login: %s", rec.Header().Get("Location"))
+	}
+	cookie := f.enter(stagingHost, "/")
+	if rec := f.check(stagingHost, http.MethodGet, "/", cookie); rec.Code != http.StatusNoContent {
+		t.Errorf("member with a role: %d", rec.Code)
+	}
+	rec := f.console.do(http.MethodGet, "/auth/gate?"+url.Values{"host": {otherHost}, "return": {"/"}}.Encode(), "", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("gate of an app without a role: %d %s", rec.Code, rec.Header().Get("Location"))
+	}
+	// Losing the role closes the app at once, even with the cookie.
+	if err := f.srv.store.SetAppRole(ctx, staging.ID, 7, ""); err != nil {
+		t.Fatal(err)
+	}
+	if rec := f.check(stagingHost, http.MethodGet, "/", cookie); rec.Code == http.StatusNoContent {
+		t.Error("the gate cookie still works after the role was taken away")
+	}
+}

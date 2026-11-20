@@ -114,7 +114,7 @@ func TestAPITokenIssueListRevoke(t *testing.T) {
 	}
 
 	// Only the hash is stored.
-	stored, err := f.srv.store.ListAPITokens(context.Background(), f.clk.Now())
+	stored, err := f.srv.store.ListAPITokens(context.Background(), -1, f.clk.Now())
 	if err != nil || len(stored) != 1 {
 		t.Fatalf("stored tokens: %v %v", stored, err)
 	}
@@ -359,7 +359,7 @@ func TestAPITokenRateLimitAndLastUsed(t *testing.T) {
 	f := newTokenFixture(t)
 	token := f.created.Value
 	lastUsed := func() *time.Time {
-		list, err := f.srv.store.ListAPITokens(context.Background(), f.clk.Now())
+		list, err := f.srv.store.ListAPITokens(context.Background(), -1, f.clk.Now())
 		if err != nil || len(list) != 1 {
 			t.Fatalf("tokens: %v %v", list, err)
 		}
@@ -393,7 +393,7 @@ func TestAPITokenRateLimitAndLastUsed(t *testing.T) {
 	if rec := f.withToken(http.MethodGet, "/api/system", token, nil); rec.Code != http.StatusOK {
 		t.Errorf("after a minute: %d", rec.Code)
 	}
-	list, _ := f.srv.store.ListAPITokens(context.Background(), f.clk.Now())
+	list, _ := f.srv.store.ListAPITokens(context.Background(), -1, f.clk.Now())
 	for _, tok := range list {
 		if tok.ID == f.created.Token.ID && (tok.LastUsedAt == nil || !tok.LastUsedAt.Equal(f.clk.Now()) || tok.LastUsedIP != "192.0.2.1") {
 			t.Errorf("last use = %v %q", tok.LastUsedAt, tok.LastUsedIP)

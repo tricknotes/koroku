@@ -19,6 +19,8 @@ type sessionJSON struct {
 	IP         string    `json:"ip"`
 	UserAgent  string    `json:"user_agent"`
 	Current    bool      `json:"current"`
+	// User is whose session it is; the owner sees everyone's.
+	User userRefJSON `json:"user"`
 }
 
 type loginEventJSON struct {
@@ -30,7 +32,8 @@ type loginEventJSON struct {
 	UserAgent    string    `json:"user_agent"`
 }
 
-// handleListSessions lists the browsers that are logged in as the user.
+// handleListSessions lists the browsers that are logged in as the user, or,
+// for the owner, as anyone.
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	out := []sessionJSON{}
 	current, ok := sessionFrom(r)
@@ -39,7 +42,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"sessions": out})
 		return
 	}
-	list, err := s.store.ListSessions(r.Context(), current.GitHubUserID, s.clock.Now())
+	list, err := s.store.ListSessions(r.Context(), recordsOf(r), s.clock.Now())
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -48,12 +51,14 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		out = append(out, sessionJSON{
 			ID: sess.ID, CreatedAt: sess.CreatedAt, LastSeenAt: sess.LastSeenAt, ExpiresAt: sess.ExpiresAt,
 			IP: sess.IP, UserAgent: sess.UserAgent, Current: sess.TokenHash == current.TokenHash,
+			User: userRefJSON{ID: sess.GitHubUserID, Login: sess.Login},
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sessions": out})
 }
 
-// handleDeleteSession ends one session. Ending one's own is a logout.
+// handleDeleteSession ends one session: one's own, or for the owner anyone's.
+// Ending one's own is a logout.
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	current, ok := sessionFrom(r)
 	if !ok {
@@ -61,7 +66,7 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	err := s.store.DeleteSessionByID(r.Context(), current.GitHubUserID, id)
+	err := s.store.DeleteSessionByID(r.Context(), recordsOf(r), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "session_not_found", "no such session")
 		return
@@ -93,14 +98,15 @@ func (s *Server) handleRevokeOtherSessions(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"revoked": n})
 }
 
-// handleLoginEvents returns the recent login history.
+// handleLoginEvents returns the recent login history: the user's own, or
+// for the owner everyone's (including refused attempts).
 func (s *Server) handleLoginEvents(w http.ResponseWriter, r *http.Request) {
 	out := []loginEventJSON{}
 	if s.auth.InsecureNoAuth {
 		writeJSON(w, http.StatusOK, map[string]any{"events": out})
 		return
 	}
-	events, err := s.store.ListLoginEvents(r.Context(), loginEventsShown)
+	events, err := s.store.ListLoginEvents(r.Context(), recordsOf(r), loginEventsShown)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
