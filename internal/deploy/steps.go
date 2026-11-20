@@ -289,10 +289,16 @@ func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, di
 // else that got write access to the release directory, could have changed
 // them since the deploy that checked them.
 func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, composeFile string) error {
+	_, err := e.revalidatedProject(ctx, app, id, composeFile)
+	return err
+}
+
+// revalidatedProject is revalidate that also returns the merged project.
+func (e *Engine) revalidatedProject(ctx context.Context, app store.App, id int64, composeFile string) (compose.Project, error) {
 	dir := e.ReleaseDir(app.Slug, id)
 	project, err := e.composeConfigTo(ctx, e.invocation(app, id, composeFile, true), dir, io.Discard)
 	if err != nil {
-		return err
+		return compose.Project{}, err
 	}
 	policy := compose.CheckPolicy(project, compose.PolicyParams{
 		ReleaseDir:  dir,
@@ -304,9 +310,9 @@ func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, compos
 		Relax:       app.RelaxPolicy,
 	})
 	if !policy.OK() {
-		return &compose.PolicyError{Violations: policy.Violations}
+		return compose.Project{}, &compose.PolicyError{Violations: policy.Violations}
 	}
-	return nil
+	return project, nil
 }
 
 func (e *Engine) compose(ctx context.Context, inv compose.Invocation, dir string, log *deployLog, sub ...string) error {

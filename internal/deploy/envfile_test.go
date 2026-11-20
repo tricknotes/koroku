@@ -48,6 +48,33 @@ func TestRenderEnvFile(t *testing.T) {
 	}
 }
 
+func TestParseEnvFileValuesRoundTrips(t *testing.T) {
+	vars := map[string]string{
+		"PLAIN":      "abc-123_./:@%+=,",
+		"EMPTY":      "",
+		"SPACES":     "hello world",
+		"EQUALS":     "a=b=c",
+		"DOLLAR":     "pa$$word ${HOME} $USER",
+		"BACKSLASH":  `C:\path\n`,
+		"SQUOTE":     "it's $5",
+		"MULTILINE":  "line1\nline2\r\n",
+		"SQ_AND_ESC": `it's "quoted" \ and $x \n`,
+	}
+	content, err := RenderEnvFile(vars)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, v := range ParseEnvFileValues(content) {
+		got[v] = true
+	}
+	for key, value := range vars {
+		if !got[value] {
+			t.Errorf("value of %s (%q) not read back; got %q", key, value, ParseEnvFileValues(content))
+		}
+	}
+}
+
 func TestRenderEnvFileRejectsBadInput(t *testing.T) {
 	for _, key := range []string{"", "1ABC", "A-B", "A B", "A=B", "KEY\n", strings.Repeat("A", 256)} {
 		if _, err := RenderEnvFile(map[string]string{key: "v"}); err == nil {

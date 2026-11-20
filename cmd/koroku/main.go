@@ -219,6 +219,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		DefaultMemory:    cfg.Deploy.DefaultMemoryLimit,
 		DiskLimitPercent: cfg.Deploy.DiskUsageLimitPercent,
 		PruneImages:      cfg.Deploy.PruneImages,
+		TaskTimeout:      time.Duration(cfg.Tasks.TimeoutMinutes) * time.Minute,
 	}
 	apiOpts := api.Options{
 		Config:  cfg,
@@ -358,6 +359,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	apiOpts.Deployer = engine
 	apiOpts.Ops = engine
 	apiOpts.Copier = engine
+	apiOpts.Tasks = engine
 	go engine.RunMaintenance(ctx)
 	// Memory use history for the limit guidance (ARCHITECTURE 9.5).
 	go engine.NewMemorySampler().Run(ctx)

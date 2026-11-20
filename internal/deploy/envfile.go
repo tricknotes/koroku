@@ -90,6 +90,49 @@ func quoteEnvValue(v string) string {
 	return `"` + replacer.Replace(v) + `"`
 }
 
+// ParseEnvFileValues reads back the values of an env file written by
+// RenderEnvFile. It is not a general dotenv parser: it understands the
+// three forms RenderEnvFile produces, and serves to mask the values a
+// container receives (ARCHITECTURE 9.5).
+func ParseEnvFileValues(content string) []string {
+	var values []string
+	for _, line := range strings.Split(content, "\n") {
+		_, raw, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch {
+		case len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'':
+			values = append(values, raw[1:len(raw)-1])
+		case len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"':
+			values = append(values, unquoteEnvValue(raw[1:len(raw)-1]))
+		default:
+			values = append(values, raw)
+		}
+	}
+	return values
+}
+
+func unquoteEnvValue(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch s[i] {
+		case 'n':
+			b.WriteByte('\n')
+		case 'r':
+			b.WriteByte('\r')
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
 // writeFileAtomic writes data to path through a temporary file in the same
 // directory so that readers never observe a partial file.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {

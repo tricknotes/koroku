@@ -38,6 +38,9 @@ type fakeDeployer struct {
 	resources  deploy.ContainerResources
 	// available lists the deployments whose releases are kept.
 	available map[int64]bool
+	// Task runs (the fake also plays the TaskRunner).
+	taskErr   error
+	taskSpecs []deploy.TaskSpec
 }
 
 func (f *fakeDeployer) EnqueueRollback(ctx context.Context, app store.App, fromID int64) (store.Deployment, error) {

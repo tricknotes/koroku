@@ -167,6 +167,9 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 	d, err := s.deployer.Enqueue(r.Context(), app, in.Ref, sha, message)
 	var diskFull *deploy.DiskFullError
 	switch {
+	case errors.Is(err, deploy.ErrBusy):
+		writeError(w, http.StatusConflict, "busy", "a command is running on the app; wait for it or cancel it")
+		return
 	case errors.As(err, &diskFull):
 		writeJSON(w, http.StatusInsufficientStorage, errorBody{Error: errorDetail{
 			Code:    "disk_full",
