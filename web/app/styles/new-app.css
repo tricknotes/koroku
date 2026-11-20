@@ -26,7 +26,9 @@
 
 .env-draft-row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) auto;
+
+  /* A fixed width for the actions keeps the columns aligned across rows. */
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) 7rem;
   grid-template-areas:
     "key value actions"
     "note note note"
@@ -107,7 +109,7 @@
 /* On a phone the key takes its own line, the value and actions the next. */
 @media (width <= 40rem) {
   .env-draft-row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) 7rem;
     grid-template-areas:
       "key key"
       "value actions"

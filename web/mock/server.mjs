@@ -1099,7 +1099,10 @@ async function handleApi(request, response, url, scenario) {
       response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       return response.end(result.text);
     }
-    if (result?.status) return sendJson(response, result.status, result.json);
+    // A numeric status picks the HTTP status; a string one is part of the body.
+    if (typeof result?.status === 'number') {
+      return sendJson(response, result.status, result.json);
+    }
     return sendJson(response, 200, result);
   }
   throw notFound();
