@@ -53,7 +53,8 @@ type Config struct {
 }
 
 // Storage is the S3-compatible object storage used for log archives and
-// restic backups (Cloudflare R2 in production; nothing R2-specific is used).
+// restic backups. Only the S3 API is used, with path-style URLs, so any
+// provider that offers it works.
 type Storage struct {
 	Endpoint        string `toml:"endpoint"`
 	Region          string `toml:"region"`

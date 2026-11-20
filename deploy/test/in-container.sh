@@ -9,7 +9,7 @@
 #   docker     answers "docker info"; everything else is the real CLI
 #   swapon     remembers that the swap file was enabled
 #   ufw        logs the call and remembers "enable"
-#   sshd       reports two configured ports
+#   sshd       reports two configured ports ("sshd -T"), accepts "sshd -t"
 
 set -euo pipefail
 
@@ -193,6 +193,7 @@ check "ufw: ssh ports 22, 2222 (sshd), 2200 (session), then 80 and 443, before e
 check "ufw: 443/udp stays closed by default" not called "ufw allow 443/udp"
 check "koroku enabled" called "systemctl enable koroku.service"
 check "koroku not started while the config holds example values" not koroku_start_requested
+check "ssh: password login left alone while root has no authorized key" not test -e /etc/ssh/sshd_config.d/01-koroku.conf
 
 # What the human does next: real values and keys.
 sed -i -e 's/dev\.example\.com/koroku.test/' -e 's/203\.0\.113\.10/192.0.2.10/' \
@@ -203,6 +204,8 @@ sed -i -e 's/dev\.example\.com/koroku.test/' -e 's/203\.0\.113\.10/192.0.2.10/' 
   echo >>/etc/koroku/master.key
   echo "restic-password-stand-in" >/etc/koroku/restic.key
   echo "pem-stand-in" >/etc/koroku/github-app.pem
+  mkdir -p /root/.ssh
+  echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIStandInKeyForTheDryRunOnly0000000000000 dry-run" >/root/.ssh/authorized_keys
 )
 snapshot >/tmp/before
 : >"$CALLS"
@@ -219,6 +222,11 @@ check "caddy not restarted (already runs with --resume)" not called "systemctl r
 check "swap file not enabled twice" not called "swapon /swapfile"
 check "ufw not enabled twice" not called "ufw --force enable"
 check "koroku started now that the config has no example values" called "systemctl start koroku.service"
+check "ssh: key-only drop-in installed once root has a key" \
+  grep -qx 'PasswordAuthentication no' /etc/ssh/sshd_config.d/01-koroku.conf
+check "ssh: root keeps key login (it ran the script)" \
+  grep -qx 'PermitRootLogin prohibit-password' /etc/ssh/sshd_config.d/01-koroku.conf
+check "ssh: sshd reloaded" called "systemctl try-reload-or-restart ssh.service"
 sleep 2
 # Any HTTP answer will do: without a [github] section the API returns 401.
 check "koroku answers on its loopback port" curl -sS -o /dev/null http://127.0.0.1:8080/api/system
@@ -247,6 +255,7 @@ check "no managed file, key or permission changed" diff /tmp/before /tmp/after3
 check "koroku neither started nor restarted" not koroku_start_requested
 check "caddy not restarted" not called "systemctl restart caddy.service"
 check "--http3 opens 443/udp" called "ufw allow 443/udp"
+check "ssh: sshd not reloaded again" not called "systemctl try-reload-or-restart ssh.service"
 
 echo
 echo "######## refusals ########"

@@ -1,6 +1,6 @@
 # koroku — Claude Code 作業ガイド
 
-個人用の Heroku ライクなホスティング基盤を実装するリポジトリ。VPS 1 台の上で、GitHub リポジトリの Docker Compose アプリ（3〜5 個）を UI からデプロイする。
+個人用の Heroku ライクなホスティング基盤を実装するリポジトリ。OSS として公開しており、特定のホスティング事業者・DNS サービス・オブジェクトストレージに依存しない。VPS 1 台の上で、GitHub リポジトリの Docker Compose アプリ（3〜5 個）を UI からデプロイする。
 
 ## 参照する資料
 
@@ -13,16 +13,16 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| 実行基盤 | さくらの VPS 1 台、Ubuntu 24.04、x86_64 |
-| ベースドメイン | `dev.tricknotes.io`（アプリは `<slug>.dev.tricknotes.io`、管理 UI は `console.dev.tricknotes.io`） |
+| 実行基盤 | VPS 1 台（事業者は問わない）、Ubuntu 24.04、x86_64 |
+| ベースドメイン | 利用者が `config.toml` の `base_domain` で決める。文書と例では `dev.example.com`（アプリは `<slug>.dev.example.com`、管理 UI は `console.dev.example.com`） |
 | コントロールプレーン | Go 製シングルバイナリ `koroku`（systemd、ホスト直置き）+ SQLite |
 | フロントエンド | Ember + TypeScript の SPA。ビルド成果物を `koroku` に embed |
 | リバースプロキシ | Caddy（ホスト直置き）。設定は DB から全体を生成して admin API の `POST /load` |
 | GitHub 連携 | GitHub App（ログイン + installation token で clone） |
 | デプロイ単位 | 1 アプリ = 1 Compose プロジェクト（`-p koroku-<slug>`）。staging と本番は別アプリ |
-| 外部ストレージ | Cloudflare R2（S3 互換 API のみ使用。S3 に差し替え可能にする） |
-| バックアップ | restic → R2。日次 03:00 JST |
-| ログ退避 | 4 時間ごとに R2 へ |
+| 外部ストレージ | S3 互換のオブジェクトストレージ（S3 互換 API のみ、パス形式の URL で使う。事業者固有の API は使わない） |
+| バックアップ | restic → オブジェクトストレージ。日次 03:00 JST |
+| ログ退避 | 4 時間ごとにオブジェクトストレージへ |
 
 ## リポジトリ構成
 
@@ -34,7 +34,7 @@ internal/compose/     override 生成、config 正規化、ポリシー検査
 internal/caddy/       Caddy JSON 設定の生成と投入
 internal/github/      GitHub App 認証、API クライアント
 internal/domains/     独自ドメインの検証
-internal/logs/        ログコレクタと R2 退避
+internal/logs/        ログコレクタとオブジェクトストレージへの退避
 internal/backup/      restic 呼び出し、スケジュール、リストア
 internal/store/       SQLite、マイグレーション
 internal/runner/      外部コマンド実行の抽象
@@ -56,6 +56,7 @@ plugins/koroku/       アプリのリポジトリを koroku 向けに整える S
 - 外部呼び出しには `context` でタイムアウトを付ける。エラーは文脈を付けて wrap する。
 - DB が唯一の正。Caddy 設定や override は常に DB から再生成できること。
 - UI の文言は日本語。コード、コメント、コミットメッセージは英語。
+- 文書、コード、コメント、UI に特定の事業者（VPS、DNS、オブジェクトストレージ）の名前や、運用者個人のドメイン・IP を書かない。条件で書き、例には `example.com` と `203.0.113.x` を使う。
 - デプロイされる側に見える振る舞い（ポリシー検査、override の生成、デプロイ手順、ヘルスチェック、env ファイル、バックアップ）を変えたら、`plugins/koroku/skills/prepare-app/`（`references/requirements.md` と `scripts/rehearse.sh`）も同じ PR で直し、`plugin.json` の `version` を上げる。利用者のリポジトリはこの Skill を頼りに koroku へ合わせるため。
 
 ## テストと確認コマンド
@@ -121,7 +122,7 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 - [x] 停止中アプリは 503 の固定ページ
 - [x] Caddy のアクセスログをアプリ別に出力（M5 のコレクタが拾う）
 - [x] 実機確認: 設定再投入時に他アプリの接続（WebSocket、SSE）が切れないか。結果を ARCHITECTURE 12 章に追記
-- 完了条件: `https://<slug>.dev.tricknotes.io` が応答し、独自ドメインを追加して DNS を向けると HTTPS で応答する
+- 完了条件: `https://<slug>.dev.example.com` が応答し、独自ドメインを追加して DNS を向けると HTTPS で応答する
 
 ### M3 GitHub App
 
@@ -142,7 +143,7 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 ### M5 運用
 
 - [x] ログコレクタ（`docker compose logs --follow` を追記保存、再起動時は `--since` で再開、ローカル 14 日保持）
-- [x] 4 時間ごとの R2 退避（`logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz`）、過去ログの絞り込み表示、presigned URL でのダウンロード
+- [x] 4 時間ごとのオブジェクトストレージへの退避（`logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz`）、過去ログの絞り込み表示、presigned URL でのダウンロード
 - [x] バックアップ: 基盤（`koroku.db` は `VACUUM INTO` 後）、named volume、ダンプフック（`docker compose exec -T` の出力を `restic backup --stdin`）
 - [x] バックアップのスケジュール（日次 03:00 JST）、手動実行、`forget --prune`、週次 `check`、最終成功時刻と警告の表示
 - [x] リストア: volume は UI から、DB ダンプはダウンロードまで。`koroku restore-system` でホスト全損から復旧
@@ -152,14 +153,14 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 
 ## 受け入れシナリオ
 
-1. private リポジトリの Rails + PostgreSQL の Compose を UI からデプロイし、`https://<slug>.dev.tricknotes.io` が応答する。
+1. private リポジトリの Rails + PostgreSQL の Compose を UI からデプロイし、`https://<slug>.dev.example.com` が応答する。
 2. 環境変数を変更して再デプロイすると反映され、DB のデータは残る。
 3. 起動に失敗するコミットをデプロイすると `failed` になり、旧版が応答し続ける。
 4. アプリを 2 つ並べても、互いの DB ポートがホスト外から到達できない。
 5. あるアプリのデプロイ中、別アプリは応答し続ける。
 6. 独自ドメインを追加し、DNS 設定後に HTTPS で応答する。プライマリ以外のホスト名はリダイレクトされる。
 7. バックアップ取得 → volume を空にする → リストアでデータが戻る。
-8. 4 時間以上前のログが R2 にあり、UI からダウンロードできる。
+8. 4 時間以上前のログがオブジェクトストレージにあり、UI からダウンロードできる。
 
 ## 人が用意するもの
 
@@ -167,9 +168,9 @@ Claude Code は以下を代行しない。必要になった時点で依頼し�
 
 | 必要になる時点 | 用意するもの |
 | --- | --- |
-| M2 | VPS（さくらの VPS、4GB プラン、東京か石狩）と、その IP に向けた DNS レコード（Squarespace Domains。`*.dev` が登録できなければ `console.dev` と各 `<slug>.dev` を個別に） |
-| M3 | GitHub App の登録（権限は Contents: Read-only と Metadata: Read-only、callback は `https://console.dev.tricknotes.io/auth/github/callback`）、App ID、秘密鍵、許可するユーザー ID |
-| M5 | R2 のバケット、バケット限定の API トークン、`logs/` プレフィックスに 90 日削除のライフサイクルルール。restic のリポジトリパスワード（VPS 外にも控える） |
+| M2 | VPS（Ubuntu 24.04 amd64、メモリ 4GB 程度）と、その IP に向けた DNS レコード（ワイルドカードが登録できなければ `console.<base_domain>` と各 `<slug>.<base_domain>` を個別に） |
+| M3 | GitHub App の登録（権限は Contents: Read-only と Metadata: Read-only、callback は `https://<console_host>/auth/github/callback`）、App ID、秘密鍵、許可するユーザー ID |
+| M5 | オブジェクトストレージのバケット、バケット限定のアクセスキー、`logs/` プレフィックスに 90 日削除のライフサイクルルール。restic のリポジトリパスワード（VPS 外にも控える） |
 
 ## やらないこと
 
@@ -185,5 +186,5 @@ Claude Code は以下を代行しない。必要になった時点で依頼し�
 判断を求めずに既定案で実装してよい。変えたくなったら ARCHITECTURE 12 章を更新する。
 
 - バックアップの世代: 日次 7、週次 4、月次 6
-- ログの保持: ローカル 14 日、R2 に 90 日
+- ログの保持: ローカル 14 日、オブジェクトストレージに 90 日
 - 起動失敗時の自動ロールバック: 既定で有効

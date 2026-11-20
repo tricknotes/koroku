@@ -4,13 +4,13 @@ Nov 18, 2026 · @tricknotes
 
 ## 1. 目的とスコープ
 
-個人用に 3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHub リポジトリから UI 操作だけでデプロイできるコントロールプレーンを作る。以下、本体デーモンを `koroku`、ベースドメインを `dev.tricknotes.io` と書く。
+個人用に 3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHub リポジトリから UI 操作だけでデプロイできるコントロールプレーンを作る。以下、本体デーモンを `koroku`、ベースドメイン（`config.toml` の `base_domain`）を例として `dev.example.com` と書く。特定のホスティング事業者、DNS サービス、オブジェクトストレージには依存しない。それぞれに求める条件は [SETUP.md](SETUP.md) にまとめる。
 
 **作るもの**
 
 - GitHub リポジトリ連携（private 含む）と、UI からのブランチ／コミット指定デプロイ
 - `compose.yaml` のデプロイ。`build:` があればホストでビルド、`image:` のみなら pull
-- アプリごとの `<slug>.dev.tricknotes.io` 自動割当と TLS、アプリごとの独自ドメイン追加（本番用）
+- アプリごとの `<slug>.dev.example.com` 自動割当と TLS、アプリごとの独自ドメイン追加（本番用）
 - 環境変数の管理、デプロイログと実行ログの閲覧
 - 起動・停止・再起動・削除、過去コミットへの再デプロイ（ロールバック）
 
@@ -25,7 +25,7 @@ Nov 18, 2026 · @tricknotes
 
 | 項目 | 決定 | 理由 |
 | --- | --- | --- |
-| 実行基盤 | さくらの VPS 1 台（Ubuntu 24.04、x86_64）。Docker Engine + Compose v2.30 以上 | ご回答どおり。override で使う `!override` タグ（2.24.4 以上）と、ポリシー検査で使う `config --no-env-resolution`（2.30 以上、6 章）の要件（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)） |
+| 実行基盤 | VPS 1 台（Ubuntu 24.04、x86_64）。Docker Engine + Compose v2.30 以上 | ご回答どおり。override で使う `!override` タグ（2.24.4 以上）と、ポリシー検査で使う `config --no-env-resolution`（2.30 以上、6 章）の要件（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)） |
 | コントロールプレーン | Go 製シングルバイナリ `koroku`。systemd でホストに直置き、SQLite | 常駐メモリが小さく、配布と更新がファイル 1 つ。詳細は 4 章 |
 | フロントエンド | Ember SPA。ビルド成果物を `koroku` に埋め込んで配信 | ご希望どおり。配信用の別プロセスが不要 |
 | リバースプロキシ | Caddy。ホストに直置きし、admin API で設定を投入 | ホスト名を渡すだけで証明書の取得と更新まで自動（[Automatic HTTPS](https://caddyserver.com/docs/automatic-https)） |
@@ -46,9 +46,9 @@ Nov 18, 2026 · @tricknotes
                          | 80 / 443
 +------------------------v--------------------------------- VPS --+
 |  Caddy (systemd)                                                |
-|    console.dev.tricknotes.io -> 127.0.0.1:8080  (koroku)        |
-|    app-a.dev.tricknotes.io   -> 127.0.0.1:20001 (app-a / web)   |
-|    app-b.dev.tricknotes.io   -> 127.0.0.1:20002 (app-b / web)   |
+|    console.dev.example.com -> 127.0.0.1:8080  (koroku)        |
+|    app-a.dev.example.com   -> 127.0.0.1:20001 (app-a / web)   |
+|    app-b.dev.example.com   -> 127.0.0.1:20002 (app-b / web)   |
 |    admin API: 127.0.0.1:2019                                    |
 |                                                                 |
 |  koroku (Go, systemd)  listen 127.0.0.1:8080                    |
@@ -251,7 +251,7 @@ services:
 
 DNS にワイルドカードの A レコードを 1 本置き、証明書は Caddy がホスト名ごとに自動取得する。
 
-- **DNS**: `*.dev.tricknotes.io` を VPS の IP に向ける。アプリは `<slug>.dev.tricknotes.io`、管理 UI は `console.dev.tricknotes.io`。
+- **DNS**: `*.dev.example.com` を VPS の IP に向ける。アプリは `<slug>.dev.example.com`、管理 UI は `console.dev.example.com`。
 - **証明書**: Caddy は設定にホスト名があると自動 HTTPS を有効にし、証明書の取得・更新と HTTP→HTTPS リダイレクトを行う（[Automatic HTTPS](https://caddyserver.com/docs/automatic-https)）。
 - **発行上限**: Let's Encrypt は登録ドメインあたり 7 日間で 50 枚まで（[Rate Limits](https://letsencrypt.org/docs/rate-limits/)）。3〜5 アプリでは問題ないが、開発中は staging 環境を使う。
 - **設定投入**: `koroku` が DB から Caddy の JSON 設定全体を生成し、admin API の `POST /load` で置き換える（[API Tutorial](https://caddyserver.com/docs/api-tutorial)）。差分更新はしない。`koroku` 起動時にも必ず実行し、DB を唯一の正とする。
@@ -280,16 +280,16 @@ DNS にワイルドカードの A レコードを 1 本置き、証明書は Cad
 - 認証なしモードの Host 検査は `*.localhost` を受け付ける（`console.dev.localhost` で開くため）。`.localhost` 配下の名前は常にループバックに解決される（RFC 6761）ので、DNS リバインディングの対策は崩れない。変更系の `Origin` は `http://<Host>` に加えて `https://<Host>` も許す。同じ `dev.localhost` 配下のアプリからの要求は、従来どおり `Sec-Fetch-Site: same-site` と `Origin` の不一致で拒否する。
 - アクセスログは出さない（`access_log_dir = ""`）。Caddy はコンテナ内で root として動き、ログファイルを `koroku`（利用者の UID）が読めないため。
 
-**Squarespace Domains での設定**: `tricknotes.io` の DNS Settings → Custom Records に A レコードを追加する（[Adding DNS records to your domain](https://support.squarespace.com/hc/articles/360002101888)）。Host に `*.dev` を指定できるかは未確認。できない場合は `console.dev` とアプリごとの `<slug>.dev` を個別に登録する。証明書はホスト名ごとに取る設計なので、どちらでも `koroku` 側の実装は変わらない。
+**ワイルドカードのレコードを登録できない DNS サービス**: `console.<base>` とアプリごとの `<slug>.<base>` を個別に登録する。証明書はホスト名ごとに取る設計なので、どちらでも `koroku` 側の実装は変わらない。
 
 ワイルドカード証明書は DNS-01 チャレンジでのみ発行できる（[Challenge Types](https://letsencrypt.org/docs/challenge-types/)）。個別証明書だとサブドメイン名が証明書の公開ログに載る点が気になる場合は、後から DNS 事業者の API 連携を足して切り替える。
 
 ### 8.1 独自ドメイン
 
-アプリごとに任意個の独自ドメインを UI から追加できる。自動割当の `<slug>.dev.tricknotes.io` は常に残り、独自ドメインはそこに足される別名として扱う。
+アプリごとに任意個の独自ドメインを UI から追加できる。自動割当の `<slug>.dev.example.com` は常に残り、独自ドメインはそこに足される別名として扱う。
 
 1. **登録**: UI でホスト名（例 `example.com`、`www.example.com`）を入力する。状態は `pending`。
-2. **DNS 設定（利用者が実施）**: サブドメインは `<slug>.dev.tricknotes.io` への CNAME、apex は VPS の IP への A レコード。UI に設定すべき値を表示する。
+2. **DNS 設定（利用者が実施）**: サブドメインは `<slug>.dev.example.com` への CNAME、apex は VPS の IP への A レコード。UI に設定すべき値を表示する。
 3. **検証**: `koroku` がホスト名を名前解決し、`config.toml` の `public_ip` と一致したら `active` にする。「再検証」ボタンと 5 分間隔の自動再試行を持つ。
 4. **反映**: `active` のホスト名だけを Caddy 設定に含めて `POST /load` する。証明書は自動割当ドメインと同じく Caddy がホスト名ごとに取得する。
 
@@ -300,7 +300,7 @@ DNS にワイルドカードの A レコードを 1 本置き、証明書は Cad
 - 追加した直後に 1 回検証するので、DNS を先に設定してあれば待たずに `active` になる。
 - CDN を前段に置くなど IP が一致しない構成のために、検証を飛ばす「強制有効化」を用意する。
 - アプリごとに「プライマリドメイン」を 1 つ選べる。選んだ場合、他のホスト名へのアクセスはプライマリへ 308 リダイレクトする（`www` ありなしの統一用）。
-- ホスト名は全アプリで一意。`*.dev.tricknotes.io` 配下は独自ドメインとして登録できない。
+- ホスト名は全アプリで一意。`*.dev.example.com` 配下は独自ドメインとして登録できない。
 
 **追加するデータと API**
 
@@ -321,7 +321,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 |  | staging アプリ | 本番アプリ |
 | --- | --- | --- |
 | slug の例 | `myapp-staging` | `myapp` |
-| URL | `myapp-staging.dev.tricknotes.io` のみ | 独自ドメイン（プライマリ）+ `myapp.dev.tricknotes.io` |
+| URL | `myapp-staging.dev.example.com` のみ | 独自ドメイン（プライマリ）+ `myapp.dev.example.com` |
 | デプロイ元 | 任意のブランチ | `main` のコミット |
 | 環境変数・volume | アプリ単位で独立 | アプリ単位で独立 |
 
@@ -499,7 +499,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - **コンテナログ**: Docker の `json-file` ドライバを `max-size=10m`、`max-file=3` でローテートする（`daemon.json`）。長期保管は 10.1 の収集機構が担う。
 - **ディスク**: デプロイ成功後に `docker image prune -f`、週 1 回 `docker builder prune --all --filter until=168h`。使用率はシステム画面に出す。
 - **メモリ**: ビルド時のピークに備えて swap を 2GB 置く。VPS は 2 vCPU、4GB RAM、40GB ディスクを出発点にする（未計測の目安）。
-- **バックアップ**: 基盤の設定とアプリのデータを日次で R2 に退避する（10.2）。
+- **バックアップ**: 基盤の設定とアプリのデータを日次でオブジェクトストレージに退避する（10.2）。
 - **koroku の更新**: バイナリを差し替えて `systemctl restart koroku`。アプリのコンテナは影響を受けない。
 - **起動制御と削除（M5 の実装で確定、2026-11-18）**
   - 停止は `docker compose stop`、起動は稼働中リリースのファイルで `up -d --wait`（設定を確実に揃えるため。リリースのファイルが残っていなければ `docker compose start`）、再起動は `docker compose restart`。停止・起動のたびに Caddy 設定を再投入し、停止中は 503 の固定ページになる。
@@ -514,7 +514,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 ### 10.1 ログ収集
 
-ログは `koroku` 内蔵のコレクタがファイルに蓄積し、4 時間ごとに R2 に退避する。Loki などのログ基盤は、常駐メモリが増えるので 3〜5 アプリの規模では採用しない。
+ログは `koroku` 内蔵のコレクタがファイルに蓄積し、4 時間ごとにオブジェクトストレージに退避する。Loki などのログ基盤は、常駐メモリが増えるので 3〜5 アプリの規模では採用しない。
 
 | 項目 | 仕様 |
 | --- | --- |
@@ -522,9 +522,9 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | 収集 | アプリごとに `docker compose logs --follow --timestamps --no-color` を読み続け、`/var/lib/koroku/logs/<slug>/<service>/YYYY-MM-DD.log` に追記 |
 | 再開 | `koroku` 再起動時は最後に書いた時刻を `--since` に渡す。直近分は Docker 側に残っているので短い停止は埋まる |
 | ローカル保持 | 14 日。日付が変わったファイルは gzip 圧縮 |
-| R2 への退避 | 4 時間ごと（00:10 JST 起点）に、前回以降の差分を gzip して `logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz` へアップロード |
-| R2 側の保持 | プレフィックス `logs/` に 90 日で削除するライフサイクルルールを設定（[Object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles)） |
-| 閲覧 | ライブ tail（SSE）。過去 14 日は日付・サービス・キーワードで絞り込み。それ以前は presigned URL でダウンロード（[Presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/)） |
+| オブジェクトストレージへの退避 | 4 時間ごと（00:10 JST 起点）に、前回以降の差分を gzip して `logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz` へアップロード |
+| オブジェクトストレージ側の保持 | プレフィックス `logs/` に 90 日で削除するライフサイクルルールを設定（[S3: Lifecycle configuration](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html) と同等の機能。koroku からは設定しない） |
+| 閲覧 | ライブ tail（SSE）。過去 14 日は日付・サービス・キーワードで絞り込み。それ以前は presigned URL でダウンロード（[S3: Presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)） |
 
 - API: `GET /api/apps/{slug}/logs?service=&from=&to=&q=`、`GET /api/apps/{slug}/logs/archives`、`GET /api/apps/{slug}/logs/archives/url?key=`。
 
@@ -533,7 +533,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - ローカルのファイルは 1 行が `<UTC の時刻（ナノ秒まで）> <本文>`。日付の区切りと退避の時間枠は `config.toml` の `timezone`（既定 `Asia/Tokyo`）で決める。
 - サービス名は `docker compose logs` の行頭（コンテナ名からプロジェクト名を除いたもの）から末尾の `-<番号>` を落として求める。`container_name` を独自に指定したサービスはその名前で記録される（Compose がそう出力するため）。
 - 再開時は、サービスごとに最後に書いた時刻の 30 秒前から `--since` で読み直し、「サービス・時刻・本文」が一致する行を数えて重複を落とす。同じ時刻の別の行は残す。Docker 側に行が残っている限り欠落しない。
-- 1 回の `logs --follow` の中で、同じコンテナの「時刻・本文」が一致する行がもう一度出たら捨てる（コンテナごとに直近 4096 行を覚えておく）。`docker compose logs --follow` は、コンテナの起動と重なって開始されると同じコンテナに二重に接続し、以後その行をすべて 2 回ずつ出すことがある（12 章の実機確認）。停止中のアプリを待っているフォロワーはデプロイのたびにこの状況になるので、対処しないと保存されるログと R2 への退避が倍になる。Docker は行ごとにナノ秒の時刻を付けるので、同じコンテナで時刻も本文も同じ行はアプリが 2 回出力したものではない。別レプリカ（`web-1` と `web-2`）の同じ行は残す。
+- 1 回の `logs --follow` の中で、同じコンテナの「時刻・本文」が一致する行がもう一度出たら捨てる（コンテナごとに直近 4096 行を覚えておく）。`docker compose logs --follow` は、コンテナの起動と重なって開始されると同じコンテナに二重に接続し、以後その行をすべて 2 回ずつ出すことがある（12 章の実機確認）。停止中のアプリを待っているフォロワーはデプロイのたびにこの状況になるので、対処しないと保存されるログとオブジェクトストレージへの退避が倍になる。Docker は行ごとにナノ秒の時刻を付けるので、同じコンテナで時刻も本文も同じ行はアプリが 2 回出力したものではない。別レプリカ（`web-1` と `web-2`）の同じ行は残す。
 - 1 行は 16 KiB で切り、不正な UTF-8 と制御文字は置き換える。ログの本文は `koroku` 自身のログやエラーメッセージに出さない（アプリの出力に何が入るか分からないため）。
 - Caddy のアクセスログは、同じアプリの擬似サービス `_access` として取り込む。`koroku` が止まっている間にローテートされて消えた分は読めない。
 - 退避は「日ごとのファイルのどこまで送ったか」をバイト位置で記録し、送る範囲を保存してからアップロードする。失敗や再起動のあとは同じ範囲を同じキーへ送り直すので、重複も欠落も起きない。失敗した時間枠は次回（および 10 分後の再試行）にその時間枠のキーで送る。空の時間枠は何も送らない。
@@ -544,7 +544,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 ### 10.2 バックアップ
 
-バックアップは restic で R2 に取る。R2 は S3 互換 API を持ち（[S3 API compatibility](https://developers.cloudflare.com/r2/api/s3/api/)）、restic は S3 互換ストレージをリポジトリにできる（[restic documentation](https://restic.readthedocs.io/)）。重複排除・暗号化・世代管理を自前で書かずに済む。
+バックアップは restic で S3 互換のオブジェクトストレージに取る。restic は S3 互換ストレージをリポジトリにできる（[restic documentation](https://restic.readthedocs.io/)）。重複排除・暗号化・世代管理を自前で書かずに済む。
 
 | 対象 | 方法 |
 | --- | --- |
@@ -557,7 +557,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - **世代**: `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune`。スナップショットには `app:<slug>` と `kind:system|volume|dump` のタグを付ける。
 - **監視**: 週 1 回 `restic check`。最終成功時刻を UI に出し、24 時間以上成功がなければ警告表示する。外部通知は後回し。
 - **バケット**: 1 バケットを `restic/` と `logs/` に分ける。ライフサイクルルールは `logs/` だけに掛ける（`restic/` を期限削除するとリポジトリが壊れる）。
-- **S3 への切替**: `config.toml` の endpoint・region・バケット名を変えるだけにする。R2 固有の API は使わない。
+- **ストレージの選択**: S3 互換 API（署名 V4、パス形式の URL）だけを使い、事業者固有の API は使わない。事業者の切り替えは `config.toml` の endpoint・region・バケット名・アクセスキーを変えるだけで済む。
 
 **リストア**
 
@@ -567,8 +567,8 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 **事前準備と秘密情報**
 
-- R2 にバケットを作り、そのバケットに限定した API トークン（Access Key ID / Secret Access Key）を発行して `/etc/koroku/config.toml` に置く。
-- restic のリポジトリパスワードは `/etc/koroku/restic.key`。これと R2 の認証情報は VPS の外（パスワードマネージャなど）にも必ず控える。失うとホスト全損時に復元できない。
+- オブジェクトストレージにバケットを作り、そのバケットに限定したアクセスキー（Access Key ID / Secret Access Key）を発行して `/etc/koroku/config.toml` に置く。
+- restic のリポジトリパスワードは `/etc/koroku/restic.key`。これとオブジェクトストレージの認証情報は VPS の外（パスワードマネージャなど）にも必ず控える。失うとホスト全損時に復元できない。
 
 **バックアップの細則（M5 の実装と実機確認で確定、2026-11-18）**
 
@@ -585,7 +585,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - 基盤のバックアップで設定ディレクトリをコピーするとき、その下にあるデータディレクトリ（`data_dir`）と、コピー先の作業ディレクトリ自身は除外する。ローカル環境では両方を `data/dev` の下に置くため、除外しないと作業ディレクトリを何重にもコピーし続けて失敗した（2026-11-19、ローカル環境で検出）。本番は `/etc/koroku` と `/var/lib/koroku` が別なので影響しない。
 - volume のリストアで中身を退避する移動は `rename` で行い、`EXDEV`（マウントをまたぐ移動）で失敗したときだけ、所有者・パーミッション・時刻を保ったコピーと元の削除に切り替える。事前に「同じファイルシステムか」は確かめているが、同じファイルシステムでも別の bind mount を経由すると Linux は `rename` を拒む（ローカル環境は、`koroku` のコンテナにデータディレクトリと Docker の volume ディレクトリを別々にマウントしている）。コピーではハードリンクと拡張属性は保たれないが、退避は手作業での救出用なので許容する。ソケット・デバイス・名前付きパイプはコピーせず、リストアを失敗させて元に戻す。本番は同じマウントなので従来どおり `rename` になる。
 
-実装は M5。受け入れシナリオに「バックアップ取得 → volume を空にする → リストアでデータが戻る」と「4 時間以上前のログが R2 にあり UI からダウンロードできる」を加える。
+実装は M5。受け入れシナリオに「バックアップ取得 → volume を空にする → リストアでデータが戻る」と「4 時間以上前のログがオブジェクトストレージにあり UI からダウンロードできる」を加える。
 
 ### 10.3 ログインの強化（2026-11-19）
 
@@ -616,6 +616,29 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - クライアントの IP: `koroku` はループバックで待ち受け、Caddy を経由して届く。接続元がループバックのときだけ `X-Forwarded-For` の最後の値を使う。Caddy は既定でクライアントから来た `X-Forwarded-For` を信用せず、接続元の IP で置き換えるので、偽装できない。User-Agent は 512 バイトで切る。
 - `login_events` テーブル: 時刻、結果（`succeeded`、`not_allowed`、`two_factor_required`、`two_factor_unknown`）、GitHub のユーザー ID と login、IP、User-Agent。GitHub のユーザーが分かったものだけを残し、state の不一致や GitHub の失敗は残さない。誰でも起こせて、記録が溢れるだけなので。新しい 200 件を残して古いものを消す。
 - 画面: ユーザーメニューから「セキュリティ」を開き、セッションの一覧（このセッションを示す、個別に終了、ほかをすべて終了）と、ログイン履歴を見る。
+
+### 10.4 本番投入の準備（2026-11-20）
+
+本番の VPS に載せる前に、外部サービスの設定の誤りを早く見つけることと、SSH の入口を狭めることを足した。手順は `docs/SETUP.md`。
+
+**`koroku check`**
+
+- 外部サービスの設定は手作業で、誤りは「ログインできない」「バックアップが夜に失敗する」のように、使ってみるまで表に出ない。`koroku check` は `config.toml` を読み、次を 1 つずつ確かめて、直し方と `docs/SETUP.md` の節を示す。失敗が 1 つでもあれば終了コード 1。
+  - 例の値（`example.com`、`203.0.113.x`）が残っていないこと。`public_ip` がホストのインターフェースのアドレスにあること（ないときは警告。NAT の下ならありうる）。
+  - DNS: `console_host` と、登録していない名前（`koroku-check-<乱数>.<base_domain>`）が `public_ip` だけに解決されること。後者が解決されなければワイルドカードがないとして警告する（アプリごとの登録でも運用できるため）。判定は独自ドメインの検証（8 章）と同じ関数。
+  - Caddy の admin API が応答すること。`console_url` に HTTPS で接続でき、証明書が信頼できること。`acme_ca` が Let's Encrypt の staging なら、信頼できない証明書は警告にとどめ、本番への切り替えを促す。
+  - `master.key` があり 0600 であること（ないときは警告。初回起動で作られる）。
+  - GitHub App: App の JWT で `GET /app` が通り、`app_id`・`client_id` が一致し、権限が Contents と Metadata の read だけであること（足りなければ失敗、余分なら警告）。`GET /app/installations` で 1 つ以上インストールされていること。`allowed_user_id` が実在するアカウントであること（`GET /user/{id}`、認証なし）。callback URL は API で読めないので、正しい値を表示するだけにする。
+  - オブジェクトストレージ: `koroku-check/<乱数>` に書き、読み、一覧し、消す。`logs/` と `restic/` の外なので、ライフサイクルルールにも restic にも触れない。トークンの権限不足をここで見つける。
+  - restic: 基盤のスナップショットを一覧できること（パスワードの誤りはここで失敗する）。まだ 1 つもなければ警告（リポジトリは最初のバックアップで作られる）。最新が 26 時間より古ければ警告。
+- 外部への書き込みはストレージの確認用オブジェクト 1 つだけで、終わったら消す。DNS、GitHub、Caddy は読むだけ。秘密は表示しない。
+- `serve` の起動時には行わない。起動時に外部サービスを待つと、GitHub やオブジェクトストレージの障害で管理 UI まで止まるため。
+
+**SSH を鍵だけにする**
+
+- VPS の OS イメージは、パスワードでの SSH ログインを受け付けるものが多い。`koroku` を動かすホストの root はすべてのアプリと秘密を握るので、`provision.sh` はパスワードと keyboard-interactive の認証を止め、root のログインを禁じる（スクリプトを root で直接実行した場合は鍵での root ログインだけ残す）。設定は `/etc/ssh/sshd_config.d/01-koroku.conf` に置く。sshd は最初に読んだ値を使うので、`50-cloud-init.conf` より先に読まれる名前にした。
+- 締め出しを避けるため、`sudo` を実行したユーザー（`SUDO_USER`、なければ root）の `~/.ssh/authorized_keys` に鍵が 1 つ以上あるときだけ行う。ないときは何もせず、最後のまとめで知らせる。書いたあとに `sshd -t` で検査し、通らなければファイルを消して止まる。反映は reload で、開いているセッションは切れない。
+- `--keep-ssh-password` で、この手順だけを飛ばせる。
 
 ## 11. 実装フェーズ（Claude Code 向け）
 
@@ -651,8 +674,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 **決定済み（2026-11-18）**
 
-- ベースドメインは `dev.tricknotes.io`。DNS は Squarespace Domains で管理する。
-- VPS はさくらの VPS、OS は Ubuntu 24.04、アーキテクチャは x86_64。標準 OS の Ubuntu は amd64 のみ提供されている（[サービス仕様](https://vps.sakura.ad.jp/vps_resource/pdf/spec.pdf)）。
+- OS は Ubuntu 24.04、アーキテクチャは x86_64（amd64）に限る。ホスティング事業者、DNS サービス、オブジェクトストレージは選ばない（2026-11-21 に一般化。OSS として誰でも使えるように、特定の事業者を前提にした記述を外した）。
 - private な GHCR イメージは、ホストで `docker login` しておく方式とする。
 
 **名前の変更（2026-11-19）**
@@ -662,17 +684,14 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
   - 旧名は「PaaS のデーモン」という種類の説明で、固有の名前ではなかった。
   - まだどこにもデプロイしていないので、今ならパス、Compose プロジェクト名、イメージタグの移行が要らない。旧名のパスや Cookie を読む互換処理も入れない。
 
-**契約時の注意**: さくらの VPS は Linux カーネル脆弱性への対応で一部の受付を止めている。2026-11-13 追記時点で、大阪リージョンの Linux 通常容量プランの新規申し込みと、スケールアップが停止中（[対応状況](https://vps.sakura.ad.jp/contents/info/202610-pendingapply/)）。東京か石狩で、後から上げられない前提で最初から 4GB プランを選ぶ。構築直後にカーネルを更新する。
-
 **実機での確認が要るもの（2026-11-19）**
 
 - GitHub App のユーザーアクセストークンで `GET /user` に `two_factor_authentication` が含まれるか（10.3）。含まれなければ `[github] require_two_factor = false` にして、この節に結果を書く。
 
 **残り**
 
-- [ ] Squarespace の Custom Records で Host `*.dev` が登録できるか（M2 で確認。不可なら個別 A レコード）
 - [x] `--env-file` 指定時にリポジトリ内の `.env` がどう扱われるか（M1 で実機確認済み、下記）
-- [ ] バックアップとログの保持期間（既定案: バックアップは日次 7・週次 4・月次 6、ログは R2 に 90 日）
+- [ ] バックアップとログの保持期間（既定案: バックアップは日次 7・週次 4・月次 6、ログはオブジェクトストレージに 90 日）
 - [ ] 起動失敗時の自動ロールバックを既定で有効にするか（既定案: 有効）
 - [ ] push 時の自動デプロイを将来入れるか（入れるなら Webhook の受け口を M3 で用意する）
 
@@ -687,7 +706,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
   - 実際の ACME 発行（Let's Encrypt staging を含む）は VPS と DNS が要るので未確認。
 
 - ローカル環境のバックアップ（2026-11-19、Versity S3 Gateway v1.11.0、restic 同梱の開発用イメージ、WSL2 の snap 版 Docker）: 受け入れシナリオ 7 を手元で実施した。Rails + PostgreSQL のアプリに確認用の行を入れてバックアップ → アプリ停止 → volume を空にして起動（DB は空で初期化される）→ UI と同じ API でリストア → 行が戻り、アプリも応答した。退避した中身は所有者（postgres の UID 70）を保っていた。
-  - S3 互換サーバーは、MinIO のリポジトリがアーカイブされたため、Versity S3 Gateway、RustFS、Garage、SeaweedFS、MinIO のコミュニティフォークを比較した。koroku の `TestIntegrationS3`（13 項目）と restic（init・backup・`--stdin`・`forget --prune`・`check --read-data`・restore）を各サーバーで実行し、Garage 以外は全項目通過した（Garage は期限切れの presigned URL に 400、署名の誤りに `AccessDenied` を返す。`koroku` 本体はこのエラーコードに依存しない）。ローカルには、イメージ 82MB・待機時のメモリ約 29MiB と最も軽く、環境変数だけで設定でき、中身が volume にファイルとして並ぶ Versity S3 Gateway を選んだ。本番は R2 のまま。
+  - S3 互換サーバーは、MinIO のリポジトリがアーカイブされたため、Versity S3 Gateway、RustFS、Garage、SeaweedFS、MinIO のコミュニティフォークを比較した。koroku の `TestIntegrationS3`（13 項目）と restic（init・backup・`--stdin`・`forget --prune`・`check --read-data`・restore）を各サーバーで実行し、Garage 以外は全項目通過した（Garage は期限切れの presigned URL に 400、署名の誤りに `AccessDenied` を返す。`koroku` 本体はこのエラーコードに依存しない）。ローカルには、イメージ 82MB・待機時のメモリ約 29MiB と最も軽く、環境変数だけで設定でき、中身が volume にファイルとして並ぶ Versity S3 Gateway を選んだ。本番は利用者が選ぶ S3 互換のオブジェクトストレージ。
   - `koroku` のコンテナは利用者の UID で動くため、volume のファイル（root や postgres の所有）を読み書きできるよう、`chown`・`dac_override`・`fowner`・`fsetid` の 4 つだけを ambient capability で持たせた（`DEV_FILE_CAPS=1`。どれも Docker が既定でコンテナに与える範囲）。Docker の volume ディレクトリはホストと同じパスでマウントする。Docker Desktop は volume が VM の中にあるので、この方法では届かない。
 
 - ローカル環境のログ退避（2026-11-19、同じ環境）: 受け入れシナリオ 8 を手元で実施した。開発用の設定は退避の間隔を最小の 1 時間にしている。`koroku` を再起動すると、起動時の取りこぼし処理で直前の時間枠までのアプリのログが `logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz` に置かれ、`GET /api/apps/{slug}/logs/archives` に出た。presigned URL（`http://127.0.0.1:9000/...`、有効 15 分）からのダウンロードは、WSL 内と Windows 側の `curl.exe` のどちらも 200 で、展開すると収集したログの行と一致した。任意の時点で退避を走らせる手段は足さなかった。キーは時間枠の開始時刻で決まるので、時間枠の途中で送ると、後で同じキーを上書きしてしまうため。
@@ -713,10 +732,6 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - [GitHub Docs: Generating a user access token for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 - [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)
 
-* [Cloudflare R2: S3 API compatibility](https://developers.cloudflare.com/r2/api/s3/api/)
-* [Cloudflare R2: Object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles)
-* [Cloudflare R2: Presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/)
+* [Amazon S3: Lifecycle configuration](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html)
+* [Amazon S3: Presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)
 * [restic documentation](https://restic.readthedocs.io/)
-* [Squarespace: Adding DNS records to your domain](https://support.squarespace.com/hc/articles/360002101888)
-* [さくらの VPS: サービス仕様](https://vps.sakura.ad.jp/vps_resource/pdf/spec.pdf)
-* [さくらの VPS: 脆弱性への対応状況](https://vps.sakura.ad.jp/contents/info/202610-pendingapply/)

@@ -50,6 +50,7 @@ const usage = `Usage: koroku <command> [flags]
 
 Commands:
   serve            Run the API server and deploy worker
+  check            Check the host and the external services against config.toml
   restore-system   Restore the database and configuration from a backup (new host)
   version          Print the version
 
@@ -64,6 +65,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	switch args[0] {
 	case "serve":
 		return serve(ctx, args[1:], stderr, nil)
+	case "check":
+		return check(ctx, args[1:], stdout, stderr)
 	case "restore-system":
 		return restoreSystem(ctx, args[1:], stdout, stderr)
 	case "version":

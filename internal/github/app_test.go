@@ -1,0 +1,91 @@
+package github
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"testing"
+)
+
+func TestApp(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.mux.HandleFunc("GET /app", func(w http.ResponseWriter, r *http.Request) {
+		if !f.requireAppJWT(w, r) {
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id":          testAppID,
+			"slug":        "koroku-test",
+			"client_id":   testClientID,
+			"html_url":    "https://github.com/apps/koroku-test",
+			"permissions": map[string]string{"contents": "read", "metadata": "read"},
+		})
+	})
+	app, err := f.client().App(context.Background())
+	if err != nil {
+		t.Fatalf("App: %v", err)
+	}
+	if app.ID != testAppID || app.Slug != "koroku-test" || app.ClientID != testClientID {
+		t.Errorf("app = %+v", app)
+	}
+	if app.Permissions["contents"] != "read" || app.Permissions["metadata"] != "read" {
+		t.Errorf("permissions = %v", app.Permissions)
+	}
+}
+
+func TestAppNeedsCredentials(t *testing.T) {
+	c, err := NewAnonymous("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.App(context.Background()); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("err = %v, want ErrNotConfigured", err)
+	}
+	if _, err := c.Installations(context.Background()); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("err = %v, want ErrNotConfigured", err)
+	}
+}
+
+func TestInstallations(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.mux.HandleFunc("GET /app/installations", func(w http.ResponseWriter, r *http.Request) {
+		if !f.requireAppJWT(w, r) {
+			return
+		}
+		writeJSON(w, http.StatusOK, []map[string]any{
+			{"id": 7, "account": map[string]any{"login": "octocat"}, "repository_selection": "selected"},
+		})
+	})
+	list, err := f.client().Installations(context.Background())
+	if err != nil {
+		t.Fatalf("Installations: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != 7 || list[0].Account != "octocat" || list[0].RepositorySelection != "selected" {
+		t.Errorf("installations = %+v", list)
+	}
+}
+
+func TestUserByID(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.mux.HandleFunc("GET /user/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Error("the user lookup sent credentials")
+		}
+		if r.PathValue("id") != "583231" {
+			writeError(w, http.StatusNotFound, "Not Found")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"id": 583231, "login": "octocat"})
+	})
+	c := f.client()
+	user, err := c.UserByID(context.Background(), 583231)
+	if err != nil {
+		t.Fatalf("UserByID: %v", err)
+	}
+	if user.ID != 583231 || user.Login != "octocat" {
+		t.Errorf("user = %+v", user)
+	}
+	if _, err := c.UserByID(context.Background(), 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing user: err = %v, want ErrNotFound", err)
+	}
+}

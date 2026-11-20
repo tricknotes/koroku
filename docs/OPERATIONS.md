@@ -1,6 +1,6 @@
 # 運用手順
 
-`koroku` を載せる VPS の構築、更新、復旧の手順をまとめる。設計の背景は [ARCHITECTURE.md](ARCHITECTURE.md) の 3 章（配置）、8 章（Caddy）、10 章（セキュリティと運用）を参照。
+`koroku` を載せる VPS の構築、更新、復旧の手順をまとめる。設計の背景は [ARCHITECTURE.md](ARCHITECTURE.md) の 3 章（配置）、8 章（Caddy）、10 章（セキュリティと運用）を参照。サーバー、DNS、GitHub App、オブジェクトストレージなど、外部サービス側の設定は [SETUP.md](SETUP.md) に順を追って書いてある。
 
 > この文書の手順は、実機の VPS ではまだ一度も通していない。確認できた範囲と、できていない範囲は末尾の「[検証済みの範囲](#検証済みの範囲)」と「[未検証（実機で確認が必要）](#未検証実機で確認が必要)」に分けて書いてある。
 
@@ -8,8 +8,8 @@
 
 1. 手元で `koroku` のバイナリをビルドする。
 2. バイナリと `deploy/` ディレクトリを VPS に送り、`deploy/provision.sh` を root で実行する。
-3. DNS を向け、`/etc/koroku/config.toml` と鍵ファイルを用意する。
-4. `koroku` を起動し、必要なら再起動（カーネル更新の反映）する。
+3. DNS を向け、`/etc/koroku/config.toml` と鍵ファイルを用意する（[SETUP.md](SETUP.md)）。
+4. `koroku` を起動し、`koroku check` で外部サービスまで含めて確かめる。必要なら再起動（カーネル更新の反映）する。
 
 対象は Ubuntu 24.04（amd64）の新規 VPS 1 台。それ以外の OS ではスクリプトが止まる（`--force` で続行できるが未確認）。
 
@@ -37,6 +37,7 @@ sudo ./deploy/provision.sh ./koroku
 | --- | --- |
 | `--skip-upgrade` | 導入済みパッケージを更新しない。アプリが動いているホストで設定だけ当て直すときに使う（Docker が更新されると全コンテナが再起動するため） |
 | `--http3` | `443/udp` も開ける（既定は閉じたまま。8.2 節） |
+| `--keep-ssh-password` | SSH のパスワードログインを止める手順（13）を飛ばす |
 | `--force` | Ubuntu 24.04 amd64 以外でも続行する（未確認） |
 
 ### スクリプトがすること
@@ -55,8 +56,9 @@ sudo ./deploy/provision.sh ./koroku
 | 10 | 2GB の swap ファイル `/swapfile` と `/etc/fstab` への登録。有効な swap が合計 2GB 以上あれば何もしない |
 | 11 | `/etc/koroku` と `/var/lib/koroku`（どちらも 0700）、`/etc/koroku/config.toml`（なければ例から作成、0600）、`/usr/local/bin/koroku`、`koroku.service` |
 | 12 | ufw で 22（と sshd の待受ポート）、80、443 の TCP を許可して有効化 |
-| 13 | `koroku` を有効化。`config.toml` に例の値（`example.com`、`203.0.113.x`）が残っていれば起動はしない |
-| 14 | 結果のまとめと、再起動が必要かどうかの表示 |
+| 13 | SSH を鍵だけにする。`sudo` を実行したユーザー（直接 root で実行したなら root）の `~/.ssh/authorized_keys` に鍵があるときだけ、`/etc/ssh/sshd_config.d/01-koroku.conf` でパスワードと keyboard-interactive の認証を止め、root のログインを禁じる（root で実行したときは鍵での root ログインだけ残す）。`sshd -t` で検査してから reload する。鍵がなければ何もせず、まとめで知らせる（ARCHITECTURE 10.4） |
+| 14 | `koroku` を有効化。`config.toml` に例の値（`example.com`、`203.0.113.x`）が残っていれば起動はしない |
+| 15 | 結果のまとめと、再起動が必要かどうかの表示 |
 
 - **再実行できる。** 内容が同じファイルは書き換えず、変更がなければ Docker も Caddy も `koroku` も再起動しない。`koroku` のバイナリか unit が変わったときだけ `koroku` を再起動する。
 - **上書きしないもの。** `/etc/koroku/config.toml`、`master.key`、`restic.key`、`github-app.pem` は、存在すれば中身にも権限にも触れない（権限が緩いときは注意を表示するだけ）。
@@ -69,11 +71,13 @@ sudo ./deploy/provision.sh ./koroku
 | 項目 | 内容 |
 | --- | --- |
 | DNS | `*.<base_domain>` の A レコードを VPS の IP に向ける。ワイルドカードが登録できなければ `console.<base_domain>` とアプリごとの `<slug>.<base_domain>` を個別に登録する |
-| 事業者側のフィルター | VPS の手前にパケットフィルターがある場合は、そちらでも 80/tcp と 443/tcp を開ける |
+| 事業者側のファイアウォール | VPS の手前に事業者のファイアウォール（パケットフィルター、セキュリティグループなど）がある場合は、そちらでも 80/tcp と 443/tcp を開ける |
 | `config.toml` | 5 章のとおりに記入する |
+| SSH の鍵 | VPS の作成時に公開鍵を登録していなければ、`ssh-copy-id` で登録し、鍵でログインできることを確かめてからスクリプトを再実行する（パスワードログインはそのとき止まる） |
 | GitHub App の秘密鍵 | `/etc/koroku/github-app.pem` に置く（root 所有、0600） |
 | restic のパスワード | `/etc/koroku/restic.key` に置く（root 所有、0600） |
 | 起動 | `sudo systemctl restart koroku`、`journalctl -u koroku -f` でログを確認 |
+| 確認 | `sudo koroku check`。DNS、証明書、GitHub App、オブジェクトストレージ、restic を確かめ、足りないものと SETUP.md の節を示す |
 | 控え | 7 章のものを VPS の外に保存する |
 | 再起動 | スクリプトが求めていれば `sudo systemctl reboot` |
 | 証明書の本番切替 | 動作を確かめたら `config.toml` の `acme_ca` の行を消して `koroku` を再起動する（例の値は Let's Encrypt の staging） |
@@ -93,7 +97,7 @@ sudo ./deploy/provision.sh ./koroku
 | `[github] private_key_file` | `/etc/koroku/github-app.pem` |
 | `[github] allowed_user_id` | ログインを許可する GitHub ユーザーの数値 ID（1 件） |
 | `[github] require_two_factor` | 既定 `true`。GitHub の 2 段階認証が有効なアカウントでなければログインさせない。ログインが `two_factor_unknown` で断られる（GitHub が状態を返さない）ときだけ `false` にする（ARCHITECTURE 10.3） |
-| `[storage] endpoint`、`region`、`bucket`、`access_key_id`、`secret_access_key` | オブジェクトストレージ（R2 なら endpoint は `https://<アカウント ID>.r2.cloudflarestorage.com`、region は `auto`）。バケットは先に作っておく（`koroku` も restic もバケットは作らない）。このセクションがないと、ログは VPS 内にだけ残り、バックアップは無効になる |
+| `[storage] endpoint`、`region`、`bucket`、`access_key_id`、`secret_access_key` | S3 互換のオブジェクトストレージ。endpoint と region は事業者の S3 互換 API のもの（region の概念がなければ `auto`）。パス形式（`https://<endpoint>/<bucket>/<key>`）で接続する。バケットは先に作っておく（`koroku` も restic もバケットは作らない）。このセクションがないと、ログは VPS 内にだけ残り、バックアップは無効になる |
 | `[backup] restic_password_file` | `/etc/koroku/restic.key`（0600）。中身は自分で決めたパスワード 1 行。ファイルがない、または他人が読める権限だとバックアップは無効になる |
 | `[backup] hour`、`timezone` | 日次バックアップの時刻（既定は `Asia/Tokyo` の 3 時） |
 | `[logs] retention_days`、`archive_interval_hours` | ログのローカル保持日数（既定 14）と退避の間隔（既定 4 時間） |
@@ -109,7 +113,7 @@ sudo ./deploy/provision.sh ./koroku
 | マスターキー（環境変数の暗号化） | `/etc/koroku/master.key`（0600） | `koroku` が初回起動時に生成する。失うと保存済みの環境変数を復号できない |
 | GitHub App の秘密鍵 | `/etc/koroku/github-app.pem`（0600） | GitHub App の設定画面で発行して置く |
 | GitHub App の client secret | `/etc/koroku/config.toml`（0600） | 同上 |
-| R2 の Access Key ID / Secret Access Key | `/etc/koroku/config.toml`（0600） | バケット限定の API トークンを発行して書く |
+| オブジェクトストレージの Access Key ID / Secret Access Key | `/etc/koroku/config.toml`（0600） | バケット限定のアクセスキーを発行して書く |
 | restic のリポジトリパスワード | `/etc/koroku/restic.key`（0600） | 自分で決めて置く。失うとバックアップを復元できない |
 | private なイメージのレジストリ認証 | `/root/.docker/config.json` | VPS 上で `sudo docker login ghcr.io` |
 | TLS 証明書と ACME アカウント | `/var/lib/caddy`（Caddy が管理） | 自動。バックアップ対象外で、失っても再発行される |
@@ -121,7 +125,7 @@ sudo ./deploy/provision.sh ./koroku
 ホストを失ったときに、これがないと復旧できない。パスワードマネージャなどに保存する。
 
 - restic のリポジトリパスワード（`/etc/koroku/restic.key` の中身）
-- R2 の endpoint、バケット名、Access Key ID、Secret Access Key
+- オブジェクトストレージの endpoint、region、バケット名、Access Key ID、Secret Access Key
 - GitHub App の秘密鍵（なくしても GitHub 側で再発行できる）
 
 `master.key` と `config.toml` は基盤のバックアップ（`/etc/koroku`）に含まれるので、上の 2 つがあれば取り戻せる。バックアップが一度も成功していない間は `master.key` も控えておく。
@@ -166,7 +170,7 @@ Ubuntu 24.04 の apt が配る restic は 0.16.4（2024 年初めの版）で、
 | 入れたもの | 理由 |
 | --- | --- |
 | `NoNewPrivileges=yes` | setuid や file capability による権限の獲得を禁じる。全プロセスがすでに root なので影響がない |
-| `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK` | 使うソケットは Docker ソケット（unix）、GitHub・R2・Caddy・アプリへの TCP（IPv4/IPv6）、名前解決時の netlink だけ |
+| `RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK` | 使うソケットは Docker ソケット（unix）、GitHub・オブジェクトストレージ・Caddy・アプリへの TCP（IPv4/IPv6）、名前解決時の netlink だけ |
 | `RestrictNamespaces=yes` | コンテナと名前空間を作るのは Docker デーモンで、`koroku` や docker CLI ではない |
 | `SystemCallArchitectures=native` | 子プロセスはすべて x86-64 のバイナリ |
 | `LockPersonality=yes`、`RestrictRealtime=yes` | どのプロセスも使わない |
@@ -219,7 +223,7 @@ journalctl -u koroku -n 50 --no-pager
 
 ## 11. ホスト全損からの復旧
 
-ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で控えたもの（restic のパスワード、R2 の接続情報）と、`koroku` のバイナリ。
+ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で控えたもの（restic のパスワード、オブジェクトストレージの接続情報）と、`koroku` のバイナリ。
 
 1. 新しい VPS を用意し、3 章のとおりにプロビジョニングする。この時点の `config.toml` は例の値なので、`koroku` は起動していない。
 2. 復元に必要な最小限の設定を新しいホストに置く。`/etc/koroku/config.toml` に `base_domain` と `[storage]`（7 章で控えた接続情報）を書き、`/etc/koroku/restic.key`（0600）に restic のパスワードを書く。
@@ -237,14 +241,14 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 
 ## 検証済みの範囲
 
-実機がないので、次の方法で確かめた（2026-11-18）。
+実機がないので、次の方法で確かめた（2026-11-18。SSH の手順は 2026-11-20）。
 
 | 確認 | 方法 | 結果 |
 | --- | --- | --- |
 | シェルの構文と静的検査 | 使い捨ての `ubuntu:24.04` コンテナで `bash -n` と `shellcheck`（0.9.0） | 指摘なし |
 | unit ファイル | `systemd-analyze verify`（systemd 255）。`koroku.service` と、パッケージの `caddy.service` に drop-in を重ねたもの | 警告なし |
 | Caddy の初期設定 | `caddy validate`（Caddy 2.11.9） | `Valid configuration` |
-| スクリプトの通し実行 | `deploy/test/dry-run.sh`。使い捨ての `ubuntu:24.04` コンテナで 3 回続けて実行 | 37 項目すべて成功 |
+| スクリプトの通し実行 | `deploy/test/dry-run.sh`。使い捨ての `ubuntu:24.04` コンテナで 3 回続けて実行 | 42 項目すべて成功 |
 
 通し実行で確かめたこと:
 
@@ -254,6 +258,7 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 - `config.toml` に例の値がある間は `koroku` を起動せず、書き換えたあとの実行で起動する。
 - drop-in の `ExecStart` を `caddy` ユーザーでそのまま実行すると、初回は初期設定（admin API のみ、80 番は応答なし）で起動する。`koroku` が設定を投入したあとに Caddy を再起動すると、`koroku` が止まっていても投入済みの設定で戻る（`--resume`）。
 - `caddy` ユーザーが `/var/log/caddy/apps` に書ける。
+- root に鍵がない 1 回目は SSH の設定に触れず、鍵を置いた 2 回目に drop-in を入れて reload し、3 回目は reload しない。
 
 コンテナには systemd もカーネルも本物のネットワークもないので、`systemctl`、`swapon`、`ufw`、`sshd`、`docker info` は呼び出しを記録するだけの代役に差し替えた。つまり、これらが実際に何をするかは確かめていない。
 
@@ -267,12 +272,14 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 - [ ] **停止動作**: デプロイ中に `systemctl restart koroku` したとき、8.4 節のとおりになるか（デプロイは `failed (interrupted)`、子プロセスは残らない、アプリのコンテナは動き続ける）。
 - [ ] **Caddy の drop-in**: パッケージ導入時の最初の起動が drop-in を使うか（使っていなければスクリプトが再起動する）。`Type=notify` と `--resume` の組み合わせ、Caddy のパッケージ更新時や再起動後に経路が戻ること。
 - [ ] **ufw**: 有効化しても実行中の SSH セッションが切れないこと。Docker の iptables ルールと共存し、コンテナからの外向き通信とイメージのビルドができること。アプリのポート（`127.0.0.1` に bind）が外から届かないこと（受け入れシナリオ 4）。
-- [ ] **事業者側のパケットフィルター**: 既定で有効か、80/443 を開ける操作が要るか。
+- [ ] **事業者側のファイアウォール**: 既定で有効か、80/443 を開ける操作が要るか（事業者による）。
 - [ ] **swap**: OS イメージに最初から swap があるか。`/swapfile` が再起動後も有効か。
 - [ ] **Docker のログ設定**: 実際のデーモンが `daemon.json` を読み、新しいコンテナのログが 10MB × 3 で回るか（コンテナではデーモンを起動していない）。
 - [ ] **証明書**: Let's Encrypt（staging、本番）での発行。`443/udp` を閉じた状態でブラウザが支障なく HTTP/2 で通信するか。
 - [ ] **needrestart**: `NEEDRESTART_MODE=l` で、スクリプトの途中にサービスが自動再起動されないこと。
+- [ ] **SSH を鍵だけにする手順**: 実際の sshd が `01-koroku.conf` を `50-cloud-init.conf` より優先し、パスワードでのログインを断ること（別の端末から `ssh -o PubkeyAuthentication=no` で確かめる）。reload で実行中のセッションが切れないこと。Ubuntu 24.04 の `ssh.socket` による起動でも `systemctl try-reload-or-restart ssh.service` が効くこと。
+- [ ] **`koroku check`**: 実際の DNS、Let's Encrypt（staging と本番）、GitHub、オブジェクトストレージに対して、各項目が期待どおりの結果になること。
 - [ ] **SSH のポート検出**: `sshd -T` が待受ポートを返すこと（22 番以外にしている場合）。
 - [ ] **`bin/dev make build` のバイナリ**: 通し実行で使ったのは、フロントエンドを含めずにビルドしたバイナリ。
-- [ ] **restic 0.19.1 とバックアップ機能の組み合わせ**: バックアップの実装が入ってから、実際の R2 バケットで `backup`、`restore <snapshot>:<subpath>`、`forget --prune`、`check` を確かめる。
-- [ ] **復旧手順（11 章）**: `koroku restore-system` は、S3 互換サーバー（MinIO）と本物の restic を使った結合テストで「バックアップ → 別ディレクトリを新ホストに見立てて復元 → 復元した DB にアプリが入っている」まで確認した。実際の R2 と、新しい VPS での一連の手順（再デプロイ、volume のリストア、DNS の切り替え）は未確認。
+- [ ] **restic 0.19.1 とバックアップ機能の組み合わせ**: バックアップの実装が入ってから、実際のオブジェクトストレージのバケットで `backup`、`restore <snapshot>:<subpath>`、`forget --prune`、`check` を確かめる。
+- [ ] **復旧手順（11 章）**: `koroku restore-system` は、S3 互換サーバー（MinIO）と本物の restic を使った結合テストで「バックアップ → 別ディレクトリを新ホストに見立てて復元 → 復元した DB にアプリが入っている」まで確認した。実際のオブジェクトストレージと、新しい VPS での一連の手順（再デプロイ、volume のリストア、DNS の切り替え）は未確認。

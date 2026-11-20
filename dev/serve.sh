@@ -48,7 +48,7 @@ internal_ca = true
 access_log_dir = ""
 
 [storage]
-# The storage service of compose.yaml (Versity S3 Gateway), in place of Cloudflare R2.
+# The storage service of compose.yaml (Versity S3 Gateway), in place of production object storage.
 endpoint = "http://127.0.0.1:9000"
 region = "us-east-1"
 bucket = "koroku"

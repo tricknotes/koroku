@@ -17,7 +17,7 @@
 #           store (see README.md).
 #
 #   storage S3-compatible object storage (Versity S3 Gateway) on
-#           127.0.0.1:9000, standing in for Cloudflare R2: log archives and
+#           127.0.0.1:9000, standing in for production object storage: log archives and
 #           restic backups go there, as plain files in a volume. Its WebUI is
 #           on http://127.0.0.1:9001 (access key koroku-dev, secret
 #           koroku-dev-secret). storage-setup creates the bucket.
@@ -106,8 +106,8 @@ services:
     volumes:
       - storage-data:/data
 
-  # Creates the bucket (koroku expects it to exist, like the R2 bucket made
-  # by hand in production), then exits.
+  # Creates the bucket (koroku expects it to exist, like the bucket made by
+  # hand in production), then exits.
   storage-setup:
     <<: *dev
     restart: "no"

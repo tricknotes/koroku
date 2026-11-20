@@ -37,6 +37,9 @@ readonly CONFIG_FILE=$CONFIG_DIR/config.toml
 readonly DATA_DIR=/var/lib/koroku
 readonly CADDY_LOG_DIR=/var/log/caddy
 readonly CADDY_ADMIN_URL=http://127.0.0.1:2019
+# sshd reads the files in sshd_config.d in order and keeps the first value of
+# each setting, so this name wins over 50-cloud-init.conf and the like.
+readonly SSHD_DROP_IN=/etc/ssh/sshd_config.d/01-koroku.conf
 
 # --- Output -----------------------------------------------------------------
 
@@ -58,8 +61,9 @@ usage() {
   cat <<'EOF'
 Usage: provision.sh [options] /path/to/koroku
 
-Sets up Docker, Caddy, restic, swap, the firewall and the koroku service on a
-fresh Ubuntu 24.04 (amd64) host. Run it as root. It can be run again safely.
+Sets up Docker, Caddy, restic, swap, the firewall, key-only SSH and the koroku
+service on a fresh Ubuntu 24.04 (amd64) host. Run it as root. It can be run
+again safely.
 
 Options:
   --skip-upgrade  Do not upgrade packages that are already installed. Use it
@@ -67,6 +71,9 @@ Options:
                   a Docker upgrade restarts every container.
   --http3         Also open 443/udp so that HTTP/3 reaches Caddy. Off by
                   default; see docs/OPERATIONS.md.
+  --keep-ssh-password
+                  Leave SSH password login as it is. By default it is turned
+                  off once the user who ran sudo has an authorized SSH key.
   --force         Run on a system other than Ubuntu 24.04 amd64 (untested).
   -h, --help      Show this help.
 EOF
@@ -544,6 +551,64 @@ setup_firewall() {
   # 127.0.0.1, which is what actually keeps them private.
 }
 
+# authorized_keys_of USER prints the authorized_keys file of USER when it
+# holds at least one key, and nothing otherwise.
+authorized_keys_of() {
+  local home file
+  home=$(getent passwd "$1" | cut -d: -f6 || true)
+  file=$home/.ssh/authorized_keys
+  if [[ -n $home && -f $file ]] && grep -qE '^[[:space:]]*[^#[:space:]]' "$file"; then
+    printf '%s' "$file"
+  fi
+}
+
+harden_ssh() {
+  step "Restricting SSH to key-based login"
+  if [[ $KEEP_SSH_PASSWORD == 1 ]]; then
+    SSH_STATE='left as it is (--keep-ssh-password)'
+    info "$SSH_STATE"
+    return 0
+  fi
+  if ! command -v sshd >/dev/null 2>&1; then
+    SSH_STATE='no sshd on this host'
+    info "$SSH_STATE"
+    return 0
+  fi
+  # The account that ran sudo is the one that must still get in afterwards.
+  local user=${SUDO_USER:-root} keys
+  keys=$(authorized_keys_of "$user")
+  if [[ -z $keys ]]; then
+    SSH_STATE="password login still allowed ($user has no authorized SSH key)"
+    note "SSH password login stays enabled: $user has no key in ~/.ssh/authorized_keys. Register one (ssh-copy-id), log in with it, and run this script again"
+    return 0
+  fi
+  local root_login=no
+  if [[ $user == root ]]; then
+    root_login=prohibit-password
+  fi
+  {
+    echo "# Installed by koroku's provision.sh: log in with SSH keys only."
+    echo "# To undo, delete this file and run provision.sh with --keep-ssh-password."
+    echo "PasswordAuthentication no"
+    echo "KbdInteractiveAuthentication no"
+    echo "PermitRootLogin $root_login"
+  } >"$WORK_DIR/sshd.conf"
+  install -d -m 0755 /etc/ssh/sshd_config.d
+  install_file "$WORK_DIR/sshd.conf" "$SSHD_DROP_IN" 0644
+  if [[ $FILE_CHANGED == 1 ]]; then
+    if ! sshd -t 2>"$WORK_DIR/sshd-test.err"; then
+      rm -f -- "$SSHD_DROP_IN"
+      die "sshd rejected the new setting, so it was removed again: $(cat "$WORK_DIR/sshd-test.err")"
+    fi
+    # A reload keeps open sessions, this one included.
+    systemctl try-reload-or-restart ssh.service
+    info "installed $SSHD_DROP_IN and reloaded sshd"
+  else
+    info "$SSHD_DROP_IN: unchanged"
+  fi
+  SSH_STATE="keys only (keys of $user in $keys; root login: $root_login)"
+}
+
 start_koroku() {
   step "Starting koroku"
   systemctl enable koroku.service
@@ -592,6 +657,7 @@ summary() {
   else
     info "firewall: tcp ${SSH_PORTS% } (ssh), 80, 443; udp 443 stays closed (no HTTP/3)"
   fi
+  info "ssh: $SSH_STATE"
   if ((${#NOTES[@]} > 0)); then
     printf '\n    Notes:\n'
     printf '      - %s\n' "${NOTES[@]}"
@@ -602,16 +668,19 @@ summary() {
     Manual steps (details in docs/OPERATIONS.md; skip what is done):
       1. DNS: point *.<base_domain> (or console.<base_domain> and every
          <slug>.<base_domain>) to the public address of this host. If the
-         hosting provider has a packet filter in front of the host, open
+         hosting provider has a firewall in front of the host, open
          80/tcp and 443/tcp there as well.
       2. Edit $CONFIG_FILE: base_domain, public_ip, the GitHub App
-         values and the object storage (R2) values. Put the GitHub App
+         values and the object storage values. Put the GitHub App
          private key in $CONFIG_DIR/github-app.pem (mode 0600).
       3. Put the restic repository password in $CONFIG_DIR/restic.key
          (mode 0600) and keep a copy outside this host, together with
          $CONFIG_DIR/master.key (created at the first start of koroku)
-         and the R2 credentials.
+         and the object storage credentials.
       4. Start koroku: systemctl restart koroku && journalctl -u koroku -f
+      5. Run: koroku check
+         It tests DNS, the certificate, the GitHub App, object storage and restic, and
+         says what is still missing (docs/SETUP.md goes through each one).
 EOF
   if [[ $CONFIG_CREATED == 1 ]]; then
     info "(this run created $CONFIG_FILE; it holds example values only)"
@@ -642,12 +711,14 @@ EOF
 FORCE=0
 SKIP_UPGRADE=0
 HTTP3=0
+KEEP_SSH_PASSWORD=0
 KOROKU_BINARY=''
 while (($# > 0)); do
   case $1 in
     --force) FORCE=1 ;;
     --skip-upgrade) SKIP_UPGRADE=1 ;;
     --http3) HTTP3=1 ;;
+    --keep-ssh-password) KEEP_SSH_PASSWORD=1 ;;
     -h | --help)
       usage
       exit 0
@@ -678,7 +749,7 @@ readonly SCRIPT_DIR
 OS_CODENAME='' OS_ARCH='' KOROKU_VERSION='' KOROKU_STATE='' KOROKU_FAILED=0
 DOCKER_VERSION='' COMPOSE_VERSION='' CADDY_VERSION='' RESTIC_INSTALLED_VERSION=''
 DOCKER_DAEMON_CHANGED=0 KOROKU_BINARY_CHANGED=0 KOROKU_UNIT_CHANGED=0 CONFIG_CREATED=0
-SSH_PORTS=''
+SSH_PORTS='' SSH_STATE=''
 
 export DEBIAN_FRONTEND=noninteractive
 # needrestart (run by apt) must only list services that use outdated
@@ -709,5 +780,6 @@ install_restic
 setup_swap
 install_koroku
 setup_firewall
+harden_ssh
 start_koroku
 summary
