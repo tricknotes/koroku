@@ -26,8 +26,8 @@
 | 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない（M3） |
 | 403 | `token_not_allowed` | API トークンでは使えない API（API トークンの節） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
-| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found` | 対象がない |
-| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens` | 状態の衝突 |
+| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found` | 対象がない |
+| 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens`、`not_deployed` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
 | 429 | `rate_limited` | API トークンの利用回数の上限（1 分あたり 120 回）を超えた。`Retry-After` あり |
 | 507 | `disk_full`（`details.used_percent`、`details.limit_percent`） | ディスク使用率が上限超過でデプロイ拒否 |
@@ -376,7 +376,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/deployments?limit=50` | `{"deployments": [デプロイ, ...]}`（新しい順、`limit` は 1〜200） |
-| `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}` か `{"sha": "<40 桁>"}`（両方あれば `sha` をデプロイし `ref` は表示用）。202 でデプロイ。保持しているリリースへ再ビルドなしで戻すときは `{"rollback_to": <デプロイの ID>}`（ほかのフィールドと同時には指定できない）。戻せなければ `422 release_unavailable`、別のアプリのデプロイなら `422 validation_failed`（`details.rollback_to`）。保持していない古い版へは、過去の `sha` を指定して再デプロイする |
+| `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}` か `{"sha": "<40 桁>"}`（両方あれば `sha` をデプロイし `ref` は表示用）。202 でデプロイ。保持しているリリースへ再ビルドなしで戻すときは `{"rollback_to": <デプロイの ID>}`（ほかのフィールドと同時には指定できない）。戻せなければ `422 release_unavailable`、別のアプリのデプロイなら `422 validation_failed`（`details.rollback_to`）。保持していない古い版へは、過去の `sha` を指定して再デプロイする。そのアプリでコマンドを実行中なら `409 busy` |
 | `GET /api/deployments/{id}` | デプロイ |
 | `POST /api/deployments/{id}/cancel` | 202 でその時点のデプロイ。実行中のものは非同期に止まる。終了済みは `409 not_cancelable` |
 | `GET /api/deployments/{id}/logs` | デプロイログの SSE（下記）。`?format=text` を付けると、その時点までの全文を `text/plain` で返す |
@@ -400,6 +400,62 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 最初の見出しより前の行（`Queued deployment of <sha>.` など）は受付の記録。`koroku` の再起動で中断されたデプロイには `failed` の見出しがなく、末尾に `Failed: ...` の行だけが付く。
 
 **デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。
+
+## ワンオフのコマンドと登録タスク（2026-11-21）
+
+ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose run --rm --no-deps -T <service> sh -c '<command>'` を実行する。
+
+登録タスクの形:
+
+```json
+{ "name": "マイグレーションの状態", "service": "web", "command": "bin/rails db:migrate:status" }
+```
+
+実行記録の形:
+
+```json
+{
+  "id": 7,
+  "app_slug": "blog",
+  "task_name": "マイグレーションの状態",
+  "service": "web",
+  "command": "bin/rails db:migrate:status",
+  "deployment_id": 42,
+  "status": "succeeded",
+  "exit_code": 0,
+  "error": "",
+  "started_at": "2026-11-21T03:00:00Z",
+  "finished_at": "2026-11-21T03:00:04Z"
+}
+```
+
+- `task_name` はその場で入力したコマンドなら空文字。`deployment_id` は実行したリリース。
+- `status` は `running` / `succeeded` / `failed` / `canceled`（`queued` はない）。`exit_code` はコマンドの終了コードで、終わる前やキャンセル・タイムアウト・起動できなかったときは `null`。
+- `error` は失敗の理由（`exited with code 1`、`timed out after 30m0s`、`canceled by user`、`interrupted: koroku restarted while the command was running` など）。
+
+| メソッドとパス | 内容 |
+| --- | --- |
+| `GET /api/apps/{slug}/tasks` | `{"tasks": [登録タスク, ...]}`（登録順） |
+| `PUT /api/apps/{slug}/tasks` | ボディ `{"tasks": [登録タスク, ...]}` で全件を置き換える。200 で保存後の一覧。名前は 1〜60 文字で重複不可、`service` はサービス名の書式、`command` は改行を含まない 1〜2000 文字、20 件まで。違反は `422 validation_failed`（`details` のキーは `tasks[0].name` の形）。本番アプリでは直近のログインが要る（`403 reauth_required`） |
+| `GET /api/apps/{slug}/task-runs?limit=50` | `{"runs": [実行記録, ...]}`（新しい順、`limit` は 1〜200。アプリごとに新しい 50 件だけが残る） |
+| `POST /api/apps/{slug}/task-runs` | 実行。ボディは `{"task": "<登録タスクの名前>"}` か `{"service": "web", "command": "..."}`（どちらか一方）。202 で実行記録（`status: "running"`）。本番アプリでは直近のログインが要る（`403 reauth_required`）。下の表のエラーがある |
+| `GET /api/task-runs/{id}` | 実行記録。なければ `404 task_run_not_found` |
+| `GET /api/task-runs/{id}/logs` | 出力の SSE。形はデプロイログの SSE と同じ（1 行 1 メッセージ、`id:` はバイト位置、終わると `event: end` で `data:` は最終 `status`）。`?format=text` で全文を `text/plain` |
+| `POST /api/task-runs/{id}/cancel` | 202 でその時点の実行記録（止まるのは非同期）。終了済みは `409 not_cancelable` |
+
+`POST /api/apps/{slug}/task-runs` のエラー:
+
+| ステータス | `code` | 意味 |
+| --- | --- | --- |
+| 404 | `task_not_found` | その名前の登録タスクがない |
+| 409 | `not_deployed` | 稼働中のリリースのファイルがない（一度もデプロイしていない） |
+| 409 | `busy` | デプロイが `queued` か `running`、またはほかの操作・実行の最中 |
+| 422 | `validation_failed` | `task` と `service`/`command` の両方か、どちらもない。`service` がリリースの Compose にない、コマンドが空・長すぎる・改行を含む |
+| 422 | `policy_violation` | リリースのファイルがポリシー検査を通らなくなっている（再デプロイで直る） |
+
+**ログの行**: 先頭に `$ <コマンド>`、続いて `Running in service <service> of deployment #<id>.`。終わりに `Exited with code <N>.`、`Timed out after <時間>.`、`Canceled.`、`Failed to run: <理由>` のどれか。コマンドの出力は環境変数の値をマスクしてある。
+
+アプリの実行中（`running` の記録がある間）は、そのアプリへの `POST /api/apps/{slug}/deployments` も `409 busy` になる。起動・停止・再起動・削除・リストアも同じ。
 
 ## GitHub リポジトリ（M3）
 

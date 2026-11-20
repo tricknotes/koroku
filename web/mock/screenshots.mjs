@@ -1309,6 +1309,123 @@ function tabs(count) {
   return Array.from({ length: count }, () => 'Tab');
 }
 
+const TASK_RUN = '[data-test-task-run]';
+const RUN_OUTPUT = '[data-test-task-run-detail] [data-test-step-log]';
+
+/** Tasks tab: registered tasks, the command form and the runs. */
+const TASK_SHOTS = [
+  {
+    name: 'tasks-normal',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: TASK_RUN,
+    fullPage: true,
+  },
+  {
+    name: 'tasks-normal-phone',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: TASK_RUN,
+    ...PHONE,
+  },
+  {
+    name: 'tasks-open',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: TASK_RUN,
+    click: '[data-test-show-output]',
+    then: RUN_OUTPUT,
+    fullPage: true,
+  },
+  {
+    name: 'tasks-running',
+    path: '/apps/blog/tasks?scenario=tasks-running',
+    wait: RUN_OUTPUT,
+    settle: 2500,
+    fullPage: true,
+  },
+  {
+    name: 'tasks-running-phone',
+    path: '/apps/blog/tasks?scenario=tasks-running',
+    wait: RUN_OUTPUT,
+    settle: 2500,
+    ...PHONE,
+  },
+  {
+    name: 'tasks-failed',
+    path: '/apps/blog/tasks?scenario=tasks-failed',
+    wait: '[data-test-run-notice="failed"]',
+    then: RUN_OUTPUT,
+    fullPage: true,
+  },
+  {
+    name: 'tasks-failed-phone',
+    path: '/apps/blog/tasks?scenario=tasks-failed',
+    wait: '[data-test-run-notice="failed"]',
+    then: RUN_OUTPUT,
+    ...PHONE,
+  },
+  {
+    name: 'tasks-empty',
+    path: '/apps/shop-staging/tasks?scenario=tasks-failed',
+    wait: '[data-test-no-tasks]',
+  },
+  {
+    name: 'tasks-empty-phone',
+    path: '/apps/shop-staging/tasks?scenario=tasks-failed',
+    wait: '[data-test-no-tasks]',
+    ...PHONE,
+    themes: ['light'],
+  },
+  {
+    name: 'tasks-not-deployed',
+    path: '/apps/notes/tasks?scenario=undeployed',
+    wait: '[data-test-tasks-not-deployed]',
+    themes: ['light'],
+  },
+  {
+    name: 'tasks-confirm',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: '[data-test-run-task]',
+    click: '[data-test-run-task]',
+    then: '[data-test-dialog-command]',
+  },
+  {
+    name: 'tasks-confirm-phone',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: '[data-test-run-task]',
+    click: '[data-test-run-task]',
+    then: '[data-test-dialog-command]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'tasks-editing',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: '[data-test-edit-tasks]',
+    click: '[data-test-edit-tasks]',
+    then: '[data-test-task-editor]',
+  },
+  {
+    name: 'tasks-editing-phone',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: '[data-test-edit-tasks]',
+    click: '[data-test-edit-tasks]',
+    then: '[data-test-task-editor]',
+    ...PHONE,
+    themes: ['light'],
+  },
+  // Last, because it changes the scenario: a task started in the UI of a
+  // staging app (no confirmation), its output streaming in.
+  {
+    name: 'tasks-live',
+    path: '/apps/blog-staging/tasks?scenario=healthy',
+    wait: '[data-test-run-task]',
+    clicks: ['[data-test-run-task]'],
+    then: RUN_OUTPUT,
+    settle: 3000,
+    mutates: true,
+    themes: ['light'],
+  },
+];
+
 const LOGS = '/apps/blog/logs';
 const LOG_ROW = '[data-test-log-row]';
 const PHONE_SCREEN = { ...PHONE, fullPage: false };
@@ -1635,7 +1752,7 @@ try {
   await mock.match;
   const [, endpoint] = await chromium.match;
   const browser = await connect(endpoint);
-  const shots = [...SHOTS, ...LOG_SHOTS];
+  const shots = [...SHOTS, ...LOG_SHOTS, ...TASK_SHOTS];
   for (const shot of shots.filter((entry) => entry.name.startsWith(only))) {
     for (const theme of shot.themes ?? ['light', 'dark']) {
       console.log(await capture(browser, shot, theme));

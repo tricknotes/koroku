@@ -52,6 +52,7 @@ func newTestServer(t *testing.T, mutate func(*Options)) *Server {
 		Box:      box,
 		Deployer: fake,
 		Ops:      fake,
+		Tasks:    fake,
 		Refs:     fakeRefs{"main": testSHA},
 		Config:   cfg,
 		Store:    st,

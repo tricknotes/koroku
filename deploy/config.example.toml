@@ -93,3 +93,7 @@ archive_interval_hours = 4
 restic_password_file = "/etc/koroku/restic.key"
 # Hour of the daily backup, in the time zone above.
 hour = 3
+
+[tasks]
+# One-off commands run from the console stop after this many minutes.
+timeout_minutes = 30

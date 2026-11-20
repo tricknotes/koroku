@@ -50,6 +50,8 @@ type Options struct {
 	Auth AuthOptions
 	// Ops runs start/stop/restart/delete and host cleanup.
 	Ops AppOperator
+	// Tasks runs one-off commands. Optional.
+	Tasks TaskRunner
 	// Logs serves collected runtime logs. Optional.
 	Logs AppLogs
 	// Backups runs backups and restores. Optional.
@@ -79,6 +81,7 @@ type Server struct {
 	domains  DomainChecker
 	auth     AuthOptions
 	ops      AppOperator
+	tasks    TaskRunner
 	logs     AppLogs
 	backups  Backups
 	volumes  AppVolumes
@@ -123,6 +126,7 @@ func New(opts Options) *Server {
 		domains:  opts.Domains,
 		auth:     opts.Auth,
 		ops:      opts.Ops,
+		tasks:    opts.Tasks,
 		logs:     opts.Logs,
 		backups:  opts.Backups,
 		volumes:  opts.Volumes,
@@ -212,6 +216,13 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/apps/{slug}/db-copies", s.handleStartDBCopy)
 	mux.HandleFunc("GET /api/db-copies/{id}", s.handleGetDBCopy)
 	mux.HandleFunc("GET /api/db-copies/{id}/logs", s.handleDBCopyLogs)
+	mux.HandleFunc("GET /api/apps/{slug}/tasks", s.handleListTasks)
+	mux.HandleFunc("PUT /api/apps/{slug}/tasks", s.handlePutTasks)
+	mux.HandleFunc("GET /api/apps/{slug}/task-runs", s.handleListTaskRuns)
+	mux.HandleFunc("POST /api/apps/{slug}/task-runs", s.handleCreateTaskRun)
+	mux.HandleFunc("GET /api/task-runs/{id}", s.handleGetTaskRun)
+	mux.HandleFunc("GET /api/task-runs/{id}/logs", s.handleTaskRunLogs)
+	mux.HandleFunc("POST /api/task-runs/{id}/cancel", s.handleCancelTaskRun)
 
 	mux.HandleFunc("GET /api/deployments/{id}", s.handleGetDeployment)
 	mux.HandleFunc("GET /api/deployments/{id}/logs", s.handleDeploymentLogs)

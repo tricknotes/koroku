@@ -117,3 +117,10 @@ log endpoints: `logs-empty` (nothing logged, nothing archived), `logs-error`
 (the log endpoints answer 500), `logs-loading` (searches take a minute) and
 `logs-no-storage` (object storage is not configured). Example:
 `/apps/blog/logs?scenario=logs-no-storage&period=archive`.
+
+`mock/tasks.mjs` serves the tasks tab (registered tasks and runs of commands).
+Runs started in the UI print their output line by line and finish by
+themselves after a few seconds. Its scenarios: `tasks-running` (blog runs a
+registered task whose output keeps arriving) and `tasks-failed` (the latest
+run on blog exited with code 1; shop-staging has no tasks and no runs).
+Example: `/apps/blog/tasks?scenario=tasks-running`.

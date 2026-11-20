@@ -36,6 +36,8 @@ import type {
   SessionResponse,
   Snapshot,
   SystemInfo,
+  Task,
+  TaskRun,
   TokenLifetime,
 } from 'koroku-console/utils/types';
 
@@ -399,6 +401,59 @@ export default class ApiService extends Service {
 
   deploymentLogsUrl(id: number): string {
     return `/api/deployments/${id}/logs`;
+  }
+
+  // One-off commands and registered tasks (ARCHITECTURE 9.6)
+
+  async listTasks(slug: string): Promise<Task[]> {
+    const { tasks } = await this.request<{ tasks: Task[] | null }>(
+      'GET',
+      `/api/apps/${seg(slug)}/tasks`,
+    );
+    return tasks ?? [];
+  }
+
+  /** Replaces every registered task. */
+  async putTasks(slug: string, tasks: Task[]): Promise<Task[]> {
+    const response = await this.request<{ tasks: Task[] | null }>(
+      'PUT',
+      `/api/apps/${seg(slug)}/tasks`,
+      {
+        body: {
+          tasks: tasks.map(({ name, service, command }) => ({
+            name,
+            service,
+            command,
+          })),
+        },
+      },
+    );
+    return response.tasks ?? [];
+  }
+
+  async listTaskRuns(slug: string, limit = 50): Promise<TaskRun[]> {
+    const { runs } = await this.request<{ runs: TaskRun[] | null }>(
+      'GET',
+      `/api/apps/${seg(slug)}/task-runs`,
+      { query: { limit } },
+    );
+    return runs ?? [];
+  }
+
+  /** Runs a registered task (`{task}`) or a command (`{service, command}`). */
+  createTaskRun(
+    slug: string,
+    body: { task: string } | { service: string; command: string },
+  ): Promise<TaskRun> {
+    return this.request('POST', `/api/apps/${seg(slug)}/task-runs`, { body });
+  }
+
+  cancelTaskRun(id: number): Promise<TaskRun> {
+    return this.request('POST', `/api/task-runs/${id}/cancel`);
+  }
+
+  taskRunLogsUrl(id: number): string {
+    return `/api/task-runs/${id}/logs`;
   }
 
   // GitHub repositories

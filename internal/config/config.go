@@ -50,6 +50,13 @@ type Config struct {
 	Storage Storage `toml:"storage"`
 	Logs    Logs    `toml:"logs"`
 	Backup  Backup  `toml:"backup"`
+	Tasks   Tasks   `toml:"tasks"`
+}
+
+// Tasks holds settings of one-off commands (ARCHITECTURE 9.6).
+type Tasks struct {
+	// TimeoutMinutes bounds one run of a command.
+	TimeoutMinutes int `toml:"timeout_minutes"`
 }
 
 // Storage is the S3-compatible object storage used for log archives and
@@ -162,6 +169,7 @@ func Default() Config {
 		Storage:       Storage{Region: "auto"},
 		Logs:          Logs{RetentionDays: 14, ArchiveIntervalHours: 4},
 		Backup:        Backup{ResticPasswordFile: "/etc/koroku/restic.key", Hour: 3},
+		Tasks:         Tasks{TimeoutMinutes: 30},
 		Caddy: Caddy{
 			Enabled:      true,
 			AdminURL:     "http://127.0.0.1:2019",
@@ -301,6 +309,9 @@ func (c Config) Validate() error {
 	}
 	if c.Backup.Hour < 0 || c.Backup.Hour > 23 {
 		errs = append(errs, fmt.Errorf("backup.hour %d must be between 0 and 23", c.Backup.Hour))
+	}
+	if m := c.Tasks.TimeoutMinutes; m < 1 || m > 1440 {
+		errs = append(errs, fmt.Errorf("tasks.timeout_minutes %d must be between 1 and 1440", m))
 	}
 	if g := c.GitHub; g.Configured() {
 		// A half-configured App would lock the console or, worse, look

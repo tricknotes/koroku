@@ -16,7 +16,7 @@ module('Unit | Utility | errors', function () {
     );
     assert.strictEqual(
       errorMessage(new ApiError(409, 'not_cancelable', '')),
-      'このデプロイはすでに終了しているためキャンセルできません。',
+      'すでに終了しているためキャンセルできません。',
     );
     assert.strictEqual(
       errorMessage(new ApiError(0, 'network_error', '')),

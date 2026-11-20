@@ -12,6 +12,7 @@ Router.map(function () {
   this.route('app', { path: '/apps/:slug' }, function () {
     this.route('deploy');
     this.route('logs');
+    this.route('tasks');
     this.route('env');
     this.route('domains');
     this.route('backups');

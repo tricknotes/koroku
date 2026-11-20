@@ -182,6 +182,9 @@ func TestStorageLogsAndBackupConfig(t *testing.T) {
 	if cfg.Backup.Hour != 3 || cfg.Backup.ResticPasswordFile != "/etc/koroku/restic.key" {
 		t.Errorf("Backup = %+v", cfg.Backup)
 	}
+	if cfg.Tasks.TimeoutMinutes != 30 {
+		t.Errorf("Tasks = %+v", cfg.Tasks)
+	}
 	if cfg.Timezone != "Asia/Tokyo" || cfg.Location().String() != "Asia/Tokyo" {
 		t.Errorf("Timezone = %q / %v", cfg.Timezone, cfg.Location())
 	}
@@ -216,6 +219,8 @@ hour = 4
 		"zero retention":     "[logs]\nretention_days = 0",
 		"archive too rare":   "[logs]\narchive_interval_hours = 48",
 		"bad backup hour":    "[backup]\nhour = 24",
+		"no task timeout":    "[tasks]\ntimeout_minutes = 0",
+		"task timeout > day": "[tasks]\ntimeout_minutes = 1441",
 		"relative log dir":   "[logs]\ndir = \"logs\"",
 	} {
 		if _, err := Parse("base_domain = \"dev.example.com\"\n" + text); err == nil {

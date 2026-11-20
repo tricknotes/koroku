@@ -46,6 +46,7 @@ export const SCREENS: Screen[] = [
   { name: 'logs', url: '/apps/blog/logs', tab: 'logs' },
   { name: 'log search', url: '/apps/blog/logs?period=1h', tab: 'logs' },
   { name: 'log archives', url: '/apps/blog/logs?period=archive', tab: 'logs' },
+  { name: 'tasks', url: '/apps/blog/tasks', tab: 'tasks' },
   { name: 'environment variables', url: '/apps/blog/env', tab: 'env' },
   { name: 'domains', url: '/apps/blog/domains', tab: 'domains' },
   { name: 'backups', url: '/apps/blog/backups', tab: 'backups' },
@@ -278,6 +279,32 @@ export function serveConsole(
       deployments: state.deployments,
     }))
     .on('GET', `${app}/env`, () => ({ vars: state.env }))
+    .on('GET', `${app}/tasks`, {
+      tasks: [
+        {
+          name: 'マイグレーションの状態',
+          service: 'web',
+          command: 'bin/rails db:migrate:status',
+        },
+      ],
+    })
+    .on('GET', `${app}/task-runs`, {
+      runs: [
+        {
+          id: 7,
+          app_slug: slug,
+          task_name: 'マイグレーションの状態',
+          service: 'web',
+          command: 'bin/rails db:migrate:status',
+          deployment_id: 42,
+          status: 'succeeded',
+          exit_code: 0,
+          error: '',
+          started_at: '2026-11-18T03:30:00Z',
+          finished_at: '2026-11-18T03:30:04Z',
+        },
+      ],
+    })
     .on('GET', `${app}/domains`, () => ({
       default_hostname: `${slug}.dev.example.com`,
       domains: state.domains,

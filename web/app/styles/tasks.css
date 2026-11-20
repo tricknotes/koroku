@@ -1,0 +1,226 @@
+/* Tasks tab: registered tasks, the command form and the history of runs.
+   The history reuses the rows and the detail panel of the deploy tab. */
+
+/* Registered tasks: name, service, command and the run button. */
+
+.task-rows {
+  --row-columns: minmax(8rem, 14rem) 7rem minmax(0, 1fr) auto;
+}
+
+.task-rows .row {
+  min-height: 3.25rem;
+}
+
+.task-name {
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-service {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.task-service > .cell-label {
+  display: none;
+}
+
+.task-command > code {
+  display: block;
+  padding: 0;
+  background: none;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.task-rows .skeleton-wide {
+  width: 60%;
+}
+
+.task-rows .skeleton-fixed {
+  width: 5rem;
+}
+
+/* Editor: one line of fields per task. */
+
+.task-editor {
+  padding: var(--space-4);
+}
+
+.task-editor-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-editor-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) 8rem minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.task-editor-row .field {
+  margin-bottom: 0;
+}
+
+/* Lines the button up with the inputs, below their labels. */
+.task-remove {
+  margin-top: calc(
+    var(--text-sm) * 1.5 + var(--space-1) +
+      (var(--control-height) - var(--control-height-sm)) / 2
+  );
+}
+
+.task-editor-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-4);
+}
+
+.task-editor-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.task-editor > .field-error {
+  margin: 0 0 var(--space-3);
+}
+
+.task-editor .banner {
+  margin: var(--space-3) 0 0;
+}
+
+/* The command typed on the spot, on one line like the deploy form. */
+
+.task-form {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: end;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.task-form .field {
+  margin-bottom: 0;
+}
+
+.task-form-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* History: a typed command is its own title. */
+
+.task-run-adhoc {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.task-run-command {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.task-run-command > code {
+  min-width: 0;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.task-run-log {
+  margin: 0;
+}
+
+.task-dialog-command {
+  margin: var(--space-2) 0 var(--space-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (width <= 56rem) {
+  .task-rows > .row-list-header {
+    display: none;
+  }
+
+  /* Stacked: name and the run button, then where and what. */
+  .task-rows .row {
+    grid-template:
+      "name action" auto
+      "service service" auto
+      "command command" auto / minmax(0, 1fr) auto;
+    gap: var(--space-1) var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .task-name {
+    grid-area: name;
+  }
+
+  .task-service {
+    display: flex;
+    grid-area: service;
+    gap: var(--space-2);
+  }
+
+  .task-service > .cell-label {
+    display: inline;
+  }
+
+  .task-command {
+    grid-area: command;
+  }
+
+  .task-action {
+    grid-area: action;
+  }
+}
+
+@media (width <= 40rem) {
+  .task-editor-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .task-field-name {
+    grid-column: 1 / 2;
+  }
+
+  .task-remove {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .task-field-service,
+  .task-field-command {
+    grid-column: 1 / -1;
+  }
+
+  .task-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

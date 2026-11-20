@@ -45,11 +45,14 @@ const MESSAGES: Record<string, string> = {
   app_not_found: 'アプリが見つかりません。',
   deployment_not_found: 'デプロイが見つかりません。',
   domain_not_found: 'ドメインが見つかりません。',
+  task_not_found:
+    'このタスクは見つかりません。ほかの画面で変更されたかもしれません。再読み込みしてください。',
+  task_run_not_found: '実行の記録が見つかりません。',
   snapshot_not_found:
     'スナップショットが見つからないか、この操作には使えない種類です。',
   slug_taken: 'この slug はすでに使われています。',
   no_free_port: '割り当てられるポートが残っていません。',
-  not_cancelable: 'このデプロイはすでに終了しているためキャンセルできません。',
+  not_cancelable: 'すでに終了しているためキャンセルできません。',
   hostname_taken: 'このホスト名はすでに登録されています。',
   env_var_exists: '同じキーの環境変数がすでにあります。',
   env_var_not_found:
@@ -157,6 +160,8 @@ const SPECIFIC_NOT_FOUND = new Set([
   'domain_not_found',
   'repo_not_found',
   'snapshot_not_found',
+  'task_not_found',
+  'task_run_not_found',
 ]);
 
 /**

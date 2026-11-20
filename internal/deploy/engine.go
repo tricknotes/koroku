@@ -80,6 +80,10 @@ type Options struct {
 	// dump it streams (ARCHITECTURE 10.6).
 	CopyTimeout  time.Duration
 	CopyMaxBytes int64
+	// TaskTimeout bounds one run of a one-off command (ARCHITECTURE 9.6).
+	TaskTimeout time.Duration
+	// KeepTaskRuns is the number of runs (and their logs) kept per app.
+	KeepTaskRuns int
 }
 
 func (o *Options) applyDefaults() {
@@ -119,6 +123,12 @@ func (o *Options) applyDefaults() {
 	if o.CopyMaxBytes == 0 {
 		o.CopyMaxBytes = defaultCopyMaxBytes
 	}
+	if o.TaskTimeout == 0 {
+		o.TaskTimeout = 30 * time.Minute
+	}
+	if o.KeepTaskRuns == 0 {
+		o.KeepTaskRuns = 50
+	}
 }
 
 // Engine accepts deployments and runs them one at a time.
@@ -134,6 +144,16 @@ type Engine struct {
 
 	// locks serializes deployments and manual operations per app.
 	locks appLocks
+
+	// admit makes "is a command running?" and "is a deployment queued?"
+	// one decision: a deployment is not accepted while a command runs on
+	// the app, nor a command while a deployment is queued or running.
+	admit sync.Mutex
+	// tasks are the runs in progress, by run ID (guarded by mu).
+	tasks map[int64]*runningTask
+	// lifetime ends when the worker stops (koroku shuts down); runs that
+	// outlive the request that started them are bound to it.
+	lifetime context.Context
 
 	// finishTimeout bounds the database writes that record a result.
 	finishTimeout time.Duration
@@ -156,6 +176,9 @@ func New(opts Options) *Engine {
 		opts:    opts,
 		wake:    make(chan struct{}, 1),
 		cancels: map[int64]context.CancelCauseFunc{},
+		tasks:   map[int64]*runningTask{},
+
+		lifetime: context.Background(),
 
 		finishTimeout: 30 * time.Second,
 	}
@@ -266,6 +289,13 @@ func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message s
 	if err := e.CheckDisk(); err != nil {
 		return store.Deployment{}, err
 	}
+	// A deployment would wait for the command, and with it every other
+	// app's deployment behind the single worker (ARCHITECTURE 9.6).
+	e.admit.Lock()
+	defer e.admit.Unlock()
+	if e.taskRunning(app.ID) {
+		return store.Deployment{}, ErrBusy
+	}
 	e.queueing.Lock()
 	defer e.queueing.Unlock()
 	d, superseded, err := e.opts.Store.EnqueueDeployment(ctx, app.ID, ref, sha, message, e.opts.Clock.Now())
@@ -330,9 +360,13 @@ func (e *Engine) notify() {
 func (e *Engine) Run(ctx context.Context) error {
 	e.mu.Lock()
 	e.base = ctx
+	e.lifetime = ctx
 	e.mu.Unlock()
 	now := e.opts.Clock.Now()
 	e.failInterruptedCopies(ctx, now)
+	if err := e.failInterruptedTaskRuns(ctx, now); err != nil {
+		return err
+	}
 	interrupted, err := e.opts.Store.FailInterruptedDeployments(ctx, now)
 	if err != nil {
 		return fmt.Errorf("recover interrupted deployments: %w", err)

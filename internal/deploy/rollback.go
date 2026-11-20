@@ -72,6 +72,13 @@ func (e *Engine) EnqueueRollback(ctx context.Context, app store.App, fromID int6
 	if from.Status != store.StatusSucceeded || target.Status != store.StatusSucceeded || !e.ReleaseAvailable(app, target.ID) {
 		return store.Deployment{}, ErrReleaseUnavailable
 	}
+	// Like a deployment, a rollback would wait for a running command and
+	// hold up the single worker (ARCHITECTURE 9.6).
+	e.admit.Lock()
+	defer e.admit.Unlock()
+	if e.taskRunning(app.ID) {
+		return store.Deployment{}, ErrBusy
+	}
 	d, superseded, err := e.opts.Store.EnqueueRollback(ctx, target, e.opts.Clock.Now())
 	if err != nil {
 		return store.Deployment{}, err

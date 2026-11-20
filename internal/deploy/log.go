@@ -109,7 +109,7 @@ func (c *cappedWriter) Write(p []byte) (int, error) {
 	if c.remaining <= 0 {
 		if !c.noted {
 			c.noted = true
-			_, _ = io.WriteString(c.dst, "[log truncated: the size limit of the deploy log was reached]\n")
+			_, _ = io.WriteString(c.dst, "[log truncated: the size limit of the log was reached]\n")
 		}
 		return len(p), nil
 	}

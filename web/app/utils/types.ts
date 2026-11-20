@@ -151,6 +151,34 @@ export interface Deployment {
   rollback_available?: boolean;
 }
 
+/** A named command kept for one-click runs (ARCHITECTURE 9.6). */
+export interface Task {
+  name: string;
+  service: string;
+  command: string;
+}
+
+/** Runs are never queued: they start at once or are refused. */
+export type TaskRunStatus = 'running' | 'succeeded' | 'failed' | 'canceled';
+
+/** One run of a command in a service of an app. */
+export interface TaskRun {
+  id: number;
+  app_slug: string;
+  /** The registered task it came from; '' for a command typed on the spot. */
+  task_name: string;
+  service: string;
+  command: string;
+  /** The release it ran in. */
+  deployment_id: number | null;
+  status: TaskRunStatus;
+  /** `null` until it ends, and when it was canceled or timed out. */
+  exit_code: number | null;
+  error: string;
+  started_at: string;
+  finished_at: string | null;
+}
+
 export type Environment = 'production' | 'staging';
 
 export interface App {
