@@ -205,11 +205,11 @@ module('Acceptance | security', function (hooks) {
 
   test('the reasons for refused logins are explained', async function (assert) {
     fakes.api.on('GET', '/api/session', { authenticated: false });
-    fakes.browser.query = '?login_error=two_factor_required';
+    fakes.browser.query = '?login_error=state_mismatch';
     await visit('/');
 
     assert
       .dom('[data-test-login-error]')
-      .includesText('2 段階認証が有効になっていない');
+      .includesText('状態が一致しなくなりました');
   });
 });

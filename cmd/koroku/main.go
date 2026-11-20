@@ -232,10 +232,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		Box:     box,
 		Domains: checker,
 		Auth: api.AuthOptions{
-			AllowedUserID:    cfg.GitHub.AllowedUserID,
-			RequireTwoFactor: cfg.GitHub.RequireTwoFactor,
-			ConsoleURL:       cfg.ConsoleURL,
-			InsecureNoAuth:   *insecureNoAuth,
+			AllowedUserID:  cfg.GitHub.AllowedUserID,
+			ConsoleURL:     cfg.ConsoleURL,
+			InsecureNoAuth: *insecureNoAuth,
 		},
 	}
 
@@ -307,8 +306,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		gitRefs.Tokens = tokens
 		apiOpts.Refs = deploy.GitHubRefResolver{Client: gh, Fallback: gitRefs}
 		apiOpts.Auth.GitHub = gh
-		if !cfg.GitHub.RequireTwoFactor {
-			logger.Warn("github.require_two_factor is off: logins are accepted without two-factor authentication")
+		if cfg.GitHub.ObsoleteRequireTwoFactor != nil {
+			logger.Warn("github.require_two_factor is no longer used and can be removed from config.toml: " +
+				"GitHub does not report the two-factor status to a GitHub App, so GitHub enforces it at sign-in instead")
 		}
 	}
 	// Assign the interfaces only when there is a router: a nil *Router

@@ -40,12 +40,12 @@
 | --- | --- |
 | `GET /api/session` | 常に 200。`{"authenticated": true, "user": {"id": 1, "login": "octo", "avatar_url": "https://..."}, "reauth_until": "2026-11-19T03:10:00Z"}` か `{"authenticated": false}`。`reauth_until` は再ログインなしで危険な操作ができる期限（ログインから 10 分。`--insecure-no-auth` では `null`） |
 | `GET /auth/github/login?return_to=/apps/blog/env` | GitHub の認可画面へリダイレクト（ページ遷移で開く）。`return_to` はログイン後に戻るパス（省略時は `/`）。`/` で始まらないもの、`//` や `\` を含むものは無視して `/` に戻す |
-| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（許可ユーザーではない）、`two_factor_required`（GitHub の 2 段階認証が無効）、`two_factor_unknown`（GitHub が 2 段階認証の状態を返さなかった）、`state_mismatch`、`github_error`、`not_configured`（GitHub App が未設定） |
+| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（許可ユーザーではない）、`state_mismatch`、`github_error`、`not_configured`（GitHub App が未設定） |
 | `POST /auth/logout` | 204。セッションを破棄 |
 | `GET /api/sessions` | 有効なセッションの一覧（新しい順）。`{"sessions": [{"id": "9f2c41d07a1b3e55", "created_at": "...", "last_seen_at": "...", "expires_at": "...", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ...", "current": true}]}`。`last_seen_at` は 1 分単位の目安 |
 | `DELETE /api/sessions/{id}` | 204。そのセッションを終了する（自分のセッションを指定するとログアウトと同じ）。なければ `404 session_not_found` |
 | `POST /api/sessions/revoke-others` | 自分以外のセッションをすべて終了する。200 で `{"revoked": 2}` |
-| `GET /api/login-events` | ログイン履歴（新しい順、最大 50 件）。`{"events": [{"at": "...", "outcome": "succeeded", "github_user_id": 1, "login": "octo", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ..."}]}`。`outcome` は `succeeded` / `not_allowed` / `two_factor_required` / `two_factor_unknown` |
+| `GET /api/login-events` | ログイン履歴（新しい順、最大 50 件）。`{"events": [{"at": "...", "outcome": "succeeded", "github_user_id": 1, "login": "octo", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ..."}]}`。`outcome` は `succeeded` / `not_allowed`（古い版が残した `two_factor_required` / `two_factor_unknown` もありうる） |
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 

@@ -48,6 +48,10 @@ export interface LoginSession {
   current: boolean;
 }
 
+/**
+ * The server records `succeeded` and `not_allowed`. Histories written by
+ * older versions may also hold the two-factor outcomes.
+ */
 export type LoginOutcome =
   'succeeded' | 'not_allowed' | 'two_factor_required' | 'two_factor_unknown';
 

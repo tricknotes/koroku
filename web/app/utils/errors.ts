@@ -191,10 +191,6 @@ export const UNAVAILABLE_MESSAGES: Record<Unavailability, string> = {
 
 const LOGIN_ERRORS: Record<string, string> = {
   not_allowed: 'このアカウントはログインを許可されていません。',
-  two_factor_required:
-    'GitHub の 2 段階認証が有効になっていないため、ログインできません。GitHub の設定で 2 段階認証を有効にしてからやり直してください。',
-  two_factor_unknown:
-    'GitHub から 2 段階認証の状態を取得できなかったため、ログインを止めました。サーバーの設定（github.require_two_factor）を確認してください。',
   state_mismatch:
     'ログインの途中で状態が一致しなくなりました。もう一度やり直してください。',
   github_error:

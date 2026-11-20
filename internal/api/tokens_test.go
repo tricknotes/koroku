@@ -57,7 +57,7 @@ func newTokenFixture(t *testing.T) *tokenFixture {
 	clk := clock.NewFake(time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC))
 	srv := newTestServer(t, func(o *Options) {
 		o.Clock = clk
-		o.Auth = AuthOptions{AllowedUserID: 42, ConsoleURL: consoleURL, RequireTwoFactor: true, GitHub: defaultGitHub()}
+		o.Auth = AuthOptions{AllowedUserID: 42, ConsoleURL: consoleURL, GitHub: defaultGitHub()}
 		o.Logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	})
 	h := srv.Handler()

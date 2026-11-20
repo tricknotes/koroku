@@ -64,9 +64,6 @@ type AuthOptions struct {
 	// InsecureNoAuth disables authentication and the Origin check. It is
 	// meant for local development and tests only.
 	InsecureNoAuth bool
-	// RequireTwoFactor refuses logins unless GitHub reports two-factor
-	// authentication as enabled for the user.
-	RequireTwoFactor bool
 }
 
 type sessionKey struct{}
@@ -442,16 +439,6 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("login rejected: not the allowed user", "github_user_id", user.ID, "login", user.Login)
 		s.recordLogin(ctx, r, user, store.LoginNotAllowed)
 		loginErrorRedirect(w, r, store.LoginNotAllowed)
-		return
-	}
-	if s.auth.RequireTwoFactor && (user.TwoFactor == nil || !*user.TwoFactor) {
-		outcome := store.LoginTwoFactorRequired
-		if user.TwoFactor == nil {
-			outcome = store.LoginTwoFactorUnknown
-		}
-		s.log.Warn("login rejected: two-factor authentication not confirmed", "login", user.Login, "reason", outcome)
-		s.recordLogin(ctx, r, user, outcome)
-		loginErrorRedirect(w, r, outcome)
 		return
 	}
 
