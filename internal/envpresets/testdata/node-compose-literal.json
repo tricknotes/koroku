@@ -1,0 +1,13 @@
+{
+  "compose_path": "compose.yml",
+  "frameworks": [
+    "node"
+  ],
+  "presets": [],
+  "skipped": [
+    {
+      "key": "NODE_ENV",
+      "service": "web"
+    }
+  ]
+}

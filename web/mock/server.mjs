@@ -10,6 +10,7 @@
 //
 // See web/README.md for the scenarios and options.
 
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { dirname, extname, join, resolve, sep } from 'node:path';
@@ -17,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import {
   BASE_DOMAIN,
   COMPOSE,
+  ENV_PRESETS,
   ENV_VARS,
   REPOS,
   SCENARIOS,
@@ -206,13 +208,24 @@ route('POST', '/api/system/prune', async ({ state, body }) => {
 route('GET', '/api/apps', ({ state }) => ({
   apps: [...state.apps.values()].sort((a, b) => a.slug.localeCompare(b.slug)),
 }));
-route('POST', '/api/apps', ({ state, body }) => {
+route('POST', '/api/apps', ({ state, body: { env, ...body }, scenario }) => {
   if (!/^[a-z][a-z0-9-]{0,39}$/.test(body.slug ?? '')) {
     throw new HttpError(422, 'validation_failed', { slug: 'is invalid' });
   }
   if (state.apps.has(body.slug)) throw new HttpError(409, 'slug_taken');
+  // Variables saved with the app need a recent login (ARCHITECTURE 9.8).
+  if (env?.length && scenario === 'stale-login') {
+    throw new HttpError(403, 'reauth_required');
+  }
   const app = newApp(body, 20000 + state.apps.size);
   state.apps.set(app.slug, app);
+  if (env?.length) {
+    state.env ??= new Map();
+    state.env.set(
+      app.slug,
+      [...env].sort((a, b) => (a.key < b.key ? -1 : 1)),
+    );
+  }
   state.deployments.set(app.slug, []);
   state.domains.set(app.slug, []);
   return { status: 201, json: app };
@@ -740,6 +753,35 @@ route('GET', '/api/repos/:owner/:repo/commits', ({ state }) => {
   return { commits: commits() };
 });
 route('GET', '/api/repos/:owner/:repo/compose', () => COMPOSE);
+// Secrets are generated on every request, as koroku does.
+route('GET', '/api/repos/:owner/:repo/env-presets', ({ state, params }) => {
+  const suggestion = ENV_PRESETS[`${params.owner}/${params.repo}`];
+  if (state.github === false || !suggestion) {
+    return {
+      status: 'unavailable',
+      reason: state.github === false ? 'not_configured' : 'repo_unavailable',
+      compose_path: '',
+      frameworks: [],
+      presets: [],
+      skipped: [],
+    };
+  }
+  const generate = (kind) =>
+    kind === 'laravel'
+      ? `base64:${randomBytes(32).toString('base64')}`
+      : randomBytes(64).toString('hex');
+  return {
+    status: 'ok',
+    reason: '',
+    ...suggestion,
+    presets: suggestion.presets.map(({ secret, ...preset }) => ({
+      ...preset,
+      match: preset.match ?? '',
+      value: secret ? generate(secret) : preset.value,
+      generated: Boolean(secret),
+    })),
+  };
+});
 
 // --- HTTP plumbing --------------------------------------------------------
 
@@ -1057,7 +1099,10 @@ async function handleApi(request, response, url, scenario) {
       response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       return response.end(result.text);
     }
-    if (result?.status) return sendJson(response, result.status, result.json);
+    // A numeric status picks the HTTP status; a string one is part of the body.
+    if (typeof result?.status === 'number') {
+      return sendJson(response, result.status, result.json);
+    }
     return sendJson(response, 200, result);
   }
   throw notFound();

@@ -131,7 +131,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 - GitHub App が未設定（`[github]` セクションなし）のときは、誰もログインできず API は 401 を返す。「未設定なら素通し」にはしない。ローカル開発では `koroku serve --insecure-no-auth` で認証と Origin 検証を外せる。設定ファイルではなく起動フラグにしているのは、本番の unit ファイルに紛れ込みにくくするため。
 - `[github]` は全項目（`app_id`、`client_id`、`client_secret`、`private_key_file`、`allowed_user_id`）が揃っていなければ起動時にエラーにする。秘密鍵ファイルはグループや他人が読める権限なら拒否する。
 - リポジトリの指定が `repo_full_name`（`owner/name`）のアプリは installation token を使って取得する。GitHub App がそのリポジトリにインストールされていなければ、public リポジトリの可能性があるので認証なしで取得を試みる。`repo_url` を明示したアプリには token を使わない。
-- アプリ作成時の Compose ファイル検出（`GET /api/repos/{owner}/{repo}/compose`）は、サービス名とポートを画面に下書きするためのもので、作成画面の「既定のブランチ」の欄にあるブランチ（空ならリポジトリの既定のブランチ）を読む。欄を変えて離れると読み直す。YAML パーサーの依存を増やさず行ベースの簡易読み取りで済ませる（アンカーやフロースタイルは読めない。読めなければ手入力）。デプロイ時の判定は `docker compose config` の結果で行う。
+- アプリ作成時の Compose ファイル検出（`GET /api/repos/{owner}/{repo}/compose`）は、サービス名とポートを画面に下書きするためのもので、作成画面の「既定のブランチ」の欄にあるブランチ（空ならリポジトリの既定のブランチ）を読む。欄を変えて離れると読み直す。YAML パーサーの依存を増やさず行ベースの簡易読み取りで済ませる（アンカーやフロースタイルは読めない。読めなければ手入力）。デプロイ時の判定は `docker compose config` の結果で行う。作成画面は同じ読み取りで、環境変数の初期値（9.8）も下書きする（同じブランチを読み、欄を変えたときに一緒に読み直す）。
 - fine-grained PAT は使わない。長寿命の秘密をサーバーに置くことになり、ログイン手段も別に要るため。
 
 ### 5.1 GitHub の Deployments への反映
@@ -797,6 +797,55 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
 - イメージをレジストリに push して共有する: レジストリの運用が増える。同じホストの Docker の中で名前を付け替えれば足りる。
 - `build.args` の値を DB に記録して比べる: 値の指紋を残すことになる（9.2 の指紋は環境変数そのものの比較用）。比較は判定のたびに `config` で求め、何も残さない。
 
+### 9.8 アプリ作成時の環境変数の初期値
+
+アプリの作成画面は、リポジトリのファイルから使っているフレームワークを推し量り、本番で動かすのにたいてい要る環境変数を初期値として並べる。利用者は作成の前に値を直したり、行を消したり足したりでき、アプリと一緒に保存される。`RAILS_ENV` の設定漏れで development のまま動く事故と、`SECRET_KEY_BASE` のように「ないと起動しないが値に決まりがない」変数を手元で生成して貼り付ける手間を減らすため。
+
+**判定の規則**
+
+読むのはリポジトリ直下のファイルの一覧と、下の表に出てくるファイルだけ。
+
+| フレームワーク | 判定 | 初期値 |
+| --- | --- | --- |
+| Rails | `Gemfile` に `gem "rails"` か `gem "railties"` | `RAILS_ENV=production`、`RACK_ENV=production`、`SECRET_KEY_BASE=<生成>`。`config/environments/production.rb` に `RAILS_LOG_TO_STDOUT`、`RAILS_SERVE_STATIC_FILES` の名前が出てくれば、それぞれ `true` |
+| Rack（Sinatra など） | Rails ではなく、`Gemfile` に `sinatra`・`roda`・`rack` の gem があるか、直下に `config.ru` がある | `RACK_ENV=production` |
+| Laravel | `composer.json` に `laravel/framework` があり、直下に `artisan` がある | `APP_ENV=production`、`APP_DEBUG=false`、`APP_KEY=base64:<生成>` |
+| Django | 直下の `manage.py` に `django` が出てくる | 設定モジュール（`manage.py` が `DJANGO_SETTINGS_MODULE` に入れる既定値）のファイルが `SECRET_KEY` か `DJANGO_SECRET_KEY` を環境変数から読んでいれば、その名前で `<生成>` |
+| Phoenix / Elixir | 直下に `mix.exs` がある | `MIX_ENV=prod`。`mix.exs` の依存に `:phoenix` があれば `SECRET_KEY_BASE=<生成>` |
+| Node.js | 直下に `package.json` があり、上のどれにも当たらない | `NODE_ENV=production` |
+
+- 入れるのは、フレームワークか、そのひな形が作る設定ファイルが実際に読む変数だけ。`RAILS_LOG_TO_STDOUT` と `RAILS_SERVE_STATIC_FILES` は Rails 7.0 までのひな形の `production.rb` が読むもので、7.1 以降のひな形は読まない（標準出力へのログと静的ファイルの配信が既定）。読まないアプリに入れても意味がないので、`production.rb` に名前が出てくるときだけ入れる。値は `.present?` でも `== "true"` でも真になる `true`。
+- Django の `DEBUG` は入れない。Django 自体は環境変数を読まず、設定ファイルの書き方（`== "True"` で比べる、`bool()` で包むなど）によっては文字列の `False` が真になり、かえってデバッグを有効にしてしまうため。`SECRET_KEY` も、設定ファイルが環境変数から読む書き方（`os.environ`、`os.getenv`、`env(...)`）のときだけ入れる。
+- Node.js は、ほかのフレームワークと一緒なら入れない。Rails や Laravel のリポジトリの `package.json` はアセットのビルド用で、実行時の `NODE_ENV` は関係しない。
+- 同じ名前が複数の規則から出たら、表の上のものを使う。
+- 判定は `internal/envpresets` の純粋な関数で、リポジトリのファイルの組と期待する結果を `testdata` に置いて固定する。
+
+**既存の値を上書きしない**
+
+- Compose ファイルのどれかのサービスが `environment:` に同じ名前の値を直接（`$` を含まない値で）書いていれば、その変数は入れず、画面に「Compose ファイルで設定済み」と出す。Compose では `environment:` が `env_file` より優先され、koroku の env ファイル（6 章）の値は効かないため。`RAILS_ENV: ${RAILS_ENV:-development}` のように補間する書き方は koroku の値が効くので、入れる。読み取りは、作成画面の Compose 検出（5 章）と同じ行ベースの簡易読み取りで、読む Compose ファイルも作成画面で選んだもの。
+- 画面で利用者が入力・編集した行と、自分で足した行は、ブランチを変えて判定し直しても上書きしない。消した初期値は、判定し直しても戻さない。判定し直すときに入れ替わるのは、手を付けていない初期値の行だけ。
+
+**秘密の値の生成**
+
+- `koroku` が Go の `crypto/rand` で生成し、初期値の API の応答に入れる。ブラウザーの実装に依存せず、koroku のほかの秘密（セッション、API トークン）と同じ生成元にそろうため。形式はフレームワークの生成コマンドに合わせ、テストで固定する。
+  - Rails の `SECRET_KEY_BASE`: 64 バイトの 16 進（128 文字。`bin/rails secret` と同じ）
+  - Phoenix の `SECRET_KEY_BASE`: 48 バイトの base64（64 文字。`mix phx.gen.secret` と同じ長さ）
+  - Laravel の `APP_KEY`: `base64:` と 32 バイトの base64（`php artisan key:generate` と同じ）
+  - Django の `SECRET_KEY`: 英数字 50 文字（`get_random_secret_key()` と同じ長さ。記号を除き、env ファイルの引用を単純にする）
+- 生成した値は DB にもログにも残さない。初期値の API を呼ぶたびに新しく作り（応答は `Cache-Control: no-store`）、作成のリクエストで送られてきた時点で、ほかの環境変数と同じく暗号化して保存する（10 章）。画面は生成した値を既定で隠し、「表示」で見せる。
+- 値はまだ何にも使われていない乱数なので、初期値の API は再ログイン（10.3）を求めない。
+
+**保存**
+
+- `POST /api/apps` の `env`（`[{key, value}]`）で、アプリと同じトランザクションで保存する。値の検査は `PUT /api/apps/{slug}/env` と同じで、1 つでも不正ならアプリも作らずに 422 を返す。アプリだけができて秘密が保存されていない、という半端な状態を作らない。
+- `env` が空でなければ、作成は環境変数の保存を含むので、直近 10 分以内のログインを求める（10.3）。検査はアプリを作る前に行う。再ログインすると入力中のフォームは失われるので、画面は再ログインが要る状態のとき、初期値の欄にそのことと再ログインのボタンを出し、変数をすべて外せば再ログインなしで作成できる（変数はあとから「環境変数」タブで足せる）ことを示す。
+
+**取得**
+
+- `GET /api/repos/{owner}/{repo}/env-presets?ref=<ブランチ>&path=<Compose ファイル>`。作成画面の Compose 検出と同じく、GitHub の contents API でブランチのファイルを読み、GitHub App で読めないリポジトリは認証なしで読む（9.4）。作成画面は、リポジトリを選んだときと「既定のブランチ」を変えたときに呼ぶ。
+- 1 回の判定の問い合わせは、直下の一覧と、表のうち直下にあるファイル（と `config/environments/production.rb`、Django の設定ファイル、Compose ファイル）だけ。ブランチは動くので結果はキャッシュしない。
+- 読めなかったときは 200 で `status: "unavailable"` と理由（9.4 と同じ語）を返し、画面は欄を出さない。リポジトリを URL で指定したときは、github.com の URL なら同じ API で（App で読めなければ認証なしで）読み、それ以外の URL では呼ばない。
+
 ## 10. セキュリティと運用
 
 `koroku` は Docker ソケットを操作できるためホストの root 相当であり、管理 UI の認証がこのシステムの唯一の関門になる。
@@ -933,7 +982,7 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
 - セッションの発行（ログイン）から 10 分以内でなければ、次の操作を `403 reauth_required` で断る。UI は再ログインの案内を出し、GitHub のログインを経て元の画面に戻す。
   - アプリの削除
   - 本番アプリ（`environment = production`）のデプロイ
-  - 環境変数の保存（一括置換も 1 件ずつの追加・変更・削除も）と、値の表示（下記）
+  - 環境変数の保存（一括置換も 1 件ずつの追加・変更・削除も、作成時に `env` で一緒に保存するのも。9.8）と、値の表示（下記）
   - volume のリストアと、DB ダンプのダウンロード
   - DB のコピー（10.6）
   - アプリ設定のうち、`environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）の変更。本番の確認ダイアログを外す、ポリシー検査を外す、別のコードを動かす、のいずれかにつながるため
@@ -942,7 +991,7 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
 - 環境変数の `GET` は、10 分を過ぎていても断らず、値を `null` にして `values_hidden: true` を返す。キーの一覧は見られるようにして、タブそのものは使えるようにするため。
 - 再ログインは通常のログインと同じ流れで、新しいセッションを発行する。同じブラウザーの古いセッションはそのとき消す。戻り先は `GET /auth/github/login?return_to=<パス>` で渡し、state と同じく短命の Cookie に入れる。`/` で始まり `//` や `\` を含まないパスだけを受け付ける（外部サイトへのリダイレクトに使われないように）。
 - 限界: GitHub にログインしたままのブラウザーでは、再ログインはパスワードを聞かれずに終わる。防げるのは「Cookie だけが盗まれて別の場所で使われる」場合で、本人のブラウザーそのものを使われる場合は防げない。GitHub の OAuth には OpenID Connect の `max_age` に当たるものがない。
-- 再ログインを求めない操作: 作成、staging のデプロイ、起動制御、ドメイン、バックアップの実行、prune。どれも取り消せるか、データを外へ出さないため。
+- 再ログインを求めない操作: 作成（環境変数を含まないもの）、staging のデプロイ、起動制御、ドメイン、バックアップの実行、prune。どれも取り消せるか、データを外へ出さないため。
 
 **セッションの一覧と失効、ログイン履歴**
 

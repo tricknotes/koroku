@@ -1,0 +1,42 @@
+{
+  "compose_path": "compose.yaml",
+  "frameworks": [
+    "rails"
+  ],
+  "presets": [
+    {
+      "key": "RAILS_ENV",
+      "value": "production",
+      "framework": "rails",
+      "file": "Gemfile",
+      "match": "rails"
+    },
+    {
+      "key": "SECRET_KEY_BASE",
+      "generator": "rails_secret_key_base",
+      "framework": "rails",
+      "file": "Gemfile",
+      "match": "rails"
+    },
+    {
+      "key": "RAILS_LOG_TO_STDOUT",
+      "value": "true",
+      "framework": "rails",
+      "file": "config/environments/production.rb",
+      "match": "RAILS_LOG_TO_STDOUT"
+    },
+    {
+      "key": "RAILS_SERVE_STATIC_FILES",
+      "value": "true",
+      "framework": "rails",
+      "file": "config/environments/production.rb",
+      "match": "RAILS_SERVE_STATIC_FILES"
+    }
+  ],
+  "skipped": [
+    {
+      "key": "RACK_ENV",
+      "service": "web"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "compose_path": "",
+  "frameworks": [
+    "django"
+  ],
+  "presets": [
+    {
+      "key": "DJANGO_SECRET_KEY",
+      "generator": "django_secret_key",
+      "framework": "django",
+      "file": "mysite/settings.py",
+      "match": "DJANGO_SECRET_KEY"
+    }
+  ],
+  "skipped": []
+}

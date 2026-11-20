@@ -21,6 +21,7 @@ import type {
   Domain,
   DomainList,
   EnvList,
+  EnvPresets,
   EnvRequirements,
   EnvPending,
   Promotion,
@@ -515,6 +516,24 @@ export default class ApiService extends Service {
     query: { ref?: string; path?: string },
   ): Promise<ComposeDetection> {
     return this.request('GET', `${repoPath(fullName)}/compose`, { query });
+  }
+
+  /** Variables to prefill on the create screen; secrets come generated. */
+  async getEnvPresets(
+    fullName: string,
+    query: { ref?: string; path?: string },
+  ): Promise<EnvPresets> {
+    const presets = await this.request<EnvPresets>(
+      'GET',
+      `${repoPath(fullName)}/env-presets`,
+      { query },
+    );
+    return {
+      ...presets,
+      frameworks: presets.frameworks ?? [],
+      presets: presets.presets ?? [],
+      skipped: presets.skipped ?? [],
+    };
   }
 
   // Custom domains

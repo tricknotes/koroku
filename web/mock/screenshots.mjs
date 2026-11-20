@@ -1435,6 +1435,81 @@ SHOTS.push(
     ...PHONE,
     themes: ['light'],
   },
+  // Environment presets (ARCHITECTURE 9.8): a Rails repository.
+  {
+    name: 'new-app-env',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: CHOOSE_REPOSITORY,
+    then: '[data-test-env-draft-row="SECRET_KEY_BASE"]',
+    fullPage: true,
+  },
+  {
+    name: 'new-app-env-revealed',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      ${CHOOSE_REPOSITORY};
+      setTimeout(() => {
+        document
+          .querySelector('[data-test-env-draft-row="SECRET_KEY_BASE"] [data-test-env-draft-reveal]')
+          .click();
+      }, 400);
+    })()`,
+    then: '[data-test-env-draft-row="SECRET_KEY_BASE"] [data-test-env-draft-value]',
+    fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'new-app-env-invalid',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      ${CHOOSE_REPOSITORY};
+      setTimeout(() => {
+        document.querySelector('[data-test-env-draft-add]').click();
+        setTimeout(() => {
+          const keys = document.querySelectorAll('[data-test-env-draft-key]');
+          const key = keys[keys.length - 1];
+          key.value = 'RAILS_ENV';
+          key.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('[data-test-submit]').click();
+        }, 200);
+      }, 400);
+    })()`,
+    then: '[data-test-env-draft-error]',
+    fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'new-app-env-none',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      const select = document.querySelector('${REPOSITORY}');
+      select.value = 'octo/wiki';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`,
+    then: '[data-test-env-presets-none]',
+    fullPage: true,
+    themes: ['light'],
+  },
+  {
+    name: 'new-app-env-reauth',
+    path: '/apps/new?scenario=stale-login',
+    wait: REPOSITORY,
+    script: CHOOSE_REPOSITORY,
+    then: '[data-test-env-presets-reauth]',
+    fullPage: true,
+  },
+  {
+    name: 'new-app-env-phone',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: CHOOSE_REPOSITORY,
+    then: '[data-test-env-draft-row="SECRET_KEY_BASE"]',
+    ...PHONE,
+  },
   { name: 'login', path: '/?scenario=login', wait: '[data-test-login-link]' },
   {
     name: 'login-denied',

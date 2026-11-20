@@ -1141,6 +1141,83 @@ export const COMPOSE = {
   ],
 };
 
+/**
+ * What `GET /api/repos/{owner}/{repo}/env-presets` suggests for each mock
+ * repository (ARCHITECTURE 9.8); `secret` marks a generated value, made
+ * fresh on every request like koroku does.
+ */
+export const ENV_PRESETS = {
+  'octo/blog': {
+    compose_path: 'compose.yaml',
+    frameworks: ['rails'],
+    presets: [
+      {
+        key: 'RAILS_ENV',
+        value: 'production',
+        framework: 'rails',
+        file: 'Gemfile',
+        match: 'rails',
+      },
+      {
+        key: 'SECRET_KEY_BASE',
+        secret: 'hex64',
+        framework: 'rails',
+        file: 'Gemfile',
+        match: 'rails',
+      },
+      {
+        key: 'RAILS_LOG_TO_STDOUT',
+        value: 'true',
+        framework: 'rails',
+        file: 'config/environments/production.rb',
+        match: 'RAILS_LOG_TO_STDOUT',
+      },
+      {
+        key: 'RAILS_SERVE_STATIC_FILES',
+        value: 'true',
+        framework: 'rails',
+        file: 'config/environments/production.rb',
+        match: 'RAILS_SERVE_STATIC_FILES',
+      },
+    ],
+    skipped: [{ key: 'RACK_ENV', service: 'web' }],
+  },
+  'octo/shop': {
+    compose_path: 'compose.yaml',
+    frameworks: ['laravel'],
+    presets: [
+      {
+        key: 'APP_ENV',
+        value: 'production',
+        framework: 'laravel',
+        file: 'composer.json',
+        match: 'laravel/framework',
+      },
+      {
+        key: 'APP_DEBUG',
+        value: 'false',
+        framework: 'laravel',
+        file: 'composer.json',
+        match: 'laravel/framework',
+      },
+      {
+        key: 'APP_KEY',
+        secret: 'laravel',
+        framework: 'laravel',
+        file: 'composer.json',
+        match: 'laravel/framework',
+      },
+    ],
+    skipped: [],
+  },
+  'octo/wiki': {
+    compose_path: 'compose.yaml',
+    frameworks: [],
+    presets: [],
+    skipped: [],
+  },
+};
+
 /** A new app as `POST /api/apps` would return it. */
 export function newApp(body, hostPort) {
   return app(body.slug, { ...body, host_port: hostPort, created_at: ago(0) });

@@ -1,0 +1,23 @@
+{
+  "compose_path": "",
+  "frameworks": [
+    "phoenix"
+  ],
+  "presets": [
+    {
+      "key": "MIX_ENV",
+      "value": "prod",
+      "framework": "phoenix",
+      "file": "mix.exs",
+      "match": "phoenix"
+    },
+    {
+      "key": "SECRET_KEY_BASE",
+      "generator": "phoenix_secret_key_base",
+      "framework": "phoenix",
+      "file": "mix.exs",
+      "match": "phoenix"
+    }
+  ],
+  "skipped": []
+}

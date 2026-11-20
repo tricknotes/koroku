@@ -457,11 +457,20 @@ func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"apps": out})
 }
 
+// createAppInput is the body of POST /api/apps: the app's fields and the
+// environment variables to store with it (ARCHITECTURE 9.8). PATCH takes
+// no variables.
+type createAppInput struct {
+	appInput
+	Env []envVarJSON `json:"env"`
+}
+
 func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
-	var in appInput
-	if !decodeJSON(w, r, &in) {
+	var body createAppInput
+	if !decodeJSON(w, r, &body) {
 		return
 	}
+	in := body.appInput
 	app := store.App{
 		DefaultBranch:   "main",
 		WebService:      "web",
@@ -489,11 +498,17 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	sealEnv := s.sealCreateEnv(body.Env, errs)
 	if len(errs) > 0 {
 		writeValidationError(w, errs)
 		return
 	}
-	created, err := s.store.CreateApp(r.Context(), app, s.cfg.Deploy.PortRangeStart, s.cfg.Deploy.PortRangeEnd, s.clock.Now())
+	// Saving variables needs a recent login (ARCHITECTURE 10.3); it is
+	// checked before anything is created.
+	if len(body.Env) > 0 && !s.requireRecentAuth(w, r) {
+		return
+	}
+	created, err := s.store.CreateAppWithEnv(r.Context(), app, s.cfg.Deploy.PortRangeStart, s.cfg.Deploy.PortRangeEnd, s.clock.Now(), sealEnv)
 	switch {
 	case errors.Is(err, store.ErrConflict):
 		writeError(w, http.StatusConflict, "slug_taken", "an app with this slug already exists")

@@ -196,6 +196,15 @@ func nullInt(v *int64) sql.NullInt64 {
 // CreateApp inserts an app and assigns it the lowest free host port in
 // [portStart, portEnd]. ID, HostPort and timestamps of the argument are ignored.
 func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, now time.Time) (App, error) {
+	return s.CreateAppWithEnv(ctx, app, portStart, portEnd, now, nil)
+}
+
+// CreateAppWithEnv is CreateApp that also stores environment variables in
+// the same transaction, so that an app never exists without the variables
+// it was created with. The values are sealed with the new app's ID, which
+// is only known inside the transaction: env receives it and returns the
+// variables. A nil env stores none.
+func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEnd int, now time.Time, env func(appID int64) ([]EnvVar, error)) (App, error) {
 	limits, err := encodeLimits(app.ServiceMemoryLimits)
 	if err != nil {
 		return App{}, err
@@ -264,6 +273,22 @@ func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, 
 	created, err := scanApp(tx.QueryRowContext(ctx, `SELECT `+appColumns+` FROM apps WHERE id = ?`, id))
 	if err != nil {
 		return App{}, err
+	}
+	if env != nil {
+		vars, err := env(id)
+		if err != nil {
+			return App{}, fmt.Errorf("create app: %w", err)
+		}
+		for _, v := range vars {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO env_vars (app_id, key, value_encrypted) VALUES (?, ?, ?)`,
+				id, v.Key, v.ValueEncrypted); err != nil {
+				if isUniqueViolation(err) {
+					return App{}, fmt.Errorf("env var %q: %w", v.Key, ErrConflict)
+				}
+				return App{}, fmt.Errorf("create app: insert env var: %w", err)
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return App{}, fmt.Errorf("create app: %w", err)
