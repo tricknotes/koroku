@@ -23,6 +23,7 @@ import type {
   EnvList,
   EnvRequirements,
   EnvPending,
+  Promotion,
   EnvVar,
   LogArchive,
   LoginEvent,
@@ -374,9 +375,35 @@ export default class ApiService extends Service {
     return deployments ?? [];
   }
 
+  /** What promoting the paired staging release would do (ARCHITECTURE 9.5). */
+  async getPromotion(slug: string): Promise<Promotion> {
+    const json = await this.request<Promotion>(
+      'GET',
+      `/api/apps/${seg(slug)}/promotion`,
+    );
+    return {
+      ...json,
+      commits: {
+        status: json.commits?.status ?? 'unknown',
+        list: json.commits?.list ?? [],
+      },
+      env: {
+        only_in_source: json.env?.only_in_source ?? [],
+        only_in_target: json.env?.only_in_target ?? [],
+      },
+      images: {
+        status: json.images?.status ?? 'unavailable',
+        services: (json.images?.services ?? []).map((s) => ({
+          ...s,
+          differing_args: s.differing_args ?? [],
+        })),
+      },
+    };
+  }
+
   createDeployment(
     slug: string,
-    body: { ref?: string; sha?: string },
+    body: { ref?: string; sha?: string; promote_from_deployment?: number },
   ): Promise<Deployment> {
     return this.request('POST', `/api/apps/${seg(slug)}/deployments`, { body });
   }

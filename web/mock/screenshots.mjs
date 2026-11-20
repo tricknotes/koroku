@@ -283,12 +283,61 @@ const SHOTS = [
     fullPage: false,
     themes: ['dark'],
   },
+  // Promotion of the paired staging release (ARCHITECTURE 9.5).
+  {
+    name: 'promote-reuse',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: '[data-test-promote]',
+  },
+  {
+    name: 'promote-reuse-phone',
+    path: '/apps/blog/deploy?scenario=healthy',
+    wait: '[data-test-promote]',
+    ...PHONE,
+  },
+  {
+    name: 'promote-rebuild',
+    path: '/apps/shop/deploy?scenario=healthy',
+    wait: '[data-test-promote]',
+  },
+  {
+    name: 'promote-rebuild-phone',
+    path: '/apps/shop/deploy?scenario=healthy',
+    wait: '[data-test-promote]',
+    ...PHONE,
+  },
+  {
+    name: 'promote-unpaired',
+    path: '/apps/blog/deploy?scenario=promote-unpaired',
+    wait: '[data-test-promotion-unpaired]',
+  },
+  {
+    name: 'promote-confirm',
+    path: '/apps/shop/deploy?scenario=healthy',
+    wait: '[data-test-promote]',
+    click: '[data-test-promote]',
+  },
+  {
+    name: 'promote-confirm-phone',
+    path: '/apps/shop/deploy?scenario=healthy',
+    wait: '[data-test-promote]',
+    click: '[data-test-promote]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'promote-settings',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-field="promote_from"] option[value="blog-staging"]',
+    fullPage: true,
+  },
   // Keyboard: Tab from the top of the page to the first history row.
   {
     name: 'deploy-focus-row',
     path: '/apps/blog/deploy?scenario=healthy',
     wait: DEPLOYMENT,
-    keys: tabs(18),
+    // The promotion panel of the production app adds its summary and button.
+    keys: tabs(20),
   },
   {
     name: 'detail-error',

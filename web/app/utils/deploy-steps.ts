@@ -73,6 +73,7 @@ const STEP_LABELS: Record<string, string> = {
   fetch: '取得',
   prepare: '生成',
   validate: '検証',
+  reuse: 'イメージの再利用',
   build: 'ビルド',
   pull: 'イメージの pull',
   backup: 'デプロイ前のバックアップ',

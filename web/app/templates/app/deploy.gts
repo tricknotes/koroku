@@ -14,6 +14,7 @@ import EnvRequirementsWarning from 'koroku-console/components/env-requirements-w
 import EnvironmentBadge from 'koroku-console/components/environment-badge';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
+import PromotionPanel from 'koroku-console/components/promotion-panel';
 import Icon from 'koroku-console/components/icon';
 import RelativeTime from 'koroku-console/components/relative-time';
 import RowList from 'koroku-console/components/row-list';
@@ -488,12 +489,23 @@ export default class AppDeployTemplate extends Component<Signature> {
     }
   };
 
+  /** A promotion was queued from the panel: show it like a deployment. */
+  promoted = async (deployment: Deployment) => {
+    await this.history.load({ quiet: true });
+    this.selectedId = deployment.id;
+    await this.args.model.reload();
+  };
+
   /** Opens the steps of a deployment, or closes them again. */
   toggle = (deployment: Deployment) => {
     this.selectedId = this.isSelected(deployment) ? null : deployment.id;
   };
 
   <template>
+    {{#if @model.isProduction}}
+      <PromotionPanel @app={{this.app}} @onPromoted={{this.promoted}} />
+    {{/if}}
+
     <section
       class="deploy-form-section"
       aria-labelledby="deploy-title"
@@ -727,6 +739,14 @@ export default class AppDeployTemplate extends Component<Signature> {
                             </span>
                           {{else if deployment.ref}}
                             <span>{{deployment.ref}}</span>
+                          {{/if}}
+                          {{#if deployment.promoted_from}}
+                            <Badge
+                              @tone="info"
+                              title="{{deployment.promoted_from.app_slug}} のデプロイ #{{deployment.promoted_from.deployment_id}} を昇格"
+                              data-test-promoted-from
+                            >{{deployment.promoted_from.app_slug}}
+                              から昇格</Badge>
                           {{/if}}
                         </span>
                         {{#if deployment.error}}
