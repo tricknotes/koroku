@@ -123,7 +123,7 @@ func healthy(t *testing.T) Deps {
 		GitHub: fakeApp{
 			app: github.App{ID: 42, Slug: "koroku-test", ClientID: "Iv1.abc", HTMLURL: "https://github.com/apps/koroku-test",
 				Permissions: map[string]string{"contents": "read", "metadata": "read"}},
-			installs: []github.Installation{{ID: 1, Account: "octocat", RepositorySelection: "all"}},
+			installs: []github.Installation{{ID: 1, Account: "octocat", RepositorySelection: "all", Allowed: true}},
 		},
 		Users:   fakeUsers{7: "octocat"},
 		Objects: objstore.NewMemory(),
@@ -253,6 +253,14 @@ func TestProblems(t *testing.T) {
 				d.GitHub = a
 			},
 			check: "github.install", want: Warn,
+		},
+		"installed on an account koroku ignores": {
+			change: func(d *Deps) {
+				a := d.GitHub.(fakeApp)
+				a.installs = append(a.installs, github.Installation{ID: 2, Account: "stranger", RepositorySelection: "all"})
+				d.GitHub = a
+			},
+			check: "github.install", want: Warn, text: "stranger",
 		},
 		"unknown user": {
 			change: func(d *Deps) { d.Users = fakeUsers{} },
