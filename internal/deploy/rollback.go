@@ -79,9 +79,16 @@ func (e *Engine) EnqueueRollback(ctx context.Context, app store.App, fromID int6
 	if e.taskRunning(app.ID) {
 		return store.Deployment{}, ErrBusy
 	}
+	// Hold the worker off this rollback's log until the stale file is gone
+	// and the queued line is written, as Enqueue does.
+	e.queueing.Lock()
+	defer e.queueing.Unlock()
 	d, superseded, err := e.opts.Store.EnqueueRollback(ctx, target, e.opts.Clock.Now())
 	if err != nil {
 		return store.Deployment{}, err
+	}
+	if e.afterInsert != nil {
+		e.afterInsert()
 	}
 	for _, id := range superseded {
 		appendLogLine(e.LogPath(app.Slug, id), "Canceled: "+store.SupersededError+".")
