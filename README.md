@@ -4,6 +4,8 @@ VPS 1 台の上で、GitHub リポジトリの Docker Compose アプリを UI �
 
 - 設計: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - HTTP API: [docs/API.md](docs/API.md)
+- 本番の初回セットアップ（VPS、DNS、GitHub App、R2）: [docs/SETUP.md](docs/SETUP.md)
+- ホストの構築・更新・復旧: [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - マイルストーンと実装規約: [CLAUDE.md](CLAUDE.md)
 
 ## アプリのリポジトリを koroku 向けに整える
