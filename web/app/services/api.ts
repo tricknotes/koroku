@@ -3,6 +3,7 @@ import { waitForPromise } from '@ember/test-waiters';
 import { ApiError } from 'koroku-console/utils/errors';
 import type SessionService from './session';
 import type {
+  ApiToken,
   App,
   AppPatch,
   AppVolume,
@@ -11,6 +12,7 @@ import type {
   Branch,
   Commit,
   ComposeDetection,
+  CreatedApiToken,
   ContainerResources,
   Deployment,
   DockerUsageItem,
@@ -30,6 +32,7 @@ import type {
   SessionResponse,
   Snapshot,
   SystemInfo,
+  TokenLifetime,
 } from 'koroku-console/utils/types';
 
 export type Query = Record<
@@ -181,6 +184,29 @@ export default class ApiService extends Service {
       '/api/login-events',
     );
     return events ?? [];
+  }
+
+  // API tokens (read-only, for tools such as Claude Code)
+
+  async listTokens(): Promise<ApiToken[]> {
+    const { tokens } = await this.request<{ tokens: ApiToken[] | null }>(
+      'GET',
+      '/api/tokens',
+    );
+    return tokens ?? [];
+  }
+
+  createToken(
+    name: string,
+    expiresInDays: TokenLifetime,
+  ): Promise<CreatedApiToken> {
+    return this.request('POST', '/api/tokens', {
+      body: { name, expires_in_days: expiresInDays },
+    });
+  }
+
+  deleteToken(id: string): Promise<void> {
+    return this.request('DELETE', `/api/tokens/${seg(id)}`);
   }
 
   // System

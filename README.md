@@ -132,6 +132,8 @@ koroku でデプロイするリポジトリには、いくつかの前提があ�
 
 あとは「koroku で動くようにして」と頼むか、`/koroku:prepare-app` を実行します。Skill はリポジトリを調べて直し、手元の Docker で koroku と同じ形の設定を重ねたリハーサル（`config` → build / pull → `up --wait` → HTTP 確認）を行い、管理画面に入れる値（公開サービスとポート、ヘルスチェックパス、環境変数、ダンプフック）をまとめます。
 
+デプロイが失敗したら「koroku のデプロイが失敗した理由を見て直して」と頼むか、`/koroku:deploy-status` を実行します。管理画面の「セキュリティ」で作った読み取り専用の API トークンを `KOROKU_URL` と `KOROKU_TOKEN` の環境変数に置いておくと、Skill がこのリポジトリからデプロイしたアプリを見つけ、デプロイログ・実行ログ・未設定の環境変数を読んでリポジトリを直します。トークンではデプロイや設定の変更、環境変数の値の表示はできません（[ARCHITECTURE 10.5](docs/ARCHITECTURE.md)）。中身は [plugins/koroku/skills/deploy-status/](plugins/koroku/skills/deploy-status/) にあります。
+
 ## 運用
 
 koroku の更新、OS の更新、日常の確認、サーバーを失ったときの復旧は [docs/OPERATIONS.md](docs/OPERATIONS.md) にあります。koroku を再起動・更新しても、アプリのコンテナは止まりません。

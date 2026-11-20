@@ -5,6 +5,7 @@ import { on } from '@ember/modifier';
 import { fn } from '@ember/helper';
 import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
+import ApiTokens from 'koroku-console/components/api-tokens';
 import AsyncView from 'koroku-console/components/async-view';
 import Badge from 'koroku-console/components/badge';
 import Banner from 'koroku-console/components/banner';
@@ -155,8 +156,8 @@ export default class SecurityTemplate extends Component {
           {{/unless}}
         </div>
         <p class="security-note">
-          アプリの削除、本番アプリのデプロイ、環境変数の値の表示と保存、リストア、ダンプのダウンロード、環境やリポジトリの変更には、直近
-          10 分以内のログインが必要です。
+          アプリの削除、本番アプリのデプロイ、環境変数の値の表示と保存、リストア、ダンプのダウンロード、環境やリポジトリの変更、API
+          トークンの作成には、直近 10 分以内のログインが必要です。
         </p>
         <p class="security-reauth" data-test-reauth-state>
           {{#if this.reauthActive}}
@@ -275,6 +276,8 @@ export default class SecurityTemplate extends Component {
         </:default>
       </AsyncView>
     </section>
+
+    <ApiTokens />
 
     <section class="pane" aria-labelledby="events-title">
       <div class="pane-header">

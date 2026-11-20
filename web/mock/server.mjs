@@ -719,8 +719,80 @@ route('GET', '/api/login-events', () => ({
   ],
 }));
 
+// Read-only API tokens (ARCHITECTURE 10.5). The values are made up and
+// match the documented shape only.
+function tokensOf(state, scenario) {
+  state.tokens ??=
+    scenario === 'empty'
+      ? []
+      : [
+          {
+            id: '3fa9c2d17b40e815',
+            name: 'ノート PC の Claude Code',
+            created_at: ago(6 * DAY),
+            expires_at: ago(6 * DAY - 30 * DAY),
+            last_used_at: ago(2 * HOUR),
+            last_used_ip: '203.0.113.5',
+          },
+          {
+            id: '0b7e14c9d2a35f68',
+            name: 'デスクトップ',
+            created_at: ago(20 * DAY),
+            expires_at: ago(20 * DAY - 90 * DAY),
+            last_used_at: null,
+            last_used_ip: '',
+          },
+        ];
+  return state.tokens;
+}
+
+function mockTokenValue() {
+  const alphabet =
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-';
+  let out = 'koroku_ro_';
+  for (let i = 0; i < 43; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+}
+
+route('GET', '/api/tokens', (context) => ({
+  tokens: tokensOf(context.state, context.scenario),
+}));
+route('POST', '/api/tokens', (context) => {
+  const name = String(context.body.name ?? '').trim();
+  const days = context.body.expires_in_days;
+  const details = {};
+  if (name === '' || name.length > 100) details.name = 'is required';
+  if (![7, 30, 90].includes(days))
+    details.expires_in_days = 'must be 7, 30 or 90';
+  if (Object.keys(details).length > 0) {
+    throw new HttpError(422, 'validation_failed', details);
+  }
+  const token = {
+    id: Math.random().toString(16).slice(2, 18).padEnd(16, '0'),
+    name,
+    created_at: ago(0),
+    expires_at: ago(-days * DAY),
+    last_used_at: null,
+    last_used_ip: '',
+  };
+  const tokens = tokensOf(context.state, context.scenario);
+  context.state.tokens = [token, ...tokens];
+  return { status: 201, json: { token, value: mockTokenValue() } };
+});
+route('DELETE', '/api/tokens/:id', (context) => {
+  const tokens = tokensOf(context.state, context.scenario);
+  if (!tokens.some((t) => t.id === context.params.id)) {
+    throw notFound('token_not_found');
+  }
+  context.state.tokens = tokens.filter((t) => t.id !== context.params.id);
+  return { status: 204 };
+});
+
 /** What the API refuses without a recent login (ARCHITECTURE 10.3). */
 const NEEDS_RECENT_LOGIN = [
+  ['POST', /^\/api\/tokens$/],
   ['DELETE', /^\/api\/apps\/[^/]+$/],
   ['PUT', /^\/api\/apps\/[^/]+\/env(\/[^/]+)?$/],
   ['DELETE', /^\/api\/apps\/[^/]+\/env\/[^/]+$/],

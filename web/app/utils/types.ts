@@ -16,6 +16,26 @@ export interface SessionResponse {
   reauth_until?: string | null;
 }
 
+/** A read-only API token (`GET /api/tokens`, ARCHITECTURE 10.5). */
+export interface ApiToken {
+  id: string;
+  name: string;
+  created_at: string;
+  expires_at: string;
+  /** Rounded to the minute; `null` until first used. */
+  last_used_at: string | null;
+  last_used_ip: string;
+}
+
+/** Answer to `POST /api/tokens`: the only time `value` is ever sent. */
+export interface CreatedApiToken {
+  token: ApiToken;
+  value: string;
+}
+
+/** The expiries the server accepts, in days. */
+export type TokenLifetime = 7 | 30 | 90;
+
 /** A browser logged in as the user (`GET /api/sessions`). */
 export interface LoginSession {
   id: string;

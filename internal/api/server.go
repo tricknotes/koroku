@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -85,6 +86,8 @@ type Server struct {
 
 	// callbackLimiter bounds OAuth code exchanges (see handleCallback).
 	callbackLimiter *rateLimiter
+	// tokenLimiter bounds the requests of each API token.
+	tokenLimiter *tokenLimiter
 }
 
 // New builds a Server.
@@ -125,11 +128,18 @@ func New(opts Options) *Server {
 
 		// One person logs in a few times a week; ten a minute is generous.
 		callbackLimiter: &rateLimiter{limit: 10, window: time.Minute},
+		tokenLimiter:    &tokenLimiter{},
 	}
 }
 
 // Handler returns the root HTTP handler.
 func (s *Server) Handler() http.Handler {
+	return s.recoverPanics(s.logRequests(s.securityHeaders(s.guard(s.routes()))))
+}
+
+// routes registers every endpoint. The guard asks the same mux which route
+// a request would reach, to decide what an API token may use.
+func (s *Server) routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /auth/github/login", s.handleLogin)
@@ -143,6 +153,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /api/sessions/revoke-others", s.handleRevokeOtherSessions)
 	mux.HandleFunc("GET /api/login-events", s.handleLoginEvents)
+	mux.HandleFunc("GET /api/tokens", s.handleListTokens)
+	mux.HandleFunc("POST /api/tokens", s.handleCreateToken)
+	mux.HandleFunc("DELETE /api/tokens/{id}", s.handleDeleteToken)
 
 	mux.HandleFunc("GET /api/system", s.handleSystem)
 	mux.HandleFunc("GET /api/system/docker", s.handleDockerUsage)
@@ -197,7 +210,7 @@ func (s *Server) Handler() http.Handler {
 		writeError(w, http.StatusNotFound, "not_found", "no such API endpoint")
 	})
 	mux.Handle("/", s.spaHandler())
-	return s.recoverPanics(s.logRequests(s.securityHeaders(s.guard(mux))))
+	return mux
 }
 
 type errorBody struct {
@@ -235,18 +248,39 @@ func (r *statusRecorder) WriteHeader(status int) {
 // Unwrap lets http.ResponseController reach Flush on the underlying writer (SSE).
 func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
+// requestInfo carries what inner handlers learn about a request back to
+// the request log.
+type requestInfo struct {
+	// tokenID names the API token the request used; the value never
+	// reaches the log.
+	tokenID string
+}
+
+type requestInfoKey struct{}
+
+func requestInfoFrom(r *http.Request) *requestInfo {
+	info, _ := r.Context().Value(requestInfoKey{}).(*requestInfo)
+	return info
+}
+
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
+		info := &requestInfo{}
+		next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), requestInfoKey{}, info)))
 		// The query string is omitted on purpose: it may carry OAuth codes.
-		s.log.Info("http request",
+		// Headers are never logged: they carry cookies and API tokens.
+		attrs := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.status,
 			"duration_ms", time.Since(start).Milliseconds(),
-		)
+		}
+		if info.tokenID != "" {
+			attrs = append(attrs, "token_id", info.tokenID)
+		}
+		s.log.Info("http request", attrs...)
 	})
 }
 

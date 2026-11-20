@@ -31,6 +31,12 @@ const MESSAGES: Record<string, string> = {
   reauth_required:
     'この操作には再ログインが必要です（直近 10 分以内のログインが条件です）。',
   session_not_found: 'セッションが見つかりません。すでに終了しています。',
+  token_not_found: 'トークンが見つかりません。すでに失効しています。',
+  too_many_tokens:
+    '有効なトークンが上限（20 個）に達しています。使っていないものを失効させてください。',
+  invalid_token: 'API トークンが無効です。期限切れか失効しています。',
+  token_not_allowed: 'API トークンではこの操作はできません。',
+  rate_limited: 'リクエストが多すぎます。しばらくしてからやり直してください。',
   forbidden_origin:
     'この画面からの操作として認められませんでした。ページを再読み込みしてください。',
   forbidden_host:
