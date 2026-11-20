@@ -50,6 +50,10 @@ type appJSON struct {
 	DumpHookService      string            `json:"dump_hook_service"`
 	DumpHookCommand      string            `json:"dump_hook_command"`
 	BackupBeforeDeploy   bool              `json:"backup_before_deploy"`
+	LoadHookService      string            `json:"load_hook_service"`
+	LoadHookCommand      string            `json:"load_hook_command"`
+	PostLoadService      string            `json:"post_load_service"`
+	PostLoadCommand      string            `json:"post_load_command"`
 	EnvSource            string            `json:"env_source"`
 	EnvExamplePath       string            `json:"env_example_path"`
 	URL                  string            `json:"url"`
@@ -81,6 +85,10 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		DumpHookService:      app.DumpHookService,
 		DumpHookCommand:      app.DumpHookCommand,
 		BackupBeforeDeploy:   app.BackupBeforeDeploy,
+		LoadHookService:      app.LoadHookService,
+		LoadHookCommand:      app.LoadHookCommand,
+		PostLoadService:      app.PostLoadService,
+		PostLoadCommand:      app.PostLoadCommand,
 		EnvSource:            app.EnvSource,
 		EnvExamplePath:       app.EnvExamplePath,
 		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
@@ -143,6 +151,10 @@ type appInput struct {
 	DumpHookService      *string            `json:"dump_hook_service"`
 	DumpHookCommand      *string            `json:"dump_hook_command"`
 	BackupBeforeDeploy   *bool              `json:"backup_before_deploy"`
+	LoadHookService      *string            `json:"load_hook_service"`
+	LoadHookCommand      *string            `json:"load_hook_command"`
+	PostLoadService      *string            `json:"post_load_service"`
+	PostLoadCommand      *string            `json:"post_load_command"`
 	EnvSource            *string            `json:"env_source"`
 	EnvExamplePath       *string            `json:"env_example_path"`
 }
@@ -216,6 +228,18 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	if in.BackupBeforeDeploy != nil {
 		app.BackupBeforeDeploy = *in.BackupBeforeDeploy
 	}
+	if in.LoadHookService != nil {
+		app.LoadHookService = strings.TrimSpace(*in.LoadHookService)
+	}
+	if in.LoadHookCommand != nil {
+		app.LoadHookCommand = strings.TrimSpace(*in.LoadHookCommand)
+	}
+	if in.PostLoadService != nil {
+		app.PostLoadService = strings.TrimSpace(*in.PostLoadService)
+	}
+	if in.PostLoadCommand != nil {
+		app.PostLoadCommand = strings.TrimSpace(*in.PostLoadCommand)
+	}
 
 	if in.EnvSource != nil {
 		app.EnvSource = strings.TrimSpace(*in.EnvSource)
@@ -280,18 +304,27 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 			errs.add("backup_exclude_volumes", fmt.Sprintf("%q is not a valid volume name", truncateForError(name)))
 		}
 	}
-	switch {
-	case app.DumpHookService == "" && app.DumpHookCommand == "":
-	case app.DumpHookService == "":
-		errs.add("dump_hook_service", "is required when a dump command is set")
-	case app.DumpHookCommand == "":
-		errs.add("dump_hook_command", "is required when a dump service is set")
-	case !servicePattern.MatchString(app.DumpHookService):
-		errs.add("dump_hook_service", "is not a valid service name")
-	case len(app.DumpHookCommand) > 1000 || strings.ContainsAny(app.DumpHookCommand, "\n\r\x00"):
-		errs.add("dump_hook_command", "must be a single line of at most 1000 characters")
-	}
+	validateHook(errs, "dump_hook", app.DumpHookService, app.DumpHookCommand)
+	validateHook(errs, "load_hook", app.LoadHookService, app.LoadHookCommand)
+	validateHook(errs, "post_load", app.PostLoadService, app.PostLoadCommand)
 	return errs
+}
+
+// validateHook checks a service and command pair (the dump hook, the load
+// hook, the post-load command): both or neither, a valid service name and
+// a single line of command.
+func validateHook(errs fieldErrors, prefix, service, command string) {
+	switch {
+	case service == "" && command == "":
+	case service == "":
+		errs.add(prefix+"_service", "is required when a command is set")
+	case command == "":
+		errs.add(prefix+"_command", "is required when a service is set")
+	case !servicePattern.MatchString(service):
+		errs.add(prefix+"_service", "is not a valid service name")
+	case len(command) > 1000 || strings.ContainsAny(command, "\n\r\x00"):
+		errs.add(prefix+"_command", "must be a single line of at most 1000 characters")
+	}
 }
 
 func (s *Server) validateSlug(slug string) string {
