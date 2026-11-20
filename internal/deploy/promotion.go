@@ -17,7 +17,7 @@ import (
 )
 
 // Reasons a built service of a promotion is built instead of reusing the
-// source release's image (ARCHITECTURE 9.5). They are part of the API.
+// source release's image (ARCHITECTURE 9.7). They are part of the API.
 const (
 	ReasonArgsDiffer       = "args_differ"
 	ReasonBuildDiffers     = "build_differs"
@@ -62,7 +62,7 @@ func (d ImageDecision) Explain() string {
 var ErrSourceReleaseMissing = errors.New("the promoted release is no longer on disk")
 
 // EnqueuePromotion queues a deployment of source's commit to app, recorded
-// as a promotion of source (ARCHITECTURE 9.5). The caller checks that the
+// as a promotion of source (ARCHITECTURE 9.7). The caller checks that the
 // apps are paired and that source is the source app's current release.
 func (e *Engine) EnqueuePromotion(ctx context.Context, app store.App, source store.Deployment) (store.Deployment, error) {
 	return e.enqueue(ctx, app, "", source.CommitSHA, source.CommitMessage, &source.ID)

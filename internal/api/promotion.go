@@ -14,7 +14,7 @@ import (
 )
 
 // Promoter queues promotions and previews their image reuse
-// (ARCHITECTURE 9.5). The deploy engine implements it.
+// (ARCHITECTURE 9.7). The deploy engine implements it.
 type Promoter interface {
 	EnqueuePromotion(ctx context.Context, app store.App, source store.Deployment) (store.Deployment, error)
 	PreviewPromotionImages(ctx context.Context, target, src store.App, source store.Deployment) ([]deploy.ImageDecision, error)
@@ -199,7 +199,7 @@ type promotionJSON struct {
 }
 
 // handlePromotionPreview returns what a promotion would deploy and how it
-// differs from production, for the confirmation (ARCHITECTURE 9.5). It
+// differs from production, for the confirmation (ARCHITECTURE 9.7). It
 // reads keys and hashes only, never values.
 func (s *Server) handlePromotionPreview(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.loadApp(w, r)

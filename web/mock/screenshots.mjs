@@ -283,7 +283,7 @@ const SHOTS = [
     fullPage: false,
     themes: ['dark'],
   },
-  // Promotion of the paired staging release (ARCHITECTURE 9.5).
+  // Promotion of the paired staging release (ARCHITECTURE 9.7).
   {
     name: 'promote-reuse',
     path: '/apps/blog/deploy?scenario=healthy',

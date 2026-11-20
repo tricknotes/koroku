@@ -1,4 +1,4 @@
--- Promotion of a staging release to production (ARCHITECTURE 9.5).
+-- Promotion of a staging release to production (ARCHITECTURE 9.7).
 -- promote_from_app_id: the staging app a production app promotes from.
 -- Deleting the staging app removes the pairing.
 ALTER TABLE apps ADD COLUMN promote_from_app_id INTEGER

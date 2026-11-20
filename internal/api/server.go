@@ -36,7 +36,7 @@ type Options struct {
 	// Box encrypts environment variable values.
 	Box      *secrets.Box
 	Deployer Deployer
-	// Promoter queues promotions (ARCHITECTURE 9.5). Optional.
+	// Promoter queues promotions (ARCHITECTURE 9.7). Optional.
 	Promoter Promoter
 	// Refs resolves branch names for deployments. Optional.
 	Refs RefResolver

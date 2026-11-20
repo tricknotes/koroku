@@ -71,7 +71,7 @@ interface Signature {
 
 /**
  * "Promote staging's release to production" on a production app's deploy
- * tab (ARCHITECTURE 9.5): what would be deployed, how it differs from what
+ * tab (ARCHITECTURE 9.7): what would be deployed, how it differs from what
  * runs now, whether the built images are reused, and the confirmation.
  */
 export default class PromotionPanel extends Component<Signature> {

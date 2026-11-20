@@ -300,6 +300,15 @@ func TestPromotionReferences(t *testing.T) {
 		t.Errorf("ordinary deployment has PromotedFromID %v", *plain.PromotedFromID)
 	}
 
+	// A rollback to the promoted release is a rollback, not a promotion.
+	rb, _, err := s.EnqueueRollback(ctx, d, testNow)
+	if err != nil {
+		t.Fatalf("EnqueueRollback: %v", err)
+	}
+	if rb.PromotedFromID != nil || rb.SourceDeploymentID == nil || *rb.SourceDeploymentID != d.ID {
+		t.Errorf("rollback of a promotion = %+v", rb)
+	}
+
 	// Deleting the staging app removes the pairing and the reference.
 	if err := s.DeleteApp(ctx, staging.ID); err != nil {
 		t.Fatalf("DeleteApp: %v", err)

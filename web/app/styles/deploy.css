@@ -350,11 +350,6 @@
   gap: var(--space-2);
 }
 
-/* The rollback dialog: a few separate consequences, one per point. */
-.dialog-points > li + li {
-  margin-top: var(--space-1);
-}
-
 /* Steps: a vertical line of markers, each with a log that folds away. */
 
 .steps {
@@ -790,4 +785,9 @@ div.step-header {
   .promotion-actions > .button {
     width: 100%;
   }
+}
+
+/* The rollback dialog: a few separate consequences, one per point. */
+.dialog-points > li + li {
+  margin-top: var(--space-1);
 }

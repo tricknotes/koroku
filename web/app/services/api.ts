@@ -375,7 +375,7 @@ export default class ApiService extends Service {
     return deployments ?? [];
   }
 
-  /** What promoting the paired staging release would do (ARCHITECTURE 9.5). */
+  /** What promoting the paired staging release would do (ARCHITECTURE 9.7). */
   async getPromotion(slug: string): Promise<Promotion> {
     const json = await this.request<Promotion>(
       'GET',

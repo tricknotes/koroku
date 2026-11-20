@@ -11,7 +11,7 @@ import (
 )
 
 // assetHostCompose passes ASSET_HOST to the build, like a Rails app that
-// bakes asset_host into precompiled assets (ARCHITECTURE 9.5).
+// bakes asset_host into precompiled assets (ARCHITECTURE 9.7).
 const assetHostCompose = `services:
   web:
     build:

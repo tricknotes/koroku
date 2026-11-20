@@ -11,7 +11,7 @@ import (
 )
 
 // BuildDiff is the result of comparing the build sections of one service
-// in two releases (ARCHITECTURE 9.5). It holds key names only, never values.
+// in two releases (ARCHITECTURE 9.7). It holds key names only, never values.
 type BuildDiff struct {
 	// DifferingArgs are the build.args keys whose interpolated values
 	// differ, or that only one side has, in sorted order.

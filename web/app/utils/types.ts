@@ -539,7 +539,7 @@ export interface PromotionImage {
   differing_args: string[];
 }
 
-/** What promoting the paired staging release would do (ARCHITECTURE 9.5). */
+/** What promoting the paired staging release would do (ARCHITECTURE 9.7). */
 export interface Promotion {
   status: 'ready' | 'not_paired' | 'unavailable';
   reason: PromotionReason | '';

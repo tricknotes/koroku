@@ -283,6 +283,63 @@ func TestPromote(t *testing.T) {
 	}
 }
 
+// TestPromoteAfterStagingRollback: once staging is rolled back to a kept
+// release (ARCHITECTURE 7.1), its current release is that release, not the
+// rollback record, and a promotion deploys and records it.
+func TestPromoteAfterStagingRollback(t *testing.T) {
+	f := newPromotionFixture(t)
+	ctx := context.Background()
+	st := f.srv.store
+	kept := f.preview().SourceDeployment
+	f.release("shop-staging", middleSHA)
+
+	from, err := st.GetDeployment(ctx, kept.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rb, _, err := st.EnqueueRollback(ctx, from, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.StartDeployment(ctx, rb.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishDeployment(ctx, rb.ID, store.StatusSucceeded, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	source := f.preview().SourceDeployment
+	if source == nil || source.ID != kept.ID || source.CommitSHA != stagingSHA {
+		t.Fatalf("source after the rollback = %+v, want deployment %d", source, kept.ID)
+	}
+	rec := request(t, f.h, http.MethodPost, "/api/apps/shop/deployments",
+		fmt.Sprintf(`{"promote_from_deployment": %d}`, rb.ID))
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "promotion_stale") {
+		t.Errorf("promoting the rollback record = %d %s", rec.Code, rec.Body)
+	}
+	rec = request(t, f.h, http.MethodPost, "/api/apps/shop/deployments",
+		fmt.Sprintf(`{"promote_from_deployment": %d}`, kept.ID))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("promote = %d %s", rec.Code, rec.Body)
+	}
+	if d := decode[deploymentJSON](t, rec); d.CommitSHA != stagingSHA || d.PromotedFrom == nil ||
+		d.PromotedFrom.DeploymentID != kept.ID || d.SourceDeploymentID != nil {
+		t.Errorf("promotion = %+v", d)
+	}
+}
+
+// TestRollbackCannotBeAPromotion: rollback_to takes no promotion source.
+func TestRollbackCannotBeAPromotion(t *testing.T) {
+	f := newPromotionFixture(t)
+	source := f.preview().SourceDeployment
+	current := f.preview().CurrentDeployment
+	rec := request(t, f.h, http.MethodPost, "/api/apps/shop/deployments",
+		fmt.Sprintf(`{"rollback_to": %d, "promote_from_deployment": %d}`, current.ID, source.ID))
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "rollback_to") {
+		t.Errorf("combined = %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestPromoteNeedsRecentLogin(t *testing.T) {
 	srv, clk := newAuthServer(t, defaultGitHub())
 	b := newBrowser(t, srv.Handler())

@@ -152,7 +152,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		build := []string{"build"}
 		if d.PromotedFromID != nil {
 			// A promotion tags the promoted release's images where that is
-			// safe and builds only the rest (ARCHITECTURE 9.5).
+			// safe and builds only the rest (ARCHITECTURE 9.7).
 			build = append(build, e.reuseImages(ctx, d, app, repoProject, releaseDir, log)...)
 		}
 		if d.PromotedFromID == nil || len(build) > 1 {

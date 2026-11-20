@@ -129,7 +129,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
   @tracked deleting = false;
   @tracked deleteError: unknown = null;
 
-  /** The other apps, for the promotion source (ARCHITECTURE 9.5). */
+  /** The other apps, for the promotion source (ARCHITECTURE 9.7). */
   apps = new Loadable<App[]>(() => this.api.listApps());
 
   constructor(owner: Owner, args: Signature['Args']) {
