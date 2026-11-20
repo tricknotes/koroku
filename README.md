@@ -4,7 +4,7 @@ VPS 1 台の上で、GitHub リポジトリの Docker Compose アプリを UI �
 
 - 設計: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - HTTP API: [docs/API.md](docs/API.md)
-- 本番の初回セットアップ（VPS、DNS、GitHub App、R2）: [docs/SETUP.md](docs/SETUP.md)
+- 本番の初回セットアップ（サーバー、DNS、GitHub App、オブジェクトストレージ）: [docs/SETUP.md](docs/SETUP.md)
 - ホストの構築・更新・復旧: [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - マイルストーンと実装規約: [CLAUDE.md](CLAUDE.md)
 
@@ -53,7 +53,7 @@ docker compose up
 | `web` | Vite の開発サーバー（development モード）。Ember アプリのソースを変えるとホットリロードされる。`/api` と `/auth` は `koroku` に転送する |
 | `koroku` | このチェックアウトからビルドしたコントロールプレーン。ログインなし（`--insecure-no-auth`）で `127.0.0.1:8080` で待ち受ける |
 | `caddy` | リバースプロキシ。`127.0.0.1` の 80 と 443 だけで待ち受け、`koroku` が本番と同じく設定を投入する。証明書は Caddy 内蔵の CA で出す |
-| `storage` | S3 互換のオブジェクトストレージ（[Versity S3 Gateway](https://github.com/versity/versitygw)）。R2 の代わりに、ログの退避と restic のバックアップの置き場になる。`127.0.0.1:9000` で待ち受け、WebUI は <http://127.0.0.1:9001>（アクセスキー `koroku-dev`、シークレット `koroku-dev-secret`）。中身は volume `koroku-dev-s3-data` にファイルとして並ぶ |
+| `storage` | S3 互換のオブジェクトストレージ（[Versity S3 Gateway](https://github.com/versity/versitygw)）。本番のオブジェクトストレージの代わりに、ログの退避と restic のバックアップの置き場になる。`127.0.0.1:9000` で待ち受け、WebUI は <http://127.0.0.1:9001>（アクセスキー `koroku-dev`、シークレット `koroku-dev-secret`）。中身は volume `koroku-dev-s3-data` にファイルとして並ぶ |
 | `storage-setup` | `storage` にバケット `koroku` を作って終わる |
 
 - アプリは手元の Docker にデプロイされ、`https://<slug>.dev.localhost` で開けます（`*.localhost` は OS やブラウザがループバックに解決します）。管理 UI は Vite の <http://localhost:4200> のほか、`pnpm build` 済みなら `https://console.dev.localhost` でも開けます。

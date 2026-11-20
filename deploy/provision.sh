@@ -668,18 +668,18 @@ summary() {
     Manual steps (details in docs/OPERATIONS.md; skip what is done):
       1. DNS: point *.<base_domain> (or console.<base_domain> and every
          <slug>.<base_domain>) to the public address of this host. If the
-         hosting provider has a packet filter in front of the host, open
+         hosting provider has a firewall in front of the host, open
          80/tcp and 443/tcp there as well.
       2. Edit $CONFIG_FILE: base_domain, public_ip, the GitHub App
-         values and the object storage (R2) values. Put the GitHub App
+         values and the object storage values. Put the GitHub App
          private key in $CONFIG_DIR/github-app.pem (mode 0600).
       3. Put the restic repository password in $CONFIG_DIR/restic.key
          (mode 0600) and keep a copy outside this host, together with
          $CONFIG_DIR/master.key (created at the first start of koroku)
-         and the R2 credentials.
+         and the object storage credentials.
       4. Start koroku: systemctl restart koroku && journalctl -u koroku -f
       5. Run: koroku check
-         It tests DNS, the certificate, the GitHub App, R2 and restic, and
+         It tests DNS, the certificate, the GitHub App, object storage and restic, and
          says what is still missing (docs/SETUP.md goes through each one).
 EOF
   if [[ $CONFIG_CREATED == 1 ]]; then

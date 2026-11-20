@@ -187,7 +187,7 @@ func checkPublicIP(d Deps) Result {
 	const name = "public_ip"
 	ip := net.ParseIP(d.Config.PublicIP)
 	if ip == nil {
-		return fail(name, "set public_ip to the global address of the VPS (docs/SETUP.md 7)",
+		return fail(name, "set public_ip to the global address of this server (docs/SETUP.md 7)",
 			"public_ip is not set: custom domains cannot be verified")
 	}
 	addrs, err := d.HostAddrs()
@@ -199,7 +199,7 @@ func checkPublicIP(d Deps) Result {
 			return ok(name, "%s is an address of this host", ip)
 		}
 	}
-	return warn(name, "check that public_ip is the global address shown in the VPS control panel (docs/SETUP.md 2)",
+	return warn(name, "check that public_ip is the global address the provider assigned to this server (docs/SETUP.md 2)",
 		"%s is not an address of any interface of this host (fine only behind NAT)", ip)
 }
 
@@ -277,7 +277,7 @@ func checkHTTPS(ctx context.Context, d Deps) Result {
 				"%s serves a Let's Encrypt staging certificate (browsers will not trust it)", cfg.ConsoleHost)
 		}
 		return fail(name,
-			"Caddy obtains the certificate once DNS points here and 80/443 are open, also in the VPS packet filter (docs/SETUP.md 2, 3); see journalctl -u caddy",
+			"Caddy obtains the certificate once DNS points here and 80/443 are open, also in the provider's firewall (docs/SETUP.md 2, 3); see journalctl -u caddy",
 			"%s: %v", cfg.ConsoleURL, err)
 	}
 	drain(resp)
@@ -415,13 +415,13 @@ const checkPrefix = "koroku-check/"
 func checkStorage(ctx context.Context, d Deps) Result {
 	const name = "storage"
 	if !d.Config.Storage.Configured() {
-		return fail(name, "create an R2 bucket and token and fill in [storage] (docs/SETUP.md 5)",
+		return fail(name, "create a bucket and an access key and fill in [storage] (docs/SETUP.md 5)",
 			"[storage] is not configured: no backups and no log archive")
 	}
 	if d.Objects == nil {
 		return fail(name, "", "the storage client could not be built")
 	}
-	hint := "the token needs Object Read & Write on bucket " + d.Config.Storage.Bucket + " (docs/SETUP.md 5)"
+	hint := "the access key must be allowed to read, write, list and delete objects in bucket " + d.Config.Storage.Bucket + " (docs/SETUP.md 5)"
 	key := checkPrefix + randomHex(8)
 	body := []byte("written by koroku check; safe to delete\n")
 	if err := d.Objects.Put(ctx, key, body, "text/plain"); err != nil {

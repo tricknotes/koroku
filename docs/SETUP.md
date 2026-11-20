@@ -1,12 +1,11 @@
 # 初回セットアップ（外部サービス）
 
-本番の VPS に `koroku` を載せるまでに、人が外部サービスの画面で行う設定を順に並べる。ホストの構築（`provision.sh`）と更新・復旧は [OPERATIONS.md](OPERATIONS.md)、設計の背景は [ARCHITECTURE.md](ARCHITECTURE.md) を参照。
+本番のサーバーに `koroku` を載せるまでに、外部サービス側で行う設定を順に並べる。ホストの構築（`provision.sh`）と更新・復旧は [OPERATIONS.md](OPERATIONS.md)、設計の背景は [ARCHITECTURE.md](ARCHITECTURE.md) を参照。
 
+- 特定の事業者には依存しない。各節の冒頭に「満たすべき条件」を書き、続けて一般的な手順を書く。画面の名前や操作は事業者によって違うので、それぞれのドキュメントで読み替える。
 - 各節の最後に、`config.toml` のどこに何を書くかを示す。値はまとめて 7 節に書き込む。
 - 終わったら `sudo koroku check` を実行する（8 節）。足りないものと、この文書のどの節を読めばよいかが表示される。途中で何度実行してもよい。
-- ここに出てくるドメインと IP は例（`dev.example.com`、`203.0.113.10`）。実際の値はリポジトリに書かない。
-
-> 外部サービスの画面の名前は 2026-11 時点の公開情報による。画面が変わっていたら、この文書を直す。さくらの VPS のパケットフィルターの初期状態と、Squarespace Domains がワイルドカード（`*.dev`）のレコードを受け付けるかは、まだ実機で確かめていない（[未確認の点](#未確認の点)）。
+- ここに出てくるドメインと IP は例（`dev.example.com`、`203.0.113.10`）。
 
 ## 1. 全体の流れ
 
@@ -14,54 +13,68 @@
 
 | 順 | すること | 節 | 控える値 |
 | --- | --- | --- | --- |
-| 1 | VPS を作り、パケットフィルターで 80/443 を開ける | 2 | グローバル IP |
+| 1 | サーバーを用意し、事業者側のファイアウォールで 80/443 を開ける | 2 | グローバル IPv4 アドレス |
 | 2 | DNS に A レコードを登録する | 3 | — |
 | 3 | `provision.sh` を実行する | [OPERATIONS 3](OPERATIONS.md#3-プロビジョニング) | — |
 | 4 | GitHub App を登録し、自分のアカウントにインストールする | 4 | App ID、Client ID、client secret、秘密鍵、ユーザー ID |
-| 5 | R2 のバケット、ライフサイクルルール、API トークンを作る | 5 | endpoint、Access Key ID、Secret Access Key |
-| 6 | restic のパスワードを作り、秘密を VPS の外に控える | 6 | restic のパスワード |
+| 5 | オブジェクトストレージのバケット、ライフサイクルルール、アクセスキーを用意する | 5 | endpoint、region、Access Key ID、Secret Access Key |
+| 6 | restic のパスワードを作り、秘密をサーバーの外に控える | 6 | restic のパスワード |
 | 7 | `config.toml` を書いて `koroku` を起動する | 7 | — |
 | 8 | `koroku check` で確かめ、初回のバックアップを取る | 8 | — |
 | 9 | 証明書を Let's Encrypt の本番に切り替える | 9 | — |
 
-## 2. さくらの VPS
+## 2. サーバー
 
-1. コントロールパネルでサーバーを追加する。プランは 4GB、リージョンは東京か石狩。OS は標準 OS の **Ubuntu 24.04 amd64**。
-2. インストールの設定で **SSH の公開鍵を登録する**。手元の `~/.ssh/id_ed25519.pub` などの中身を貼る（なければ `ssh-keygen -t ed25519` で作る）。管理ユーザー（Ubuntu の標準イメージでは `ubuntu`）のパスワードも決めておく。`provision.sh` は、鍵でログインできるのを確かめてからパスワードでのログインを止める（OPERATIONS 3 章）。
-3. 起動したら、サーバーの情報画面で **IPv4 のグローバルアドレス** を控える。これが `public_ip` と DNS の値になる。
-4. **パケットフィルター** の設定を開き、SSH（22/tcp）と Web（80/tcp、443/tcp）を許可する。443/udp（HTTP/3）は開けなくてよい（OPERATIONS 8.2）。パケットフィルターを使わない設定にしても動く（ホストの ufw が同じ 3 つだけを通す）が、二重にしておくほうが安全。
-5. 手元から鍵でログインできることを確かめる。
+**満たすべき条件**
+
+| 項目 | 条件 |
+| --- | --- |
+| OS | Ubuntu 24.04、amd64（x86_64）。それ以外では `provision.sh` が止まる |
+| 大きさ | 2 vCPU、メモリ 4GB、ディスク 40GB 程度から（アプリ 3〜5 個、ビルドをサーバー上で行う前提の目安） |
+| ネットワーク | 固定のグローバル IPv4 アドレス。80/tcp と 443/tcp に外から届くこと（Let's Encrypt の HTTP-01 / TLS-ALPN-01 の検証に要る） |
+| ログイン | SSH の公開鍵でログインできる、sudo 可能なユーザー |
+
+**手順**
+
+1. 事業者の管理画面でサーバーを作る。OS に Ubuntu 24.04 を選び、作成時に SSH の公開鍵を登録できるなら登録する（鍵がなければ手元で `ssh-keygen -t ed25519` で作る）。
+2. 割り当てられたグローバル IPv4 アドレスを控える。これが `public_ip` と DNS の値になる。
+3. 事業者側にファイアウォール（パケットフィルター、セキュリティグループなどと呼ばれる）があれば、22/tcp、80/tcp、443/tcp の受信を許可する。443/udp（HTTP/3）は開けなくてよい（OPERATIONS 8.2）。ホストの中でも ufw が同じ 3 つだけを通すので、事業者側は使わなくても動くが、二重にしておくほうが安全。
+4. 手元から鍵でログインできることを確かめる。作成時に鍵を登録できなかった場合は、パスワードでログインして `ssh-copy-id` で鍵を登録し、鍵でログインし直す。`provision.sh` は、実行したユーザーに鍵が登録されているときだけパスワードでのログインを止める（OPERATIONS 3 章）。
 
    ```sh
-   ssh ubuntu@203.0.113.10
+   ssh <ユーザー>@203.0.113.10
    ```
 
 > IPv6 のアドレスは DNS に登録しない（AAAA レコードを作らない）。`koroku` は、名前解決で得られた **すべての** アドレスが `public_ip` と一致することを確かめるので（ARCHITECTURE 8 章）、AAAA があると管理 UI の確認と独自ドメインの検証が通らない。
 
-## 3. DNS（Squarespace Domains）
+## 3. DNS
 
-`*.dev.example.com`（アプリ）と `console.dev.example.com`（管理 UI）が VPS の IP を指すようにする。
+**満たすべき条件**: `console.<base_domain>`（管理 UI）と `<slug>.<base_domain>`（各アプリ）が、サーバーの IPv4 アドレス **だけ** に解決されること。
 
-1. Squarespace Domains でドメインを開き、**DNS** → **DNS Settings** → **Custom records** → **Add record**。
-2. 次のレコードを足す。
+`base_domain` は、持っているドメインそのもの（`example.com`）でも、そのサブドメイン（`dev.example.com`）でもよい。
 
-   | Host | Type | Data | TTL |
-   | --- | --- | --- | --- |
-   | `*.dev` | A | VPS の IPv4 | 1 hour |
-   | `console.dev` | A | VPS の IPv4 | 1 hour |
+**手順**
 
-   - `console.dev` はワイルドカードで足りるが、明示しておくとワイルドカードを消したときも管理 UI が残る。
-   - **`*.dev` を受け付けない場合**は、アプリを作るたびに `<slug>.dev` の A レコードを足す。`koroku check` はワイルドカードがないことを警告として表示する（失敗ではない）。
-   - TTL は、作り直しの多い最初のうちは短めにしておく（既定は 4 時間）。
-3. 反映を確かめる。手元でも VPS でもよい。
+1. ドメインの DNS を管理しているサービス（レジストラ、DNS ホスティング）の画面で、次のレコードを足す。ホスト名の書き方（`*.dev` とだけ書くか、`*.dev.example.com` と書くか）はサービスによって違う。
+
+   | 名前 | 種類 | 値 |
+   | --- | --- | --- |
+   | `*.dev.example.com` | A | サーバーの IPv4 |
+   | `console.dev.example.com` | A | サーバーの IPv4 |
+
+   - `console` の行はワイルドカードで足りるが、明示しておくとワイルドカードを消したときも管理 UI が残る。
+   - **ワイルドカードのレコードを登録できないサービスでは**、アプリを作るたびに `<slug>.dev.example.com` の A レコードを足す。`koroku check` はワイルドカードがないことを警告として表示する（失敗ではない）。
+   - CDN やプロキシを挟む機能（DNS サービスによっては既定で有効）は使わない。証明書は Caddy が取るので、DNS は IP をそのまま返す設定にする。
+   - TTL は、作り直しの多い最初のうちは短め（数分〜1 時間）にしておく。
+2. 反映を確かめる。
 
    ```sh
    dig +short console.dev.example.com
    dig +short anything.dev.example.com
    ```
 
-   どちらも VPS の IP だけが返れば済み。
-4. ドメインに CAA レコードがある場合は、`letsencrypt.org` を許可するものを足す（なければ何もしなくてよい）。
+   どちらもサーバーの IP だけが返れば済み。
+3. ドメインに CAA レコードがある場合は、`letsencrypt.org` を許可するものを足す（なければ何もしなくてよい）。
 
 ## 4. GitHub App
 
@@ -105,71 +118,66 @@ curl -s https://api.github.com/users/<自分の login> | grep '"id"'
 
 GitHub アカウントの 2 段階認証を有効にしておく。`koroku` は既定で、2 段階認証が無効なアカウントのログインを断る（ARCHITECTURE 10.3）。
 
-### 4.4 VPS に置く
+### 4.4 サーバーに置く
 
 ```sh
 # 手元
-scp ~/Downloads/<app 名>.*.private-key.pem ubuntu@203.0.113.10:github-app.pem
+scp ~/Downloads/<app 名>.*.private-key.pem <ユーザー>@203.0.113.10:github-app.pem
 
-# VPS 上
+# サーバー上
 sudo install -m 0600 -o root -g root github-app.pem /etc/koroku/github-app.pem
 rm github-app.pem
 ```
 
-ダウンロードした `.pem` は、パスワードマネージャに入れてから手元から消す。
+ダウンロードした `.pem` は、パスワードマネージャなどに入れてから手元から消す。
 
 **`config.toml`**: `[github]` の `app_id`、`client_id`、`client_secret`、`allowed_user_id`。`private_key_file` は既定の `/etc/koroku/github-app.pem` のまま。
 
-## 5. Cloudflare R2
+## 5. オブジェクトストレージ
 
 ログの退避（`logs/`）とバックアップ（`restic/`）を 1 つのバケットに置く（ARCHITECTURE 10.1、10.2）。
 
-### 5.1 バケット
+**満たすべき条件**
 
-1. Cloudflare のダッシュボードで **R2 Object Storage** を開く（初回は支払い方法の登録を求められる。無料枠を超えなければ請求はない）。
-2. **Create bucket**。名前は `koroku` など。Location は Automatic か、Location hint で Asia-Pacific。Storage class は Standard。
-   - Jurisdiction（EU など）は指定しない。指定すると endpoint が変わる。
-3. バケットの **Settings** → **Object lifecycle rules** → **Add rule**。
+| 項目 | 条件 |
+| --- | --- |
+| API | S3 互換 API（署名 V4）。`koroku` は事業者固有の API を使わない |
+| 接続方式 | パス形式（`https://<endpoint>/<bucket>/<key>`）を受け付けること。仮想ホスト形式（`https://<bucket>.<endpoint>/`）にしか対応しないサービスは使えない |
+| 通信 | `https` の endpoint |
+| バケット | 先に作っておく。`koroku` も restic もバケットを作らない |
+| アクセスキー | このバケットだけに限定し、オブジェクトの読み取り・書き込み・一覧・削除を許可する。バケットの作成や設定変更の権限は要らない |
+| ライフサイクルルール | プレフィックス `logs/` のオブジェクトを 90 日で削除できること（できなければ、退避したログが消えずに溜まり続ける） |
+| ダウンロード | 署名付き URL（presigned URL）での取得。過去ログのダウンロードに使う |
 
-   | 項目 | 値 |
-   | --- | --- |
-   | Rule name | `logs-90d` |
-   | Prefix | `logs/` |
-   | Action | Delete objects、90 days after upload |
+**手順**
 
-   **`restic/` を対象にするルールは作らない。** 期限で消されると restic のリポジトリが壊れ、どのバックアップも戻せなくなる。プレフィックスを空にしたルール（バケット全体）も同じ理由で作らない。既定で入っている「未完了のマルチパートアップロードを中止する」ルールは残してよい。
-
-### 5.2 API トークン
-
-1. R2 の概要ページの **Account Details** → **API Tokens** の **Manage** → **Create Account API token**（User API token でもよい）。
-2. 次のとおりに作る。
+1. バケットを作る。名前は `koroku` など。公開アクセスは無効のまま（ログもバックアップも非公開）。バージョニングは不要。
+2. ライフサイクルルールを 1 つ足す。
 
    | 項目 | 値 |
    | --- | --- |
-   | Token name | `koroku` |
-   | Permissions | **Object Read & Write** |
-   | Specify bucket(s) | **Apply to specific buckets only** → 5.1 のバケット |
-   | TTL | Forever |
+   | 対象 | プレフィックス `logs/` |
+   | 動作 | 作成から 90 日で削除 |
 
-3. 作成後の画面で **Access Key ID** と **Secret Access Key** を控える（Secret は一度しか表示されない）。同じ画面にある S3 の endpoint（`https://<アカウント ID>.r2.cloudflarestorage.com`）も控える。
+   **`restic/` を対象にするルールは作らない。** 期限で消されると restic のリポジトリが壊れ、どのバックアップも戻せなくなる。プレフィックスを空にしたルール（バケット全体）も同じ理由で作らない。「未完了のマルチパートアップロードを中止する」ルールはあってよい。
+3. このバケットに限定したアクセスキー（API トークン）を作り、**Access Key ID** と **Secret Access Key** を控える。Secret は作成時にしか表示されないことが多い。
+4. 事業者の S3 互換 API の **endpoint**（`https://...`）と **region** を控える。region の概念がないサービスでは `auto` にする。
 
-Admin 権限は要らない。`koroku` も restic もバケットを作らず、ライフサイクルルールにも触れないため。
+**`config.toml`**: `[storage]` の `endpoint`、`region`、`bucket`、`access_key_id`、`secret_access_key`。
 
-**`config.toml`**: `[storage]` の `endpoint`、`bucket`、`access_key_id`、`secret_access_key`。`region` は `auto`。
+## 6. restic のパスワードと、サーバーの外に控えるもの
 
-## 6. restic のパスワードと、VPS の外に控えるもの
-
-VPS 上でパスワードを作り、そのまま鍵ファイルにする。
+サーバー上でパスワードを作り、そのまま鍵ファイルにする。
 
 ```sh
 sudo sh -c 'umask 077; openssl rand -base64 32 > /etc/koroku/restic.key'
-sudo cat /etc/koroku/restic.key    # パスワードマネージャに控える
+sudo cat /etc/koroku/restic.key    # パスワードマネージャなどに控える
 ```
 
-次をパスワードマネージャなど、VPS の外に控える。ホストを失ったときの復旧（OPERATIONS 11 章）に要る。
+次を、パスワードマネージャなどサーバーの外に控える。ホストを失ったときの復旧（OPERATIONS 11 章）に要る。
 
 - restic のパスワード（`/etc/koroku/restic.key` の中身）
-- R2 の endpoint、バケット名、Access Key ID、Secret Access Key
+- オブジェクトストレージの endpoint、region、バケット名、Access Key ID、Secret Access Key
 - GitHub App の client secret と秘密鍵（なくしても GitHub で作り直せる）
 - `master.key`: `koroku` の初回起動で `/etc/koroku/master.key` に作られる。最初のバックアップが成功するまでは、`sudo base64 /etc/koroku/master.key` の出力も控えておく（そのあとは基盤のバックアップに入る）
 
@@ -178,7 +186,7 @@ sudo cat /etc/koroku/restic.key    # パスワードマネージャに控える
 `provision.sh` が `/etc/koroku/config.toml` を例から作ってある（0600）。`sudo -e /etc/koroku/config.toml` で次を書き換える。キーの一覧と既定値は、導入したバイナリと同じコミットの `deploy/config.example.toml` が正（OPERATIONS 5 章）。
 
 ```toml
-base_domain = "dev.example.com"
+base_domain = "dev.example.com"     # 3 節
 public_ip = "203.0.113.10"          # 2 節
 
 [caddy]
@@ -193,7 +201,7 @@ client_secret = "..."
 allowed_user_id = 1234567
 
 [storage]                           # 5 節
-endpoint = "https://<アカウント ID>.r2.cloudflarestorage.com"
+endpoint = "https://s3.example.com"
 region = "auto"
 bucket = "koroku"
 access_key_id = "..."
@@ -220,7 +228,7 @@ sudo koroku check
 | 名前 | 確かめること |
 | --- | --- |
 | `config` | 例の値（`example.com`、`203.0.113.x`）が残っていない |
-| `public_ip` | ホストのアドレスに含まれる |
+| `public_ip` | ホストのアドレスに含まれる（NAT の下では警告になる） |
 | `dns.console`、`dns.apps` | 管理 UI のホスト名と、未登録の `<乱数>.<base_domain>`（ワイルドカード）が `public_ip` だけに解決される |
 | `caddy` | Caddy の admin API が応答する |
 | `https` | 管理 UI に HTTPS で接続でき、証明書が信頼できる（staging の間は警告） |
@@ -231,10 +239,12 @@ sudo koroku check
 | `storage` | バケットに書き、読み、一覧し、消せる（`koroku-check/` に小さなファイルを書いてすぐ消す） |
 | `backup` | restic のリポジトリを読める（パスワードが合う）。基盤のスナップショットがあり、新しい |
 
+ライフサイクルルールと署名付き URL は、`koroku check` では確かめない（ルールの読み取りには、アクセスキーに要らない権限が要るため）。5 節のとおりに設定したことを、事業者の画面で確かめる。
+
 すべて `[ ok ]` か、意図した `[warn]` だけになったら:
 
 1. ブラウザーで `https://console.dev.example.com` を開き、GitHub でログインする（staging の証明書なので警告が出る。9 節で消える）。
-2. **システム** 画面で **バックアップ** の **今すぐ実行** を押し、成功したら `koroku check` をもう一度実行する。`backup` が `[ ok ]` になれば、restic のリポジトリが R2 にできている。
+2. **システム** 画面で **バックアップ** の **今すぐ実行** を押し、成功したら `koroku check` をもう一度実行する。`backup` が `[ ok ]` になれば、restic のリポジトリがバケットにできている。
 
 ## 9. 証明書を本番に切り替える
 
@@ -243,12 +253,3 @@ staging のままで、DNS、ログイン、デプロイ、バックアップま
 1. `sudo -e /etc/koroku/config.toml` で `[caddy]` の `acme_ca` の行を消す。
 2. `sudo systemctl restart koroku`。`koroku` が Caddy の設定を入れ直し、Caddy が本番の証明書を取り直す（数十秒）。
 3. `sudo koroku check` の `https` が `[ ok ]` になることを確かめる。ならなければ `journalctl -u caddy -n 100 --no-pager` を見る。
-
-## 未確認の点
-
-最初の本番構築で確かめ、結果をこの文書に反映する。
-
-- [ ] さくらの VPS のパケットフィルターが、新規サーバーで既定で有効か、どのポートを通すか。
-- [ ] Squarespace Domains が Host `*.dev` の A レコードを受け付けるか。受け付けない場合の運用（アプリごとの登録）で困らないか。
-- [ ] Ubuntu 24.04 の標準イメージの管理ユーザー名と、SSH のパスワードログインの初期状態。
-- [ ] R2 の「Object Read & Write」（バケット限定）のトークンで、restic の `init`、`backup`、`forget --prune`、`check` と、ログの退避・presigned URL のダウンロードがすべて通るか。

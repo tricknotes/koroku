@@ -70,9 +70,10 @@ access_log_dir = "/var/log/caddy/apps"
 
 [storage]
 # S3-compatible object storage for log archives (logs/) and restic backups
-# (restic/). With Cloudflare R2: endpoint https://<account-id>.r2.cloudflarestorage.com
-# and region "auto". Use a token limited to this bucket, and add a lifecycle
-# rule that deletes objects under logs/ after 90 days (never under restic/).
+# (restic/), reached with path-style URLs (https://<endpoint>/<bucket>/<key>).
+# Use the S3 endpoint and region of the provider ("auto" where the provider
+# has no regions), a key limited to this bucket, and a lifecycle rule that
+# deletes objects under logs/ after 90 days (never under restic/).
 # Without this section logs stay local only and backups are disabled.
 # endpoint = "https://s3.example.com"
 # region = "auto"
