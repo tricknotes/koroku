@@ -40,6 +40,14 @@ import { deploymentLog } from './deploy-log.mjs';
 import { copyHistory, copyLog, newCopy, settleCopies } from './db-copy.mjs';
 import { LOG_SCENARIOS, registerLogRoutes } from './logs.mjs';
 import { memoryHistory } from './memory.mjs';
+import {
+  TASK_SCENARIOS,
+  cancelTaskRun,
+  settleTaskRuns,
+  startTaskRun,
+  taskRunLog,
+  tasksState,
+} from './tasks.mjs';
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.MOCK_PORT ?? 4300);
@@ -440,6 +448,113 @@ route('GET', '/api/deployments/:id/logs', ({ state, params, query }) => {
     // What the deployment writes from here on, until it is over.
     next: log.next && (() => (settle(state), log.next())),
   };
+});
+
+// One-off commands and registered tasks (ARCHITECTURE 9.5).
+
+function tasksOf(context) {
+  const taskState = tasksState(context.state, context.scenario);
+  settleTaskRuns(taskState);
+  return taskState;
+}
+
+function findTaskRun(context) {
+  for (const list of tasksOf(context).runs.values()) {
+    const found = list.find((run) => run.id === Number(context.params.id));
+    if (found) return found;
+  }
+  throw notFound('task_run_not_found');
+}
+
+/** A run without the mock's own bookkeeping, as the API returns it. */
+function publicRun(run) {
+  const rest = { ...run };
+  delete rest.mock;
+  return rest;
+}
+
+const SERVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+route('GET', '/api/apps/:slug/tasks', (context) => ({
+  tasks: tasksOf(context).tasks.get(appOf(context).slug),
+}));
+route('PUT', '/api/apps/:slug/tasks', (context) => {
+  const app = appOf(context);
+  const list = Array.isArray(context.body.tasks) ? context.body.tasks : null;
+  const errors = {};
+  if (!list) errors.tasks = 'is required';
+  const seen = new Set();
+  const tasks = (list ?? []).map((task, index) => {
+    const name = String(task.name ?? '').trim();
+    const service = String(task.service ?? '').trim();
+    const command = String(task.command ?? '').trim();
+    if (!name) errors[`tasks[${index}].name`] = 'is required';
+    else if (seen.has(name))
+      errors[`tasks[${index}].name`] = 'is used by another task';
+    seen.add(name);
+    if (!SERVICE_NAME.test(service))
+      errors[`tasks[${index}].service`] = 'is not a valid service name';
+    if (!command) errors[`tasks[${index}].command`] = 'is required';
+    return { name, service, command };
+  });
+  if (tasks.length > 20) errors.tasks = 'at most 20 tasks can be registered';
+  if (Object.keys(errors).length > 0) {
+    throw new HttpError(422, 'validation_failed', errors);
+  }
+  tasksOf(context).tasks.set(app.slug, tasks);
+  return { tasks };
+});
+route('GET', '/api/apps/:slug/task-runs', (context) => ({
+  runs: tasksOf(context).runs.get(appOf(context).slug).map(publicRun),
+}));
+route('POST', '/api/apps/:slug/task-runs', (context) => {
+  const app = appOf(context);
+  const taskState = tasksOf(context);
+  const { task, service, command } = context.body;
+  let spec;
+  if (task !== undefined) {
+    const found = taskState.tasks.get(app.slug).find((t) => t.name === task);
+    if (!found) throw notFound('task_not_found');
+    spec = found;
+  } else {
+    const errors = {};
+    if (!SERVICE_NAME.test(String(service ?? '')))
+      errors.service = 'is not a valid service name';
+    if (!String(command ?? '').trim()) errors.command = 'is required';
+    if (Object.keys(errors).length > 0) {
+      throw new HttpError(422, 'validation_failed', errors);
+    }
+    spec = { name: '', service, command: String(command).trim() };
+  }
+  if (!app.current_deployment) throw new HttpError(409, 'not_deployed');
+  const deploying = ['queued', 'running'].includes(
+    app.latest_deployment?.status,
+  );
+  const running = taskState.runs
+    .get(app.slug)
+    .some((run) => run.status === 'running');
+  if (deploying || running) throw new HttpError(409, 'busy');
+  return {
+    status: 202,
+    json: publicRun(startTaskRun(taskState, app, spec)),
+  };
+});
+route('GET', '/api/task-runs/:id', (context) =>
+  publicRun(findTaskRun(context)),
+);
+route('POST', '/api/task-runs/:id/cancel', (context) => {
+  const run = findTaskRun(context);
+  if (run.status !== 'running') throw new HttpError(409, 'not_cancelable');
+  cancelTaskRun(run);
+  return { status: 202, json: publicRun(run) };
+});
+route('GET', '/api/task-runs/:id/logs', (context) => {
+  const run = findTaskRun(context);
+  const log = taskRunLog(run, () => tasksOf(context));
+  if (context.query.get('format') === 'text') {
+    return { text: log.lines.join('\n') + '\n' };
+  }
+  return { sse: log.lines, end: log.end, next: log.next };
 });
 
 route('GET', '/api/apps/:slug/domains', (context) => ({
@@ -878,6 +993,9 @@ const NEEDS_RECENT_LOGIN = [
   ['POST', /^\/api\/apps\/[^/]+\/backups\/restore$/],
   ['GET', /^\/api\/apps\/[^/]+\/backups\/[^/]+\/download$/],
   ['POST', /^\/api\/apps\/[^/]+\/db-copies$/],
+  // The production apps of the scenarios (blog, shop).
+  ['PUT', /^\/api\/apps\/(blog|shop)\/tasks$/],
+  ['POST', /^\/api\/apps\/(blog|shop)\/task-runs$/],
 ];
 
 async function handleApi(request, response, url, scenario) {
@@ -978,7 +1096,7 @@ function handleMock(response, url) {
     return response.end('mock file\n');
   }
   return sendJson(response, 200, {
-    scenarios: { ...SCENARIOS, ...LOG_SCENARIOS },
+    scenarios: { ...SCENARIOS, ...LOG_SCENARIOS, ...TASK_SCENARIOS },
     usage: '/?scenario=<name>&theme=<system|light|dark>',
   });
 }
@@ -1054,6 +1172,6 @@ server.listen(PORT, HOST, () => {
     `mock koroku: http://${HOST}:${PORT}/  (scenario: ${DEFAULT_SCENARIO})`,
   );
   console.log(
-    `scenarios: ${Object.keys({ ...SCENARIOS, ...LOG_SCENARIOS }).join(', ')}`,
+    `scenarios: ${Object.keys({ ...SCENARIOS, ...LOG_SCENARIOS, ...TASK_SCENARIOS }).join(', ')}`,
   );
 });

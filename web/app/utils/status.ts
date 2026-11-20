@@ -5,6 +5,7 @@ import type {
   DeploymentStatus,
   Domain,
   Environment,
+  TaskRunStatus,
 } from './types';
 
 export type AppState =
@@ -89,6 +90,20 @@ export const DEPLOYMENT_STATUS_LABELS: Record<DeploymentStatus, string> = {
 
 export const DEPLOYMENT_STATUS_KINDS: Record<DeploymentStatus, StatusKind> = {
   queued: 'deploying',
+  running: 'deploying',
+  succeeded: 'running',
+  failed: 'failed',
+  canceled: 'stopped',
+};
+
+export const TASK_RUN_STATUS_LABELS: Record<TaskRunStatus, string> = {
+  running: '実行中',
+  succeeded: '成功',
+  failed: '失敗',
+  canceled: 'キャンセル',
+};
+
+export const TASK_RUN_STATUS_KINDS: Record<TaskRunStatus, StatusKind> = {
   running: 'deploying',
   succeeded: 'running',
   failed: 'failed',
