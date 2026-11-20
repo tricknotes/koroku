@@ -1,0 +1,155 @@
+/* Backups tab of a staging app: copying another app's database into it. */
+
+.copy-start,
+.copy-settings {
+  padding: var(--space-4);
+}
+
+.copy-kind {
+  margin: 0;
+}
+
+/* What the copy is about to do, as a numbered list of short steps. */
+.copy-plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: copy-step;
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.copy-plan > li {
+  display: grid;
+  grid-template-columns: 1.5rem 6.5rem minmax(0, 1fr);
+  gap: var(--space-2);
+  counter-increment: copy-step;
+}
+
+.copy-plan > li::before {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  content: counter(copy-step) ".";
+}
+
+.copy-plan-title {
+  font-weight: var(--weight-medium);
+}
+
+.copy-plan-detail {
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+
+.copy-plan-command {
+  display: block;
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.subsection-title {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.copy-rows {
+  --row-columns: 7rem minmax(0, 1.2fr) 7.5rem 5.5rem 6.5rem 5.5rem 4.5rem;
+}
+
+.copy-rows .row {
+  min-height: 3.25rem;
+}
+
+.copy-rows .row.is-selected {
+  background: var(--color-bg-subtle);
+}
+
+.copy-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-size,
+.copy-duration {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.copy-action {
+  justify-self: end;
+}
+
+.copy-detail {
+  margin-top: var(--space-4);
+}
+
+.copy-detail-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+@media (width <= 56rem) {
+  .copy-rows > .row-list-header {
+    display: none;
+  }
+
+  .copy-rows .row {
+    grid-template:
+      "status source action" auto
+      "kind size action" auto
+      "time duration action" auto / auto minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .copy-status {
+    grid-area: status;
+  }
+
+  .copy-source {
+    grid-area: source;
+  }
+
+  .copy-kind-cell {
+    grid-area: kind;
+  }
+
+  .copy-size {
+    grid-area: size;
+  }
+
+  .copy-time {
+    grid-area: time;
+  }
+
+  .copy-duration {
+    grid-area: duration;
+  }
+
+  .copy-action {
+    grid-area: action;
+    align-self: start;
+  }
+
+  .copy-rows .cell-label {
+    margin-right: var(--space-2);
+  }
+
+  .copy-plan > li {
+    grid-template-columns: 1.5rem minmax(0, 1fr);
+  }
+
+  .copy-plan-detail {
+    grid-column: 2;
+  }
+}

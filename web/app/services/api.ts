@@ -14,6 +14,8 @@ import type {
   ComposeDetection,
   CreatedApiToken,
   ContainerResources,
+  CopySourceKind,
+  DbCopy,
   Deployment,
   DockerUsageItem,
   Domain,
@@ -528,6 +530,32 @@ export default class ApiService extends Service {
 
   snapshotDownloadUrl(slug: string, snapshotId: string): string {
     return `/api/apps/${seg(slug)}/backups/${seg(snapshotId)}/download`;
+  }
+
+  // Database copies
+
+  async listDbCopies(slug: string): Promise<DbCopy[]> {
+    const { copies } = await this.request<{ copies: DbCopy[] | null }>(
+      'GET',
+      `/api/apps/${seg(slug)}/db-copies`,
+    );
+    return copies ?? [];
+  }
+
+  /** Starts copying the source's database into the staging app `slug`. */
+  startDbCopy(
+    slug: string,
+    body: { source: string; source_kind: CopySourceKind; confirm: string },
+  ): Promise<DbCopy> {
+    return this.request('POST', `/api/apps/${seg(slug)}/db-copies`, { body });
+  }
+
+  getDbCopy(id: number): Promise<DbCopy> {
+    return this.request('GET', `/api/db-copies/${id}`);
+  }
+
+  dbCopyLogsUrl(id: number): string {
+    return `/api/db-copies/${id}/logs`;
   }
 }
 
