@@ -41,6 +41,18 @@ const KNOWN_FIELDS = new Set([
   'env',
 ]);
 
+/**
+ * The `owner/name` of a github.com repository URL, or '' for any other URL.
+ * Compose detection can read those without the App when they are public.
+ */
+export function githubFullName(url: string): string {
+  const match =
+    /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(
+      url.trim(),
+    );
+  return match ? `${match[1]}/${match[2]}` : '';
+}
+
 /** The service most likely to be the public one. */
 function guessWebService(services: ComposeService[]): ComposeService | null {
   return (
@@ -58,7 +70,7 @@ export default class NewAppTemplate extends Component {
 
   repos = new Loadable<Repo[]>(() => this.api.listRepos());
   compose = new Loadable<ComposeDetection>(() =>
-    this.api.detectCompose(this.repoFullName, {
+    this.api.detectCompose(this.detectRepo, {
       ref: this.detectedBranch,
       path: this.requestedComposePath,
     }),
@@ -66,7 +78,7 @@ export default class NewAppTemplate extends Component {
 
   /** Variables to prefill, read on the branch of `presetsBranch`. */
   presets = new Loadable<EnvPresets>(() =>
-    this.api.getEnvPresets(this.repoFullName, {
+    this.api.getEnvPresets(this.detectRepo, {
       ref: this.presetsBranch,
       path: this.requestedComposePath,
     }),
@@ -78,6 +90,8 @@ export default class NewAppTemplate extends Component {
 
   @tracked repoFullName = '';
   @tracked repoUrl = '';
+  /** The repository is given by URL although the App lists repositories. */
+  @tracked byUrl = false;
   @tracked defaultBranch = '';
   /** The branch the shown Compose detection was made on. */
   @tracked detectedBranch = '';
@@ -100,9 +114,26 @@ export default class NewAppTemplate extends Component {
     void this.repos.load();
   }
 
-  /** Without the GitHub App the repository is given as a clone URL. */
-  get manualRepo(): boolean {
+  /** No GitHub App on this server: repositories cannot be listed. */
+  get appMissing(): boolean {
     return this.repos.unavailable !== null;
+  }
+
+  /** The repository is given as a clone URL instead of picked from a list. */
+  get manualRepo(): boolean {
+    return this.appMissing || this.byUrl;
+  }
+
+  /** The `owner/name` Compose detection reads, or '' when it cannot. */
+  get detectRepo(): string {
+    return this.manualRepo ? githubFullName(this.repoUrl) : this.repoFullName;
+  }
+
+  /** A URL outside github.com: nothing can be read before deploying. */
+  get undetectableUrl(): boolean {
+    return (
+      this.manualRepo && this.repoUrl.trim() !== '' && this.detectRepo === ''
+    );
   }
 
   get repoChosen(): boolean {
@@ -125,7 +156,7 @@ export default class NewAppTemplate extends Component {
 
   /** No services could be read: service and port are typed by hand. */
   get manualService(): boolean {
-    return this.manualRepo || this.services.length === 0;
+    return this.services.length === 0;
   }
 
   get detectedPorts(): number[] {
@@ -152,8 +183,7 @@ export default class NewAppTemplate extends Component {
     this.defaultBranch = repo?.default_branch ?? '';
     this.suggestSlugFrom(this.repoFullName);
     this.requestedComposePath = '';
-    this.draft.reset();
-    this.presetResult = null;
+    this.resetPresets();
     if (repo) {
       void this.detect();
       void this.loadPresets();
@@ -165,6 +195,49 @@ export default class NewAppTemplate extends Component {
     this.suggestSlugFrom(this.repoUrl.trim());
   };
 
+  /** Detects once the URL field is left, for github.com URLs. */
+  changeRepoUrl = () => {
+    this.requestedComposePath = '';
+    this.compose.reset();
+    this.resetPresets();
+    if (this.detectRepo !== '') {
+      void this.detect();
+      void this.loadPresets();
+    }
+  };
+
+  /** Switches between the App's list and a typed URL. */
+  useUrl = () => {
+    this.byUrl = true;
+    this.repoFullName = '';
+    this.resetDetection();
+  };
+
+  useList = () => {
+    this.byUrl = false;
+    this.repoUrl = '';
+    this.resetDetection();
+  };
+
+  private resetDetection(): void {
+    this.defaultBranch = '';
+    this.detectedBranch = '';
+    this.requestedComposePath = '';
+    this.composePath = '';
+    this.webService = '';
+    this.webPort = '';
+    this.compose.reset();
+    this.resetPresets();
+  }
+
+  /** Another repository: its suggestions and the rows start afresh. */
+  private resetPresets(): void {
+    this.presets.reset();
+    this.presetsBranch = '';
+    this.presetResult = null;
+    this.draft.reset();
+  }
+
   /**
    * Detects again on the branch typed in, once the field is left (not on
    * every keystroke). Another branch can have other files, so the chosen
@@ -172,7 +245,7 @@ export default class NewAppTemplate extends Component {
    * touched stay as they are.
    */
   changeBranch = () => {
-    if (this.manualRepo || this.repoFullName === '') return;
+    if (this.detectRepo === '') return;
     if (this.defaultBranch.trim() === this.detectedBranch) return;
     this.requestedComposePath = '';
     void this.detect();
@@ -206,11 +279,11 @@ export default class NewAppTemplate extends Component {
   }
 
   private async detect(): Promise<void> {
-    const repo = this.repoFullName;
+    const repo = this.detectRepo;
     const branch = this.defaultBranch.trim();
     this.detectedBranch = branch;
     await this.compose.load();
-    if (repo !== this.repoFullName || branch !== this.detectedBranch) return;
+    if (repo !== this.detectRepo || branch !== this.detectedBranch) return;
 
     const detection = this.compose.value;
     this.composePath = detection?.path ?? '';
@@ -222,12 +295,12 @@ export default class NewAppTemplate extends Component {
 
   /**
    * The environment step: shown while reading the repository and when it
-   * could be read; without the GitHub App, or when the files cannot be
-   * read, there is nothing to suggest and the step stays out of the way.
+   * could be read. For a URL outside github.com, or when the files cannot
+   * be read, there is nothing to suggest and the step stays out of the way.
    */
   get showEnv(): boolean {
     return (
-      !this.manualRepo &&
+      this.detectRepo !== '' &&
       (this.presets.loading ||
         this.presetResult !== null ||
         this.draft.rows.length > 0)
@@ -235,11 +308,11 @@ export default class NewAppTemplate extends Component {
   }
 
   private async loadPresets(): Promise<void> {
-    const repo = this.repoFullName;
+    const repo = this.detectRepo;
     const branch = this.defaultBranch.trim();
     this.presetsBranch = branch;
     await this.presets.load();
-    if (repo !== this.repoFullName || branch !== this.presetsBranch) return;
+    if (repo !== this.detectRepo || branch !== this.presetsBranch) return;
     const result = this.presets.error ? null : this.presets.value;
     if (result?.status === 'ok') {
       this.presetResult = result;
@@ -299,7 +372,7 @@ export default class NewAppTemplate extends Component {
       body.healthcheck_path = this.healthcheckPath.trim();
     }
     const env = this.draft.vars;
-    if (!this.manualRepo && env.length > 0) body.env = env;
+    if (this.detectRepo !== '' && env.length > 0) body.env = env;
 
     this.submitting = true;
     try {
@@ -335,13 +408,16 @@ export default class NewAppTemplate extends Component {
         </div>
         <div class="form-group-body">
           {{#if this.manualRepo}}
-            <Banner data-test-unavailable={{this.repos.unavailable}}>
-              GitHub
-              連携がこのサーバーに設定されていないため、リポジトリを一覧から選べません。公開リポジトリの
-              URL を直接指定します。
-            </Banner>
+            {{#if this.appMissing}}
+              <Banner data-test-unavailable={{this.repos.unavailable}}>
+                GitHub
+                連携がこのサーバーに設定されていないため、リポジトリを一覧から選べません。公開リポジトリの
+                URL を直接指定します。
+              </Banner>
+            {{/if}}
             <FormField
               @label="公開リポジトリの URL"
+              @hint="GitHub App をインストールしていない公開リポジトリ（OSS など）を指定します。private リポジトリは、App をそのアカウントか org にインストールして一覧から選びます。"
               @error={{this.errors.repo_url}}
               data-test-field-group="repo_url"
               as |field|
@@ -357,8 +433,18 @@ export default class NewAppTemplate extends Component {
                 aria-invalid={{field.invalid}}
                 data-test-field="repo_url"
                 {{on "input" this.setRepoUrl}}
+                {{on "change" this.changeRepoUrl}}
               />
             </FormField>
+            {{#unless this.appMissing}}
+              <p class="new-app-repo-switch">
+                <Button
+                  @size="small"
+                  data-test-repo-use-list
+                  {{on "click" this.useList}}
+                >インストール済みの一覧から選ぶ</Button>
+              </p>
+            {{/unless}}
           {{else if this.repos.error}}
             <Banner
               @tone="error"
@@ -375,7 +461,7 @@ export default class NewAppTemplate extends Component {
           {{else if this.repos.loaded}}
             <FormField
               @label="リポジトリ"
-              @hint="GitHub App をインストールしたリポジトリが並びます。"
+              @hint="GitHub App をインストールしたリポジトリが並びます。別の org のリポジトリは、その org に App をインストールすると並びます。"
               @error={{this.errors.repo_full_name}}
               data-test-field-group="repo_full_name"
               as |field|
@@ -398,6 +484,13 @@ export default class NewAppTemplate extends Component {
                 {{/each}}
               </select>
             </FormField>
+            <p class="new-app-repo-switch">
+              <Button
+                @size="small"
+                data-test-repo-use-url
+                {{on "click" this.useUrl}}
+              >一覧にない公開リポジトリを URL で指定</Button>
+            </p>
           {{else}}
             <p class="new-app-progress" aria-live="polite" data-test-loading>
               <Icon @name="spinner" />
@@ -443,7 +536,12 @@ export default class NewAppTemplate extends Component {
           </div>
           <div class="form-group-body">
             <div aria-live="polite">
-              {{#if this.compose.loading}}
+              {{#if this.undetectableUrl}}
+                <Banner data-test-compose-manual>
+                  GitHub 以外の URL では Compose
+                  ファイルを検出できません。公開するサービスとポートを入力してください。
+                </Banner>
+              {{else if this.compose.loading}}
                 <p class="new-app-progress" data-test-compose-loading>
                   <Icon @name="spinner" />
                   Compose ファイルを検出中…

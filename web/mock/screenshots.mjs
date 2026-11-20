@@ -1359,6 +1359,39 @@ SHOTS.push(
     themes: ['light'],
   },
   {
+    name: 'new-app-url',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      document.querySelector('[data-test-repo-use-url]').click();
+      setTimeout(() => {
+        const url = document.querySelector('[data-test-field="repo_url"]');
+        url.value = 'https://github.com/octo/oss-tool';
+        url.dispatchEvent(new Event('input', { bubbles: true }));
+        url.dispatchEvent(new Event('change', { bubbles: true }));
+      }, 300);
+    })()`,
+    then: '[data-test-compose-path]',
+    fullPage: true,
+  },
+  {
+    name: 'new-app-url-phone',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      document.querySelector('[data-test-repo-use-url]').click();
+      setTimeout(() => {
+        const url = document.querySelector('[data-test-field="repo_url"]');
+        url.value = 'https://github.com/octo/oss-tool';
+        url.dispatchEvent(new Event('input', { bubbles: true }));
+        url.dispatchEvent(new Event('change', { bubbles: true }));
+      }, 300);
+    })()`,
+    then: '[data-test-compose-path]',
+    ...PHONE,
+    themes: ['light'],
+  },
+  {
     name: 'new-app-invalid',
     path: '/apps/new?scenario=healthy',
     wait: REPOSITORY,

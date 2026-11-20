@@ -305,8 +305,13 @@ func checkMasterKey(cfg config.Config) Result {
 	return ok(name, "%s exists (mode 0600)", cfg.MasterKeyFile)
 }
 
-// wantedPermissions are the permissions of the App (ARCHITECTURE 9).
+// wantedPermissions are the permissions the App needs (ARCHITECTURE 5).
 var wantedPermissions = map[string]string{"contents": "read", "metadata": "read"}
+
+// optionalPermissions are permissions the App may have; without them a
+// feature is off. deployments: write lets koroku record its deployments on
+// GitHub (ARCHITECTURE 5.1).
+var optionalPermissions = map[string]string{"deployments": "write"}
 
 func checkGitHub(ctx context.Context, d Deps) []Result {
 	cfg := d.Config.GitHub
@@ -354,7 +359,11 @@ func permissionResult(app github.App, consoleURL string) Result {
 		}
 	}
 	for perm, level := range app.Permissions {
-		if _, wanted := wantedPermissions[perm]; !wanted {
+		_, wanted := wantedPermissions[perm]
+		if optional, ok := optionalPermissions[perm]; ok && level == optional {
+			continue
+		}
+		if !wanted {
 			extra = append(extra, perm+": "+level)
 		}
 	}
@@ -366,10 +375,14 @@ func permissionResult(app github.App, consoleURL string) Result {
 			"App %q lacks %s", app.Slug, strings.Join(missing, ", "))
 	}
 	if len(extra) > 0 {
-		return warn(name, "koroku needs Contents and Metadata only; remove the rest (docs/SETUP.md 4)",
+		return warn(name, "koroku needs Contents and Metadata read-only and Deployments read and write only; remove the rest (docs/SETUP.md 4)",
 			"App %q also has %s", app.Slug, strings.Join(extra, ", "))
 	}
-	return ok(name, "App %q (ID %d), Contents and Metadata read-only; %s", app.Slug, app.ID, callback)
+	if app.Permissions["deployments"] != optionalPermissions["deployments"] {
+		return warn(name, "set Repository permissions > Deployments to Read and write, then accept the new permission on the installation (docs/SETUP.md 4)",
+			"App %q lacks deployments: write; GitHub deployments will not be updated", app.Slug)
+	}
+	return ok(name, "App %q (ID %d), Contents and Metadata read-only, Deployments read and write; %s", app.Slug, app.ID, callback)
 }
 
 func installationResult(ctx context.Context, gh GitHubApp, app github.App) Result {
@@ -385,11 +398,19 @@ func installationResult(ctx context.Context, gh GitHubApp, app github.App) Resul
 		}
 		return warn(name, hint, "the App is not installed anywhere: private repositories cannot be listed or fetched")
 	}
-	accounts := make([]string, 0, len(list))
+	var used, ignored []string
 	for _, in := range list {
-		accounts = append(accounts, fmt.Sprintf("%s (%s repositories)", in.Account, in.RepositorySelection))
+		if in.Allowed {
+			used = append(used, fmt.Sprintf("%s (%s repositories)", in.Account, in.RepositorySelection))
+		} else {
+			ignored = append(ignored, in.Account)
+		}
 	}
-	return ok(name, "installed on %s", strings.Join(accounts, ", "))
+	if len(ignored) > 0 {
+		return warn(name, "add an account you manage to [github] installation_accounts; uninstall the App from accounts you do not know (docs/SETUP.md 4)",
+			"installed on %s, which koroku ignores; used: %s", strings.Join(ignored, ", "), strings.Join(used, ", "))
+	}
+	return ok(name, "installed on %s", strings.Join(used, ", "))
 }
 
 func userResult(ctx context.Context, users GitHubUsers, id int64) Result {

@@ -93,6 +93,8 @@ type Server struct {
 	envReqs  *envreq.Reader
 	// envPresets reads repositories for the create screen (ARCHITECTURE 9.8).
 	envPresets *envpresets.Reader
+	// publicFiles reads public repositories anonymously (Options.PublicFiles).
+	publicFiles envreq.Files
 
 	routeStatus func() RouteStatus
 
@@ -119,28 +121,29 @@ func New(opts Options) *Server {
 		presetFiles = opts.Auth.GitHub
 	}
 	return &Server{
-		envReqs:    envreq.NewReader(files, opts.PublicFiles),
-		envPresets: envpresets.NewReader(presetFiles, opts.PublicFiles),
-		cfg:        opts.Config,
-		store:      opts.Store,
-		system:     opts.System,
-		web:        opts.Web,
-		log:        logger,
-		version:    opts.Version,
-		clock:      clk,
-		box:        opts.Box,
-		deployer:   opts.Deployer,
-		promoter:   opts.Promoter,
-		refs:       opts.Refs,
-		router:     opts.Router,
-		domains:    opts.Domains,
-		auth:       opts.Auth,
-		ops:        opts.Ops,
-		tasks:      opts.Tasks,
-		logs:       opts.Logs,
-		backups:    opts.Backups,
-		volumes:    opts.Volumes,
-		copier:     opts.Copier,
+		envReqs:     envreq.NewReader(files, opts.PublicFiles),
+		publicFiles: opts.PublicFiles,
+		envPresets:  envpresets.NewReader(presetFiles, opts.PublicFiles),
+		cfg:         opts.Config,
+		store:       opts.Store,
+		system:      opts.System,
+		web:         opts.Web,
+		log:         logger,
+		version:     opts.Version,
+		clock:       clk,
+		box:         opts.Box,
+		deployer:    opts.Deployer,
+		promoter:    opts.Promoter,
+		refs:        opts.Refs,
+		router:      opts.Router,
+		domains:     opts.Domains,
+		auth:        opts.Auth,
+		ops:         opts.Ops,
+		tasks:       opts.Tasks,
+		logs:        opts.Logs,
+		backups:     opts.Backups,
+		volumes:     opts.Volumes,
+		copier:      opts.Copier,
 
 		routeStatus: opts.RouteStatus,
 

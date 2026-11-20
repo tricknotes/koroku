@@ -78,7 +78,7 @@
 
 ## 4. GitHub App
 
-ログインと private リポジトリの取得に使う（ARCHITECTURE 5 章）。
+ログイン、private リポジトリの取得、デプロイの状態をリポジトリの Deployments に写すのに使う（ARCHITECTURE 5 章）。
 
 ### 4.1 登録
 
@@ -95,8 +95,11 @@
 | Webhook → Active | **オフ**（`koroku` は Webhook を受けない） |
 | Repository permissions → Contents | **Read-only** |
 | Repository permissions → Metadata | Read-only（自動で付く） |
+| Repository permissions → Deployments | **Read and write**（デプロイの状態をリポジトリの Deployments に出す。なくても動くが、反映されない） |
 | ほかの権限 | すべて No access |
-| Where can this GitHub App be installed? | **Only on this account** |
+| Where can this GitHub App be installed? | **Only on this account**（別の org のリポジトリも使うなら **Any account**。4.5） |
+
+あとから Deployments の権限を足した場合は、App の設定画面の **Permissions & events** で変えて保存したあと、インストール先（**Install App** → 自分のアカウントの歯車）に出る権限の変更の依頼を **Accept** する。受け入れるまで、GitHub は koroku からの記録を 403 で断る（koroku は警告を出してデプロイを続ける）。
 
 **Create GitHub App** を押したあと、App の設定画面で次を行う。
 
@@ -107,6 +110,8 @@
 ### 4.2 インストール
 
 App の設定画面の左の **Install App** → 自分のアカウントの **Install**。**Only select repositories** でデプロイしたいリポジトリだけを選ぶ（あとから足せる）。public リポジトリは選ばなくてもデプロイできるが、ブランチやコミットの一覧が速くなるので選んでおくとよい。
+
+App をインストールしていない public リポジトリ（OSS など）は、作成画面の「一覧にない公開リポジトリを URL で指定」から URL で指定できる。
 
 ### 4.3 ログインを許可するユーザー ID
 
@@ -133,6 +138,19 @@ rm github-app.pem
 
 **`config.toml`**: `[github]` の `app_id`、`client_id`、`client_secret`、`allowed_user_id`。`private_key_file` は既定の `/etc/koroku/github-app.pem` のまま。
 
+### 4.5 別の org のリポジトリを使う（任意）
+
+自分が管理する別の org の private リポジトリをデプロイするときだけ行う。
+
+1. App の設定画面の **Advanced** → **Make public**（「Where can this GitHub App be installed?」を **Any account** にする）。App のページを知っていれば誰でもインストールできるようになるが、koroku は下の 3 で許したアカウントのインストールしか使わない。
+2. App のページ（`https://github.com/apps/<app 名>`）の **Install** から、その org を選んでインストールする。**Only select repositories** でデプロイしたいリポジトリだけを選ぶ。
+3. `config.toml` の `[github]` に org の login を書き、`koroku` を再起動する。
+
+   ```toml
+   installation_accounts = ["my-org"]
+   ```
+
+4. `sudo koroku check` の `github.install` に org が出ることを確かめる。知らないアカウントにインストールされていれば警告が出るので、その場合は App の設定画面の **Install App** の一覧を確かめる。
 ## 5. オブジェクトストレージ
 
 ログの退避（`logs/`）とバックアップ（`restic/`）を 1 つのバケットに置く（ARCHITECTURE 10.1、10.2）。
@@ -233,7 +251,7 @@ sudo koroku check
 | `caddy` | Caddy の admin API が応答する |
 | `https` | 管理 UI に HTTPS で接続でき、証明書が信頼できる（staging の間は警告） |
 | `master_key` | `master.key` があり、0600 |
-| `github.app` | App ID と秘密鍵の組が正しく、Client ID が一致し、権限が Contents と Metadata の Read-only だけ |
+| `github.app` | App ID と秘密鍵の組が正しく、Client ID が一致し、権限が Contents と Metadata の Read-only と Deployments の Read and write だけ（Deployments がなければ警告） |
 | `github.install` | App が 1 つ以上のアカウントにインストールされている |
 | `github.user` | 許可するユーザー ID のアカウントが実在する |
 | `storage` | バケットに書き、読み、一覧し、消せる（`koroku-check/` に小さなファイルを書いてすぐ消す） |

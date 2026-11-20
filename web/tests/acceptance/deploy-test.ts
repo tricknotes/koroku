@@ -658,6 +658,50 @@ module('Acceptance | deploy', function (hooks) {
       assert.dom('[data-test-app-state]').hasText('失敗');
     });
 
+    test('a link with ?deployment= opens that deployment', async function (assert) {
+      deployments = [
+        makeDeployment({
+          id: 45,
+          status: 'failed',
+          error: 'web did not become healthy',
+          finished_at: '2026-11-18T03:01:05Z',
+        }),
+        makeDeployment({ id: 42 }),
+      ];
+      serveApp();
+
+      await visit('/apps/blog/deploy?deployment=42');
+
+      assert.strictEqual(
+        fakes.eventSource.last.url,
+        '/api/deployments/42/logs',
+      );
+      assert
+        .dom('[data-test-deployment="42"] [data-test-show-log]')
+        .hasAttribute('aria-expanded', 'true');
+      assert
+        .dom('[data-test-deployment="45"] [data-test-show-log]')
+        .hasAttribute('aria-expanded', 'false');
+    });
+
+    test('a link to a deployment that is not listed opens as usual', async function (assert) {
+      deployments = [
+        makeDeployment({
+          id: 45,
+          status: 'failed',
+          finished_at: '2026-11-18T03:01:05Z',
+        }),
+      ];
+      serveApp();
+
+      await visit('/apps/blog/deploy?deployment=7');
+
+      assert.strictEqual(
+        fakes.eventSource.last.url,
+        '/api/deployments/45/logs',
+      );
+    });
+
     test('a failed deployment opens by itself, at the step that failed', async function (assert) {
       const current = makeDeployment({ id: 42 });
       deployments = [

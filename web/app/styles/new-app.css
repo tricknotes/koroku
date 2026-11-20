@@ -161,3 +161,8 @@
     margin-top: var(--space-10);
   }
 }
+
+/* Switching between the App's list and a typed URL, under the field. */
+.new-app-repo-switch {
+  margin: calc(-1 * var(--space-2)) 0 var(--space-5);
+}

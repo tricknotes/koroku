@@ -227,7 +227,11 @@ func (c *Client) lookupInstallation(ctx context.Context, owner, repo string) (in
 		return 0, err
 	}
 	var resp struct {
-		ID int64 `json:"id"`
+		ID      int64 `json:"id"`
+		Account struct {
+			ID    int64  `json:"id"`
+			Login string `json:"login"`
+		} `json:"account"`
 	}
 	_, err = c.do(ctx, call{
 		method: http.MethodGet,
@@ -239,6 +243,11 @@ func (c *Client) lookupInstallation(ctx context.Context, owner, repo string) (in
 	}
 	if resp.ID <= 0 {
 		return 0, errors.New("response has no installation id")
+	}
+	if !c.accountAllowed(resp.Account.ID, resp.Account.Login) {
+		// As if the App were not installed: a public repository is then
+		// read anonymously, a private one is unavailable.
+		return 0, fmt.Errorf("%w: installed on account %s, which is not allowed", ErrNotFound, resp.Account.Login)
 	}
 	return resp.ID, nil
 }

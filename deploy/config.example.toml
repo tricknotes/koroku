@@ -53,9 +53,11 @@ access_log_dir = "/var/log/caddy/apps"
 # internal_ca = true
 
 [github]
-# The GitHub App used for login and for fetching repositories. Without this
-# section nobody can log in. Permissions: Contents (read-only) and Metadata
-# (read-only); callback URL: https://<console_host>/auth/github/callback.
+# The GitHub App used for login, for fetching repositories and for
+# recording deployments on GitHub. Without this section nobody can log in.
+# Permissions: Contents (read-only), Metadata (read-only) and Deployments
+# (read and write; without it deployments are not shown on GitHub);
+# callback URL: https://<console_host>/auth/github/callback.
 # app_id = 123456
 # client_id = "Iv1.xxxxxxxxxxxxxxxx"
 # client_secret = "..."
@@ -63,6 +65,11 @@ access_log_dir = "/var/log/caddy/apps"
 # Numeric ID of the only GitHub user allowed to log in
 # (see https://api.github.com/users/<login>).
 # allowed_user_id = 0
+# Other accounts (organizations you manage) whose installations of the App
+# koroku uses, by login. The App must be installable on any account for this;
+# installations on accounts not listed here (or the allowed user's own) are
+# ignored.
+# installation_accounts = ["my-org"]
 # Turn on two-factor authentication for that GitHub account: GitHub asks
 # for it when you sign in to the console. koroku cannot check it itself.
 

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -100,11 +101,24 @@ func newGitHubClient(cfg config.GitHub) (*github.Client, error) {
 		return nil, fmt.Errorf("github private key %s: %w", cfg.PrivateKeyFile, err)
 	}
 	return github.New(github.Config{
-		AppID:        cfg.AppID,
-		PrivateKey:   key,
-		ClientID:     cfg.ClientID,
-		ClientSecret: cfg.ClientSecret,
+		AppID:          cfg.AppID,
+		PrivateKey:     key,
+		ClientID:       cfg.ClientID,
+		ClientSecret:   cfg.ClientSecret,
+		AccountAllowed: installationAccountFilter(cfg),
 	})
+}
+
+// installationAccountFilter allows the installations on the operator's own
+// account and on the accounts listed in installation_accounts.
+func installationAccountFilter(cfg config.GitHub) func(int64, string) bool {
+	logins := make(map[string]bool, len(cfg.InstallationAccounts))
+	for _, login := range cfg.InstallationAccounts {
+		logins[strings.ToLower(strings.TrimSpace(login))] = true
+	}
+	return func(id int64, login string) bool {
+		return id == cfg.AllowedUserID || logins[strings.ToLower(login)]
+	}
 }
 
 // serve runs the HTTP server until ctx is canceled. When ready is non-nil it
@@ -306,6 +320,18 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		gitRefs.Tokens = tokens
 		apiOpts.Refs = deploy.GitHubRefResolver{Client: gh, Fallback: gitRefs}
 		apiOpts.Auth.GitHub = gh
+		// Mirror deployments into the repositories' GitHub deployments
+		// (ARCHITECTURE 5.1). Best effort, off the deploy path.
+		ghDeployments := deploy.NewGitHubDeployments(deploy.GitHubDeploymentsOptions{
+			Store:      st,
+			Client:     gh,
+			Clock:      clk,
+			Logger:     logger,
+			ConsoleURL: cfg.ConsoleURL,
+			BaseDomain: cfg.BaseDomain,
+		})
+		deployOpts.Status = ghDeployments
+		go ghDeployments.Run(ctx)
 		if cfg.GitHub.ObsoleteRequireTwoFactor != nil {
 			logger.Warn("github.require_two_factor is no longer used and can be removed from config.toml: " +
 				"GitHub does not report the two-factor status to a GitHub App, so GitHub enforces it at sign-in instead")
