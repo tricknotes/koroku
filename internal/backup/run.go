@@ -132,7 +132,7 @@ func (m *Manager) BackupApp(ctx context.Context, app App) (RunResult, error) {
 
 // BackupDump stores one snapshot of the app's dump hook output and waits
 // for it. It is taken before a database copy loads data into the app
-// (ARCHITECTURE 10.5) and is not recorded through the Recorder: the copy
+// (ARCHITECTURE 10.6) and is not recorded through the Recorder: the copy
 // keeps the snapshot ID. The error matches ErrBusy when another operation
 // holds the repository.
 func (m *Manager) BackupDump(ctx context.Context, app App) (snapshotID string, err error) {

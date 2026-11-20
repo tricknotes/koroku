@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Sources and statuses of a database copy (ARCHITECTURE 10.5).
+// Sources and statuses of a database copy (ARCHITECTURE 10.6).
 const (
 	CopySourceLive     = "live"
 	CopySourceSnapshot = "snapshot"

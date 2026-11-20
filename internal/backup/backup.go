@@ -59,7 +59,7 @@ const (
 	TriggerManual    Trigger = "manual"
 	TriggerPreDeploy Trigger = "pre_deploy"
 	// TriggerPreCopy is the dump of a staging app taken before a database
-	// copy replaces its data (ARCHITECTURE 10.5). It is not recorded as a
+	// copy replaces its data (ARCHITECTURE 10.6). It is not recorded as a
 	// run; the copy keeps the snapshot ID.
 	TriggerPreCopy Trigger = "pre_copy"
 )

@@ -1,4 +1,4 @@
--- Copying a production database into a staging app (ARCHITECTURE 10.5).
+-- Copying a production database into a staging app (ARCHITECTURE 10.6).
 
 -- Load hook: a command run inside a service that reads a dump from stdin.
 ALTER TABLE apps ADD COLUMN load_hook_service TEXT NOT NULL DEFAULT '';

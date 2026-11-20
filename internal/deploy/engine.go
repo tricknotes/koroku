@@ -77,7 +77,7 @@ type Options struct {
 	// PruneImages runs `docker image prune -f` after a successful deploy.
 	PruneImages bool
 	// CopyTimeout bounds a whole database copy; CopyMaxBytes bounds the
-	// dump it streams (ARCHITECTURE 10.5).
+	// dump it streams (ARCHITECTURE 10.6).
 	CopyTimeout  time.Duration
 	CopyMaxBytes int64
 }

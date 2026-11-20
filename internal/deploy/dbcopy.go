@@ -18,7 +18,7 @@ import (
 )
 
 // This file copies the database of one app into a staging app
-// (ARCHITECTURE 10.5): the source's dump hook (or its newest dump snapshot)
+// (ARCHITECTURE 10.6): the source's dump hook (or its newest dump snapshot)
 // is streamed into the target's load hook through a pipe, while the
 // target's other services are stopped.
 

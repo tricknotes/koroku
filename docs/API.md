@@ -429,7 +429,7 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
 
 ## DB のコピー（2026-11-21）
 
-本番アプリの DB を staging アプリへ流し込む（ARCHITECTURE 10.5）。パスの `{slug}` は受け側（staging）のアプリ。
+本番アプリの DB を staging アプリへ流し込む（ARCHITECTURE 10.6）。パスの `{slug}` は受け側（staging）のアプリ。
 
 アプリの形に次の設定が加わる（`PATCH /api/apps/{slug}` で変える。ダンプフックと同じく、サービスとコマンドは両方を指定するか両方を空にする。コマンドは 1 行 1000 文字まで）。
 

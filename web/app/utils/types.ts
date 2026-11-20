@@ -184,7 +184,7 @@ export interface App {
   backup_before_deploy?: boolean;
   /**
    * The load hook reads a dump from stdin; the post-load command runs after
-   * a copy (ARCHITECTURE 10.5). Absent from older backends.
+   * a copy (ARCHITECTURE 10.6). Absent from older backends.
    */
   load_hook_service?: string;
   load_hook_command?: string;
@@ -404,7 +404,7 @@ export interface BackupOverview {
 
 export type CopySourceKind = 'live' | 'snapshot';
 
-/** One copy of a database into a staging app (ARCHITECTURE 10.5). */
+/** One copy of a database into a staging app (ARCHITECTURE 10.6). */
 export interface DbCopy {
   id: number;
   target_app: string;

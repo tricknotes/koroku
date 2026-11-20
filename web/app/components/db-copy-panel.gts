@@ -88,7 +88,7 @@ interface Signature {
 
 /**
  * Copying another app's database into this staging app (ARCHITECTURE
- * 10.5): the source, a preview of the steps, the typed confirmation, the
+ * 10.6): the source, a preview of the steps, the typed confirmation, the
  * progress and history, and the load hook settings.
  */
 export default class DbCopyPanel extends Component<Signature> {

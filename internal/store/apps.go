@@ -57,7 +57,7 @@ type App struct {
 	DumpHookService      string
 	DumpHookCommand      string
 	BackupBeforeDeploy   bool
-	// Database copy settings (ARCHITECTURE 10.5): the load hook reads a
+	// Database copy settings (ARCHITECTURE 10.6): the load hook reads a
 	// dump from stdin; the post-load command runs after a copy.
 	LoadHookService string
 	LoadHookCommand string

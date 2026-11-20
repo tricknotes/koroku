@@ -12,7 +12,7 @@ import (
 	"github.com/tricknotes/koroku/internal/store"
 )
 
-// DBCopier copies a database into a staging app (ARCHITECTURE 10.5).
+// DBCopier copies a database into a staging app (ARCHITECTURE 10.6).
 type DBCopier interface {
 	StartCopy(ctx context.Context, req deploy.CopyRequest) (store.DBCopy, error)
 	CopyLogPath(slug string, id int64) string

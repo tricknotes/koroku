@@ -1,4 +1,4 @@
-// Copying a database into a staging app (ARCHITECTURE 10.5): the presets
+// Copying a database into a staging app (ARCHITECTURE 10.6): the presets
 // for the dump and load hooks, the settings form, the choice of the source
 // and the steps of a copy log.
 
