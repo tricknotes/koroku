@@ -53,9 +53,11 @@ access_log_dir = "/var/log/caddy/apps"
 # internal_ca = true
 
 [github]
-# The GitHub App used for login and for fetching repositories. Without this
-# section nobody can log in. Permissions: Contents (read-only) and Metadata
-# (read-only); callback URL: https://<console_host>/auth/github/callback.
+# The GitHub App used for login, for fetching repositories and for
+# recording deployments on GitHub. Without this section nobody can log in.
+# Permissions: Contents (read-only), Metadata (read-only) and Deployments
+# (read and write; without it deployments are not shown on GitHub);
+# callback URL: https://<console_host>/auth/github/callback.
 # app_id = 123456
 # client_id = "Iv1.xxxxxxxxxxxxxxxx"
 # client_secret = "..."

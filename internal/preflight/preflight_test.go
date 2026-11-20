@@ -122,7 +122,7 @@ func healthy(t *testing.T) Deps {
 		HTTP: client,
 		GitHub: fakeApp{
 			app: github.App{ID: 42, Slug: "koroku-test", ClientID: "Iv1.abc", HTMLURL: "https://github.com/apps/koroku-test",
-				Permissions: map[string]string{"contents": "read", "metadata": "read"}},
+				Permissions: map[string]string{"contents": "read", "metadata": "read", "deployments": "write"}},
 			installs: []github.Installation{{ID: 1, Account: "octocat", RepositorySelection: "all"}},
 		},
 		Users:   fakeUsers{7: "octocat"},
@@ -241,10 +241,34 @@ func TestProblems(t *testing.T) {
 		"write permission": {
 			change: func(d *Deps) {
 				a := d.GitHub.(fakeApp)
-				a.app.Permissions = map[string]string{"contents": "read", "metadata": "read", "issues": "write"}
+				a.app.Permissions = map[string]string{"contents": "read", "metadata": "read", "deployments": "write", "issues": "write"}
 				d.GitHub = a
 			},
 			check: "github.app", want: Warn, text: "issues: write",
+		},
+		"no deployments permission": {
+			change: func(d *Deps) {
+				a := d.GitHub.(fakeApp)
+				a.app.Permissions = map[string]string{"contents": "read", "metadata": "read"}
+				d.GitHub = a
+			},
+			check: "github.app", want: Warn, text: "GitHub deployments will not be updated",
+		},
+		"read-only deployments permission": {
+			change: func(d *Deps) {
+				a := d.GitHub.(fakeApp)
+				a.app.Permissions = map[string]string{"contents": "read", "metadata": "read", "deployments": "read"}
+				d.GitHub = a
+			},
+			check: "github.app", want: Warn, text: "deployments: read",
+		},
+		"missing contents with deployments": {
+			change: func(d *Deps) {
+				a := d.GitHub.(fakeApp)
+				a.app.Permissions = map[string]string{"metadata": "read", "deployments": "write"}
+				d.GitHub = a
+			},
+			check: "github.app", want: Fail, text: "contents: read",
 		},
 		"not installed": {
 			change: func(d *Deps) {

@@ -93,7 +93,7 @@ sudo ./deploy/provision.sh ./koroku
 | `public_ip` | VPS のグローバル IP。独自ドメインの DNS 検証で照合する |
 | `[caddy] acme_ca` | 構築中は staging のまま。本番の証明書に切り替えるときに行ごと消す |
 | `[caddy] acme_email` | ACME アカウントの連絡先（任意） |
-| `[github] app_id`、`client_id`、`client_secret` | GitHub App の値。権限は Contents と Metadata の Read-only、callback は `https://<console_host>/auth/github/callback` |
+| `[github] app_id`、`client_id`、`client_secret` | GitHub App の値。権限は Contents と Metadata の Read-only と Deployments の Read and write、callback は `https://<console_host>/auth/github/callback` |
 | `[github] private_key_file` | `/etc/koroku/github-app.pem` |
 | `[github] allowed_user_id` | ログインを許可する GitHub ユーザーの数値 ID（1 件） |
 | `[github] require_two_factor` | 使われない（古い版の設定）。書いてあれば起動時に警告が出るので、消してよい。2 段階認証は GitHub アカウント側で有効にする（ARCHITECTURE 10.3） |

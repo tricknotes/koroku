@@ -171,7 +171,7 @@ Claude Code は以下を代行しない。必要になった時点で依頼し�
 | 必要になる時点 | 用意するもの |
 | --- | --- |
 | M2 | VPS（Ubuntu 24.04 か 26.04、amd64、メモリ 4GB 程度）と、その IP に向けた DNS レコード（ワイルドカードが登録できなければ `console.<base_domain>` と各 `<slug>.<base_domain>` を個別に） |
-| M3 | GitHub App の登録（権限は Contents: Read-only と Metadata: Read-only、callback は `https://<console_host>/auth/github/callback`）、App ID、秘密鍵、許可するユーザー ID |
+| M3 | GitHub App の登録（権限は Contents: Read-only、Metadata: Read-only、Deployments: Read and write、callback は `https://<console_host>/auth/github/callback`）、App ID、秘密鍵、許可するユーザー ID |
 | M5 | オブジェクトストレージのバケット、バケット限定のアクセスキー、`logs/` プレフィックスに 90 日削除のライフサイクルルール。restic のリポジトリパスワード（VPS 外にも控える） |
 
 ## やらないこと
