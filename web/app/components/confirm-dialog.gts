@@ -19,6 +19,9 @@ interface ConfirmDialogSignature {
     busy?: boolean;
     onConfirm: () => unknown;
     onCancel: () => unknown;
+    /** An optional third choice between cancelling and confirming. */
+    altLabel?: string;
+    onAlt?: () => unknown;
   };
   Blocks: {
     default: [];
@@ -49,6 +52,10 @@ export default class ConfirmDialog extends Component<ConfirmDialogSignature> {
   submit = (event: Event) => {
     event.preventDefault();
     if (this.canConfirm) void this.args.onConfirm();
+  };
+
+  alt = () => {
+    if (!this.args.busy) void this.args.onAlt?.();
   };
 
   cancel = (event: Event) => {
@@ -96,6 +103,13 @@ export default class ConfirmDialog extends Component<ConfirmDialogSignature> {
               data-test-dialog-cancel
               {{on "click" this.cancel}}
             >キャンセル</Button>
+            {{#if @altLabel}}
+              <Button
+                @disabled={{@busy}}
+                data-test-dialog-alt
+                {{on "click" this.alt}}
+              >{{@altLabel}}</Button>
+            {{/if}}
             <Button
               @type="submit"
               @variant={{if @danger "danger" "primary"}}

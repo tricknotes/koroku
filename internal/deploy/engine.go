@@ -158,11 +158,12 @@ type Engine struct {
 	// finishTimeout bounds the database writes that record a result.
 	finishTimeout time.Duration
 
-	// queueing is held by Enqueue from inserting a deployment until its log
-	// file is prepared, and briefly by the worker before it opens a log. The
-	// worker can see the new row as soon as it is inserted (it also polls),
-	// and would otherwise write its first lines before the stale file is
-	// removed and the queued line is written, losing or misordering them.
+	// queueing is held by Enqueue and EnqueueRollback from inserting a
+	// deployment until its log file is prepared, and briefly by the worker
+	// before it opens a log. The worker can see the new row as soon as it
+	// is inserted (it also polls), and would otherwise write its first lines
+	// before the stale file is removed and the queued line is written,
+	// losing or misordering them.
 	queueing sync.Mutex
 	// afterInsert, when set by tests, runs between inserting a deployment
 	// and preparing its log.

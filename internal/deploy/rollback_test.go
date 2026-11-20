@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tricknotes/koroku/internal/store"
 )
@@ -149,5 +150,39 @@ func TestFailedRollbackRestoresTheRunningRelease(t *testing.T) {
 	app, _ := h.store.GetApp(context.Background(), "blog")
 	if *app.CurrentDeploymentID != second.ID {
 		t.Errorf("current = %d, want %d", *app.CurrentDeploymentID, second.ID)
+	}
+}
+
+// TestRollbackWorkerWaitsForTheQueuedLine is TestWorkerWaitsForTheQueuedLine
+// for EnqueueRollback.
+func TestRollbackWorkerWaitsForTheQueuedLine(t *testing.T) {
+	h := newHarness(t, nil)
+	h.createApp("blog")
+	h.start()
+	first := h.deploy("blog", shaA)
+	if first.Status != store.StatusSucceeded {
+		t.Fatalf("deploy: %s", first.Status)
+	}
+	// Wake the worker right after the insert and give it time to run.
+	h.engine.afterInsert = func() {
+		h.engine.notify()
+		time.Sleep(100 * time.Millisecond)
+	}
+	// The rollback gets the next ID in the database.
+	stale := h.engine.LogPath("blog", first.ID+1)
+	if err := os.WriteFile(stale, []byte("left over from an earlier database\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rb := h.rollback("blog", first.ID)
+	if rb.ID != first.ID+1 {
+		t.Fatalf("rollback ID = %d, want %d", rb.ID, first.ID+1)
+	}
+	got := h.log("blog", rb.ID)
+	if !strings.HasPrefix(got, "Queued rollback to deployment #1 ") || strings.Contains(got, "left over") {
+		t.Errorf("log:\n%s", got)
+	}
+	if !strings.Contains(got, "==> ") {
+		t.Errorf("the worker's lines are missing:\n%s", got)
 	}
 }
