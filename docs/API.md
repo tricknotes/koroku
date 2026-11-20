@@ -460,7 +460,7 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
 | --- | --- |
 | `GET /api/apps/{slug}/db-copies?limit=20` | そのアプリへのコピーの履歴。`{"copies": [コピー, ...]}`（新しい順、`limit` は 1〜100） |
 | `POST /api/apps/{slug}/db-copies` | ボディ `{"source": "blog", "source_kind": "live", "confirm": "blog-staging"}`。202 でコピー（バックグラウンドで進む）。`source_kind` は省略時 `live` |
-| `GET /api/db-copies/{id}` | コピー |
+| `GET /api/db-copies/{id}` | コピー。なければ `404 copy_not_found` |
 | `GET /api/db-copies/{id}/logs` | コピーのログの SSE。形はデプロイログと同じ（`id:` はバイト位置、終わると `event: end` で最終 `status`）。`?format=text` で全文 |
 
 `POST` の断り方:
@@ -471,6 +471,7 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
 | 404 | `app_not_found`、`source_not_found` | 受け側か送り側のアプリがない |
 | 409 | `busy` | 受け側か（`live` では）送り側がデプロイ中・操作中・コピー中 |
 | 409 | `not_deployed` | 受け側が一度もデプロイされていない |
+| 409 | `target_not_running` | 受け側が停止中 |
 | 409 | `source_not_running` | `live` で送り側が稼働中でない |
 | 409 | `no_dump_snapshot` | `snapshot` で送り側のダンプのスナップショットがない |
 | 422 | `target_not_staging` | 受け側が本番アプリ |
