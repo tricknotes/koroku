@@ -121,6 +121,16 @@ type Engine struct {
 
 	// finishTimeout bounds the database writes that record a result.
 	finishTimeout time.Duration
+
+	// queueing is held by Enqueue from inserting a deployment until its log
+	// file is prepared, and briefly by the worker before it opens a log. The
+	// worker can see the new row as soon as it is inserted (it also polls),
+	// and would otherwise write its first lines before the stale file is
+	// removed and the queued line is written, losing or misordering them.
+	queueing sync.Mutex
+	// afterInsert, when set by tests, runs between inserting a deployment
+	// and preparing its log.
+	afterInsert func()
 }
 
 // New builds an Engine. Call Run to start the worker.
@@ -240,9 +250,14 @@ func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message s
 	if err := e.CheckDisk(); err != nil {
 		return store.Deployment{}, err
 	}
+	e.queueing.Lock()
+	defer e.queueing.Unlock()
 	d, superseded, err := e.opts.Store.EnqueueDeployment(ctx, app.ID, ref, sha, message, e.opts.Clock.Now())
 	if err != nil {
 		return store.Deployment{}, err
+	}
+	if e.afterInsert != nil {
+		e.afterInsert()
 	}
 	for _, id := range superseded {
 		appendLogLine(e.LogPath(app.Slug, id), "Canceled: "+store.SupersededError+".")
@@ -375,6 +390,9 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 	logger = logger.With("app", app.Slug)
 
 	masker := secrets.NewMasker()
+	// Wait until Enqueue has prepared this deployment's log file.
+	e.queueing.Lock()
+	e.queueing.Unlock()
 	log, err := openDeployLog(e.LogPath(app.Slug, d.ID), masker, e.opts.Clock.Now)
 	if err != nil {
 		logger.Error("opening the deploy log failed", "error", err)
