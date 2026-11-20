@@ -111,7 +111,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 | App をインストールした、自分が管理する別の org のリポジトリ（private を含む） | 同上 | installation token |
 | App をインストールしていない public リポジトリ（OSS など） | 作成画面で URL を入れる（`repo_url`） | 認証なし |
 
-- 別の org に App をインストールするには、App の「Where can this GitHub App be installed?」を「Any account」にする。そうすると誰でも App を自分のアカウントにインストールできるので、koroku は使うインストール先を、許可ユーザー自身のアカウント（`allowed_user_id` と一致するアカウント ID）と、`[github] installation_accounts` に書いたアカウント（login、大文字小文字を区別しない）に限る。それ以外のインストール先のリポジトリは一覧に出さず、token も発行しない。そのリポジトリを指定しても App が入っていないものとして扱う（public なら認証なしで読む）。`koroku check` は、使わないインストール先があれば警告する。
+- 別の org に App をインストールするには、App の「Where can this GitHub App be installed?」を「Any account」にする。そうすると誰でも App を自分のアカウントにインストールできるので、koroku は使うインストール先を、許可ユーザー自身のアカウント（`allowed_user_id` と一致するアカウント ID）と、`[github] installation_accounts` に書いたアカウント（login、大文字小文字を区別しない）に限る。それ以外のインストール先のリポジトリは一覧に出さず、token も発行しない。そのリポジトリを指定しても App が入っていないものとして扱う（public なら認証なしで読む）。`koroku check` は、使わないインストール先があれば警告する。システム画面の「GitHub App」は、インストール先ごとに使うかどうかを示し、別の org を加える手順（App の設定画面とインストール画面へのリンク、`config.toml` に書く `installation_accounts` の行）を出す。作成画面のリポジトリ欄からも、そこへ移れる。
 - 作成画面の Compose ファイルの検出（`GET /api/repos/{owner}/{repo}/compose`）は、App で読めないリポジトリ（未インストール、または使わないインストール先）を認証なしで読み直す。github.com 以外の URL は読めないので、サービスとポートを手で入れる。
 
 | 用途 | 方式 |

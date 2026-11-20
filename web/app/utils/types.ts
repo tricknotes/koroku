@@ -65,6 +65,26 @@ export interface LoginEvent {
   user_agent: string;
 }
 
+/** `GET /api/system/github`: the GitHub App and where it is installed. */
+export interface GitHubAppStatus {
+  configured: boolean;
+  app: {
+    slug: string;
+    html_url: string;
+    /** Settings page; "Advanced" there makes it installable by any account. */
+    settings_url: string;
+    install_url: string;
+  } | null;
+  installations: {
+    account: string;
+    /** `all` or `selected`. */
+    repository_selection: string;
+    /** koroku lists and fetches this installation's repositories. */
+    used: boolean;
+  }[];
+  installation_accounts: string[];
+}
+
 export interface SystemInfo {
   version: string;
   base_domain: string;

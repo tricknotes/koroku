@@ -19,6 +19,7 @@ func TestApp(t *testing.T) {
 			"client_id":   testClientID,
 			"html_url":    "https://github.com/apps/koroku-test",
 			"permissions": map[string]string{"contents": "read", "metadata": "read"},
+			"owner":       map[string]string{"login": "octo", "type": "User"},
 		})
 	})
 	app, err := f.client().App(context.Background())
@@ -27,6 +28,9 @@ func TestApp(t *testing.T) {
 	}
 	if app.ID != testAppID || app.Slug != "koroku-test" || app.ClientID != testClientID {
 		t.Errorf("app = %+v", app)
+	}
+	if app.Owner != "octo" || app.OwnerIsOrg {
+		t.Errorf("owner = %q (org %v)", app.Owner, app.OwnerIsOrg)
 	}
 	if app.Permissions["contents"] != "read" || app.Permissions["metadata"] != "read" {
 		t.Errorf("permissions = %v", app.Permissions)
@@ -87,5 +91,22 @@ func TestUserByID(t *testing.T) {
 	}
 	if _, err := c.UserByID(context.Background(), 1); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing user: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestAppSettingsAndInstallURLs(t *testing.T) {
+	user := App{Slug: "koroku-octo", HTMLURL: "https://github.com/apps/koroku-octo", Owner: "octo"}
+	if got := user.SettingsURL(); got != "https://github.com/settings/apps/koroku-octo" {
+		t.Errorf("user settings = %q", got)
+	}
+	org := App{Slug: "koroku", HTMLURL: "https://github.com/apps/koroku", Owner: "acme", OwnerIsOrg: true}
+	if got := org.SettingsURL(); got != "https://github.com/organizations/acme/settings/apps/koroku" {
+		t.Errorf("org settings = %q", got)
+	}
+	if got := org.InstallURL(); got != "https://github.com/apps/koroku/installations/new" {
+		t.Errorf("install = %q", got)
+	}
+	if got := (App{Slug: "x", HTMLURL: "https://example.com/other"}).SettingsURL(); got != "" {
+		t.Errorf("unexpected html_url: settings = %q", got)
 	}
 }

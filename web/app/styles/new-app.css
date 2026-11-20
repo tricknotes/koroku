@@ -164,5 +164,13 @@
 
 /* Switching between the App's list and a typed URL, under the field. */
 .new-app-repo-switch {
+  display: flex;
   margin: calc(-1 * var(--space-2)) 0 var(--space-5);
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+}
+
+.new-app-repo-help {
+  font-size: var(--text-sm);
 }

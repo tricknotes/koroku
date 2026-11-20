@@ -148,7 +148,7 @@ rm github-app.pem
 
 ### 4.5 別の org のリポジトリを使う（任意）
 
-自分が管理する別の org の private リポジトリをデプロイするときだけ行う。
+自分が管理する別の org の private リポジトリをデプロイするときだけ行う。管理画面のシステム画面の「GitHub App」にも、同じ手順とリンク、`config.toml` に書く行が出る。
 
 1. App の設定画面の **Advanced** → **Make public**（「Where can this GitHub App be installed?」を **Any account** にする）。App のページを知っていれば誰でもインストールできるようになるが、koroku は下の 3 で許したアカウントのインストールしか使わない。
 2. App のページ（`https://github.com/apps/<app 名>`）の **Install** から、その org を選んでインストールする。**Only select repositories** でデプロイしたいリポジトリだけを選ぶ。

@@ -468,6 +468,83 @@ module('Acceptance | system', function (hooks) {
     });
   });
 
+  module('GitHub App', function () {
+    const app = {
+      slug: 'koroku-octo',
+      html_url: 'https://github.com/apps/koroku-octo',
+      settings_url: 'https://github.com/settings/apps/koroku-octo',
+      install_url: 'https://github.com/apps/koroku-octo/installations/new',
+    };
+
+    test('it lists the installations and how to add another org', async function (assert) {
+      fakes.api.on('GET', '/api/system/github', {
+        configured: true,
+        app,
+        installations: [
+          { account: 'octo', repository_selection: 'selected', used: true },
+          { account: 'my-org', repository_selection: 'all', used: false },
+        ],
+        installation_accounts: [],
+      });
+      await visit('/system');
+
+      assert.dom('[data-test-github-app-link]').hasText('koroku-octo');
+      assert
+        .dom('[data-test-github-installation="octo"]')
+        .includesText('使う')
+        .includesText('選んだリポジトリ');
+      assert
+        .dom('[data-test-github-installation="my-org"]')
+        .includesText('使わない');
+      assert
+        .dom('[data-test-github-settings]')
+        .hasAttribute(
+          'href',
+          'https://github.com/settings/apps/koroku-octo/advanced',
+        );
+      assert
+        .dom('[data-test-github-install]')
+        .hasAttribute('href', app.install_url);
+      assert
+        .dom('[data-test-github-config]')
+        .hasText(
+          'installation_accounts = ["my-org"]',
+          'an unused installation is suggested',
+        );
+    });
+
+    test('configured accounts are kept in the suggested line', async function (assert) {
+      fakes.api.on('GET', '/api/system/github', {
+        configured: true,
+        app,
+        installations: [],
+        installation_accounts: ['acme'],
+      });
+      await visit('/system');
+      assert.dom('[data-test-github-no-installation]').exists();
+      assert
+        .dom('[data-test-github-config]')
+        .hasText('installation_accounts = ["acme"]');
+    });
+
+    test('without an App it says so', async function (assert) {
+      fakes.api.on('GET', '/api/system/github', {
+        configured: false,
+        app: null,
+        installations: [],
+        installation_accounts: [],
+      });
+      await visit('/system');
+      assert.dom('[data-test-github-unconfigured]').exists();
+      assert.dom('[data-test-github-guide]').doesNotExist();
+    });
+
+    test('a server without the endpoint shows no panel', async function (assert) {
+      await visit('/system');
+      assert.dom('[data-test-github-app]').doesNotExist();
+    });
+  });
+
   module('background jobs', function () {
     test('backup, log archive and Caddy report last and next run', async function (assert) {
       await visit('/system');
