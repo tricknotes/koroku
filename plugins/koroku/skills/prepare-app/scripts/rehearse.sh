@@ -17,6 +17,9 @@
 #   --env-file <path>    env file with test values (default: empty)
 #   --host-port <port>   loopback port to publish on (default: 28080)
 #   --memory <limit>     memory limit for services without one (default: 512m)
+#   --task <svc>:<cmd>   after the check, run a one-off command the way
+#                        koroku's tasks do (run --rm --no-deps -T <svc>
+#                        sh -c <cmd>); repeatable; a non-zero exit fails
 #   --keep               leave the containers, volumes and work directory
 set -euo pipefail
 
@@ -28,6 +31,7 @@ env_src=""
 host_port="28080"
 memory="512m"
 keep=0
+tasks=()
 
 die() { echo "rehearse: $*" >&2; exit 2; }
 
@@ -40,6 +44,9 @@ while [ $# -gt 0 ]; do
     --env-file) env_src="${2:?}"; shift 2 ;;
     --host-port) host_port="${2:?}"; shift 2 ;;
     --memory) memory="${2:?}"; shift 2 ;;
+    --task)
+      case "${2:?}" in *:?*) ;; *) die "--task needs <service>:<command>" ;; esac
+      tasks+=("$2"); shift 2 ;;
     --keep) keep=1; shift ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option: $1" ;;
@@ -207,6 +214,18 @@ while :; do
     exit 1
   fi
   sleep 1
+done
+
+for task in ${tasks[@]+"${tasks[@]}"}; do
+  task_service="${task%%:*}"
+  task_command="${task#*:}"
+  echo "==> Running a task in $task_service: $task_command"
+  # No terminal and no input, like koroku's tasks.
+  if ! "${dc[@]}" run --rm --no-deps -T "$task_service" sh -c "$task_command" </dev/null; then
+    echo
+    echo "FAILED: the task in $task_service exited with a non-zero status" >&2
+    exit 1
+  fi
 done
 
 echo

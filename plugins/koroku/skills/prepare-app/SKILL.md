@@ -46,6 +46,8 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 <skill-dir>/scripts/rehearse.sh --service web --port 3000 --health /up --env-file /path/to/test.env
 ```
 
+登録しておくと便利なコマンドがあれば `--task web:'bin/rails db:migrate:status'` のように渡すと、koroku のタスクと同じ形（新しいコンテナ、端末と入力なし）で実行して確かめる。
+
 - リポジトリの追跡中と未追跡（ignore されていない）のファイルだけを一時ディレクトリにコピーし、`.git` なしで動かす。
 - koroku と同じ形の override（公開サービスのポートを `127.0.0.1` に置き換え、ほかのポートを消し、env ファイルを全サービスに注入し、メモリ上限 512m）を重ねて `config` → `build` / `pull` → `up --wait` → HTTP 確認（5xx 以外が返るまで最大 60 秒）を行う。
 - 最初に Compose ファイルが参照する変数（`docker compose config --variables`）を出す。koroku が照合に使うのと同じ一覧なので、アプリが必要とする変数が並んでいるか確かめる。
@@ -68,6 +70,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 | メモリ上限 | 512m を超えるサービスがあれば、その値と理由（アプリ設定で上げる） |
 | バックアップ | ダンプフック（サービス名とコマンド。例 `db` / `pg_dump -U postgres app`）と、ファイルのバックアップから外す volume（DB のデータ volume） |
 | 本番の DB を staging へコピーするとき | ロードフック（例 `db` / `pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"`）と、個人情報を消すコマンドがあればそのサービスとコマンド（`references/requirements.md` の「本番の DB を staging にコピーする」） |
+| タスク | 管理画面に登録しておくと便利なコマンド（名前、サービス、コマンド。例 `マイグレーションの状態` / `web` / `bin/rails db:migrate:status`）。対話的なコマンドは使えない |
 | 独自ドメインを使うときの準備 | ホスト名の許可リストなど、アプリ側で設定する環境変数 |
 
 あわせて、変えたファイルと理由、リハーサルの結果（実行したコマンドと出力の要点）、確かめられなかったことを書く。リハーサルしていないものを「動く」と書かない。
