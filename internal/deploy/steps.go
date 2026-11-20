@@ -53,7 +53,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, err
 	}
 	log.Printf("Compose file: %s", composeFile)
-	envContent, fingerprints, err := e.renderEnv(ctx, app, log.masker)
+	envContent, fingerprints, err := e.renderEnv(ctx, app, commit.SHA, log.masker)
 	if err != nil {
 		return false, err
 	}
@@ -227,9 +227,10 @@ func (e *Engine) repoAuth(ctx context.Context, app store.App, masker *secrets.Ma
 }
 
 // renderEnv decrypts the app's variables, registers their values for
-// masking and renders the env file. It also returns the fingerprint of
+// masking and renders the env file together with the variables koroku
+// provides (ProvidedEnv). It also returns the fingerprint of
 // each variable.
-func (e *Engine) renderEnv(ctx context.Context, app store.App, masker *secrets.Masker) (string, map[string]string, error) {
+func (e *Engine) renderEnv(ctx context.Context, app store.App, commitSHA string, masker *secrets.Masker) (string, map[string]string, error) {
 	rows, err := e.opts.Store.ListEnvVars(ctx, app.ID)
 	if err != nil {
 		return "", nil, err
@@ -245,6 +246,11 @@ func (e *Engine) renderEnv(ctx context.Context, app store.App, masker *secrets.M
 		vars[row.Key] = string(plain)
 		fingerprints[row.Key] = e.opts.Box.Fingerprint(ad, plain)
 		masker.Add(string(plain))
+	}
+	// The provided variables are not the app's: they are not fingerprinted
+	// (ARCHITECTURE 9.2) and not masked (a commit is not a secret).
+	for k, v := range ProvidedEnv(commitSHA) {
+		vars[k] = v
 	}
 	content, err := RenderEnvFile(vars)
 	if err != nil {

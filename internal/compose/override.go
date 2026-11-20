@@ -61,7 +61,8 @@ func (p OverrideParams) ReleaseImages() []string {
 //   - appends the app's env file;
 //   - sets restart: unless-stopped unless the repository chose a policy
 //     (one-shot services such as migrations declare restart: "no");
-//   - applies a memory limit (see memoryLimit);
+//   - applies a memory limit (see memoryLimit), raising memswap_limit with it
+//     when the repository's value would end up below the limit;
 //   - gives built services a per-release image name (see ReleaseImage).
 func Override(p OverrideParams) ([]byte, error) {
 	if _, ok := p.Project.Services[p.WebService]; !ok {
@@ -104,6 +105,15 @@ func Override(p OverrideParams) ([]byte, error) {
 			}
 			if svc.MemLimit != "" || svc.DeployMemoryLimit() == "" {
 				fmt.Fprintf(&b, "    mem_limit: %s\n", quote(limit))
+			}
+			// Docker refuses a memory+swap limit below the memory limit. A
+			// repository that set memswap_limit (often equal to its own
+			// mem_limit, to forbid swap) would stop starting once the app
+			// settings raise the memory limit, so it is raised along.
+			if swap, ok := ParseMemory(svc.MemswapLimit); ok {
+				if mem, ok := ParseMemory(limit); ok && swap < mem {
+					fmt.Fprintf(&b, "    memswap_limit: %s\n", quote(limit))
+				}
 			}
 		}
 	}

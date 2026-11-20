@@ -54,7 +54,7 @@ services:
 - サービスが自分で `env_file: .env` と書いていれば、その中身はコンテナに入る（koroku の値が後ろに付くので、同じ名前なら koroku が勝つ）。ただしコミット済みの `.env` に秘密を書いてはいけない。
 - Compose の `environment:` に直書きした値は `env_file` より強い。`RAILS_ENV: development` のように書いてあると koroku の画面で変えられないので、`RAILS_ENV: ${RAILS_ENV:-production}` のように補間にする。
 - 補間をコンテナ側に遅らせたいときは `$$VAR` と書く。
-- デプロイしたコミットの SHA を受け取る仕組みはない。`.git` も消えるので、ビルドや起動で `git rev-parse` などに頼らない。
+- デプロイしたコミットは、koroku が足す `KOROKU_COMMIT_SHA`（40 桁）と `KOROKU_COMMIT_SHORT`（先頭 7 桁）で分かる。補間にも使えるので、CI がコミットごとにビルドしたイメージを `image: ghcr.io/<owner>/<name>:sha-${KOROKU_COMMIT_SHORT}` のように指せる（ホストでビルドせずに pull だけで済む）。`.git` は消えるので、ビルドや起動で `git rev-parse` などに頼らない。`KOROKU_` で始まる名前は予約されていて、画面からは設定できない。
 
 ### 必要な変数の宣言（koroku が照合する）
 
@@ -129,7 +129,9 @@ services:
 | WebSocket | koroku が Caddy の設定を入れ替えると、アップグレード済みの接続は最長 5 分後に切れる。クライアントは再接続できるようにする |
 | CPU アーキテクチャ | 本番は x86_64（`linux/amd64`）。pull するイメージは amd64 版が必要。Apple シリコンの手元で作ったイメージを push して使う場合も amd64 で作る |
 | ビルドの重さ | ビルドは本番と同じホスト（目安 2 vCPU・4GB、swap 2GB）で、ほかのアプリが動いたまま行う。マルチステージにし、`.dockerignore` で `node_modules`・`tmp`・`log` などを外す |
-| private なイメージ | koroku のホストで `docker login` してあることが前提。ホストの管理者に頼む |
+| private なイメージ | koroku のホストで `docker login` してあることが前提。ホストの管理者に頼む。GHCR なら `read:packages` だけの token で `docker login ghcr.io` する。CI がビルドしたイメージを使うなら、そのコミットのイメージができてからデプロイする（`sha-${KOROKU_COMMIT_SHORT}` のタグがまだなければ pull で失敗し、稼働中の版はそのまま） |
+| 自前のリバースプロキシ | アプリの中に Caddy や nginx を置いて振り分けている場合、TLS は koroku の Caddy が終端するので、アプリ側は平文の HTTP で待ち受け、証明書の取得をやめる（Caddy なら `auto_https off` と `:8080` のようなサイト）。前段の koroku からの `X-Forwarded-For` / `X-Forwarded-Proto` を信頼する設定（Caddy の `trusted_proxies static private_ranges`、nginx の `set_real_ip_from`）がないと、利用者の IP が全員同じ（前段のアドレス）に見え、IP ごとの回数制限が全員まとめてかかる。Caddy の回数制限やログは `{remote_host}` ではなく `{client_ip}` を使う |
+| `memswap_limit` | swap を禁じるために `mem_limit` と同じ値を書いてよい。koroku の画面でメモリ上限を上げると、koroku が `memswap_limit` も同じ値に上げる |
 | サービス名の `-数字` | ログはコンテナ名からサービス名を求める。サービス名は英小文字と `-` / `_` にしておくと扱いやすい |
 
 ## バックアップ

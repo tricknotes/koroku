@@ -303,7 +303,8 @@ func Compare(vars []Variable, saved []string) (set map[string]bool, unlisted []s
 	listed := make(map[string]bool, len(vars))
 	for _, v := range vars {
 		listed[v.Key] = true
-		set[v.Key] = savedSet[v.Key]
+		// koroku writes these itself (deploy.ProvidedEnvPrefix).
+		set[v.Key] = savedSet[v.Key] || strings.HasPrefix(v.Key, "KOROKU_")
 	}
 	unlisted = []string{}
 	for _, k := range saved {

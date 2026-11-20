@@ -409,7 +409,7 @@ func TestDeploySucceeds(t *testing.T) {
 		t.Errorf("env file mode = %04o, want 0600", info.Mode().Perm())
 	}
 	env, _ := os.ReadFile(envPath)
-	if string(env) != "DATABASE_URL=postgres://app:s3cr3t-password@db/app\nRAILS_ENV=production\n" {
+	if string(env) != "DATABASE_URL=postgres://app:s3cr3t-password@db/app\nKOROKU_COMMIT_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nKOROKU_COMMIT_SHORT=aaaaaaa\nRAILS_ENV=production\n" {
 		t.Errorf("env file = %q", env)
 	}
 
@@ -570,7 +570,7 @@ func TestFailedStartRollsBackToPreviousRelease(t *testing.T) {
 		t.Errorf("rollback args = %v", rollback.Args)
 	}
 	env, _ := os.ReadFile(h.engine.EnvFile("blog"))
-	if string(env) != "GREETING=version-one\n" {
+	if string(env) != "GREETING=version-one\nKOROKU_COMMIT_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nKOROKU_COMMIT_SHORT=aaaaaaa\n" {
 		t.Errorf("env file after rollback = %q, want the previous release's environment", env)
 	}
 	got, _ := h.store.GetApp(context.Background(), "blog")
@@ -665,7 +665,7 @@ func TestBuildFailureDoesNotRollBack(t *testing.T) {
 	}
 	// The running release keeps its environment until a start is attempted.
 	env, _ := os.ReadFile(h.engine.EnvFile("blog"))
-	if string(env) != "GREETING=version-one\n" {
+	if string(env) != "GREETING=version-one\nKOROKU_COMMIT_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nKOROKU_COMMIT_SHORT=aaaaaaa\n" {
 		t.Errorf("env file = %q", env)
 	}
 	got, _ := h.store.GetApp(context.Background(), "blog")
