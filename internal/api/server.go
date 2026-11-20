@@ -180,6 +180,7 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/apps/{slug}/stop", s.handleAppOperation(AppOperator.Stop))
 	mux.HandleFunc("POST /api/apps/{slug}/restart", s.handleAppOperation(AppOperator.Restart))
 	mux.HandleFunc("GET /api/apps/{slug}/services", s.handleListServices)
+	mux.HandleFunc("GET /api/apps/{slug}/memory", s.handleMemoryHistory)
 	mux.HandleFunc("GET /api/apps/{slug}/env", s.handleGetEnv)
 	mux.HandleFunc("PUT /api/apps/{slug}/env", s.handlePutEnv)
 	mux.HandleFunc("GET /api/apps/{slug}/env/requirements", s.handleEnvRequirements)

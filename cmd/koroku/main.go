@@ -359,6 +359,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	apiOpts.Ops = engine
 	apiOpts.Copier = engine
 	go engine.RunMaintenance(ctx)
+	// Memory use history for the limit guidance (ARCHITECTURE 9.5).
+	go engine.NewMemorySampler().Run(ctx)
 	srv := api.New(apiOpts)
 	go checker.Run(ctx, routing.RecheckInterval)
 

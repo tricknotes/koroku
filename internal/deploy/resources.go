@@ -52,9 +52,10 @@ type ContainerResources struct {
 	Groups           []ResourceGroup `json:"groups"`
 }
 
-// containerInspectFormat prints, per container, the labels and the memory
-// limit `docker stats` does not report, as tab-separated JSON strings.
-const containerInspectFormat = `{{json .Id}}	{{json .Name}}	{{json (index .Config.Labels "com.docker.compose.project")}}	{{json (index .Config.Labels "com.docker.compose.service")}}	{{.HostConfig.Memory}}`
+// containerInspectFormat prints, per container, the labels, the memory
+// limit and the restart count that `docker stats` does not report, as
+// tab-separated fields (strings in JSON).
+const containerInspectFormat = `{{json .Id}}	{{json .Name}}	{{json (index .Config.Labels "com.docker.compose.project")}}	{{json (index .Config.Labels "com.docker.compose.service")}}	{{.HostConfig.Memory}}	{{.RestartCount}}`
 
 // ContainerResources reports the memory and CPU use of every running
 // container, grouped by koroku app. `docker stats` samples twice to compute
@@ -174,6 +175,8 @@ func parseStats(out []byte) ([]statsRow, error) {
 type containerMeta struct {
 	name, project, service string
 	limit                  int64
+	// restarts is Docker's RestartCount: restarts by the restart policy.
+	restarts int
 }
 
 // inspectContainers reads the Compose labels and memory limits of the
@@ -196,7 +199,7 @@ func parseContainerInspect(out []byte) (map[string]containerMeta, error) {
 			continue
 		}
 		fields := strings.Split(string(line), "\t")
-		if len(fields) != 5 {
+		if len(fields) != 6 {
 			return nil, errors.New("parse docker container inspect output")
 		}
 		var id, name, project, service string
@@ -209,11 +212,16 @@ func parseContainerInspect(out []byte) (map[string]containerMeta, error) {
 		if err != nil {
 			return nil, errors.New("parse docker container inspect output")
 		}
+		restarts, err := strconv.Atoi(fields[5])
+		if err != nil {
+			return nil, errors.New("parse docker container inspect output")
+		}
 		result[id] = containerMeta{
-			name:    strings.TrimPrefix(name, "/"),
-			project: project,
-			service: service,
-			limit:   limit,
+			name:     strings.TrimPrefix(name, "/"),
+			project:  project,
+			service:  service,
+			limit:    limit,
+			restarts: restarts,
 		}
 	}
 	return result, nil

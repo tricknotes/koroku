@@ -508,6 +508,31 @@ func TestImageOnlyApp(t *testing.T) {
 	if strings.Contains(log, " build Building images") || !strings.Contains(log, " pull Pulling images") {
 		t.Errorf("an image-only app must pull and not build:\n%s", log)
 	}
+
+	// The memory sampler reads the running container from the real
+	// docker stats and inspect output (ARCHITECTURE 9.5).
+	if err := e.engine.NewMemorySampler().Sample(context.Background()); err != nil {
+		t.Fatalf("sample memory: %v", err)
+	}
+	var history struct {
+		Services []struct {
+			Name       string `json:"name"`
+			LimitBytes *int64 `json:"limit_bytes"`
+			PeakBytes  int64  `json:"peak_bytes"`
+			Points     []any  `json:"points"`
+		} `json:"services"`
+	}
+	if code := e.call(http.MethodGet, "/api/apps/"+slug+"/memory", nil, &history); code != http.StatusOK {
+		t.Fatalf("memory history: %d", code)
+	}
+	if len(history.Services) != 1 {
+		t.Fatalf("memory history = %+v", history)
+	}
+	web := history.Services[0]
+	// The override gives every service the default limit (512m).
+	if web.Name != "web" || web.LimitBytes == nil || *web.LimitBytes != 512<<20 || web.PeakBytes <= 0 || len(web.Points) != 1 {
+		t.Errorf("web memory = %+v", web)
+	}
 }
 
 // containerStates maps service name to container state for a project.
