@@ -110,6 +110,7 @@ func newEnv(t *testing.T) *env {
 		Deployer: engine,
 		Ops:      engine,
 		Copier:   engine,
+		Tasks:    engine,
 		Refs:     deploy.GitRefResolver{Fetcher: fetcher},
 		// Authentication is covered by the API unit tests.
 		Auth: api.AuthOptions{InsecureNoAuth: true},
