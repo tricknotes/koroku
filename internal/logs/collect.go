@@ -456,7 +456,7 @@ const replayWindow = 4096
 // every container that starts later. Started while a container is coming up
 // (which is what a follower waiting for a stopped app does at every deploy),
 // it can attach to that container twice, and from then on prints each of its
-// lines twice, timestamp included (seen with Compose 5.8; ARCHITECTURE 12).
+// lines twice, timestamp included (seen with Compose 5.8; ARCHITECTURE 10.1).
 // Docker stamps every line of a container with its own nanosecond, so a line
 // that repeats container, timestamp and text is such an echo and not output
 // the app printed twice. The two copies arrive close together: remembering

@@ -1,39 +1,42 @@
-# 個人用 PaaS（Heroku ライク）アーキテクチャ設計書
+# koroku アーキテクチャ
 
-Nov 18, 2026 · @tricknotes
+koroku の現在の設計を書く。過去の経緯や変更の履歴は書かない（それは git の履歴と PR にある）。利用者向けの説明は [README](../README.md)、HTTP API の形は [API.md](API.md)、構築と運用の手順は [SETUP.md](SETUP.md) と [OPERATIONS.md](OPERATIONS.md)。
 
 ## 1. 目的とスコープ
 
-個人用に 3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHub リポジトリから UI 操作だけでデプロイできるコントロールプレーンを作る。以下、本体デーモンを `koroku`、ベースドメイン（`config.toml` の `base_domain`）を例として `dev.example.com` と書く。特定のホスティング事業者、DNS サービス、オブジェクトストレージには依存しない。それぞれに求める条件は [SETUP.md](SETUP.md) にまとめる。
+koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHub リポジトリから UI 操作だけでデプロイする個人用のコントロールプレーンである。以下、本体デーモンを `koroku`、ベースドメイン（`config.toml` の `base_domain`）を例として `dev.example.com` と書く。特定のホスティング事業者、DNS サービス、オブジェクトストレージには依存しない。それぞれに求める条件は [SETUP.md](SETUP.md) にまとめる。
 
-**作るもの**
+**提供するもの**
 
 - GitHub リポジトリ連携（private 含む）と、UI からのブランチ／コミット指定デプロイ
 - `compose.yaml` のデプロイ。`build:` があればホストでビルド、`image:` のみなら pull
 - アプリごとの `<slug>.dev.example.com` 自動割当と TLS、アプリごとの独自ドメイン追加（本番用）
 - 環境変数の管理、デプロイログと実行ログの閲覧
 - 起動・停止・再起動・削除、過去コミットへの再デプロイ（ロールバック）
+- バックアップとリストア、実行ログの保管
 
-**作らないもの（初期）**
+**提供しないもの**
 
 - `git push` デプロイ、Addons、buildpack
 - マルチノード、マルチユーザー、オートスケール
 - 無停止デプロイ（再作成中の数秒の断は許容）
-- push 時の自動デプロイ
+- push 時の自動デプロイ（Webhook を受けない）
+- ホストの冗長化（ホスト障害時は全アプリが止まる）
+- Loki などのログ基盤、外部への障害通知
 
-## 2. 決定事項サマリ
+## 2. 設計の要点
 
-| 項目 | 決定 | 理由 |
+| 項目 | 方式 | 理由 |
 | --- | --- | --- |
-| 実行基盤 | VPS 1 台（Ubuntu 24.04、x86_64）。Docker Engine + Compose v2.30 以上 | ご回答どおり。override で使う `!override` タグ（2.24.4 以上）と、ポリシー検査で使う `config --no-env-resolution`（2.30 以上、6 章）の要件（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)） |
+| 実行基盤 | VPS 1 台（Ubuntu 24.04、x86_64）。Docker Engine + Compose v2.30 以上 | override で使う `!override` タグ（2.24.4 以上）と、ポリシー検査で使う `config --no-env-resolution`（2.30 以上、6 章）の要件（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)） |
 | コントロールプレーン | Go 製シングルバイナリ `koroku`。systemd でホストに直置き、SQLite | 常駐メモリが小さく、配布と更新がファイル 1 つ。詳細は 4 章 |
-| フロントエンド | Ember SPA。ビルド成果物を `koroku` に埋め込んで配信 | ご希望どおり。配信用の別プロセスが不要 |
+| フロントエンド | Ember SPA。ビルド成果物を `koroku` に埋め込んで配信 | 配信用の別プロセスが不要 |
 | リバースプロキシ | Caddy。ホストに直置きし、admin API で設定を投入 | ホスト名を渡すだけで証明書の取得と更新まで自動（[Automatic HTTPS](https://caddyserver.com/docs/automatic-https)） |
 | アプリへの経路 | 公開サービスを `127.0.0.1:<割当ポート>` に publish し、Caddy がそこへ転送 | 共有 Docker ネットワークが不要で、アプリ同士が互いに見えない |
 | TLS | ホスト名ごとに個別証明書（HTTP-01）。ワイルドカード「証明書」は見送り | ワイルドカード発行には DNS-01 が要り、DNS 事業者の API 連携が増える（[Challenge Types](https://letsencrypt.org/docs/challenge-types/)） |
 | GitHub 連携 | 自分専用の GitHub App。ログインと clone の両方に使う | clone 用トークンが 1 時間で失効し、長寿命の秘密を置かずに済む（5 章） |
 | デプロイ単位 | 1 アプリ = 1 Compose プロジェクト（`-p koroku-<slug>`） | プロジェクト名でリソースが分離される（[How Compose works](https://docs.docker.com/compose/intro/compose-application-model/)） |
-| ビルド | `build:` があればホストで build、なければ pull | ご回答どおり（両対応） |
+| ビルド | `build:` があればホストで build、なければ pull | リポジトリの形に合わせて両方に対応する |
 | ジョブ実行 | `koroku` プロセス内キュー、全体で同時実行 1 | ビルドの負荷を直列化。Redis 等の外部依存が不要 |
 | UI 認証 | GitHub ログイン + 許可ユーザー ID 1 件の照合 | 個人用途。パスワード管理を持たない |
 
@@ -71,36 +74,29 @@ Nov 18, 2026 · @tricknotes
 | パス | 内容 |
 | --- | --- |
 | `/usr/local/bin/koroku` | 本体バイナリ（SPA 込み） |
-| `/etc/koroku/config.toml` | ベースドメイン、GitHub App ID、許可ユーザー ID |
-| `/etc/koroku/github-app.pem`、`/etc/koroku/master.key` | GitHub App 秘密鍵、環境変数暗号化のマスターキー（0600） |
+| `/etc/koroku/config.toml` | ベースドメイン、公開 IP、GitHub App、オブジェクトストレージなどの設定（0600） |
+| `/etc/koroku/github-app.pem`、`/etc/koroku/master.key`、`/etc/koroku/restic.key` | GitHub App 秘密鍵、環境変数暗号化のマスターキー、restic のパスワード（0600） |
 | `/var/lib/koroku/koroku.db` | SQLite |
 | `/var/lib/koroku/apps/<slug>/releases/<deploy_id>/` | チェックアウトしたソースと生成した override |
 | `/var/lib/koroku/apps/<slug>/env` | 展開済み環境変数ファイル（0600） |
 | `/var/lib/koroku/apps/<slug>/release-state/<deploy_id>/` | そのリリースの環境変数スナップショット（0600）と、使った Compose ファイル名・ビルドしたイメージ名。ロールバック用（7 章） |
 | `/var/lib/koroku/apps/<slug>/deploys/<deploy_id>.log` | デプロイログ |
+| `/var/lib/koroku/logs/<slug>/<service>/` | 収集した実行ログ（10.1） |
+| `/var/log/caddy/apps/<slug>.log` | Caddy のアクセスログ（アプリ別） |
 
 ## 4. 技術スタック選定
 
-推奨は **Go（API）+ Ember（SPA）+ SQLite**。このシステムの中心は CRUD ではなく「外部プロセスの実行・ログのストリーム配信・状態機械」で、小さな VPS でアプリとメモリを分け合うため、常駐コストと配布の軽さを優先した。
+**Go（API）+ Ember（SPA）+ SQLite** で作る。このシステムの中心は CRUD ではなく「外部プロセスの実行・ログのストリーム配信・状態機械」で、小さな VPS でアプリとメモリを分け合うため、常駐コストと配布の軽さを優先している。
 
-| 観点 | Go | Rails | Rust |
-| --- | --- | --- | --- |
-| 常駐メモリ（未計測の目安） | 数十 MB | 数百 MB（Web + ジョブワーカー） | 数十 MB 以下 |
-| 配布・更新 | バイナリ 1 つを差し替え | Ruby 実行環境かコンテナが必要 | バイナリ 1 つを差し替え |
-| Docker との親和性 | 公式 SDK がある | 非公式ライブラリ | 非公式ライブラリ |
-| プロセス実行・SSE | 標準ライブラリで足りる | 可能だがスレッド設計に注意 | async ランタイム前提で記述量が増える |
-| 保守性 | 依存が少なく、言語仕様が安定 | ご自身の習熟度が最も高い | 学習コストとビルド時間が最大 |
-
-- Docker Engine の公式 SDK は Go と Python のみ（[Docker Engine SDKs](https://docs.docker.com/reference/api/engine/sdk/)）。ただし本設計は `docker compose` CLI を呼ぶ方式を主とし、SDK は必須にしない。
+- Go は常駐メモリが数十 MB で、配布と更新がバイナリ 1 つの差し替えで済む。プロセス実行と SSE は標準ライブラリで足りる。
+- Docker は `docker compose` CLI を呼んで操作する。Docker Engine の Go SDK は使わない。
 - SQLite ドライバは cgo 不要の [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) を使い、クロスコンパイルと単一バイナリを保つ。
-- Rails は次点。VPS が 4GB 以上で、ご自身が頻繁に手で直す前提なら逆転しうる。
-- Rust は利点（メモリ）が Go との差で小さく、基盤に載せるには学習リスクが見合わないと判断した。
 
 **構成の詳細**
 
 - Go: 標準 `net/http`、`database/sql`、SQL マイグレーションは埋め込みファイルを起動時に適用。フレームワークは使わない。
 - Ember: TypeScript。API は JSON の REST、ログは SSE（`EventSource`）で受ける。
-- リポジトリ: `cmd/koroku`、`internal/{api,deploy,compose,caddy,github,store}`、`web/`（Ember）、`deploy/`（プロビジョニング）。
+- リポジトリ: `cmd/koroku`、`internal/`（`api`、`deploy`、`compose`、`caddy`、`routing`、`github`、`domains`、`logs`、`backup`、`store`、`runner`、`preflight` など）、`web/`（Ember）、`deploy/`（プロビジョニング）。
 
 ## 5. GitHub 連携
 
@@ -113,17 +109,17 @@ Nov 18, 2026 · @tricknotes
 | clone | デプロイのたびに installation access token を発行し、HTTP パスワードとして使う。形式は `https://x-access-token:TOKEN@github.com/owner/repo.git`、有効期限は 1 時間（[installation としての認証](https://docs.github.com/en/enterprise-cloud@latest/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)） |
 
 - トークンは `.git/config` やデプロイログに残さない。`GIT_ASKPASS` か `http.extraheader` で渡し、fetch 後に破棄する。
-- Webhook は初期は受けない。push 時自動デプロイを足すときに `/webhooks/github` を追加する。
+- Webhook は受けない。デプロイは常に UI か API から手動で始める。
 
-**ログインと保護の細則（M3 の実装で確定、2026-11-18）**
+**ログインと保護の細則**
 
 - セッションは 7 日で失効し、操作しても延長しない。Cookie の値は乱数 32 バイトで、DB には SHA-256 のハッシュだけを置く（DB が漏れてもセッションを再利用できないようにするため）。`config.toml` の許可ユーザー ID を変えると、既存のセッションは次のリクエストから無効になる。
 - 変更系リクエスト（`POST` / `PUT` / `PATCH` / `DELETE`）は、`Origin` ヘッダーが管理 UI のオリジン（`console_url`、既定は `https://<console_host>`）と完全一致するものだけを通す。ヘッダーがないリクエストも拒否するので、`curl` で叩くときは `-H "Origin: https://console.<base>"` を付ける。
-- GitHub App が未設定（`[github]` セクションなし）のときは、誰もログインできず API は 401 を返す。「未設定なら素通し」にはしない。ローカル開発では `koroku serve --insecure-no-auth` で認証と Origin 検証を外せる。設定ファイルではなく起動フラグにしたのは、本番の unit ファイルに紛れ込みにくくするため。
+- GitHub App が未設定（`[github]` セクションなし）のときは、誰もログインできず API は 401 を返す。「未設定なら素通し」にはしない。ローカル開発では `koroku serve --insecure-no-auth` で認証と Origin 検証を外せる。設定ファイルではなく起動フラグにしているのは、本番の unit ファイルに紛れ込みにくくするため。
 - `[github]` は全項目（`app_id`、`client_id`、`client_secret`、`private_key_file`、`allowed_user_id`）が揃っていなければ起動時にエラーにする。秘密鍵ファイルはグループや他人が読める権限なら拒否する。
 - リポジトリの指定が `repo_full_name`（`owner/name`）のアプリは installation token を使って取得する。GitHub App がそのリポジトリにインストールされていなければ、public リポジトリの可能性があるので認証なしで取得を試みる。`repo_url` を明示したアプリには token を使わない。
-- アプリ作成時の Compose ファイル検出（`GET /api/repos/{owner}/{repo}/compose`）は、サービス名とポートを画面に下書きするためのもので、YAML パーサーの依存を増やさず行ベースの簡易読み取りで済ませる（アンカーやフロースタイルは読めない。読めなければ手入力）。デプロイ時の判定は従来どおり `docker compose config` の結果で行う。
-- 不採用案: fine-grained PAT。設定は簡単だが長寿命の秘密をサーバーに置くことになり、ログイン手段も別途必要になる。
+- アプリ作成時の Compose ファイル検出（`GET /api/repos/{owner}/{repo}/compose`）は、サービス名とポートを画面に下書きするためのもので、YAML パーサーの依存を増やさず行ベースの簡易読み取りで済ませる（アンカーやフロースタイルは読めない。読めなければ手入力）。デプロイ時の判定は `docker compose config` の結果で行う。
+- fine-grained PAT は使わない。長寿命の秘密をサーバーに置くことになり、ログイン手段も別に要るため。
 
 ## 6. Compose の扱い
 
@@ -156,13 +152,14 @@ services:
 - 公開サービスの `ports` は `!override` で割当ポートに置き換え、他サービスの `ports` は `!reset []` で消す。通常のマージでは `ports` が追記されてしまうため、この 2 つのタグが必要（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)）。
 - ホストポートは 20000 番台からアプリ作成時に 1 つ割り当て、DB で一意に保つ。
 - 環境変数は全サービスに `env_file` で注入する（Heroku の config vars と同じ感覚）。`${VAR}` 補間用に `--env-file` でも同じファイルを渡す。
+- `--env-file` を指定するので、リポジトリ直下の `.env` は `${VAR}` の補間に使われない（`.env` にしかない変数は未定義になり、`${VAR:-default}` は default になる）。サービスが自分で `env_file: .env` と書いていれば、その内容はコンテナに入る。override が足す koroku の env ファイルはリストの後ろに付くので、同じ名前の変数は koroku 側の値が勝つ。つまり補間は koroku の環境変数だけで決まり、リポジトリの `.env` は「サービスが明示的に読む」ときだけ効く（`testdata/apps/build-app` と結合テストで固定）。
 - named volume はプロジェクト名 `koroku-<slug>` が接頭辞になるため、リリースディレクトリが変わっても引き継がれる。
 
-**override の細則（M1 の実装と実機確認で確定、2026-11-18）**
+**override の細則**
 
 - `restart: unless-stopped` は、リポジトリ側が `restart` を指定していないサービスにだけ付ける。全サービスに付けると、マイグレーション用のワンショットサービス（`restart: "no"`）が終了後に再起動し続けてしまうため。
-- `build:` を持つサービスには、リリースごとのイメージ名 `koroku-<slug>-<service>:r<deploy_id>` を override の `image:` で与える。Compose の既定では毎回 `<project>-<service>:latest` に上書きされ、起動に失敗した新版のイメージで旧版のタグが置き換わるので、旧リリースのディレクトリで `up` し直しても壊れたイメージが起動した（結合テストで検出）。リリース固有のタグにしておくと、ロールバックは旧版のイメージそのものを起動できる。イメージはリリースディレクトリと一緒に削除する。
-- メモリ上限の決まり方は、優先度の高い順に「アプリ設定のサービス別の値」「アプリ設定の全体値」「リポジトリの Compose が自分で指定した値（`config.toml` の既定値以下のときだけ）」「`config.toml` の既定値（512m）」。既定値は、リポジトリが自分で名乗れる上限でもある。それより大きくしたいときはアプリ設定で指定する（Compose に `mem_limit: 64g` と書くだけで上限を外せてしまうのを防ぐため。脆弱性調査での対応）。リポジトリ側が `deploy.resources.limits.memory` で書いている場合は override も同じ形式で書く。`mem_limit` と値が食い違うと Compose が `can't set distinct values` で設定全体を拒否するため。
+- `build:` を持つサービスには、リリースごとのイメージ名 `koroku-<slug>-<service>:r<deploy_id>` を override の `image:` で与える。Compose の既定では毎回 `<project>-<service>:latest` に上書きされ、起動に失敗した新版のイメージで旧版のタグが置き換わり、旧リリースのディレクトリで `up` し直しても壊れたイメージが起動してしまう。リリース固有のタグにしておくと、ロールバックは旧版のイメージそのものを起動できる。イメージはリリースディレクトリと一緒に削除する。
+- メモリ上限の決まり方は、優先度の高い順に「アプリ設定のサービス別の値」「アプリ設定の全体値」「リポジトリの Compose が自分で指定した値（`config.toml` の既定値以下のときだけ）」「`config.toml` の既定値（512m）」。既定値は、リポジトリが自分で名乗れる上限でもある。それより大きくしたいときはアプリ設定で指定する（Compose に `mem_limit: 64g` と書くだけで上限を外せてしまうのを防ぐため）。リポジトリ側が `deploy.resources.limits.memory` で書いている場合は override も同じ形式で書く。`mem_limit` と値が食い違うと Compose が `can't set distinct values` で設定全体を拒否するため。
 - override に書くサービスは、リポジトリの Compose を正規化した結果（`config --format json`）に存在するものだけにする。存在しないサービス名を書くと Compose がエラーにするため、正規化 → override 生成 → もう一度正規化してポリシー検査、の 2 回 `config` を実行する。
 - 正規化した JSON には `env_file` の中身が展開されて入るので、ログには出さない。
 - env ファイルの値は Compose に補間されない形で書く。英数字と一部の記号だけの値はそのまま、それ以外はシングルクォート、シングルクォートか改行を含む値はダブルクォートで `\ \" \$ \n` をエスケープする。`$`・空白・`#`・引用符を含む値がコンテナにそのまま届くことを結合テストで確認している。
@@ -171,7 +168,7 @@ services:
 
 1. `docker compose -p koroku-<slug> -f compose.yaml -f koroku.override.yaml config --format json` で正規化する。
 2. `build` を持つサービスがあれば `docker compose build`、`image` のみのサービスは `docker compose pull`。
-3. private レジストリは、初期はホストで `docker login` 済みであることを前提にする。
+3. private レジストリ（GHCR など）は、ホストで `docker login` しておく（`/root/.docker/config.json`）。
 
 **ポリシー検査（正規化した JSON に対して実施、違反はデプロイ拒否）**
 
@@ -182,9 +179,9 @@ services:
 
 個人用途なので、アプリ設定の「検査を緩める」フラグで個別に許可できるようにする。
 
-**検査項目の追加（脆弱性調査での対応、2026-11-18）**
+**そのほかの検査項目**
 
-当初の一覧は代表的なものだけで、Compose には同じ結果になる書き方がほかにもある。実物の `docker compose config` で、次がどれも素通りすることを確かめたので、検査に加えた（いずれも「検査を緩める」フラグで許可できる）。
+Compose には上と同じ結果になる書き方がほかにもあるので、次も拒否する（いずれも「検査を緩める」フラグで許可できる）。
 
 | ルール | 拒否する内容 | 理由 |
 | --- | --- | --- |
@@ -220,7 +217,7 @@ services:
 4. **検証**: `docker compose config --format json` を実行し、6 章のポリシー検査をかける。
 5. **ビルド／pull**: 6 章の判定に従う。
 6. **起動**: `docker compose up -d --remove-orphans --wait --wait-timeout 300`。`--wait` はサービスが running または healthy になるまで待つ（[docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/)）。
-7. **経路**: Caddy 設定を再生成して投入する（初回と設定変更時）。
+7. **経路**: Caddy 設定を再生成し、内容が変わっていれば投入する（8 章）。
 8. **確認**: `http://127.0.0.1:<port><ヘルスチェックパス>` が 5xx 以外を返すまで最大 60 秒リトライする。
 9. **完了**: `succeeded` にして `current_deployment_id` を更新。リリースディレクトリは直近 3 件を残し、`docker image prune -f` を実行する。
 
@@ -230,10 +227,10 @@ services:
 - 手順 6 以降の失敗は、直前の成功リリースのディレクトリで `up` し直して旧版に戻す。
 - `koroku` 再起動時に `running` のまま残ったジョブは `failed (interrupted)` にする。
 - 直前の成功リリースがない（初回デプロイの）場合は戻す先がないので、`docker compose down` で起動しかけたコンテナを消す（volume は残す）。
-- 手順 6 の `up` か手順 8 の確認で失敗したら、戻す前に `docker compose logs --tail 30` の出力をデプロイログのその手順に書く（見出しは `Last output of the containers:`）。起動に失敗した理由はたいていコンテナの出力にあるが、ロールバックでコンテナが置き換わるとアプリのログ画面からしか追えなくなり、デプロイ画面で原因が分からなかった（2026-11-18、開発用の Compose 環境で実際に失敗させて確認）。この出力もデプロイログのマスクを通る。読み出しに失敗してもデプロイの結果は変えない。キャンセルや `koroku` の停止による失敗では読まない。
+- 手順 6 の `up` か手順 8 の確認で失敗したら、戻す前に `docker compose logs --tail 30` の出力をデプロイログのその手順に書く（見出しは `Last output of the containers:`）。起動に失敗した理由はたいていコンテナの出力にあるが、ロールバックでコンテナが置き換わると、アプリのログ画面からしか追えなくなるため。この出力もデプロイログのマスクを通る。読み出しに失敗してもデプロイの結果は変えない。キャンセルや `koroku` の停止による失敗では読まない。
 - ロールバックでは環境変数も戻す。env ファイルはリリースごとにスナップショットを取り（`release-state/<deploy_id>/env`）、稼働中の `apps/<slug>/env` を書き換えるのは手順 6 の直前にする。こうすると、手順 5 までの失敗では稼働中のリリースの env に触れず、手順 6 以降の失敗では旧版を「当時の環境変数」で起動し直せる。環境変数の変更が原因で起動に失敗した場合にも旧版に戻れるようにするため。
 - `koroku` の停止（SIGTERM）と重なったデプロイは `failed (interrupted)` にし、停止処理の中ではロールバックを走らせない。コンテナが中途半端な状態で残りうるので、`koroku` の更新はデプロイ中を避ける。
-- `docker compose up --wait` は、ヘルスチェックを持たないコンテナが起動直後に落ちて再起動を繰り返していても成功を返した（実機確認、Compose v5.8.0）。起動失敗の検出は手順 8 の HTTP 確認が担う。
+- `docker compose up --wait` は、ヘルスチェックを持たないコンテナが起動直後に落ちて再起動を繰り返していても成功を返す。起動失敗の検出は手順 8 の HTTP 確認が担う。
 
 **その他の規則**
 
@@ -241,11 +238,12 @@ services:
 - 各手順の stdout/stderr を行単位でログファイルに追記し、SSE で配信する。環境変数の値とトークンはマスクする。
 - ロールバックは「過去の SHA を同じフローで再デプロイ」。DB マイグレーションの巻き戻しは行わない。
 - マイグレーション等のリリース処理は Compose 側で表現する（起動コマンド、またはワンショットのサービスと `depends_on`）。基盤側に専用機能は持たない。
+- ワンショットのサービス（`restart: "no"` で終わるもの）は、別のサービスから `depends_on` の `condition: service_completed_successfully` で待たれていなければならない。待たれていないと、手順 6 の `up -d --wait` が `container ... exited (0)` で失敗する。基盤では対処せず、利用者向けの Skill（`plugins/koroku/skills/prepare-app`）で案内する。
 
 **デプロイ時の断の範囲**: 断はデプロイ対象のアプリだけに起きる。`docker compose up` は `-p koroku-<slug>` で指定したプロジェクトのコンテナしか操作せず、その中でも設定かイメージが変わったサービスだけを再作成する（[docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/)）。他アプリへの間接的な影響は 2 つある。
 
 - ビルド中の CPU・メモリ負荷で他アプリの応答が遅くなりうる（停止はしない）。8.2 のメモリ上限とビルド直列化で抑える。
-- Caddy 設定の再投入はアプリ作成時とドメイン・ポート変更時だけ行い、通常の再デプロイでは行わない。再投入時に他アプリの接続（特に WebSocket や SSE）が切れないことは M2 で実機確認する。確認結果は 12 章。SSE と通常のリクエストは切れず、WebSocket は 8 章の `stream_close_delay` で猶予を持たせている。
+- Caddy 設定は内容が変わったとき（アプリの作成、ドメイン・ポートの変更、起動・停止など）だけ投入し、通常の再デプロイでは投入しない。投入しても他アプリの SSE と通常のリクエストは切れない。WebSocket などのアップグレード済み接続は 8 章の `stream_close_delay` の猶予のあとに 1 回切れる。
 
 ## 8. ルーティングと TLS
 
@@ -257,32 +255,32 @@ DNS にワイルドカードの A レコードを 1 本置き、証明書は Cad
 - **設定投入**: `koroku` が DB から Caddy の JSON 設定全体を生成し、admin API の `POST /load` で置き換える（[API Tutorial](https://caddyserver.com/docs/api-tutorial)）。差分更新はしない。`koroku` 起動時にも必ず実行し、DB を唯一の正とする。
 - **停止中アプリ**: ルートは残し、503 の固定ページを返す。
 
-**Caddy 設定の細則（M2 の実装と実機確認で確定、2026-11-18）**
+**Caddy 設定の細則**
 
-- サーバーは `:80` 用と `:443` 用の 2 つに分ける。1 つのサーバーに両方のポートを持たせると、`http://<slug>.<base>` へのアクセスが HTTPS へリダイレクトされず平文のままアプリへ転送された（Caddy が自動リダイレクトを挿入する位置が、ホスト別ルートの後ろになるため）。分けた構成では HTTP は 308 で HTTPS へ、未知のホスト名は `:80` で 404、`:443` では TLS ハンドシェイク失敗になる。
+- サーバーは `:80` 用と `:443` 用の 2 つに分ける。1 つのサーバーに両方のポートを持たせると、Caddy が自動リダイレクトを挿入する位置がホスト別ルートの後ろになり、`http://<slug>.<base>` へのアクセスが平文のままアプリへ転送されてしまう。この構成では HTTP は 308 で HTTPS へ、未知のホスト名は `:80` で 404、`:443` では TLS ハンドシェイク失敗になる。
 - 一度もデプロイしていないアプリも、停止中アプリと同じ 503 の固定ページにする（転送先がまだないため）。
 - 設定の投入は、DB から生成した内容が前回投入したものと同じなら省く。これで通常の再デプロイでは Caddy に触れない。`koroku` 起動時だけは必ず投入する（Caddy 側は同一内容なら `config is unchanged` として何もしない）。投入に失敗したら次回必ず投入し直し、5 分ごとの定期処理でも再試行するので、Caddy が後から起動しても追いつく。
-- アプリへの `reverse_proxy` には `stream_close_delay: 5m` を付ける。付けないと、設定を再投入した瞬間に、他アプリを含む WebSocket などのアップグレード済み接続が切れた（下の実機確認）。この指定には Caddy 2.7 以上が要るので、Ubuntu 標準の apt パッケージではなく Caddy 公式リポジトリのものを入れる（プロビジョニングスクリプトで対応）。
-- アクセスログはアプリごとに `<access_log_dir>/<slug>.log`（既定 `/var/log/caddy/apps`）へ出す。`koroku` のデータディレクトリは root 専用（0700）で Caddy のユーザーが書けないため、置き場所を分けた。ロガー名は `http.log.access.<slug>.app` とする。Caddy はロガー名を前方一致で選ぶので、slug そのままだと `shop-staging` のログが `shop.log` にも入るため。管理 UI と未知のホスト名のアクセスログは出さない。
+- アプリへの `reverse_proxy` には `stream_close_delay: 5m` を付ける。Caddy は設定を入れ替えるとサーバーを作り直し、既定ではその瞬間に、他アプリを含む WebSocket などのアップグレード済み接続を切る。この指定は切断をなくすのではなく先送りするもので、アプリの作成・ドメインやポートの変更・起動や停止のたびに、他アプリの WebSocket は最長 5 分後に 1 回切れる（クライアントの再接続に任せる）。SSE と通常のリクエストは、平文でも TLS + HTTP/2 でも、入れ替えの間に欠けない。この指定には Caddy 2.7 以上が要るので、Ubuntu 標準の apt パッケージではなく Caddy 公式リポジトリのものを入れる（プロビジョニングスクリプトで対応）。
+- アクセスログはアプリごとに `<access_log_dir>/<slug>.log`（既定 `/var/log/caddy/apps`）へ出す。`koroku` のデータディレクトリは root 専用（0700）で Caddy のユーザーが書けないため、置き場所を分けた。ロガー名は `http.log.access.<slug>.app` とする。Caddy はロガー名を前方一致で選ぶので、slug そのままだと `shop-staging` のログが `shop.log` にも入ってしまう。管理 UI と未知のホスト名のアクセスログは出さない。
 - Caddy の admin API は認証がなく設定全体を書き換えられるので、`caddy.admin_url` はループバックアドレスしか受け付けない。
-- `koroku` がデプロイの成功を記録したあとにも、もう一度設定を同期する。ルートの更新（手順 7）はデプロイが「現在のリリース」になる前に走るので、そこだけでは初回デプロイ（と停止中からのデプロイ）のアプリが 503 の固定ページのまま残り、5 分ごとの定期処理まで届かなかった（ローカル環境で検出、2026-11-19）。
+- `koroku` がデプロイの成功を記録したあとにも、もう一度設定を同期する。ルートの更新（手順 7）はデプロイが「現在のリリース」になる前に走るので、そこだけでは初回デプロイ（と停止中からのデプロイ）のアプリが、5 分ごとの定期処理まで 503 の固定ページのまま残ってしまう。
 
-**ローカル環境の Caddy（2026-11-19）**
+**ローカル環境の Caddy**
 
-手元でも本番と同じ経路（Caddy → アプリ）で `https://<slug>.dev.localhost` を開けるように、開発用の `compose.yaml` に Caddy を加えた。`koroku` 側の生成ロジックは本番と共通で、`config.toml` の 2 項目だけで切り替える。
+手元でも本番と同じ経路（Caddy → アプリ）で `https://<slug>.dev.localhost` を開けるように、開発用の `compose.yaml` にも Caddy がある。`koroku` 側の生成ロジックは本番と共通で、`config.toml` の 2 項目だけで切り替える。
 
 | 項目 | 内容 |
 | --- | --- |
 | `[caddy] listen_ip` | `:80` と `:443` を、このアドレスだけで待ち受ける（ローカルは `127.0.0.1`）。空なら全インターフェース（本番） |
 | `[caddy] internal_ca` | ACME の代わりに Caddy 内蔵の CA で証明書を出す。`*.localhost` には公的な証明書が出ないため。CA のルート証明書は利用者がブラウザ側の OS に手で入れる（コンテナの中の Caddy にはホストの信頼ストアを変えられないので、`install_trust` は切る） |
 
-- `--insecure-no-auth` は、Caddy が有効でも `listen_ip` がループバックなら起動を許す。拒否していた理由は「Caddy 経由で管理 UI がネットワークに出る」ことで、ループバックだけで待ち受けるならその心配がない。
-- 認証なしモードの Host 検査は `*.localhost` を受け付ける（`console.dev.localhost` で開くため）。`.localhost` 配下の名前は常にループバックに解決される（RFC 6761）ので、DNS リバインディングの対策は崩れない。変更系の `Origin` は `http://<Host>` に加えて `https://<Host>` も許す。同じ `dev.localhost` 配下のアプリからの要求は、従来どおり `Sec-Fetch-Site: same-site` と `Origin` の不一致で拒否する。
+- `--insecure-no-auth` は、Caddy が有効でも `listen_ip` がループバックなら起動を許す。このフラグを Caddy と併用させない理由は「Caddy 経由で管理 UI がネットワークに出る」ことで、ループバックだけで待ち受けるならその心配がない。
+- 認証なしモードの Host 検査は `*.localhost` を受け付ける（`console.dev.localhost` で開くため）。`.localhost` 配下の名前は常にループバックに解決される（RFC 6761）ので、DNS リバインディングの対策は崩れない。変更系の `Origin` は `http://<Host>` に加えて `https://<Host>` も許す。同じ `dev.localhost` 配下のアプリからの要求は、本番と同じく `Sec-Fetch-Site: same-site` と `Origin` の不一致で拒否する。
 - アクセスログは出さない（`access_log_dir = ""`）。Caddy はコンテナ内で root として動き、ログファイルを `koroku`（利用者の UID）が読めないため。
 
 **ワイルドカードのレコードを登録できない DNS サービス**: `console.<base>` とアプリごとの `<slug>.<base>` を個別に登録する。証明書はホスト名ごとに取る設計なので、どちらでも `koroku` 側の実装は変わらない。
 
-ワイルドカード証明書は DNS-01 チャレンジでのみ発行できる（[Challenge Types](https://letsencrypt.org/docs/challenge-types/)）。個別証明書だとサブドメイン名が証明書の公開ログに載る点が気になる場合は、後から DNS 事業者の API 連携を足して切り替える。
+ワイルドカード証明書は DNS-01 チャレンジでのみ発行できる（[Challenge Types](https://letsencrypt.org/docs/challenge-types/)）。個別証明書ではサブドメイン名が証明書の公開ログ（Certificate Transparency）に載る。ワイルドカード証明書に切り替えるには、DNS 事業者の API 連携が要る。
 
 ### 8.1 独自ドメイン
 
@@ -302,7 +300,7 @@ DNS にワイルドカードの A レコードを 1 本置き、証明書は Cad
 - アプリごとに「プライマリドメイン」を 1 つ選べる。選んだ場合、他のホスト名へのアクセスはプライマリへ 308 リダイレクトする（`www` ありなしの統一用）。
 - ホスト名は全アプリで一意。`*.dev.example.com` 配下は独自ドメインとして登録できない。
 
-**追加するデータと API**
+**データと API**
 
 | 種別 | 内容 |
 | --- | --- |
@@ -311,8 +309,6 @@ DNS にワイルドカードの A レコードを 1 本置き、証明書は Cad
 | `POST /api/apps/{slug}/domains/{id}/verify` | 再検証 |
 | `PATCH / DELETE /api/apps/{slug}/domains/{id}` | プライマリ指定・強制有効化、削除 |
 | UI | アプリ詳細に「ドメイン」タブ。状態、設定すべき DNS レコード、直近のエラーを表示 |
-
-実装は M2（Caddy 設定生成に複数ホスト名とリダイレクトを含める）と M4（ドメインタブ）に入れる。受け入れシナリオに「独自ドメインを追加し、DNS 設定後に HTTPS で応答する」を加える。
 
 ### 8.2 staging と本番の分け方
 
@@ -325,104 +321,80 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | デプロイ元 | 任意のブランチ | `main` のコミット |
 | 環境変数・volume | アプリ単位で独立 | アプリ単位で独立 |
 
-- `apps` に表示用の `environment`（production / staging）列を足し、一覧でラベル表示する。本番アプリのデプロイと削除には確認ダイアログを出す。
+- `apps` の `environment`（production / staging）は表示用で、一覧ではラベルになる。本番アプリのデプロイと削除には確認ダイアログを出す。
 - 同居の弱点は、staging のビルド負荷やディスク枯渇が本番に波及すること。ビルドの同時実行 1、サービスごとのメモリ上限（override で既定値を付与、アプリ設定で変更可）、ディスク使用率 85% 超でデプロイ拒否、の 3 つで抑える。
 - より強い分離が要るようになったら、同じプロビジョニングスクリプトで 2 台目を立てて `koroku` をもう 1 組動かす。マルチノード対応はしない。
 
-**本番利用で残る制約**: デプロイ時にコンテナ再作成による数秒の断がある。VPS 1 台なのでホスト障害時は全アプリが止まる。デプロイ時の断はデプロイ対象のアプリに限られる（7 章）。ホスト障害時の全停止は許容すると決定済み（2026-11-18）。
+**本番利用で残る制約**: デプロイ時にコンテナ再作成による数秒の断がある。VPS 1 台なのでホスト障害時は全アプリが止まる。デプロイ時の断はデプロイ対象のアプリに限られる（7 章）。ホスト障害時の全停止は許容する。
 
 ## 9. データモデル・API・UI
 
-テーブルは 4 つで足りる。
+データは SQLite の 1 ファイル（`koroku.db`）にある。マイグレーションは埋め込みの SQL を起動時に適用する。
 
-| テーブル | 主なカラム |
+| テーブル | 内容 |
 | --- | --- |
-| `apps` | `id`, `slug`（一意）, `repo_id`, `repo_full_name`, `default_branch`, `compose_path`, `web_service`, `web_port`, `host_port`（一意）, `healthcheck_path`, `desired_state`（running / stopped）, `relax_policy`, `current_deployment_id`, `env_source`, `env_example_path`（9.4） |
-| `env_vars` | `app_id`, `key`, `value_encrypted`（`app_id` + `key` で一意） |
-| `deployments` | `id`, `app_id`, `ref`, `commit_sha`, `commit_message`, `status`, `error`, `queued_at`, `started_at`, `finished_at`, `env_fingerprints`（9.2） |
-| `sessions` | `token_hash`, `id`, `github_user_id`, `expires_at`, `last_seen_at`, `ip`, `user_agent`（10.3） |
+| `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、必要な変数の読み方（`env_source`、`env_example_path`、9.4） |
+| `env_vars` | 環境変数。値は暗号化して保存（`app_id` + `key` で一意） |
+| `deployments` | ref、コミット、状態、エラー、時刻、環境変数の指紋（9.2） |
+| `app_domains` | 独自ドメイン（8.1） |
+| `backup_runs` | バックアップの実行記録（10.2） |
+| `sessions` | セッション（Cookie のハッシュ、表示用の ID、最終利用、IP、User-Agent。10.3） |
+| `login_events` | ログイン履歴（10.3） |
 
-**API（すべてセッション Cookie 必須、`/auth/*` を除く）**
+API はすべて JSON の REST で、ログとデプロイの進行は SSE で配信する。`/auth/*` を除き、セッション Cookie が要る。エンドポイントの一覧と形は [API.md](API.md) が正。
 
-| メソッドとパス | 用途 |
-| --- | --- |
-| `GET /auth/github/login`、`GET /auth/github/callback`、`POST /auth/logout` | ログイン・ログアウト |
-| `GET /api/session` | ログイン状態 |
-| `GET /api/repos`、`GET /api/repos/{owner}/{repo}/branches`、`GET /api/repos/{owner}/{repo}/commits?ref=` | リポジトリとデプロイ対象の選択 |
-| `GET /api/apps`、`POST /api/apps`、`GET / PATCH / DELETE /api/apps/{slug}` | アプリの CRUD。削除は `?volumes=true` で volume も消す |
-| `GET / PUT /api/apps/{slug}/env` | 環境変数（一覧と稼働中のリリースとの差、一括置換） |
-| `PUT / DELETE /api/apps/{slug}/env/{key}` | 環境変数 1 件の追加・変更・名前の変更・削除（9.2） |
-| `GET /api/apps/{slug}/env/requirements?ref=` | リポジトリが必要とする変数と、設定済みの変数との照合（9.4） |
-| `GET / POST /api/apps/{slug}/deployments` | 履歴、デプロイ開始（`{ref}` か `{sha}`） |
-| `GET /api/deployments/{id}`、`GET /api/deployments/{id}/logs`（SSE）、`POST /api/deployments/{id}/cancel` | デプロイ詳細とライブログ |
-| `POST /api/apps/{slug}/start`、`/stop`、`/restart` | 起動制御 |
-| `GET /api/apps/{slug}/services`、`GET /api/apps/{slug}/logs?service=&tail=`（SSE） | `compose ps` 相当と実行ログ |
-| `GET /api/system` | ディスク・メモリ使用量、Docker バージョン |
+### 9.1 管理 UI の構成と API
 
-**UI 画面**
+管理 UI は「上部バー + アプリ一覧（ホストの状態を常時表示）+ アプリ詳細（ヘッダーと横タブ: 概要 / デプロイ / ログ / 環境変数 / ドメイン / バックアップ / 設定）+ システム + セキュリティ」で構成する。画面の要素と、それを支える API の値は次のとおり。
 
-- アプリ一覧: 状態、URL、最終デプロイのコミットと時刻
-- アプリ作成: リポジトリ選択 → Compose ファイル検出 → 公開サービスとポートの指定
-- アプリ詳細: 概要／デプロイ（ブランチ・コミット選択、履歴、ライブログ）／ログ／環境変数／設定
-- システム: リソース使用量、手動 prune
-
-### 9.1 管理 UI の再設計に伴う API の追加（2026-11-18）
-
-管理 UI を「上部バー + アプリ一覧（ホストの状態を常時表示）+ アプリ詳細（ヘッダーと横タブ: 概要 / デプロイ / ログ / 環境変数 / ドメイン / バックアップ / 設定）+ システム」の構成に作り直す。画面構成の要件に対して、ここまでの API では取れない情報があるので、次を追加する。形は `docs/API.md` に書く。
-
-| 画面の要素 | 不足していたもの | 追加する API |
+| 画面の要素 | 必要な情報 | API |
 | --- | --- | --- |
-| アプリ一覧のホスト状態行、警告バナー | ログ退避の最終成功時刻、ディスク警告のしきい値、Caddy への設定投入の状態 | `GET /api/system` に `disk_limit_percent`、`log_archive`（`configured`、`last_success_at`、`last_error`）、`caddy`（`enabled`、`last_loaded_at`、`last_error`）を足す |
-| アプリ一覧の行、詳細ヘッダー | プライマリ URL、検証待ちドメインの有無 | アプリの JSON に `primary_url`（プライマリドメインがあればその URL、なければ自動割当の URL）と `pending_domains`（検証待ちの数）を足す。一覧のためにアプリごとにドメイン API を呼ばずに済ませる |
-| 概要タブのサービス一覧 | メモリ使用量と上限 | `GET /api/apps/{slug}/services` の各サービスに `memory_bytes` と `memory_limit_bytes` を足す（`docker stats --no-stream` の値。取れなければ `null`） |
-| デプロイタブの手順表示 | 手順の区切りと、手順ごとの所要時間 | デプロイログの手順の見出し行を `==> <RFC 3339 の時刻> <手順のキー> <表題>` の形にする。UI はこの行でログを手順に分け、次の見出し（または終了）までを所要時間とする。手順のキーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done` `cleanup` と、失敗時の `failed` `rollback`。DB に手順の表は持たない（ログファイルが唯一の記録で、SSE の再接続とも整合する）。自動ロールバックの結果も同じ理由でログの行から読み取り、デプロイの JSON にフィールドは足さない（UI が解釈する行は `docs/API.md`） |
-| バックアップタブ | 次回の実行予定、スナップショットのサイズ | `GET /api/backups` に `next_run_at`、スナップショットに `size_bytes`（restic が記録していれば。なければ `null`）を足す |
+| アプリ一覧のホスト状態行、警告バナー | ログ退避の最終成功時刻、ディスク警告のしきい値、Caddy への設定投入の状態 | `GET /api/system` の `disk_limit_percent`、`log_archive`（`configured`、`last_success_at`、`last_error`、`next_run_at`）、`caddy`（`enabled`、`last_loaded_at`、`last_error`）、`swap` |
+| アプリ一覧の行、詳細ヘッダー | プライマリ URL、検証待ちドメインの有無 | アプリの JSON の `primary_url`（プライマリドメインがあればその URL、なければ自動割当の URL）と `pending_domains`（検証待ちの数）。一覧のためにアプリごとにドメイン API を呼ばずに済む |
+| 概要タブのサービス一覧 | メモリ使用量と上限 | `GET /api/apps/{slug}/services` の各サービスの `memory_bytes` と `memory_limit_bytes`（`docker stats --no-stream` の値。取れなければ `null`） |
+| デプロイタブの手順表示 | 手順の区切りと、手順ごとの所要時間 | デプロイログの手順の見出し行（`==> <RFC 3339 の時刻> <手順のキー> <表題>`）。UI はこの行でログを手順に分け、次の見出し（または終了）までを所要時間とする。手順のキーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done` `cleanup` と、失敗時の `failed` `rollback`。DB に手順の表は持たない（ログファイルが唯一の記録で、SSE の再接続とも整合する）。自動ロールバックの結果も同じ理由でログの行から読み取り、デプロイの JSON にフィールドは持たない（UI が解釈する行は `docs/API.md`） |
+| バックアップタブ | 次回の実行予定、スナップショットのサイズ | `GET /api/backups` の `next_run_at`、スナップショットの `size_bytes`（restic が記録していれば。なければ `null`）、`GET /api/apps/{slug}/volumes`（下記） |
 | システム画面 | Docker のディスク内訳 | `GET /api/system/docker`（`docker system df` の結果: イメージ、コンテナ、volume、ビルドキャッシュそれぞれの件数と合計と、「不要なデータを削除」で空く量）。数秒かかりうるので `/api/system` とは分ける |
 
-システム画面を作る段階で、さらに 2 つ足した（2026-11-18）。どちらも既存の値からは求められない。
-
-- `GET /api/system` に `swap`（`total_bytes`、`used_bytes`。swap がない、または読めなければ `null`）。ビルド時のピークに備えて swap を 2GB 置いているので（10 章）、メモリと並べて使われ具合を見られるようにする。`/proc/meminfo` の `SwapTotal` と `SwapFree` から求める。
-- `log_archive` に `next_run_at`（次にログ退避が走る時刻。未設定なら `null`）。退避の間隔は設定値（既定 4 時間）で、UI からは分からないため。バックアップの `next_run_at` と対にして、システム画面の「次回」に出す。
-
-バックアップタブで「どの volume を取るか」を一覧から選べるようにするため、もう 1 つ足した（2026-11-18）。
-
-- `GET /api/apps/{slug}/volumes`: そのアプリの named volume の一覧（名前、バックアップから外しているか、Docker に実在するか）。それまでの UI は、過去のスナップショットの対象と除外リストから一覧を組み立てていたので、一度もスナップショットを取っていない volume は名前を手で入力しないと外せなかった。DB のデータディレクトリのように「最初のバックアップより前に外したい」volume こそ、この穴に落ちる。
+- `swap`（`total_bytes`、`used_bytes`。swap がない、または読めなければ `null`）は `/proc/meminfo` の `SwapTotal` と `SwapFree` から求める。ビルド時のピークに備えて swap を 2GB 置くので（10 章）、メモリと並べて使われ具合を見せる。
+- `log_archive.next_run_at` は次にログ退避が走る時刻（未設定なら `null`）。退避の間隔は設定値で UI からは分からないので、バックアップの `next_run_at` と対にしてシステム画面の「次回」に出す。
+- `GET /api/apps/{slug}/volumes` は、そのアプリの named volume の一覧（名前、バックアップから外しているか、Docker に実在するか）。バックアップタブで、一度もスナップショットを取っていない volume（DB のデータディレクトリなど、最初のバックアップより前に外したいもの）も選べるようにするため。
   - 「アプリの volume」の定義はバックアップと同じにする（10.2 の細則）。バックアップが使う列挙の処理（`internal/backup`）をそのまま呼び、別の定義を作らない。
   - 列挙は `docker volume ls` と `docker volume inspect` だけで、restic もオブジェクトストレージも使わない。バックアップが未設定のホストでも応答する。
   - 一度もデプロイしていないアプリは volume がまだないので、空の一覧を返す（エラーにしない）。
   - 除外リストにあるが Docker に実在しない名前（先に外しておいた、あるいは volume を消した）も `exists: false` として一覧に含める。UI に出ないと対象へ戻せないため。
   - volume の大きさは返さない。求めるにはディレクトリを歩く（`docker system df -v` も同じ）必要があり、タブを開くたびに走らせるには重い。スナップショットの `size_bytes` が目安になる。
 
-バックアップタブ自体の API（一覧、実行、リストア、ダンプのダウンロード）は 10.2 の内容を M5 で `docs/API.md` に定義済み。環境変数の画面の「再デプロイ」はデプロイの `POST` を呼ぶだけで、専用の API は作らない（保存とは分けた。9.2）。状態の自動更新はポーリング（一覧と詳細は数秒間隔、デプロイ中のログは SSE）で行い、状態変化を配信する専用の SSE は作らない（アプリ 3〜5 個の規模では不要）。
+バックアップの API（一覧、実行、リストア、ダンプのダウンロード）は 10.2 の内容で、形は `docs/API.md` にある。環境変数の画面の「再デプロイ」はデプロイの `POST` を呼ぶだけで、専用の API はない（保存とデプロイは分ける。9.2）。状態の自動更新はポーリング（一覧と詳細は数秒間隔、デプロイ中のログは SSE）で行い、状態変化を配信する専用の SSE は作らない（アプリ 3〜5 個の規模では不要）。
 
-### 9.2 環境変数を 1 件ずつ確定する（2026-11-19）
+### 9.2 環境変数を 1 件ずつ確定する
 
-環境変数の画面は、表で全件を編集してから「保存」「保存して再デプロイ」で一括置換する作りだった。1 件だけ直したいときにも画面全体の「未保存の変更」を抱えることになり、別のタブで開いた古い一覧で保存すると他の行の変更を消してしまう。そこで、行ごとに編集して確定（保存）する形に変える。
+環境変数は行ごとに編集して確定（保存）する。全件を一括置換する形だと、1 件だけ直したいときにも画面全体の「未保存の変更」を抱え、別のタブで開いた古い一覧で保存すると他の行の変更を消してしまうため。
 
-- API に `PUT /api/apps/{slug}/env/{key}`（追加・変更、本文の `key` で名前の変更）と `DELETE /api/apps/{slug}/env/{key}` を足す。名前の変更は 1 つのトランザクションで行い、「削除して追加」の途中の状態を作らない。一括置換の `PUT /api/apps/{slug}/env` は「.env 形式で編集」のために残す。
+- API は `PUT /api/apps/{slug}/env/{key}`（追加・変更、本文の `key` で名前の変更）と `DELETE /api/apps/{slug}/env/{key}`。名前の変更は 1 つのトランザクションで行い、「削除して追加」の途中の状態を作らない。一括置換の `PUT /api/apps/{slug}/env` は「.env 形式で編集」に使う。
 - 保存はデプロイを伴わない。行ごとに「保存して再デプロイ」を付けると、3 件直せば 3 回デプロイが走るため。代わりに、DB の値と稼働中のリリースの値の差を「未反映の変更」として画面に出し、再デプロイのボタンはそこに 1 つだけ置く。
 - 差を知るため、デプロイの手順 3 で env ファイルを作るときに、各変数の指紋（キーと値の HMAC-SHA256 を 16 バイトに切ったもの）を `deployments.env_fingerprints` に JSON で記録する。`GET /api/apps/{slug}/env` は、`current_deployment_id` のデプロイの指紋と今の DB を比べて、変数ごとの `pending`（`added` / `changed`）と、削除したがまだ稼働中の `removed` を返す。
   - 値そのものや素のハッシュは記録しない。短い値は素のハッシュから総当たりで戻せるため。HMAC の鍵はマスターキーから導出する（`HMAC(master_key, "koroku env fingerprint v1")`）。マスターキーを差し替えると比べられなくなるが、それは全件「変更」と出るだけで、再デプロイすれば揃う。
-  - 稼働中のリリースがない（未デプロイ）か、この列を足す前のデプロイが稼働中のときは比べられないので、`compared: false` を返し、UI は差を出さない。
+  - 稼働中のリリースがない（未デプロイ）か、指紋を記録していないデプロイが稼働中のときは比べられないので、`compared: false` を返し、UI は差を出さない。
   - 指紋は値を含まないので、再ログインから 10 分を過ぎて値を隠しているときも差は返す。
 - 失うもの: 関連する変数（接続先とパスワードなど）を同時に変えられない。1 件目を保存した時点で、半端な組み合わせが DB に残る。デプロイは手動でしか始まらないので、その間に誰かがデプロイしない限り稼働中のアプリには影響しない。まとめて変えたいときは「.env 形式で編集」（一括置換）を使う。
 
-### 9.3 コンテナのリソースの内訳（2026-11-20）
+### 9.3 コンテナのリソースの内訳
 
-システム画面の「ホストのリソース」はホスト全体の使用量しか出さないので、どのアプリがメモリや CPU を使っているかが分からない。アプリ 3〜5 個を 4GB のホストに詰める構成では、ここが一番知りたい。そこで、稼働中のコンテナのメモリと CPU をアプリごとにまとめて出す。
+システム画面は、ホスト全体の使用量に加えて、稼働中のコンテナのメモリと CPU をアプリごとにまとめて出す。アプリ 3〜5 個を 4GB のホストに詰める構成では、どのアプリが使っているかが一番知りたいため。
 
-- API は `GET /api/system/containers`。`docker stats --no-stream` は CPU 使用率を 2 回の計測の差から出すので、手元で 2.5 秒かかった。`/api/system` に混ぜると一覧画面のホスト状態行まで遅くなるため、`/api/system/docker` と同じく分ける。
+- API は `GET /api/system/containers`。`docker stats --no-stream` は CPU 使用率を 2 回の計測の差から出すので、数秒かかる。`/api/system` に混ぜると一覧画面のホスト状態行まで遅くなるため、`/api/system/docker` と同じく分ける。
 - 取り方は 3 つのコマンド。`docker stats --no-stream --no-trunc --format json`（稼働中の全コンテナ）と `docker info`（CPU のコア数と、Docker から見たメモリの総量）を並行に走らせ、終わってから stats に出たコンテナを `docker container inspect` で引く。inspect からは Compose のラベル（`com.docker.compose.project`、`com.docker.compose.service`）とメモリ上限（`HostConfig.Memory`）を取る。stats の出力にはラベルがなく、上限は「なし」でもホストのメモリ量が出て区別できないため。
 - アプリへの振り分けは、プロジェクト名が DB にあるアプリの `koroku-<slug>` と一致するかで決める。それ以外（koroku の外で動かしているコンテナ、Compose 以外のコンテナ、手元の開発環境の `koroku-dev` のように `koroku-` で始まっても DB にないもの）は 1 つの「その他」にまとめる。合計が Docker 全体の使用量と一致するように、捨てずに出す。
 - 稼働中のコンテナだけを出す（停止中のコンテナは stats に出ず、何も使っていない）。アプリのコンテナが 1 つも動いていなければ、そのアプリの行は出さない。
-- **CPU は `docker stats` と同じく 1 コアを 100% とする値で返す**（`CPUPerc` そのもの）。2 コアのホストでは 200% まで振れる。初めはコア数で割ってホスト全体に対する割合（0〜100）にしていたが、利用者の判断で 1 コア基準に改めた（2026-11-20）。`docker stats` や `top` で見慣れた読み方と同じ数字が出るほうが、手元で確かめた値と突き合わせやすいため。コア数は応答に含め、UI は「このホストは N コア、最大 N×100%」と書き添え、メーターは N×100% を満杯として描く（メモリやディスクと同じく 0〜100% の長さで比べられるように）。値は stats の 2 回の計測の間（約 1 秒）の瞬間値で、平均ではない。
+- **CPU は `docker stats` と同じく 1 コアを 100% とする値で返す**（`CPUPerc` そのもの）。2 コアのホストでは 200% まで振れる。`docker stats` や `top` で見慣れた読み方と同じ数字が出るほうが、手元で確かめた値と突き合わせやすいため。コア数は応答に含め、UI は「このホストは N コア、最大 N×100%」と書き添え、メーターは N×100% を満杯として描く（メモリやディスクと同じく 0〜100% の長さで比べられるように）。値は stats の 2 回の計測の間（約 1 秒）の瞬間値で、平均ではない。
 - メモリの使用量は stats の値（cgroup の使用量からページキャッシュの非アクティブ分を除いたもの。`docker stats` の表示と同じ）。割合の分母は `docker info` のメモリ総量（VPS ではホストの `MemTotal` と同じ）。上限は `HostConfig.Memory` で、0（上限なし）は `null`。アプリの上限の合計は、そのアプリの稼働中のコンテナすべてに上限があるときだけ出す（koroku は override で全サービスに付けるので、普通は出る）。
 - 競合: stats のあとで inspect する間にコンテナが消えると、inspect は `No such container` で失敗するが、残りのコンテナの出力は出す。その場合は出力を使い、消えたコンテナは除く（消えたものは何も使っていない）。stats と inspect が Docker デーモンのエラーで失敗したときは、`docker system df` と同じく数回やり直す。
 - 履歴は持たない。画面を開いている間、ホストの状態と同じ 30 秒間隔で取り直す。
 
-### 9.4 リポジトリが必要とする環境変数との照合（2026-11-20）
+### 9.4 リポジトリが必要とする環境変数との照合
 
-アプリのコードが新しい環境変数を使い始めたとき、koroku の画面には何も出ず、デプロイして初めて（あるいはデプロイが成功したあとで）設定漏れに気づいていた。そこで、リポジトリの側に「必要な変数の一覧」を書いてもらい、環境変数の画面とデプロイの前に、設定済みの変数と照らし合わせて見せる。
+リポジトリの側に「必要な変数の一覧」を書いてもらい、環境変数の画面とデプロイの前に、設定済みの変数と照らし合わせて見せる。アプリのコードが新しい環境変数を使い始めたときの設定漏れに、デプロイする前に気づけるようにするため。
 
 **一覧の取り方（アプリ設定で選ぶ）**
 
@@ -432,8 +404,8 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | `dotenv` | リポジトリの `.env.example`（パスは `env_example_path` で変えられる） | 区別しない（すべて必須） | キーの直前に続くコメント行 |
 | `off` | 読まない | — | — |
 
-- **既定を `compose` にした理由**: `koroku` はもともと `--env-file` で補間に使う変数を渡しており（6 章）、`${VAR}` の参照はリポジトリに必ずある Compose ファイルに書ける。`.env.example` を置いていないリポジトリで「ファイルがない」と出続けることもない。`${VAR}` を 1 つも書いていなければ「必要な変数はない」と出るだけで害がない。既存のアプリもマイグレーションで `compose` にする。利用者向けの Skill（`plugins/koroku/skills/prepare-app`）も、必須の変数を `${VAR:?説明}`、任意の変数を `${VAR:-既定値}` で Compose に書く形を勧める。
-- **`compose` の判定は `docker compose config --variables` と少し変えている**: Compose の `Required` は `?` の形だけで、`${VAR}` は任意と扱う。しかし未設定の `${VAR}` は空文字に置き換わって起動するので、ほぼ確実に設定漏れである。そこで既定値のない参照も必須として出し、空でよい変数は `${VAR:-}` と書けば任意になるようにした。既定値の中に入れ子になった参照（`${A:-${B}}` の `B`）は、外側が未設定のときだけ評価されるので任意とする。
+- **既定が `compose` である理由**: `koroku` は `--env-file` で補間に使う変数を渡しており（6 章）、`${VAR}` の参照はリポジトリに必ずある Compose ファイルに書ける。`.env.example` を置いていないリポジトリで「ファイルがない」と出続けることもない。`${VAR}` を 1 つも書いていなければ「必要な変数はない」と出るだけで害がない。利用者向けの Skill（`plugins/koroku/skills/prepare-app`）も、必須の変数を `${VAR:?説明}`、任意の変数を `${VAR:-既定値}` で Compose に書く形を勧める。
+- **`compose` の判定は `docker compose config --variables` と少し変えている**: Compose の `Required` は `?` の形だけで、`${VAR}` は任意と扱う。しかし未設定の `${VAR}` は空文字に置き換わって起動するので、ほぼ確実に設定漏れである。そこで既定値のない参照も必須として出し、空でよい変数は `${VAR:-}` と書けば任意になる。既定値の中に入れ子になった参照（`${A:-${B}}` の `B`）は、外側が未設定のときだけ評価されるので任意とする。
 - **`dotenv` に必須と任意の区別がない理由**: `.env.example` には区別を書く決まった方法がない。コメントの書き方で推し量ると誤判定するので、すべて必須として扱い、区別が欲しければ `compose` を使うよう画面と Skill で案内する。
 
 **Compose の参照の読み取り**
@@ -458,12 +430,12 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - GitHub の contents API（installation token）で、ref のコミットのファイルを読む。clone はしない。ブランチ名はまずデプロイと同じ方法でコミット SHA に解決し、Compose ファイルのパスの自動検出（ルートの一覧）と本体の読み取りを SHA で行う。
 - 結果は（リポジトリ、SHA、方式、パス）をキーに、プロセス内に 64 件までキャッシュする。SHA の中身は変わらないので期限は付けない。環境変数を 1 件保存するたびに画面が照合し直しても、GitHub への問い合わせは SHA の解決 1 回で済む。キャッシュするのはキーと説明だけで、値は持たない。「ファイルがない」はそのコミットでは変わらないのでキャッシュし、ほかの失敗はキャッシュしない。
 - GitHub への問い合わせは全体で 15 秒で打ち切る。
-- GitHub App で読めないリポジトリは、認証なしの contents API で読む（2026-11-20 に変更。利用者の依頼で public リポジトリにも対応した。当初は 1 時間 60 回の制限を理由に使わなかった）。対象は、App がインストールされていないリポジトリ、App そのものが未設定のホスト、`repo_url` が `https://github.com/<owner>/<repo>`（`.git` 付きも可）のアプリ。
+- GitHub App で読めないリポジトリは、認証なしの contents API で読む。対象は、App がインストールされていないリポジトリ、App そのものが未設定のホスト、`repo_url` が `https://github.com/<owner>/<repo>`（`.git` 付きも可）のアプリ。
   - 制限は送信元 IP ごとに 1 時間 60 回で、koroku の画面からの照合だけがこれを使う。1 コミットにつき 2 回（ルートの一覧とファイル本体）で、結果はコミットごとにキャッシュするので、新しいコミットを 1 時間に 30 個まで照合できる。ブランチからコミットへの解決は `git ls-remote`（7 章のデプロイと同じ）で、この回数に入らない。
   - 超えたら `rate_limited` を返し、画面は照合なしで使える。デプロイは git で取得するので影響しない。
   - 認証なしで 404 なら、private か存在しないリポジトリなので `repo_unavailable` にする。
-- 読めなかったときもエラーにせず、200 で `status: "unavailable"` と理由を返し、画面は照合なしで通常どおり使えるようにする。理由は `file_not_found`（ファイルがない）、`repo_unavailable`（GitHub App からも認証なしでも読めない。private リポジトリに App がインストールされていないなど）、`unsupported_repo`（`repo_url` が github.com 以外。GitHub の API では読めない）、`ref_not_found`、`too_large`、`rate_limited`、`github_error`。`not_configured` は、認証なしで読めるようになったので返さなくなった（古い画面のために型には残す）。
-- 不採用案: デプロイの手順 2 で取得したチェックアウトから読む。デプロイ前に知りたいという目的に合わない。
+- 読めなかったときもエラーにせず、200 で `status: "unavailable"` と理由を返し、画面は照合なしで通常どおり使えるようにする。理由は `file_not_found`（ファイルがない）、`repo_unavailable`（GitHub App からも認証なしでも読めない。private リポジトリに App がインストールされていないなど）、`unsupported_repo`（`repo_url` が github.com 以外。GitHub の API では読めない）、`ref_not_found`、`too_large`、`rate_limited`、`github_error`。`not_configured` は返さない（型にだけ残っている）。
+- デプロイの手順 2 で取得したチェックアウトからは読まない。デプロイ前に知りたいという目的に合わないため。
 
 ## 10. セキュリティと運用
 
@@ -474,11 +446,11 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - **信頼モデル**: デプロイするのは自分のリポジトリだけ。他人のコードを動かす前提の隔離（gVisor 等）は持たない。
 - **認証**: GitHub ログイン後、ユーザー ID が `config.toml` の許可 ID と一致した場合のみセッションを発行する。Cookie は `HttpOnly`、`Secure`、`SameSite=Lax`。変更系 API は `Origin` ヘッダーを検証する。GitHub の 2 段階認証の必須化、危険な操作の前の再ログイン、セッションの一覧とログイン履歴は 10.3。
 - **待受**: `koroku` と Caddy admin API は 127.0.0.1 のみ。外部公開は 22、80、443。
-- **残っている前提（脆弱性調査、2026-11-18）**: ポリシー検査は「自分のリポジトリを誤って危険な構成でデプロイしない」ための検査で、悪意あるリポジトリを安全に動かす隔離ではない。「検査を緩める」フラグを立てたアプリには、上の保護の多くが効かない（フラグは 1 つで、項目ごとには選べない）。Caddy の admin API は認証なしの TCP（ループバック）なので、ホストのネットワークに入れたコンテナからは設定を書き換えられる。ログのマスクは環境変数の値そのものとの一致だけで、3 文字未満の値や、base64 などに変換された値は隠せない。
+- **前提と限界**: ポリシー検査は「自分のリポジトリを誤って危険な構成でデプロイしない」ための検査で、悪意あるリポジトリを安全に動かす隔離ではない。「検査を緩める」フラグを立てたアプリには、上の保護の多くが効かない（フラグは 1 つで、項目ごとには選べない）。Caddy の admin API は認証なしの TCP（ループバック）なので、ホストのネットワークに入れたコンテナからは設定を書き換えられる。ログのマスクは環境変数の値そのものとの一致だけで、3 文字未満の値や、base64 などに変換された値は隠せない。
 - **ポート公開の抑止**: Docker が publish したポートの通信は ufw の設定を通らずに届く（[Packet filtering and firewalls](https://docs.docker.com/network/packet-filtering-firewalls/)）。ufw に頼らず、6 章の override で全サービスの `ports` を消すか 127.0.0.1 に限定する。
 - **シークレット**: 環境変数の値は AES-256-GCM で暗号化して SQLite に保存する。マスターキーは `/etc/koroku/master.key`。UI は既定でマスク表示。
 
-**管理 UI の保護の細則（脆弱性調査での対応、2026-11-18）**
+**管理 UI の保護の細則**
 
 - **アプリは管理 UI の兄弟サブドメインで動く**（`<slug>.<base>` と `console.<base>`）。ブラウザーから見ると same-site なので、`SameSite=Lax` はアプリからのリクエストを止めない。そのため次を重ねている。
   - Cookie 名に `__Host-` プレフィックスを付ける（HTTPS のとき）。兄弟サブドメインのページは親ドメイン向けの Cookie を置けるが、`__Host-` 付きの Cookie はそのホスト自身からしか設定できないので、アプリがセッションやログイン用 state の Cookie を差し込んだり上書きしたりできない。
@@ -501,16 +473,16 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - **メモリ**: ビルド時のピークに備えて swap を 2GB 置く。VPS は 2 vCPU、4GB RAM、40GB ディスクを出発点にする（未計測の目安）。
 - **バックアップ**: 基盤の設定とアプリのデータを日次でオブジェクトストレージに退避する（10.2）。
 - **koroku の更新**: バイナリを差し替えて `systemctl restart koroku`。アプリのコンテナは影響を受けない。
-- **起動制御と削除（M5 の実装で確定、2026-11-18）**
+- **起動制御と削除**
   - 停止は `docker compose stop`、起動は稼働中リリースのファイルで `up -d --wait`（設定を確実に揃えるため。リリースのファイルが残っていなければ `docker compose start`）、再起動は `docker compose restart`。停止・起動のたびに Caddy 設定を再投入し、停止中は 503 の固定ページになる。
   - デプロイと手動操作はアプリ単位で直列化する。デプロイが `queued` か `running` のアプリへの操作は 409（`busy`）で断り、操作の実行中に始まったデプロイは操作の完了を待つ。同じアプリに対して `docker compose` を同時に走らせないため。
-  - 削除は `docker compose down`（`?volumes=true` なら `--volumes` に加え、プロジェクトのラベルが付いた volume を明示的に消す）→ リリース用イメージの削除 → DB の行とアプリのディレクトリの削除 → Caddy 設定の再投入、の順。`down` に失敗したら DB には触れない。volume を残して削除したあとに同じ slug でアプリを作り直すと、プロジェクト名が同じなので残した volume がそのまま使われる（結合テストで確認）。
+  - 削除は `docker compose down`（`?volumes=true` なら `--volumes` に加え、プロジェクトのラベルが付いた volume を明示的に消す）→ リリース用イメージの削除 → DB の行とアプリのディレクトリの削除 → Caddy 設定の再投入、の順。`down` に失敗したら DB には触れない。volume を残して削除したあとに同じ slug でアプリを作り直すと、プロジェクト名が同じなので残した volume がそのまま使われる。
   - `docker builder prune --all --filter until=168h` は毎日実行する。対象は「1 週間使われていないビルドキャッシュ」なので効果は週 1 回と同じで、`koroku` を再起動しても実行の機会を逃さない。
-  - `--all` を付ける（2026-11-20 に変更）。付けないと、Docker に組み込みの BuildKit は、層がイメージと共有されているキャッシュの記録を消さない（手元で、8 日使われていない共有の記録が `--all` なしでは残り、ありで消えることを確かめた）。キャッシュは手前の記録から順にしか消えないので、ビルドの連なりの末端がたいていイメージの層である以上、その手前の古いキャッシュも残る。`--all` でもイメージが使う層は消えない（キャッシュの記録が外れるだけ）。
-  - システム画面の「削除で空く」量は、`docker system df` の回収可能（Reclaimable）ではなく、koroku の削除が実際に消す分を koroku が見積もる。Docker の値は、タグ付きでも使われていないイメージ（ロールバック用に残した直近のリリース、停止中のアプリのイメージ）と、まだ 1 週間たっていないキャッシュを含むので、ボタンを押しても減らない量が出ていた（2026-11-20）。`docker system df -v` の明細から、どのコンテナにも使われていないタグのないイメージの固有サイズと、自身もその先も 1 週間使われておらず使用中でもない、イメージと共有していないキャッシュの合計を求める。volume とコンテナは消さないので 0 とする。
-  - Compose がビルドしたイメージ（`com.docker.compose.project` のラベルが付く）は、タグがなくても見込みに入れない。層がビルドキャッシュにも残っているので、イメージを消しても空かない（手元で、タグのないイメージ 2 つ 1.1GB を消して `Total reclaimed space: 0B` だった）。どの層がどのキャッシュと重なるかは `docker system df` から分からないので、見込みは少なめに倒す。押したあとは、Docker が空けたと報告した量（`Total reclaimed space` と `Total`）の合計を画面に出し、実際の結果を示す。
-  - Caddy 設定は 5 分ごとに、内容が変わっていなくても投入し直す。Caddy が単独で再起動すると投入済みの設定を忘れるため。同一内容の投入は Caddy 側で何もしないので負荷にならない（12 章の確認結果）。
-- **プロビジョニング**: 新規 VPS を 1 本のスクリプトで構築する（Docker、Caddy、`koroku` の unit、swap、ログ設定）。
+  - `--all` を付ける。付けないと、Docker に組み込みの BuildKit は、層がイメージと共有されているキャッシュの記録を消さない。キャッシュは手前の記録から順にしか消えないので、ビルドの連なりの末端がたいていイメージの層である以上、その手前の古いキャッシュも残る。`--all` でもイメージが使う層は消えない（キャッシュの記録が外れるだけ）。
+  - システム画面の「削除で空く」量は、`docker system df` の回収可能（Reclaimable）ではなく、koroku の削除が実際に消す分を koroku が見積もる。Docker の値は、タグ付きでも使われていないイメージ（ロールバック用に残した直近のリリース、停止中のアプリのイメージ）と、まだ 1 週間たっていないキャッシュを含み、ボタンを押しても減らない量になるため。`docker system df -v` の明細から、どのコンテナにも使われていないタグのないイメージの固有サイズと、自身もその先も 1 週間使われておらず使用中でもない、イメージと共有していないキャッシュの合計を求める。volume とコンテナは消さないので 0 とする。
+  - Compose がビルドしたイメージ（`com.docker.compose.project` のラベルが付く）は、タグがなくても見込みに入れない。層がビルドキャッシュにも残っているので、イメージを消しても空かない。どの層がどのキャッシュと重なるかは `docker system df` から分からないので、見込みは少なめに倒す。押したあとは、Docker が空けたと報告した量（`Total reclaimed space` と `Total`）の合計を画面に出し、実際の結果を示す。
+  - Caddy 設定は 5 分ごとに、内容が変わっていなくても投入し直す。Caddy が単独で再起動すると投入済みの設定を忘れるため。同一内容の投入は Caddy が `config is unchanged` として何もしないので負荷にならない。
+- **プロビジョニング**: 新規 VPS を 1 本のスクリプト（`deploy/provision.sh`）で構築する。Docker、Caddy、restic、`koroku` の unit、swap、Docker のログ設定、ufw、SSH の鍵認証化（10.4）。手順は `docs/OPERATIONS.md`。
 
 ### 10.1 ログ収集
 
@@ -528,12 +500,12 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 - API: `GET /api/apps/{slug}/logs?service=&from=&to=&q=`、`GET /api/apps/{slug}/logs/archives`、`GET /api/apps/{slug}/logs/archives/url?key=`。
 
-**ログ収集の細則（M5 の実装と実機確認で確定、2026-11-18）**
+**ログ収集の細則**
 
 - ローカルのファイルは 1 行が `<UTC の時刻（ナノ秒まで）> <本文>`。日付の区切りと退避の時間枠は `config.toml` の `timezone`（既定 `Asia/Tokyo`）で決める。
 - サービス名は `docker compose logs` の行頭（コンテナ名からプロジェクト名を除いたもの）から末尾の `-<番号>` を落として求める。`container_name` を独自に指定したサービスはその名前で記録される（Compose がそう出力するため）。
 - 再開時は、サービスごとに最後に書いた時刻の 30 秒前から `--since` で読み直し、「サービス・時刻・本文」が一致する行を数えて重複を落とす。同じ時刻の別の行は残す。Docker 側に行が残っている限り欠落しない。
-- 1 回の `logs --follow` の中で、同じコンテナの「時刻・本文」が一致する行がもう一度出たら捨てる（コンテナごとに直近 4096 行を覚えておく）。`docker compose logs --follow` は、コンテナの起動と重なって開始されると同じコンテナに二重に接続し、以後その行をすべて 2 回ずつ出すことがある（12 章の実機確認）。停止中のアプリを待っているフォロワーはデプロイのたびにこの状況になるので、対処しないと保存されるログとオブジェクトストレージへの退避が倍になる。Docker は行ごとにナノ秒の時刻を付けるので、同じコンテナで時刻も本文も同じ行はアプリが 2 回出力したものではない。別レプリカ（`web-1` と `web-2`）の同じ行は残す。
+- 1 回の `logs --follow` の中で、同じコンテナの「時刻・本文」が一致する行がもう一度出たら捨てる（コンテナごとに直近 4096 行を覚えておく）。`docker compose logs --follow` は、コンテナの起動と重なって開始されると同じコンテナに二重に接続し、以後その行をすべて時刻まで同じ内容で 2 回ずつ出すことがある。停止中のアプリを待っているフォロワーはデプロイのたびにこの状況になるので、対処しないと保存されるログとオブジェクトストレージへの退避が倍になる。Docker は行ごとにナノ秒の時刻を付けるので、同じコンテナで時刻も本文も同じ行はアプリが 2 回出力したものではない。別レプリカ（`web-1` と `web-2`）の同じ行は残す。
 - 1 行は 16 KiB で切り、不正な UTF-8 と制御文字は置き換える。ログの本文は `koroku` 自身のログやエラーメッセージに出さない（アプリの出力に何が入るか分からないため）。
 - Caddy のアクセスログは、同じアプリの擬似サービス `_access` として取り込む。`koroku` が止まっている間にローテートされて消えた分は読めない。
 - 退避は「日ごとのファイルのどこまで送ったか」をバイト位置で記録し、送る範囲を保存してからアップロードする。失敗や再起動のあとは同じ範囲を同じキーへ送り直すので、重複も欠落も起きない。失敗した時間枠は次回（および 10 分後の再試行）にその時間枠のキーで送る。空の時間枠は何も送らない。
@@ -570,7 +542,7 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - オブジェクトストレージにバケットを作り、そのバケットに限定したアクセスキー（Access Key ID / Secret Access Key）を発行して `/etc/koroku/config.toml` に置く。
 - restic のリポジトリパスワードは `/etc/koroku/restic.key`。これとオブジェクトストレージの認証情報は VPS の外（パスワードマネージャなど）にも必ず控える。失うとホスト全損時に復元できない。
 
-**バックアップの細則（M5 の実装と実機確認で確定、2026-11-18）**
+**バックアップの細則**
 
 - restic は 0.17 以上が要る（リポジトリが未作成かどうかを終了コード 10 で判定するため）。初期化はバックアップのときだけ行い、一覧やリストアでは行わない。バケットそのものは `koroku` も restic も作らない。存在しないバケットを指定すると restic が数分リトライしたあと失敗する。
 - タグは、基盤が `system` と `kind:system`、アプリが `app:<slug>`・`kind:volume|dump`・`target:<volume 名かダンプフックのサービス名>`。ホスト名は固定の `koroku`。volume と基盤はディレクトリの中から `.` として取るので、ホストやパスが変わってもリストアできる。世代管理は `forget --group-by tags` で、volume・ダンプ・基盤それぞれが自分の世代（日次 7・週次 4・月次 6）を持つ。
@@ -582,19 +554,17 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 - 稼働中のアプリの volume を取るとき、読めないファイルがあっても（restic の終了コード 3）スナップショットは残し、警告として記録する。
 - restic の認証情報は環境変数で渡し、引数・エラー・ログには出さない。キャッシュは `/var/lib/koroku/restic-cache` に置く（systemd のサービスには HOME の下のキャッシュがないため）。
 - `koroku restore-system` は、基盤のスナップショットを取り出し、`koroku.db` と設定ディレクトリのファイルを置く。既にあるファイルは上書きせず、バックアップにあった版を隣に `<名前>.restored-<時刻>` として置く。`koroku.db` が既にあるホストでは `--force` なしでは実行しない。
-- 基盤のバックアップで設定ディレクトリをコピーするとき、その下にあるデータディレクトリ（`data_dir`）と、コピー先の作業ディレクトリ自身は除外する。ローカル環境では両方を `data/dev` の下に置くため、除外しないと作業ディレクトリを何重にもコピーし続けて失敗した（2026-11-19、ローカル環境で検出）。本番は `/etc/koroku` と `/var/lib/koroku` が別なので影響しない。
-- volume のリストアで中身を退避する移動は `rename` で行い、`EXDEV`（マウントをまたぐ移動）で失敗したときだけ、所有者・パーミッション・時刻を保ったコピーと元の削除に切り替える。事前に「同じファイルシステムか」は確かめているが、同じファイルシステムでも別の bind mount を経由すると Linux は `rename` を拒む（ローカル環境は、`koroku` のコンテナにデータディレクトリと Docker の volume ディレクトリを別々にマウントしている）。コピーではハードリンクと拡張属性は保たれないが、退避は手作業での救出用なので許容する。ソケット・デバイス・名前付きパイプはコピーせず、リストアを失敗させて元に戻す。本番は同じマウントなので従来どおり `rename` になる。
+- 基盤のバックアップで設定ディレクトリをコピーするとき、その下にあるデータディレクトリ（`data_dir`）と、コピー先の作業ディレクトリ自身は除外する。ローカル環境では両方を `data/dev` の下に置くので、除外しないと作業ディレクトリを何重にもコピーし続けてしまう。本番は `/etc/koroku` と `/var/lib/koroku` が別なので関係しない。
+- volume のリストアで中身を退避する移動は `rename` で行い、`EXDEV`（マウントをまたぐ移動）で失敗したときだけ、所有者・パーミッション・時刻を保ったコピーと元の削除に切り替える。事前に「同じファイルシステムか」は確かめるが、同じファイルシステムでも別の bind mount を経由すると Linux は `rename` を拒むため（ローカル環境は、`koroku` のコンテナにデータディレクトリと Docker の volume ディレクトリを別々にマウントしている）。コピーではハードリンクと拡張属性は保たれないが、退避は手作業での救出用なので許容する。ソケット・デバイス・名前付きパイプはコピーせず、リストアを失敗させて元に戻す。本番は同じマウントなので常に `rename` になる。
 
-実装は M5。受け入れシナリオに「バックアップ取得 → volume を空にする → リストアでデータが戻る」と「4 時間以上前のログがオブジェクトストレージにあり UI からダウンロードできる」を加える。
+### 10.3 ログインの強化
 
-### 10.3 ログインの強化（2026-11-19）
-
-本番運用を前にして、管理 UI の認証を 3 点強めた。許可ユーザー以外がログインできないことは M3 から変わらない。ここで扱うのは「許可ユーザーの GitHub アカウントか、koroku のセッション Cookie が盗まれた場合」の被害を小さくすることと、盗まれたことに気づけるようにすること。管理 UI をネットワークの段階で閉じる案（Tailscale、クライアント証明書など）は別に検討する。
+許可ユーザー以外はログインできない（5 章）。そのうえで、「許可ユーザーの GitHub アカウントか、koroku のセッション Cookie が盗まれた場合」の被害を小さくし、盗まれたことに気づけるように、次の 3 つを重ねる。管理 UI をネットワークの段階で閉じる仕組み（Tailscale、クライアント証明書など）は持たない。
 
 **GitHub の 2 段階認証を必須にする**
 
 - ログイン時の `GET /user` の応答の `two_factor_authentication` が `true` のときだけセッションを発行する。`false` なら `two_factor_required` で拒否する。
-- この項目は GitHub のドキュメントでは「private user の応答」にだけあり、GitHub App のユーザーアクセストークンで返るかは書かれていない。項目がない応答は `two_factor_unknown` で拒否する（確かめられないものを通さない）。返らないと実機で分かった場合に締め出されないよう、`[github] require_two_factor = false` で検査を外せる。既定は `true`。外したときは起動時に警告をログに出す。
+- この項目は GitHub のドキュメントでは「private user の応答」にだけあり、GitHub App のユーザーアクセストークンで返るかは書かれていない。項目がない応答は `two_factor_unknown` で拒否する（確かめられないものを通さない）。返らない環境で締め出されないよう、`[github] require_two_factor = false` で検査を外せる。既定は `true`。外したときは起動時に警告をログに出す。
 - 拒否したログインも、GitHub のユーザー ID が分かっているのでログイン履歴に残す（下記）。
 
 **危険な操作の前に再ログインを求める（step-up）**
@@ -612,14 +582,14 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 **セッションの一覧と失効、ログイン履歴**
 
-- `sessions` に `id`（画面と API で使う識別子。乱数 8 バイトの 16 進。Cookie のハッシュは外に出さない）、`last_seen_at`、`ip`、`user_agent` を足す。`last_seen_at` は 1 分以上たっていれば更新する（ポーリングのたびに書き込まないため）。
+- `sessions` は `id`（画面と API で使う識別子。乱数 8 バイトの 16 進。Cookie のハッシュは外に出さない）、`last_seen_at`、`ip`、`user_agent` を持つ。`last_seen_at` は 1 分以上たっていれば更新する（ポーリングのたびに書き込まないため）。
 - クライアントの IP: `koroku` はループバックで待ち受け、Caddy を経由して届く。接続元がループバックのときだけ `X-Forwarded-For` の最後の値を使う。Caddy は既定でクライアントから来た `X-Forwarded-For` を信用せず、接続元の IP で置き換えるので、偽装できない。User-Agent は 512 バイトで切る。
 - `login_events` テーブル: 時刻、結果（`succeeded`、`not_allowed`、`two_factor_required`、`two_factor_unknown`）、GitHub のユーザー ID と login、IP、User-Agent。GitHub のユーザーが分かったものだけを残し、state の不一致や GitHub の失敗は残さない。誰でも起こせて、記録が溢れるだけなので。新しい 200 件を残して古いものを消す。
 - 画面: ユーザーメニューから「セキュリティ」を開き、セッションの一覧（このセッションを示す、個別に終了、ほかをすべて終了）と、ログイン履歴を見る。
 
-### 10.4 本番投入の準備（2026-11-20）
+### 10.4 設定の点検と SSH
 
-本番の VPS に載せる前に、外部サービスの設定の誤りを早く見つけることと、SSH の入口を狭めることを足した。手順は `docs/SETUP.md`。
+外部サービスの設定の誤りを早く見つけるための `koroku check` と、SSH の入口を狭めるプロビジョニングの手順。利用者向けの手順は `docs/SETUP.md`。
 
 **`koroku check`**
 
@@ -636,93 +606,22 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 
 **SSH を鍵だけにする**
 
-- VPS の OS イメージは、パスワードでの SSH ログインを受け付けるものが多い。`koroku` を動かすホストの root はすべてのアプリと秘密を握るので、`provision.sh` はパスワードと keyboard-interactive の認証を止め、root のログインを禁じる（スクリプトを root で直接実行した場合は鍵での root ログインだけ残す）。設定は `/etc/ssh/sshd_config.d/01-koroku.conf` に置く。sshd は最初に読んだ値を使うので、`50-cloud-init.conf` より先に読まれる名前にした。
+- VPS の OS イメージは、パスワードでの SSH ログインを受け付けるものが多い。`koroku` を動かすホストの root はすべてのアプリと秘密を握るので、`provision.sh` はパスワードと keyboard-interactive の認証を止め、root のログインを禁じる（スクリプトを root で直接実行した場合は鍵での root ログインだけ残す）。設定は `/etc/ssh/sshd_config.d/01-koroku.conf` に置く。sshd は最初に読んだ値を使うので、`50-cloud-init.conf` より先に読まれる名前にする。
 - 締め出しを避けるため、`sudo` を実行したユーザー（`SUDO_USER`、なければ root）の `~/.ssh/authorized_keys` に鍵が 1 つ以上あるときだけ行う。ないときは何もせず、最後のまとめで知らせる。書いたあとに `sshd -t` で検査し、通らなければファイルを消して止まる。反映は reload で、開いているセッションは切れない。
 - `--keep-ssh-password` で、この手順だけを飛ばせる。
 
-## 11. 実装フェーズ（Claude Code 向け）
-
-> この章は初版の計画。独自ドメイン・ログ・バックアップを含む最新のマイルストーンと受け入れシナリオは、リポジトリ直下の `CLAUDE.md` を正とする。
-
-デプロイエンジンを先に固め、UI は最後に載せる。各フェーズは単体で動作確認できる状態で終える。
-
-| フェーズ | 内容 | 完了条件 |
-| --- | --- | --- |
-| M0 骨格 | リポジトリ構成、設定読込、SQLite マイグレーション、Ember の空アプリを embed 配信、CI | `koroku` が起動し `/api/system` が応答する |
-| M1 デプロイエンジン | public リポジトリの URL と SHA を受け、取得 → override 生成 → 検証 → build/pull → up → 確認。ログファイル出力 | サンプル 2 種（`build:` あり／`image:` のみ）が API 経由で起動し、失敗時に旧版へ戻る |
-| M2 ルーティング | ポート割当、Caddy 設定生成と `POST /load`、TLS（staging） | `https://<slug>.<base>` で応答する |
-| M3 GitHub App | ログイン、セッション、リポジトリ／ブランチ／コミット一覧、private clone | 許可 ID 以外はログイン不可。private リポジトリをデプロイできる |
-| M4 UI | 一覧、作成、詳細、デプロイと SSE ライブログ、環境変数 | ブラウザ操作だけで新規アプリを公開できる |
-| M5 運用 | 実行ログ、start/stop/restart、削除、prune、システム画面、プロビジョニング、バックアップ | 新規 VPS がスクリプト 1 本で立ち上がる |
-
-**テスト方針**
+## 11. テスト方針
 
 - ユニット: override 生成、ポリシー検査、Caddy 設定生成、状態遷移、ログのマスク。入力と出力がファイルで決まる部分は golden file で固定する。
-- 結合: 実 Docker を使い、サンプル Compose をデプロイして HTTP 応答まで確認する。GitHub と Caddy はインターフェースで差し替える。
-- 外部コマンド呼び出しは 1 つの `Runner` インターフェースに集約し、引数をテストで検証できるようにする。
-
-**受け入れシナリオ**
-
-1. private リポジトリの Rails + PostgreSQL の Compose を UI からデプロイし、`https://<slug>.<base>` が応答する。
-2. 環境変数を変更して再デプロイすると反映され、DB のデータは残る。
-3. 起動に失敗するコミットをデプロイすると `failed` になり、旧版が応答し続ける。
-4. アプリを 2 つ並べても、互いの DB ポートがホスト外から到達できない。
-
-## 12. 未決事項
-
-実装開始の前提は揃った。残りは既定案のまま進め、該当フェーズで確認する。
-
-**決定済み（2026-11-18）**
-
-- OS は Ubuntu 24.04、アーキテクチャは x86_64（amd64）に限る。ホスティング事業者、DNS サービス、オブジェクトストレージは選ばない（2026-11-21 に一般化。OSS として誰でも使えるように、特定の事業者を前提にした記述を外した）。
-- private な GHCR イメージは、ホストで `docker login` しておく方式とする。
-
-**名前の変更（2026-11-19）**
-
-- コントロールプレーンの名前を `paasd` から `koroku` に変えた。バイナリ、systemd の unit、設定とデータのディレクトリ（`/etc/koroku`、`/var/lib/koroku`）、Compose プロジェクト名とイメージ名の接頭辞（`koroku-<slug>`）、Cookie、環境変数（`KOROKU_*`）まで、この名前にそろえる。理由は 3 つある。
-  - リポジトリと Go モジュールは先に `koroku` になっていて、同じものに名前が 2 つあった。
-  - 旧名は「PaaS のデーモン」という種類の説明で、固有の名前ではなかった。
-  - まだどこにもデプロイしていないので、今ならパス、Compose プロジェクト名、イメージタグの移行が要らない。旧名のパスや Cookie を読む互換処理も入れない。
-
-**実機での確認が要るもの（2026-11-19）**
-
-- GitHub App のユーザーアクセストークンで `GET /user` に `two_factor_authentication` が含まれるか（10.3）。含まれなければ `[github] require_two_factor = false` にして、この節に結果を書く。
-
-**残り**
-
-- [x] `--env-file` 指定時にリポジトリ内の `.env` がどう扱われるか（M1 で実機確認済み、下記）
-- [ ] バックアップとログの保持期間（既定案: バックアップは日次 7・週次 4・月次 6、ログはオブジェクトストレージに 90 日）
-- [ ] 起動失敗時の自動ロールバックを既定で有効にするか（既定案: 有効）
-- [ ] push 時の自動デプロイを将来入れるか（入れるなら Webhook の受け口を M3 で用意する）
-
-**実機確認の結果**
-
-- `--env-file` とリポジトリ内の `.env`（2026-11-18、Docker 29.8.0 / Compose v5.8.0、ローカル環境）: `--env-file` を指定すると、プロジェクトディレクトリの `.env` は `${VAR}` の補間に使われない（`.env` にしかない変数は未定義扱いになり、`${VAR:-default}` は default になる）。一方、サービスが自分で `env_file: .env` と書いている場合、その内容はコンテナの環境変数に入る。override で足した `koroku` の env ファイルはリストの後ろに付くので、同じ名前の変数は `koroku` 側の値が勝つ。つまり、補間は `koroku` の環境変数だけで決まり、リポジトリの `.env` は「サービスが明示的に読む」ときだけ効く。`testdata/apps/build-app` と結合テストで固定している。
-
-- 設定再投入時の接続（2026-11-18、Caddy 2.11.9 の公式 Docker イメージ、ローカル環境。**VPS 上では未確認**）: SSE の `curl -N` と、`Upgrade: websocket` で 101 を受けたあと 1 秒ごとに 1 行流す接続を保ったまま `POST /load` した。
-  - 同一内容の投入は Caddy が `config is unchanged` として何もしない。
-  - 内容が変わる投入（アプリを 1 つ追加）と強制再読込では、サーバーが作り直されるが、SSE は 24 秒間の観測で 1 行も欠けなかった（平文、および TLS + HTTP/2 のどちらでも）。新しいルートは投入の 1 秒後には応答した。
-  - アップグレード済み接続は、`stream_close_delay` なし（Caddy の既定）だと再読込の瞬間に切れた。`stream_close_delay: 10s` では再読込の 10.0 秒後に切れた。つまりこの指定は切断をなくすのではなく先送りする。生成する設定では 5 分にしているので、アプリの作成・ドメインやポートの変更・起動や停止のたびに、他アプリの WebSocket は最長 5 分後に 1 回切れる（クライアントの再接続に任せる）。5 分ちょうどで切れるところまでは待って確認していない。
-  - 実際の ACME 発行（Let's Encrypt staging を含む）は VPS と DNS が要るので未確認。
-
-- ローカル環境のバックアップ（2026-11-19、Versity S3 Gateway v1.11.0、restic 同梱の開発用イメージ、WSL2 の snap 版 Docker）: 受け入れシナリオ 7 を手元で実施した。Rails + PostgreSQL のアプリに確認用の行を入れてバックアップ → アプリ停止 → volume を空にして起動（DB は空で初期化される）→ UI と同じ API でリストア → 行が戻り、アプリも応答した。退避した中身は所有者（postgres の UID 70）を保っていた。
-  - S3 互換サーバーは、MinIO のリポジトリがアーカイブされたため、Versity S3 Gateway、RustFS、Garage、SeaweedFS、MinIO のコミュニティフォークを比較した。koroku の `TestIntegrationS3`（13 項目）と restic（init・backup・`--stdin`・`forget --prune`・`check --read-data`・restore）を各サーバーで実行し、Garage 以外は全項目通過した（Garage は期限切れの presigned URL に 400、署名の誤りに `AccessDenied` を返す。`koroku` 本体はこのエラーコードに依存しない）。ローカルには、イメージ 82MB・待機時のメモリ約 29MiB と最も軽く、環境変数だけで設定でき、中身が volume にファイルとして並ぶ Versity S3 Gateway を選んだ。本番は利用者が選ぶ S3 互換のオブジェクトストレージ。
-  - `koroku` のコンテナは利用者の UID で動くため、volume のファイル（root や postgres の所有）を読み書きできるよう、`chown`・`dac_override`・`fowner`・`fsetid` の 4 つだけを ambient capability で持たせた（`DEV_FILE_CAPS=1`。どれも Docker が既定でコンテナに与える範囲）。Docker の volume ディレクトリはホストと同じパスでマウントする。Docker Desktop は volume が VM の中にあるので、この方法では届かない。
-
-- ローカル環境のログ退避（2026-11-19、同じ環境）: 受け入れシナリオ 8 を手元で実施した。開発用の設定は退避の間隔を最小の 1 時間にしている。`koroku` を再起動すると、起動時の取りこぼし処理で直前の時間枠までのアプリのログが `logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz` に置かれ、`GET /api/apps/{slug}/logs/archives` に出た。presigned URL（`http://127.0.0.1:9000/...`、有効 15 分）からのダウンロードは、WSL 内と Windows 側の `curl.exe` のどちらも 200 で、展開すると収集したログの行と一致した。任意の時点で退避を走らせる手段は足さなかった。キーは時間枠の開始時刻で決まるので、時間枠の途中で送ると、後で同じキーを上書きしてしまうため。
-
-- ローカル環境の Caddy（2026-11-19、Caddy 2.11.9 の公式 Docker イメージ、WSL2）: `listen` を `127.0.0.1:80` / `127.0.0.1:443` にしても、HTTP から HTTPS への自動リダイレクトは挿入された（`http://<slug>.dev.localhost/` が 308）。内蔵 CA で `*.dev.localhost` の証明書が発行され、ルート証明書を信頼すれば検証も通る。WSL2 の localhost 転送で、Windows 側の `curl.exe` からも `https://<slug>.dev.localhost/` に届いた。
-
-- ワンショットのサービスと `up --wait`（2026-11-19、Docker 29.8.0 / Compose v5.8.0、ローカル環境）: `restart: "no"` で `true` を実行して終わるサービスを置くと、どのサービスからも待たれていない場合は `up -d --wait` が `container ... exited (0)` で失敗した（終了コード 1）。公開サービスが `depends_on` の `condition: service_completed_successfully` で待つ場合は成功した。デプロイの手順 6 は `up --wait` なので、マイグレーションなどのワンショットのサービスは、必ず別のサービスから `service_completed_successfully` で待たれる形にする必要がある。基盤側では対処せず、利用者向けの Skill（`plugins/koroku/skills/prepare-app`）に書いた。
-
-- `docker compose logs --follow` の二重出力（2026-11-18、Docker 29.8.0 / Compose v5.8.0、ローカル環境）: コンテナがまだないプロジェクトに対して `logs --follow --timestamps` を繰り返し起動しながら `up -d` すると、起動直後のコンテナの行が、時刻まで同じ内容で 2 回ずつ出る流れに当たることがあった（1 行だけ出すコンテナで 8 回中 5 回、0.5 秒ごとに出し続けるコンテナでは 6 回中 6 回で、以後の行もすべて 2 回ずつ）。`koroku` のログコレクタはこの状況で実際に同じ行を 2 回保存していた（開発用の Compose 環境でサンプルアプリをデプロイして発見）。対処は 10.1 章。
+- 結合（`-tags integration`）: 実 Docker と restic を使い、サンプル Compose をデプロイして HTTP 応答まで確認する。S3 互換 API はローカルの S3 互換サーバーで確かめる。
+- GitHub、Caddy、オブジェクトストレージ、時計はインターフェースにしてフェイクに差し替える。外部コマンド呼び出しは 1 つの `Runner` インターフェースに集約し、引数をテストで検証する。
+- プロビジョニングスクリプトは、使い捨ての `ubuntu:24.04` コンテナで通し実行して確かめる（`deploy/test/dry-run.sh`）。
 
 ## 出典
 
 - [Compose: Merge](https://docs.docker.com/reference/compose-file/merge/)（`!reset`、`!override`）
 - [Compose: How Compose works](https://docs.docker.com/compose/intro/compose-application-model/)（プロジェクト名）
 - [docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/)（`--wait`）
-- [Docker Engine SDKs](https://docs.docker.com/reference/api/engine/sdk/)
 - [Docker: Packet filtering and firewalls](https://docs.docker.com/network/packet-filtering-firewalls/)
 - [Caddy: Automatic HTTPS](https://caddyserver.com/docs/automatic-https)
 - [Caddy: API Tutorial](https://caddyserver.com/docs/api-tutorial)

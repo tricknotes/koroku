@@ -407,7 +407,7 @@ func TestBuildAppLifecycle(t *testing.T) {
 		t.Errorf("TRICKY = %q, want %q", got["tricky"], tricky)
 	}
 	// With --env-file, Compose does not read the repository's .env for
-	// interpolation (recorded in ARCHITECTURE chapter 12).
+	// interpolation (described in ARCHITECTURE chapter 6).
 	if got["dotenv"] != "unset" {
 		t.Errorf("FROM_REPO_DOTENV = %q, want \"unset\": the repository's .env was used for interpolation", got["dotenv"])
 	}
