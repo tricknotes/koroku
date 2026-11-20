@@ -11,6 +11,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 
 ### 1. 調べる（まだ何も変えない）
 
+- koroku でのデプロイがすでに失敗していて、その理由を知りたいときは、同じプラグインの deploy-status Skill で koroku からデプロイログと実行ログを読む（読み取り専用の API トークンが要る）。
 - Compose ファイルの場所（koroku の既定は `compose.yaml`、なければ `docker-compose.yml`。別のパスも画面で指定できる）、Dockerfile、`.dockerignore`、言語とフレームワーク、DB やキャッシュなどの付属サービスを確認する。
 - `docker compose -f <file> config --no-env-resolution` で正規化した結果を読む（`--no-env-resolution` を付けると env ファイルの中身が展開されないので、秘密が出力に出にくい）。
 - Compose ファイルがなければ、作るところから始める（[references/examples.md](references/examples.md) の雛形を使う）。
