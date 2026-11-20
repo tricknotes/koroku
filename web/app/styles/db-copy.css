@@ -153,3 +153,7 @@
     grid-column: 2;
   }
 }
+
+.db-copy > .backup-note {
+  margin-bottom: var(--space-4);
+}

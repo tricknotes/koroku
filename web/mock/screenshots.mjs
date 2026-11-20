@@ -797,6 +797,89 @@ SHOTS.push(
   },
 );
 
+// Backups tab of a staging app: copying the production database into it.
+const COPY = '[data-test-db-copy]';
+const COPY_DETAIL = '[data-test-copy-detail] [data-test-step]';
+const scrollTo = (selector) =>
+  `document.querySelector(${JSON.stringify(selector)}).scrollIntoView()`;
+SHOTS.push(
+  {
+    name: 'dbcopy-normal',
+    path: '/apps/blog-staging/backups?scenario=healthy',
+    wait: COPY_DETAIL,
+    script: scrollTo(COPY),
+  },
+  {
+    name: 'dbcopy-normal-phone',
+    path: '/apps/blog-staging/backups?scenario=healthy',
+    wait: COPY_DETAIL,
+    script: scrollTo(COPY),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'dbcopy-confirm',
+    path: '/apps/blog-staging/backups?scenario=healthy',
+    wait: '[data-test-copy-run]:not([disabled])',
+    click: '[data-test-copy-run]',
+  },
+  {
+    name: 'dbcopy-confirm-phone',
+    path: '/apps/blog-staging/backups?scenario=healthy',
+    wait: '[data-test-copy-run]:not([disabled])',
+    click: '[data-test-copy-run]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
+    name: 'dbcopy-running',
+    path: '/apps/blog-staging/backups?scenario=copy-running',
+    wait: '[data-test-copy-detail] [data-state="running"]',
+    script: scrollTo('[data-test-copy-detail]'),
+  },
+  {
+    name: 'dbcopy-running-phone',
+    path: '/apps/blog-staging/backups?scenario=copy-running',
+    wait: '[data-test-copy-detail] [data-state="running"]',
+    script: scrollTo('[data-test-copy-detail]'),
+    ...PHONE,
+    fullPage: false,
+    themes: ['dark'],
+  },
+  {
+    name: 'dbcopy-failed',
+    path: '/apps/blog-staging/backups?scenario=copy-failed',
+    wait: '[data-test-copy-failed]',
+    script: scrollTo('[data-test-copy-failed]'),
+  },
+  {
+    name: 'dbcopy-failed-phone',
+    path: '/apps/blog-staging/backups?scenario=copy-failed',
+    wait: '[data-test-copy-failed]',
+    script: scrollTo('[data-test-copy-failed]'),
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
+    name: 'dbcopy-settings-preset',
+    path: '/apps/shop-staging/backups?scenario=healthy',
+    wait: '[data-test-load-preset]',
+    script: `(() => {
+      ${choose('[data-test-load-preset]', 'mysql')};
+      ${scrollTo('[data-test-copy-settings]')};
+    })()`,
+  },
+  {
+    name: 'dbcopy-dump-preset',
+    path: '/apps/blog/backups?scenario=healthy',
+    wait: '[data-test-dump-preset]',
+    script: scrollTo('[data-test-dump-preset]'),
+    themes: ['light'],
+  },
+);
+
 // Settings tab.
 const SETTINGS = '[data-test-settings-form]';
 SHOTS.push(

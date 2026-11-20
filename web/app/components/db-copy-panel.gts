@@ -115,6 +115,8 @@ export default class DbCopyPanel extends Component<Signature> {
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
     this.form = new CopySettingsForm(this.app);
+    // A backend without copies has nothing to list.
+    if (!this.form.available) return;
     void this.apps.load();
     void this.copies.load();
     this.poller.every(this, RUNNING_INTERVAL, () => this.follow());

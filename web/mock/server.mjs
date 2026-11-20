@@ -37,6 +37,7 @@ import {
   startRollback,
 } from './fixtures.mjs';
 import { deploymentLog } from './deploy-log.mjs';
+import { copyHistory, copyLog, newCopy, settleCopies } from './db-copy.mjs';
 import { LOG_SCENARIOS, registerLogRoutes } from './logs.mjs';
 
 const HOST = '127.0.0.1';
@@ -73,10 +74,15 @@ const MIME = {
 const states = new Map();
 
 function stateOf(name) {
-  if (!states.has(name)) states.set(name, buildScenario(name));
+  if (!states.has(name)) {
+    const state = buildScenario(name);
+    state.dbCopies = copyHistory(name);
+    states.set(name, state);
+  }
   const state = states.get(name);
   settle(state);
   settleBackups(state);
+  settleCopies(state);
   return state;
 }
 
@@ -521,6 +527,68 @@ route('GET', '/api/apps/:slug/volumes', (context) => {
   return { volumes: appVolumes(context.state, app) };
 });
 
+// Database copies into staging apps (db-copy.mjs).
+function findCopy(state, id) {
+  for (const list of state.dbCopies.values()) {
+    const found = list.find((entry) => entry.id === Number(id));
+    if (found) return found;
+  }
+  throw notFound('copy_not_found');
+}
+
+function copyJson(entry) {
+  const { mockFinishAt, ...json } = entry;
+  void mockFinishAt;
+  return json;
+}
+
+route('GET', '/api/apps/:slug/db-copies', (context) => {
+  const app = appOf(context);
+  return {
+    copies: (context.state.dbCopies.get(app.slug) ?? []).map(copyJson),
+  };
+});
+route('POST', '/api/apps/:slug/db-copies', (context) => {
+  const { state, body } = context;
+  const app = appOf(context);
+  if (app.environment !== 'staging') {
+    throw new HttpError(422, 'target_not_staging');
+  }
+  if (body.confirm !== app.slug) {
+    throw new HttpError(422, 'confirmation_mismatch');
+  }
+  const source = state.apps.get(body.source);
+  if (!source) throw notFound('source_not_found');
+  if (!app.load_hook_command) {
+    throw new HttpError(422, 'target_load_hook_missing');
+  }
+  if ((body.source_kind ?? 'live') === 'live' && !source.dump_hook_command) {
+    throw new HttpError(422, 'source_dump_hook_missing');
+  }
+  const list = state.dbCopies.get(app.slug) ?? [];
+  if (list.some((entry) => entry.status === 'running')) {
+    throw new HttpError(409, 'busy');
+  }
+  const entry = newCopy(state, app.slug, body);
+  state.dbCopies.set(app.slug, [entry, ...list]);
+  return { status: 202, json: copyJson(entry) };
+});
+route('GET', '/api/db-copies/:id', ({ state, params }) =>
+  copyJson(findCopy(state, params.id)),
+);
+route('GET', '/api/db-copies/:id/logs', ({ state, params, query }) => {
+  const entry = findCopy(state, params.id);
+  const log = copyLog(entry, state.apps.get(entry.target_app));
+  if (query.get('format') === 'text') {
+    return { text: log.lines.join('\n') + '\n' };
+  }
+  return {
+    sse: log.lines,
+    end: log.end,
+    next: log.next && (() => (settleCopies(state), log.next())),
+  };
+});
+
 route('GET', '/api/repos', ({ state }) => {
   if (state.github === false) throw new HttpError(503, 'not_configured');
   return { repos: REPOS };
@@ -798,6 +866,7 @@ const NEEDS_RECENT_LOGIN = [
   ['DELETE', /^\/api\/apps\/[^/]+\/env\/[^/]+$/],
   ['POST', /^\/api\/apps\/[^/]+\/backups\/restore$/],
   ['GET', /^\/api\/apps\/[^/]+\/backups\/[^/]+\/download$/],
+  ['POST', /^\/api\/apps\/[^/]+\/db-copies$/],
 ];
 
 async function handleApi(request, response, url, scenario) {
