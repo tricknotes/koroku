@@ -389,7 +389,11 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 	defer appLock.Unlock()
 
 	logger.Info("deployment started", "commit", d.CommitSHA)
-	touched, runErr := e.execute(jobCtx, d, app, log)
+	run := e.execute
+	if d.SourceDeploymentID != nil {
+		run = e.executeRollback
+	}
+	touched, runErr := run(jobCtx, d, app, log)
 
 	status, message := store.StatusSucceeded, ""
 	if runErr != nil {
@@ -472,14 +476,23 @@ func (e *Engine) removeRelease(ctx context.Context, slug string, id int64) {
 // cleanupAfterSuccess keeps the newest successful releases and drops the
 // rest, then prunes dangling images.
 func (e *Engine) cleanupAfterSuccess(ctx context.Context, app store.App, log *deployLog) {
-	kept, err := e.opts.Store.SucceededDeployments(ctx, app.ID, e.opts.KeepReleases)
+	// Rollbacks have no files of their own and may point at the same
+	// release, so the newest KeepReleases distinct releases are kept, plus
+	// whatever runs now (ARCHITECTURE 7.1).
+	succeeded, err := e.opts.Store.SucceededDeployments(ctx, app.ID, 200)
 	if err != nil {
 		e.opts.Logger.Warn("listing releases to keep failed", "app", app.Slug, "error", err)
 		return
 	}
 	keep := map[string]bool{}
-	for _, d := range kept {
-		keep[strconv.FormatInt(d.ID, 10)] = true
+	for _, d := range succeeded {
+		if len(keep) >= e.opts.KeepReleases {
+			break
+		}
+		keep[strconv.FormatInt(RollbackTarget(d), 10)] = true
+	}
+	if current, err := e.opts.Store.GetAppByID(ctx, app.ID); err == nil && current.CurrentDeploymentID != nil {
+		keep[strconv.FormatInt(*current.CurrentDeploymentID, 10)] = true
 	}
 	stale := map[int64]bool{}
 	for _, parent := range []string{"releases", "release-state"} {

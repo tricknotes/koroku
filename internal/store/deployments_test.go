@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -227,5 +228,47 @@ func TestFailInterruptedDeployments(t *testing.T) {
 	}
 	if ids, _ := s.FailInterruptedDeployments(ctx, testNow); len(ids) != 0 {
 		t.Errorf("second call found %v", ids)
+	}
+}
+
+func TestRollbackDeployment(t *testing.T) {
+	ctx := context.Background()
+	st := openTest(t)
+	app := mustCreateApp(t, st, "blog")
+	now := time.Date(2026, 11, 21, 3, 0, 0, 0, time.UTC)
+	succeed := func(d Deployment) {
+		t.Helper()
+		if err := st.StartDeployment(ctx, d.ID, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishDeployment(ctx, d.ID, StatusSucceeded, "", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, _, _ := st.EnqueueDeployment(ctx, app.ID, "main", strings.Repeat("a", 40), "First", now)
+	succeed(first)
+	second, _, _ := st.EnqueueDeployment(ctx, app.ID, "main", strings.Repeat("b", 40), "Second", now)
+	succeed(second)
+
+	queued, _, _ := st.EnqueueDeployment(ctx, app.ID, "main", strings.Repeat("c", 40), "Third", now)
+	rb, superseded, err := st.EnqueueRollback(ctx, first, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(superseded) != 1 || superseded[0] != queued.ID {
+		t.Errorf("superseded = %v, want the queued deployment", superseded)
+	}
+	if rb.Ref != RollbackRef || rb.CommitSHA != first.CommitSHA || rb.CommitMessage != "First" ||
+		rb.SourceDeploymentID == nil || *rb.SourceDeploymentID != first.ID {
+		t.Errorf("rollback = %+v", rb)
+	}
+	succeed(rb)
+	got, _ := st.GetApp(ctx, "blog")
+	if got.CurrentDeploymentID == nil || *got.CurrentDeploymentID != first.ID {
+		t.Errorf("current deployment = %v, want the rolled back release %d", got.CurrentDeploymentID, first.ID)
+	}
+	again, _ := st.GetDeployment(ctx, rb.ID)
+	if again.SourceDeploymentID == nil || *again.SourceDeploymentID != first.ID {
+		t.Errorf("read back: %+v", again)
 	}
 }
