@@ -360,21 +360,23 @@ func TestInterruptedTaskRunsAreFailedOnStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.start()
+	// Recovery marks the run failed in the database before it appends the
+	// log line, so wait for both rather than reading the log as soon as the
+	// status changes.
+	want := "Failed: " + store.InterruptedTaskError
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		got, _ := h.store.GetTaskRun(context.Background(), run.ID)
-		if got.Status == store.StatusFailed {
+		log, _ := os.ReadFile(h.engine.TaskLogPath("blog", run.ID))
+		if got.Status == store.StatusFailed && strings.Contains(string(log), want) {
 			if got.Error != store.InterruptedTaskError {
 				t.Errorf("error = %q", got.Error)
 			}
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("run = %+v", got)
+			t.Fatalf("run = %+v, log = %q", got, log)
 		}
 		time.Sleep(2 * time.Millisecond)
-	}
-	if !strings.Contains(h.taskLog("blog", run.ID), "Failed: "+store.InterruptedTaskError) {
-		t.Errorf("log: %s", h.taskLog("blog", run.ID))
 	}
 }
