@@ -231,8 +231,10 @@ func isMutating(method string) bool {
 }
 
 // guard protects the API: mutating requests must come from the console's
-// own origin, and everything under /api/ except /api/session needs a session.
-func (s *Server) guard(next http.Handler) http.Handler {
+// own origin, and everything under /api/ except /api/session needs a session
+// or, for a few read-only routes, an API token (ARCHITECTURE 10.4).
+func (s *Server) guard(mux *http.ServeMux) http.Handler {
+	var next http.Handler = mux
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		isAPI := strings.HasPrefix(path, "/api/")
@@ -244,6 +246,17 @@ func (s *Server) guard(next http.Handler) http.Handler {
 		// below.
 		if site := r.Header.Get("Sec-Fetch-Site"); isAPI && site != "" && site != "same-origin" && site != "none" {
 			writeError(w, http.StatusForbidden, "forbidden_origin", "cross-site requests to the API are not allowed")
+			return
+		}
+		if _, present := bearerToken(r); isAPI && present {
+			// A token request carries no cookie powers and may only GET
+			// routes on the token list, so the Origin and Content-Type
+			// checks for cookie-authenticated mutations do not apply.
+			if s.auth.InsecureNoAuth && !isLoopbackHost(r.Host) {
+				writeError(w, http.StatusForbidden, "forbidden_host", "in --insecure-no-auth mode the API answers only on a loopback host name")
+				return
+			}
+			s.serveWithToken(w, r, mux)
 			return
 		}
 		if isMutating(r.Method) && isAPI && r.ContentLength != 0 &&
