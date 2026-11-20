@@ -57,6 +57,17 @@ func fetchFrom(container, url string) (string, error) {
 func TestLinks(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
+	// Registered before the apps, so it runs after their containers are
+	// removed (cleanups run last-in first-out); a network with containers
+	// still attached cannot be removed.
+	var networks []string
+	t.Cleanup(func() {
+		for _, n := range networks {
+			if out, err := exec.Command("docker", "network", "rm", n).CombinedOutput(); err != nil {
+				t.Logf("cleanup of network %s failed: %v\n%s", n, err, out)
+			}
+		}
+	})
 	repoAccounts, shaAccounts := linkRepo(t, map[string]string{"web": httpService("accounts-web"), "api": httpService("accounts-api"), "db": sleeper})
 	repoBilling, shaBilling := linkRepo(t, map[string]string{"web": httpService("billing-web"), "api": httpService("billing-api")})
 	repoShop, shaShop := linkRepo(t, map[string]string{"web": httpService("shop-web"), "db": sleeper})
@@ -81,12 +92,6 @@ func TestLinks(t *testing.T) {
 		ID      int64  `json:"id"`
 		Network string `json:"network"`
 	}
-	var networks []string
-	t.Cleanup(func() {
-		for _, n := range networks {
-			_ = exec.Command("docker", "network", "rm", n).Run()
-		}
-	})
 	link := func(slug, name, target, service string, services ...string) linkInfo {
 		t.Helper()
 		var l linkInfo
