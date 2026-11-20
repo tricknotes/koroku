@@ -43,6 +43,10 @@ readonly CADDY_ADMIN_URL=http://127.0.0.1:2019
 # sshd reads the files in sshd_config.d in order and keeps the first value of
 # each setting, so this name wins over 50-cloud-init.conf and the like.
 readonly SSHD_DROP_IN=/etc/ssh/sshd_config.d/01-koroku.conf
+readonly SSHD_KEEPALIVE_DROP_IN=/etc/ssh/sshd_config.d/02-koroku-keepalive.conf
+# sshd asks an idle client every this many seconds whether it is still there.
+readonly SSH_CLIENT_ALIVE_INTERVAL=30
+readonly SSH_CLIENT_ALIVE_COUNT_MAX=4
 
 # --- Output -----------------------------------------------------------------
 
@@ -572,6 +576,36 @@ authorized_keys_of() {
   fi
 }
 
+# An idle SSH session freezes when a router or firewall on the way forgets
+# the connection (many drop idle TCP connections after a few minutes). The
+# server's keepalive messages keep the connection known to them; a client
+# that is really gone is dropped after INTERVAL x COUNT_MAX seconds.
+keep_ssh_alive() {
+  step "Keeping idle SSH sessions alive"
+  if ! command -v sshd >/dev/null 2>&1; then
+    info "no sshd on this host"
+    return 0
+  fi
+  {
+    echo "# Installed by koroku's provision.sh: keep idle SSH sessions from freezing."
+    echo "ClientAliveInterval $SSH_CLIENT_ALIVE_INTERVAL"
+    echo "ClientAliveCountMax $SSH_CLIENT_ALIVE_COUNT_MAX"
+  } >"$WORK_DIR/sshd-keepalive.conf"
+  install -d -m 0755 /etc/ssh/sshd_config.d
+  install_file "$WORK_DIR/sshd-keepalive.conf" "$SSHD_KEEPALIVE_DROP_IN" 0644
+  if [[ $FILE_CHANGED == 1 ]]; then
+    if ! sshd -t 2>"$WORK_DIR/sshd-test.err"; then
+      rm -f -- "$SSHD_KEEPALIVE_DROP_IN"
+      die "sshd rejected the keepalive setting, so it was removed again: $(cat "$WORK_DIR/sshd-test.err")"
+    fi
+    # A reload keeps open sessions; this one gets the setting at its next login.
+    systemctl try-reload-or-restart ssh.service
+    info "installed $SSHD_KEEPALIVE_DROP_IN and reloaded sshd"
+  else
+    info "$SSHD_KEEPALIVE_DROP_IN: unchanged"
+  fi
+}
+
 harden_ssh() {
   step "Restricting SSH to key-based login"
   if [[ $KEEP_SSH_PASSWORD == 1 ]]; then
@@ -790,6 +824,7 @@ install_restic
 setup_swap
 install_koroku
 setup_firewall
+keep_ssh_alive
 harden_ssh
 start_koroku
 summary

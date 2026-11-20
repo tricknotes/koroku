@@ -37,7 +37,7 @@ sudo ./deploy/provision.sh ./koroku
 | --- | --- |
 | `--skip-upgrade` | 導入済みパッケージを更新しない。アプリが動いているホストで設定だけ当て直すときに使う（Docker が更新されると全コンテナが再起動するため） |
 | `--http3` | `443/udp` も開ける（既定は閉じたまま。8.2 節） |
-| `--keep-ssh-password` | SSH のパスワードログインを止める手順（13）を飛ばす |
+| `--keep-ssh-password` | SSH のパスワードログインを止める手順（14）を飛ばす |
 | `--force` | Ubuntu 24.04、26.04 の amd64 以外でも続行する（未確認） |
 
 ### スクリプトがすること
@@ -56,9 +56,10 @@ sudo ./deploy/provision.sh ./koroku
 | 10 | 2GB の swap ファイル `/swapfile` と `/etc/fstab` への登録。有効な swap が合計 2GB 以上あれば何もしない |
 | 11 | `/etc/koroku` と `/var/lib/koroku`（どちらも 0700）、`/etc/koroku/config.toml`（なければ例から作成、0600）、`/usr/local/bin/koroku`、`koroku.service` |
 | 12 | ufw で 22（と sshd の待受ポート）、80、443 の TCP を許可して有効化 |
-| 13 | SSH を鍵だけにする。`sudo` を実行したユーザー（直接 root で実行したなら root）の `~/.ssh/authorized_keys` に鍵があるときだけ、`/etc/ssh/sshd_config.d/01-koroku.conf` でパスワードと keyboard-interactive の認証を止め、root のログインを禁じる（root で実行したときは鍵での root ログインだけ残す）。`sshd -t` で検査してから reload する。鍵がなければ何もせず、まとめで知らせる（ARCHITECTURE 10.4） |
-| 14 | `koroku` を有効化。`config.toml` に例の値（`example.com`、`203.0.113.x`）が残っていれば起動はしない |
-| 15 | 結果のまとめと、再起動が必要かどうかの表示 |
+| 13 | SSH の keepalive。`/etc/ssh/sshd_config.d/02-koroku-keepalive.conf` に `ClientAliveInterval 30` と `ClientAliveCountMax 4` を置き、`sshd -t` で検査してから reload する。放置したセッションが、途中のルーターやファイアウォールに接続を忘れられて固まらないようにするため。応答のないクライアントは約 2 分で切る。鍵の有無に関係なく行う |
+| 14 | SSH を鍵だけにする。`sudo` を実行したユーザー（直接 root で実行したなら root）の `~/.ssh/authorized_keys` に鍵があるときだけ、`/etc/ssh/sshd_config.d/01-koroku.conf` でパスワードと keyboard-interactive の認証を止め、root のログインを禁じる（root で実行したときは鍵での root ログインだけ残す）。`sshd -t` で検査してから reload する。鍵がなければ何もせず、まとめで知らせる（ARCHITECTURE 10.4） |
+| 15 | `koroku` を有効化。`config.toml` に例の値（`example.com`、`203.0.113.x`）が残っていれば起動はしない |
+| 16 | 結果のまとめと、再起動が必要かどうかの表示 |
 
 - **再実行できる。** 内容が同じファイルは書き換えず、変更がなければ Docker も Caddy も `koroku` も再起動しない。`koroku` のバイナリか unit が変わったときだけ `koroku` を再起動する。
 - **上書きしないもの。** `/etc/koroku/config.toml`、`master.key`、`restic.key`、`github-app.pem` は、存在すれば中身にも権限にも触れない（権限が緩いときは注意を表示するだけ）。
@@ -250,7 +251,7 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 | シェルの構文と静的検査 | 使い捨ての `ubuntu:24.04` コンテナで `bash -n` と `shellcheck`（0.9.0） | 指摘なし |
 | unit ファイル | `systemd-analyze verify`（systemd 255）。`koroku.service` と、パッケージの `caddy.service` に drop-in を重ねたもの | 警告なし |
 | Caddy の初期設定 | `caddy validate`（Caddy 2.11.9） | `Valid configuration` |
-| スクリプトの通し実行 | `deploy/test/dry-run.sh`。使い捨ての `ubuntu:24.04`（24.04.5）と `ubuntu:26.04`（26.04.1）のコンテナで、それぞれ 3 回続けて実行 | 24.04 は 42 項目、26.04 は 41 項目（apt の restic が古いことの確認は 24.04 だけ）すべて成功 |
+| スクリプトの通し実行 | `deploy/test/dry-run.sh`。使い捨ての `ubuntu:24.04`（24.04.5）と `ubuntu:26.04`（26.04.1）のコンテナで、それぞれ 3 回続けて実行 | 24.04 は 45 項目、26.04 は 44 項目（apt の restic が古いことの確認は 24.04 だけ）すべて成功 |
 
 通し実行で確かめたこと:
 
@@ -260,7 +261,8 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 - `config.toml` に例の値がある間は `koroku` を起動せず、書き換えたあとの実行で起動する。
 - drop-in の `ExecStart` を `caddy` ユーザーでそのまま実行すると、初回は初期設定（admin API のみ、80 番は応答なし）で起動する。`koroku` が設定を投入したあとに Caddy を再起動すると、`koroku` が止まっていても投入済みの設定で戻る（`--resume`）。
 - `caddy` ユーザーが `/var/log/caddy/apps` に書ける。
-- root に鍵がない 1 回目は SSH の設定に触れず、鍵を置いた 2 回目に drop-in を入れて reload し、3 回目は reload しない。
+- SSH の keepalive は 1 回目から入り（鍵の有無に関係なく）、2 回目以降は書き換えない。
+- root に鍵がない 1 回目は パスワードログインの設定に触れず、鍵を置いた 2 回目に drop-in を入れて reload し、3 回目は reload しない。
 
 コンテナには systemd もカーネルも本物のネットワークもないので、`systemctl`、`swapon`、`ufw`、`sshd`、`docker info` は呼び出しを記録するだけの代役に差し替えた。つまり、これらが実際に何をするかは確かめていない。
 
@@ -279,6 +281,7 @@ ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で�
 - [ ] **Docker のログ設定**: 実際のデーモンが `daemon.json` を読み、新しいコンテナのログが 10MB × 3 で回るか（コンテナではデーモンを起動していない）。
 - [ ] **証明書**: Let's Encrypt（staging、本番）での発行。`443/udp` を閉じた状態でブラウザが支障なく HTTP/2 で通信するか。
 - [ ] **needrestart**: `NEEDRESTART_MODE=l` で、スクリプトの途中にサービスが自動再起動されないこと。
+- [ ] **SSH の keepalive**: 実機で、放置したセッションが固まらず、回線が切れたクライアントのセッションが約 2 分で消えること。
 - [ ] **SSH を鍵だけにする手順**: 実際の sshd が `01-koroku.conf` を `50-cloud-init.conf` より優先し、パスワードでのログインを断ること（別の端末から `ssh -o PubkeyAuthentication=no` で確かめる）。reload で実行中のセッションが切れないこと。Ubuntu 24.04 の `ssh.socket` による起動でも `systemctl try-reload-or-restart ssh.service` が効くこと。
 - [ ] **`koroku check`**: 実際の DNS、Let's Encrypt（staging と本番）、GitHub、オブジェクトストレージに対して、各項目が期待どおりの結果になること。
 - [ ] **SSH のポート検出**: `sshd -T` が待受ポートを返すこと（22 番以外にしている場合）。

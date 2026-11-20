@@ -45,6 +45,14 @@
    ssh <ユーザー>@203.0.113.10
    ```
 
+   放置したセッションが固まらないよう、`provision.sh` はサーバー側で keepalive を設定する（OPERATIONS 3 章）。プロビジョニング前のセッションや、それでも切れる回線では、手元の `~/.ssh/config` にも書いておくとよい。
+
+   ```text
+   Host 203.0.113.10
+     ServerAliveInterval 30
+     ServerAliveCountMax 4
+   ```
+
 > IPv6 のアドレスは DNS に登録しない（AAAA レコードを作らない）。`koroku` は、名前解決で得られた **すべての** アドレスが `public_ip` と一致することを確かめるので（ARCHITECTURE 8 章）、AAAA があると管理 UI の確認と独自ドメインの検証が通らない。
 
 ## 3. DNS

@@ -1017,6 +1017,10 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
 - 外部への書き込みはストレージの確認用オブジェクト 1 つだけで、終わったら消す。DNS、GitHub、Caddy は読むだけ。秘密は表示しない。
 - `serve` の起動時には行わない。起動時に外部サービスを待つと、GitHub やオブジェクトストレージの障害で管理 UI まで止まるため。
 
+**SSH の keepalive**
+
+- 途中のルーターやファイアウォールの多くは、通信のない TCP 接続を数分で忘れる。そうなると、放置した SSH のセッションは何も届かなくなって固まる。`provision.sh` は sshd に `ClientAliveInterval 30` と `ClientAliveCountMax 4` を設定し（`/etc/ssh/sshd_config.d/02-koroku-keepalive.conf`）、30 秒ごとにクライアントへ確認を送らせる。この通信で途中の機器は接続を覚えたままになり、本当にいなくなったクライアントのセッションは約 2 分で片付く。鍵の有無に関係なく常に入れる。
+
 **SSH を鍵だけにする**
 
 - VPS の OS イメージは、パスワードでの SSH ログインを受け付けるものが多い。`koroku` を動かすホストの root はすべてのアプリと秘密を握るので、`provision.sh` はパスワードと keyboard-interactive の認証を止め、root のログインを禁じる（スクリプトを root で直接実行した場合は鍵での root ログインだけ残す）。設定は `/etc/ssh/sshd_config.d/01-koroku.conf` に置く。sshd は最初に読んだ値を使うので、`50-cloud-init.conf` より先に読まれる名前にする。
