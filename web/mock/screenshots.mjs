@@ -1055,6 +1055,9 @@ SHOTS.push(
     ...PHONE,
     fullPage: false,
     themes: ['dark'],
+  },
+);
+
 // Access protection (ARCHITECTURE 8.3), on the settings tab.
 const PROTECTION = '[data-test-protection-group]';
 const SHOW_PROTECTION = `document.querySelector('${PROTECTION}').scrollIntoView()`;
