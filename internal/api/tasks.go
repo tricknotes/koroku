@@ -15,7 +15,7 @@ import (
 	"github.com/tricknotes/koroku/internal/store"
 )
 
-// TaskRunner runs one-off commands in an app's services (ARCHITECTURE 9.5).
+// TaskRunner runs one-off commands in an app's services (ARCHITECTURE 9.6).
 type TaskRunner interface {
 	RunTask(ctx context.Context, app store.App, spec deploy.TaskSpec) (store.TaskRun, error)
 	CancelTask(ctx context.Context, id int64) error

@@ -450,7 +450,7 @@ route('GET', '/api/deployments/:id/logs', ({ state, params, query }) => {
   };
 });
 
-// One-off commands and registered tasks (ARCHITECTURE 9.5).
+// One-off commands and registered tasks (ARCHITECTURE 9.6).
 
 function tasksOf(context) {
   const taskState = tasksState(context.state, context.scenario);

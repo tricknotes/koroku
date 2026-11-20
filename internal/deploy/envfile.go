@@ -93,7 +93,7 @@ func quoteEnvValue(v string) string {
 // ParseEnvFileValues reads back the values of an env file written by
 // RenderEnvFile. It is not a general dotenv parser: it understands the
 // three forms RenderEnvFile produces, and serves to mask the values a
-// container receives (ARCHITECTURE 9.5).
+// container receives (ARCHITECTURE 9.6).
 func ParseEnvFileValues(content string) []string {
 	var values []string
 	for _, line := range strings.Split(content, "\n") {

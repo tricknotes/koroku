@@ -239,6 +239,9 @@ func TestRunningTaskHoldsTheApp(t *testing.T) {
 	if _, err := h.engine.Enqueue(ctx, app, "main", shaB, ""); !errors.Is(err, ErrBusy) {
 		t.Errorf("Enqueue err = %v", err)
 	}
+	if _, err := h.engine.EnqueueRollback(ctx, app, *app.CurrentDeploymentID); !errors.Is(err, ErrBusy) {
+		t.Errorf("EnqueueRollback err = %v", err)
+	}
 	if active, _ := h.store.HasActiveDeployment(ctx, app.ID); active {
 		t.Error("a refused deployment must not be recorded")
 	}

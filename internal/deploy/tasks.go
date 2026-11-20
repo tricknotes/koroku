@@ -67,7 +67,7 @@ func (e *Engine) taskRunning(appID int64) bool {
 }
 
 // RunTask starts a command in a service of the app's current release
-// (ARCHITECTURE 9.5) and returns the run as recorded. The command runs in
+// (ARCHITECTURE 9.6) and returns the run as recorded. The command runs in
 // the background with the app's operation lock held; follow it through its
 // log and the database. It fails with ErrNotDeployed without the files of a
 // current release, ErrBusy while a deployment is queued or running or

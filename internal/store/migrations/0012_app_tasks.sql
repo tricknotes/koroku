@@ -1,5 +1,4 @@
--- One-off commands and registered tasks (ARCHITECTURE 9.5). Numbered 0009
--- so that it does not collide with 0008 of the app links change.
+-- One-off commands and registered tasks (ARCHITECTURE 9.6).
 
 -- Named commands an app keeps for one-click runs, in display order.
 CREATE TABLE app_tasks (

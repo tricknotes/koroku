@@ -53,7 +53,7 @@ type Config struct {
 	Tasks   Tasks   `toml:"tasks"`
 }
 
-// Tasks holds settings of one-off commands (ARCHITECTURE 9.5).
+// Tasks holds settings of one-off commands (ARCHITECTURE 9.6).
 type Tasks struct {
 	// TimeoutMinutes bounds one run of a command.
 	TimeoutMinutes int `toml:"timeout_minutes"`

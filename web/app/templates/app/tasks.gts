@@ -100,7 +100,7 @@ interface Signature {
 }
 
 /**
- * Tasks tab (ARCHITECTURE 9.5): commands run once in a service of the
+ * Tasks tab (ARCHITECTURE 9.6): commands run once in a service of the
  * running release, the named ones kept for one-click runs, and the history
  * of runs with their output.
  */

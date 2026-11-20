@@ -1,4 +1,4 @@
-// One-off commands and registered tasks of the mock API (ARCHITECTURE 9.5):
+// One-off commands and registered tasks of the mock API (ARCHITECTURE 9.6):
 // fixtures per scenario, runs that the mock carries out by itself, and their
 // output as the backend writes it (docs/API.md).
 

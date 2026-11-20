@@ -11,7 +11,7 @@ import (
 // InterruptedTaskError is recorded on runs that were running when koroku stopped.
 const InterruptedTaskError = "interrupted: koroku restarted while the command was running"
 
-// Task is a named command registered for an app (ARCHITECTURE 9.5).
+// Task is a named command registered for an app (ARCHITECTURE 9.6).
 type Task struct {
 	Name    string
 	Service string

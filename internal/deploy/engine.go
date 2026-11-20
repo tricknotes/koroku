@@ -80,7 +80,7 @@ type Options struct {
 	// dump it streams (ARCHITECTURE 10.6).
 	CopyTimeout  time.Duration
 	CopyMaxBytes int64
-	// TaskTimeout bounds one run of a one-off command (ARCHITECTURE 9.5).
+	// TaskTimeout bounds one run of a one-off command (ARCHITECTURE 9.6).
 	TaskTimeout time.Duration
 	// KeepTaskRuns is the number of runs (and their logs) kept per app.
 	KeepTaskRuns int
@@ -290,7 +290,7 @@ func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message s
 		return store.Deployment{}, err
 	}
 	// A deployment would wait for the command, and with it every other
-	// app's deployment behind the single worker (ARCHITECTURE 9.5).
+	// app's deployment behind the single worker (ARCHITECTURE 9.6).
 	e.admit.Lock()
 	defer e.admit.Unlock()
 	if e.taskRunning(app.ID) {

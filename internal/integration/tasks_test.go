@@ -66,7 +66,7 @@ func containerMemory(t *testing.T, name string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// TestTasks runs commands in a deployed app (ARCHITECTURE 9.5): a
+// TestTasks runs commands in a deployed app (ARCHITECTURE 9.6): a
 // registered task and an ad-hoc command get the app's environment with its
 // values masked in the output, the exit code is recorded, and a canceled
 // run leaves no container behind while the app keeps answering.

@@ -151,7 +151,7 @@ export interface Deployment {
   rollback_available?: boolean;
 }
 
-/** A named command kept for one-click runs (ARCHITECTURE 9.5). */
+/** A named command kept for one-click runs (ARCHITECTURE 9.6). */
 export interface Task {
   name: string;
   service: string;

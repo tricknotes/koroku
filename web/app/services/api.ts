@@ -403,7 +403,7 @@ export default class ApiService extends Service {
     return `/api/deployments/${id}/logs`;
   }
 
-  // One-off commands and registered tasks (ARCHITECTURE 9.5)
+  // One-off commands and registered tasks (ARCHITECTURE 9.6)
 
   async listTasks(slug: string): Promise<Task[]> {
     const { tasks } = await this.request<{ tasks: Task[] | null }>(

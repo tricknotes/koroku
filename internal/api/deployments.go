@@ -369,6 +369,8 @@ func (s *Server) createRollback(w http.ResponseWriter, r *http.Request, app stor
 	}
 	d, err := s.deployer.EnqueueRollback(r.Context(), app, *in.RollbackTo)
 	switch {
+	case errors.Is(err, deploy.ErrBusy):
+		writeError(w, http.StatusConflict, "busy", "a command is running on the app; wait for it or cancel it")
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, deploy.ErrOtherApp):
 		writeValidationError(w, fieldErrors{"rollback_to": "no such deployment of this app"})
 	case errors.Is(err, deploy.ErrReleaseUnavailable):
