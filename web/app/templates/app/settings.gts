@@ -22,14 +22,24 @@ import {
   setValue,
 } from 'koroku-console/utils/dom';
 import { fieldErrors, policyViolations } from 'koroku-console/utils/errors';
-import SettingsForm, { LimitRow } from 'koroku-console/utils/settings-form';
+import SettingsForm, {
+  ExemptRow,
+  LimitRow,
+  MAX_EXEMPT_PATHS,
+  exemptPathProblem,
+} from 'koroku-console/utils/settings-form';
 import {
   APP_STATE_HINTS,
   APP_STATE_KINDS,
   APP_STATE_LABELS,
   deriveAppState,
 } from 'koroku-console/utils/status';
-import type { App, EnvSource, Environment } from 'koroku-console/utils/types';
+import type {
+  App,
+  AppPatch,
+  EnvSource,
+  Environment,
+} from 'koroku-console/utils/types';
 
 const KNOWN_FIELDS = new Set([
   'default_branch',
@@ -42,6 +52,8 @@ const KNOWN_FIELDS = new Set([
   'service_memory_limits',
   'env_source',
   'env_example_path',
+  'access_protection',
+  'protection_exempt_paths',
 ]);
 
 type ControlAction = 'start' | 'stop' | 'restart';
@@ -92,6 +104,9 @@ export default class AppSettingsTemplate extends Component<Signature> {
   @tracked nothingToSave = false;
   @tracked error: unknown = null;
   @tracked errors: Record<string, string> = {};
+
+  /** A save that changes the protection of a production app, held for confirmation. */
+  @tracked pendingProtection: AppPatch | null = null;
 
   @tracked controlling: ControlAction | null = null;
   @tracked controlNotice = '';
@@ -184,6 +199,44 @@ export default class AppSettingsTemplate extends Component<Signature> {
     this.nothingToSave = false;
   };
 
+  /** Whether the app is or becomes a production app with this save. */
+  get savesProduction(): boolean {
+    return (
+      this.app.environment === 'production' ||
+      this.form.environment === 'production'
+    );
+  }
+
+  /** Opening a production app to everyone is the dangerous direction. */
+  get publicProduction(): boolean {
+    return !this.form.accessProtection;
+  }
+
+  /** Staging apps get `noindex` from the proxy even when they are public. */
+  get publicStaging(): boolean {
+    return !this.form.accessProtection && this.form.environment === 'staging';
+  }
+
+  addExemptPath = () => {
+    this.form.exemptPaths = [...this.form.exemptPaths, new ExemptRow()];
+  };
+
+  /** Marks the rows behind a reported problem, not every row. */
+  exemptRowInvalid = (row: ExemptRow): boolean => {
+    if (!this.errors['protection_exempt_paths']) return false;
+    const path = row.path.trim();
+    return (
+      path !== '' &&
+      (exemptPathProblem(path) !== null ||
+        this.form.exemptList.length > MAX_EXEMPT_PATHS)
+    );
+  };
+
+  removeExemptPath = (row: ExemptRow) => {
+    this.form.exemptPaths = this.form.exemptPaths.filter((r) => r !== row);
+    this.touch();
+  };
+
   save = async () => {
     this.saved = false;
     this.nothingToSave = false;
@@ -196,7 +249,26 @@ export default class AppSettingsTemplate extends Component<Signature> {
       this.nothingToSave = true;
       return;
     }
+    if (patch.access_protection !== undefined && this.savesProduction) {
+      // Closing a production app locks its users out; opening it publishes it.
+      this.pendingProtection = patch;
+      return;
+    }
+    await this.commit(patch);
+  };
 
+  confirmProtection = async () => {
+    const patch = this.pendingProtection;
+    if (!patch) return;
+    await this.commit(patch);
+    this.pendingProtection = null;
+  };
+
+  cancelProtection = () => {
+    this.pendingProtection = null;
+  };
+
+  commit = async (patch: AppPatch) => {
     this.saving = true;
     try {
       const app = await this.api.updateApp(this.app.slug, patch);
@@ -470,6 +542,104 @@ export default class AppSettingsTemplate extends Component<Signature> {
               </span>
             </label>
           </fieldset>
+        </div>
+      </div>
+
+      <div class="form-group" data-test-protection-group>
+        <div>
+          <h2 class="form-group-title">アクセスの保護</h2>
+          <p class="form-group-description">
+            このアプリのアドレス（独自ドメインを含む）を開けるのを、この管理画面にログインしている人だけにします。アプリには手を入れず、保存するとすぐに反映されます。
+          </p>
+        </div>
+        <div class="form-group-body">
+          <label class="option">
+            <input
+              type="checkbox"
+              checked={{this.form.accessProtection}}
+              aria-describedby="settings-protection-hint"
+              data-test-field="access_protection"
+              {{on "change" (setChecked this.form "accessProtection")}}
+            />
+            <span class="option-body">
+              <span
+                class="option-label"
+              >管理画面にログインしている人だけに公開する</span>
+              <span class="option-hint" id="settings-protection-hint">
+                ログインしていない人が開くと、管理画面のログインを経て元のページに戻ります。ステージングのアプリは最初から有効です。ブラウザー以外（API
+                の呼び出しや監視サービス）は通れません。
+              </span>
+            </span>
+          </label>
+
+          {{#if this.form.accessProtection}}
+            <div
+              class="field protection-exempt"
+              role="group"
+              aria-labelledby="settings-exempt-label"
+              aria-describedby="settings-exempt-hint"
+              data-test-field-group="protection_exempt_paths"
+            >
+              <span class="field-label" id="settings-exempt-label">
+                保護を外すパス
+              </span>
+              <p class="field-hint" id="settings-exempt-hint">
+                Webhook
+                など、ログインできない呼び出し元のためのパスです。前方一致で、大文字と小文字は区別しません。ディレクトリは末尾を
+                / にします（例
+                <code
+                >/webhooks/</code>）。外したパスは、アプリ自身で認証してください。
+              </p>
+              {{#if this.form.exemptPaths.length}}
+                <ul class="exempt-rows">
+                  {{#each this.form.exemptPaths key="id" as |row|}}
+                    <li class="exempt-row" data-test-exempt-row>
+                      <input
+                        type="text"
+                        class="mono"
+                        placeholder="/webhooks/"
+                        spellcheck="false"
+                        autocomplete="off"
+                        aria-label="保護を外すパス"
+                        aria-invalid={{if (this.exemptRowInvalid row) "true"}}
+                        value={{row.path}}
+                        data-test-exempt-path
+                        {{on "input" (setValue row "path")}}
+                      />
+                      <Button
+                        @size="small"
+                        aria-label="{{if
+                          row.path
+                          row.path
+                          'この行'
+                        }} を一覧から外す"
+                        data-test-exempt-remove
+                        {{on "click" (fn this.removeExemptPath row)}}
+                      >外す</Button>
+                    </li>
+                  {{/each}}
+                </ul>
+              {{/if}}
+              <div>
+                <Button
+                  @size="small"
+                  data-test-exempt-add
+                  {{on "click" this.addExemptPath}}
+                >パスを追加</Button>
+              </div>
+              {{#if this.errors.protection_exempt_paths}}
+                <p class="field-error" data-test-field-error>
+                  {{this.errors.protection_exempt_paths}}
+                </p>
+              {{/if}}
+            </div>
+          {{else if this.publicStaging}}
+            <Banner class="protection-public" data-test-protection-public>
+              このステージングのアプリは誰でも開けます。検索エンジンに載らないよう、応答には
+              <code>X-Robots-Tag: noindex</code>
+              を付けます。
+            </Banner>
+          {{/if}}
         </div>
       </div>
 
@@ -873,6 +1043,35 @@ export default class AppSettingsTemplate extends Component<Signature> {
         </li>
       </ul>
     </section>
+
+    {{#if this.pendingProtection}}
+      <ConfirmDialog
+        @title={{if
+          this.form.accessProtection
+          "本番アプリを保護しますか？"
+          "本番アプリの保護を外しますか？"
+        }}
+        @confirmLabel="保存する"
+        @danger={{this.publicProduction}}
+        @busy={{this.saving}}
+        @onConfirm={{this.confirmProtection}}
+        @onCancel={{this.cancelProtection}}
+      >
+        {{#if this.form.accessProtection}}
+          <p data-test-protection-confirm="on">
+            保存すると、この管理画面にログインしていない利用者は、本番アプリ
+            <strong>{{this.app.slug}}</strong>
+            を開けなくなります。
+          </p>
+        {{else}}
+          <p data-test-protection-confirm="off">
+            保存すると、本番アプリ
+            <strong>{{this.app.slug}}</strong>
+            は誰でも開けるようになります。
+          </p>
+        {{/if}}
+      </ConfirmDialog>
+    {{/if}}
 
     {{#if this.confirmingStop}}
       <ConfirmDialog

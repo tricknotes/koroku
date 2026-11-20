@@ -1055,6 +1055,71 @@ SHOTS.push(
     ...PHONE,
     fullPage: false,
     themes: ['dark'],
+// Access protection (ARCHITECTURE 8.3), on the settings tab.
+const PROTECTION = '[data-test-protection-group]';
+const SHOW_PROTECTION = `document.querySelector('${PROTECTION}').scrollIntoView()`;
+SHOTS.push(
+  {
+    name: 'protection-on',
+    path: '/apps/shop-staging/settings?scenario=healthy',
+    wait: PROTECTION,
+    script: SHOW_PROTECTION,
+  },
+  {
+    name: 'protection-on-phone',
+    path: '/apps/shop-staging/settings?scenario=healthy',
+    wait: PROTECTION,
+    script: SHOW_PROTECTION,
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'protection-off',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: PROTECTION,
+    click: '[data-test-field="access_protection"]',
+    script: SHOW_PROTECTION,
+  },
+  {
+    name: 'protection-invalid',
+    path: '/apps/shop-staging/settings?scenario=healthy',
+    wait: PROTECTION,
+    script: `(() => {
+      document.querySelector('[data-test-exempt-add]').click();
+      setTimeout(() => {
+        const inputs = document.querySelectorAll('[data-test-exempt-path]');
+        const input = inputs[inputs.length - 1];
+        input.value = '/hooks/*';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        document.querySelector('[data-test-settings-save]').click();
+        setTimeout(() => document.querySelector('${PROTECTION}').scrollIntoView(), 50);
+      }, 50);
+    })()`,
+    then: '[data-test-field-group="protection_exempt_paths"] [data-test-field-error]',
+    themes: ['light'],
+  },
+  {
+    name: 'protection-production-confirm',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: PROTECTION,
+    clicks: [
+      '[data-test-field="access_protection"]',
+      '[data-test-settings-save]',
+    ],
+    then: '[data-test-protection-confirm]',
+  },
+  {
+    name: 'protection-production-confirm-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: PROTECTION,
+    clicks: [
+      '[data-test-field="access_protection"]',
+      '[data-test-settings-save]',
+    ],
+    then: '[data-test-protection-confirm]',
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
   },
 );
 
