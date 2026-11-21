@@ -2083,6 +2083,29 @@ const TASK_SHOTS = [
     fullPage: true,
   },
   {
+    // The koroku run line follows what is typed (ARCHITECTURE 9.6).
+    name: 'tasks-console',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: '[data-test-console-command]',
+    script: `(() => {
+      const input = document.querySelector('[data-test-command-input]');
+      input.value = 'bin/rails console';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`,
+    fullPage: true,
+  },
+  {
+    name: 'tasks-console-phone',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: '[data-test-console-command]',
+    script: `(() => {
+      const input = document.querySelector('[data-test-command-input]');
+      input.value = "echo $DATABASE_URL | cut -d@ -f2";
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`,
+    ...PHONE,
+  },
+  {
     name: 'tasks-running',
     path: '/apps/blog/tasks?scenario=tasks-running',
     wait: RUN_OUTPUT,

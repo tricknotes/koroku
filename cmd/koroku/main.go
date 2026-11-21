@@ -42,6 +42,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
+		var status exitStatus
+		if errors.As(err, &status) {
+			os.Exit(int(status))
+		}
 		fmt.Fprintln(os.Stderr, "koroku:", err)
 		os.Exit(1)
 	}
@@ -52,6 +56,7 @@ const usage = `Usage: koroku <command> [flags]
 Commands:
   serve            Run the API server and deploy worker
   check            Check the host and the external services against config.toml
+  run              Run a command in a container of an app (interactive)
   restore-system   Restore the database and configuration from a backup (new host)
   version          Print the version
 
@@ -68,6 +73,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return serve(ctx, args[1:], stderr, nil)
 	case "check":
 		return check(ctx, args[1:], stdout, stderr)
+	case "run":
+		return runConsole(ctx, args[1:], stdConsoleIO(stdout, stderr), runner.Exec{})
 	case "restore-system":
 		return restoreSystem(ctx, args[1:], stdout, stderr)
 	case "version":

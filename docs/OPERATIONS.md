@@ -226,6 +226,23 @@ journalctl -u koroku -n 50 --no-pager
 - **再起動**: カーネル更新のあとは `sudo systemctl reboot`。起動後に `systemctl is-active docker caddy koroku` と管理 UI を確かめる。
 - **状態の確認**: `systemctl status koroku caddy docker`、`journalctl -u koroku -f`、`sudo ufw status verbose`、`swapon --show`、`df -h /var/lib`。
 
+### 10.1 アプリのコンテナで対話的にコマンドを実行する
+
+`rails console` や `psql` のように端末が要るコマンドは、ホストで `koroku run` を使う（ARCHITECTURE 9.6）。管理 UI のタスクタブの「コマンドを実行」に、選んだサービスと入力したコマンドから組み立てた 1 行が出るので、コピーして SSH のセッションに貼る。
+
+```sh
+sudo koroku run blog web bin/rails console
+sudo koroku run blog db psql -U postgres app
+sudo koroku run blog web                       # コマンドを省くと sh
+sudo koroku run blog web sh -c 'echo $DATABASE_URL'   # $ やパイプはコンテナの sh に渡す
+sudo koroku run blog db psql -U postgres app < dump.sql   # 端末でない入力はそのまま渡る
+```
+
+- 稼働中のリリースと同じイメージ・環境変数・メモリ上限の新しいコンテナで動き、終わると消える。依存するサービス（DB など）は起動しないので、アプリが止まっていると DB につながらない。
+- 管理 UI の実行履歴には残らず、出力もマスクされない。操作ロックも取らないので、実行中にデプロイ・停止・削除ができる。デプロイで入れ替わっても、このコンテナは起動したときのイメージのまま動く。
+- 終了コードはコマンドのものを返す。
+- `koroku` のバイナリを入れ替えたあと、`koroku` を再起動するまでは「schema is version N but this binary expects M」で断る。`sudo systemctl restart koroku` のあとに実行する。
+
 ## 11. ホスト全損からの復旧
 
 ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で控えたもの（restic のパスワード、オブジェクトストレージの接続情報）と、`koroku` のバイナリ。

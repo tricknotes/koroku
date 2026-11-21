@@ -395,4 +395,33 @@ module('Acceptance | tasks', function (hooks) {
     assert.dom('[data-test-run-task]').isDisabled();
     assert.dom('[data-test-command-submit]').isDisabled();
   });
+  test('the owner gets the koroku run line for the host', async function (assert) {
+    serveApp({ slug: 'blog' });
+    await visit('/apps/blog/tasks');
+
+    assert
+      .dom('[data-test-console-command]')
+      .hasText('sudo koroku run blog web', 'a shell without a command');
+    await fillIn('[data-test-command-service]', 'db');
+    await fillIn('[data-test-command-input]', 'psql -U postgres app');
+    assert
+      .dom('[data-test-console-command]')
+      .hasText('sudo koroku run blog db psql -U postgres app');
+    await fillIn('[data-test-command-input]', 'echo $DATABASE_URL');
+    assert
+      .dom('[data-test-console-command]')
+      .hasText("sudo koroku run blog db sh -c 'echo $DATABASE_URL'");
+  });
+
+  test('a member gets no koroku run line', async function (assert) {
+    fakes.api.on('GET', '/api/session', {
+      authenticated: true,
+      user: { id: 2, login: 'mia', avatar_url: '', owner: false },
+    });
+    serveApp({ slug: 'blog', role: 'manage' });
+    await visit('/apps/blog/tasks');
+
+    assert.dom('[data-test-command-form]').exists();
+    assert.dom('[data-test-console]').doesNotExist('only the owner has SSH');
+  });
 });

@@ -9,6 +9,7 @@ import AsyncView from 'koroku-console/components/async-view';
 import Banner from 'koroku-console/components/banner';
 import Button, { buttonClass } from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import CopyButton from 'koroku-console/components/copy-button';
 import EmptyState from 'koroku-console/components/empty-state';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
@@ -21,9 +22,11 @@ import TabSection from 'koroku-console/components/tab-section';
 import TaskRunDetail from 'koroku-console/components/task-run-detail';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
+import type SessionService from 'koroku-console/services/session';
 import type AppContext from 'koroku-console/utils/app-context';
 import { inputValue, preventDefault, setValue } from 'koroku-console/utils/dom';
 import { ApiError, fieldErrors } from 'koroku-console/utils/errors';
+import { consoleCommand } from 'koroku-console/utils/console-command';
 import { formatDuration } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
 import { can } from 'koroku-console/utils/roles';
@@ -111,6 +114,7 @@ interface Signature {
 export default class AppTasksTemplate extends Component<Signature> {
   @service declare api: ApiService;
   @service declare poller: PollerService;
+  @service declare session: SessionService;
 
   tasks = new Loadable<Task[]>(() => this.api.listTasks(this.app.slug));
   runs = new Loadable<TaskRun[]>(() => this.api.listTaskRuns(this.app.slug));
@@ -181,6 +185,14 @@ export default class AppTasksTemplate extends Component<Signature> {
     for (const svc of this.services.value ?? []) names.add(svc.name);
     if (this.service) names.add(this.service);
     return [...names];
+  }
+
+  /**
+   * The same command for a terminal on the host (`koroku run`). Only the
+   * owner can SSH into the host (ARCHITECTURE 9.6).
+   */
+  get consoleCommand(): string {
+    return consoleCommand(this.app.slug, this.service, this.command);
   }
 
   get registered(): Task[] {
@@ -674,6 +686,28 @@ export default class AppTasksTemplate extends Component<Signature> {
             </p>
           {{/if}}
         </form>
+        {{#if this.session.isOwner}}
+          <div class="task-console" data-test-console>
+            <p class="task-console-note">
+              <code>bin/rails console</code>
+              や
+              <code>psql</code>
+              のように対話的に使うコマンドは、ホストに SSH して次の 1
+              行で実行します。上で選んだサービスと入力したコマンドが入ります（空なら
+              <code>sh</code>）。履歴には残りません。
+            </p>
+            <div class="task-console-command">
+              <pre
+                class="mono"
+                data-test-console-command
+              >{{this.consoleCommand}}</pre>
+              <CopyButton
+                @text={{this.consoleCommand}}
+                @label="ホストで実行するコマンド"
+              />
+            </div>
+          </div>
+        {{/if}}
       </TabSection>
     {{else}}
       <RoleNote @needed="manage" @what="コマンドとタスクの実行" />

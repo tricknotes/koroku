@@ -23,6 +23,7 @@ import (
 
 	"github.com/tricknotes/koroku/internal/logs"
 	"github.com/tricknotes/koroku/internal/objstore"
+	"github.com/tricknotes/koroku/internal/runner"
 	"github.com/tricknotes/koroku/internal/store"
 )
 
@@ -273,6 +274,22 @@ func TestServeBackupLogsAndSystemRestore(t *testing.T) {
 	})
 	if deployment.Status != "succeeded" {
 		t.Fatalf("deployment %s: %s", deployment.Status, deployment.Error)
+	}
+
+	// --- koroku run ----------------------------------------------------
+	// Next to the running serve: the database is read without writing, the
+	// input is passed through without a terminal, and the exit code of the
+	// command comes back.
+	var runOut, runErr bytes.Buffer
+	err := runConsole(context.Background(),
+		[]string{"-config", filepath.Join(env.etcDir, "config.toml"), slug, "web", "sh", "-c", "cat /app/VERSION; cat; exit 3"},
+		consoleIO{Stdin: strings.NewReader("from stdin\n"), Stdout: &runOut, Stderr: &runErr}, runner.Exec{})
+	var status3 exitStatus
+	if !errors.As(err, &status3) || status3 != 3 {
+		t.Fatalf("koroku run: err = %v, stderr:\n%s", err, runErr.String())
+	}
+	if !strings.Contains(runOut.String(), "from stdin\n") || !strings.HasPrefix(runOut.String(), "v1\n") {
+		t.Errorf("koroku run output = %q", runOut.String())
 	}
 
 	// --- volumes -------------------------------------------------------

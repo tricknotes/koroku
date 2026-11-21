@@ -310,3 +310,37 @@ func (e *Engine) failInterruptedTaskRuns(ctx context.Context, now time.Time) err
 	}
 	return nil
 }
+
+// ConsoleCmd builds the command of `koroku run` (ARCHITECTURE 9.6): the
+// command runs in a new container of the service, from the current
+// release like a task run, but attached to the caller's terminal. With tty
+// false (the input is not a terminal) no TTY is allocated and the input is
+// passed through. The caller runs it with its own standard streams. It
+// fails like RunTask, except that it takes no lock and records nothing.
+func (e *Engine) ConsoleCmd(ctx context.Context, app store.App, service string, command []string, tty bool) (runner.Cmd, error) {
+	inv, dir, ok := e.currentInvocation(app)
+	if !ok {
+		return runner.Cmd{}, ErrNotDeployed
+	}
+	meta, err := e.readMeta(app.Slug, *app.CurrentDeploymentID)
+	if err != nil {
+		return runner.Cmd{}, ErrNotDeployed
+	}
+	project, err := e.revalidatedProject(ctx, app, *app.CurrentDeploymentID, meta.ComposeFile)
+	if err != nil {
+		return runner.Cmd{}, err
+	}
+	if _, ok := project.Services[service]; !ok {
+		return runner.Cmd{}, &UnknownServiceError{Service: service, Services: project.ServiceNames()}
+	}
+	if len(command) == 0 {
+		command = []string{"sh"}
+	}
+	sub := []string{"run", "--rm", "--no-deps"}
+	if !tty {
+		sub = append(sub, "-T")
+	}
+	sub = append(sub, service)
+	sub = append(sub, command...)
+	return runner.Cmd{Name: "docker", Args: inv.Args(sub...), Env: inv.Env(), Dir: dir}, nil
+}
