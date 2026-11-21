@@ -131,6 +131,15 @@
   color: var(--color-pending);
 }
 
+.overview-warning.is-failed {
+  color: var(--color-failed);
+  font-weight: var(--weight-medium);
+}
+
+.overview-warning.is-failed > .icon {
+  color: var(--color-failed);
+}
+
 /* What a start / stop / restart did */
 
 .overview-feedback > .banner {

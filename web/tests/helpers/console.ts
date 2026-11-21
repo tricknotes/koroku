@@ -2,6 +2,7 @@ import {
   SHA_A,
   SHA_B,
   makeApp,
+  makeAppBackupStatus,
   makeBackups,
   makeDeployment,
   makeSystem,
@@ -230,6 +231,7 @@ export function serveConsole(
     })
     .on('GET', '/api/backups', () => state.backups)
     .on('GET', app, () => state.app)
+    .on('GET', `${app}/backups/status`, makeAppBackupStatus())
     .on('GET', `${app}/services`, {
       services: [
         {

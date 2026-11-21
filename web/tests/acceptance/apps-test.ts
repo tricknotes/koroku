@@ -332,6 +332,47 @@ module('Acceptance | app list', function (hooks) {
     assert.strictEqual(currentURL(), '/apps/shop/domains');
   });
 
+  test('a failed backup of an app stands out above the list and links to it', async function (assert) {
+    const ok = makeDeployment();
+    fakes.api.on('GET', '/api/apps', {
+      apps: [
+        makeApp({
+          slug: 'blog',
+          current_deployment: ok,
+          latest_deployment: ok,
+        }),
+        makeApp({
+          slug: 'shop',
+          current_deployment: ok,
+          latest_deployment: ok,
+        }),
+      ],
+    });
+    fakes.api.on('GET', '/api/system', makeSystem());
+    fakes.api.on(
+      'GET',
+      '/api/backups',
+      makeBackups({
+        problems: [{ app: 'shop', status: 'failed', whole_run: false }],
+      }),
+    );
+    fakes.api.on('GET', '/api/apps/shop', makeApp({ slug: 'shop' }));
+
+    await visit('/');
+
+    assert
+      .dom('[data-test-attention]')
+      .hasClass('banner-error', 'a failed backup is an error, not a warning');
+    assert
+      .dom('[data-test-attention-item="backup-app:shop"]')
+      .includesText('shop')
+      .includesText('直近のバックアップが失敗しました');
+    assert.dom('[data-test-attention-item^="backup-app:blog"]').doesNotExist();
+
+    await click('[data-test-attention-item="backup-app:shop"] a');
+    assert.strictEqual(currentURL(), '/apps/shop/backups');
+  });
+
   test('states refresh by polling, without a reload', async function (assert) {
     const running = makeDeployment({ status: 'running', finished_at: null });
     fakes.api.on('GET', '/api/apps', {

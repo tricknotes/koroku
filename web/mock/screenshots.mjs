@@ -953,6 +953,20 @@ SHOTS.push(
     path: '/apps/blog/backups?scenario=warnings',
     wait: SNAPSHOT,
   },
+  // Only shop's dump failed in the host's latest run: shop's tab says so,
+  // blog's does not (ARCHITECTURE 10.2).
+  {
+    name: 'backups-app-failed',
+    path: '/apps/shop/backups?scenario=warnings',
+    wait: '[data-test-backup-failed]',
+  },
+  {
+    name: 'backups-app-failed-phone',
+    path: '/apps/shop/backups?scenario=warnings',
+    wait: '[data-test-backup-failed]',
+    ...PHONE,
+    fullPage: false,
+  },
   {
     name: 'backups-running',
     path: '/apps/shop/backups?scenario=healthy',

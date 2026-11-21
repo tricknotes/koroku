@@ -117,11 +117,11 @@ func TestBackupRecorder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
-	if err := rec.FinishRun(ctx, id, backup.StatusSucceeded, "", started.Add(time.Minute)); err != nil {
+	if err := rec.FinishRun(ctx, id, backup.StatusSucceeded, "", started.Add(time.Minute), nil); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
 	failed, _ := rec.StartRun(ctx, backup.TriggerManual, started.Add(time.Hour))
-	_ = rec.FinishRun(ctx, failed, backup.StatusFailed, "restic: repository unreachable", started.Add(2*time.Hour))
+	_ = rec.FinishRun(ctx, failed, backup.StatusFailed, "restic: repository unreachable", started.Add(2*time.Hour), nil)
 
 	runs, _ := st.ListBackupRuns(ctx, 10)
 	if len(runs) != 2 || runs[0].Status != store.BackupFailed || runs[0].Error == "" || runs[0].Trigger != "manual" ||

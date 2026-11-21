@@ -169,6 +169,9 @@ func TestRepositoryErrorFailsTheRunWithoutInit(t *testing.T) {
 	}
 	assertLines(t, "commands", e.host.calls(), []string{"restic cat config"})
 	assertLines(t, "recorded runs", e.rec.finishedRuns(), []string{"1 failed " + res.Error})
+	if len(e.rec.targets) != 1 || len(e.rec.targets[0]) != 0 {
+		t.Errorf("a run that backed up nothing records no targets: %+v", e.rec.targets)
+	}
 }
 
 func TestRunContinuesPastAFailingApp(t *testing.T) {
@@ -198,6 +201,14 @@ func TestRunContinuesPastAFailingApp(t *testing.T) {
 		t.Errorf("status %s, error %q, want %q", res.Status, res.Error, want)
 	}
 	assertLines(t, "recorded runs", e.rec.finishedRuns(), []string{"1 failed " + want})
+	// Each app's outcome is recorded on its own, masked like the summary.
+	records := e.rec.targets[0]
+	if len(records) != 2 ||
+		records[0].App != "blog" || records[0].Kind != KindVolume || records[0].Target != "uploads" || records[0].Status != TargetFailed ||
+		records[0].Error != "restic backup: exit status 1: Fatal: unable to open repository: access denied for [MASKED] / [MASKED]" ||
+		records[1].App != "shop" || records[1].Status != TargetSucceeded || records[1].Error != "" {
+		t.Errorf("records = %+v", records)
+	}
 	for what, text := range map[string]string{"returned error": err.Error(), "target error": res.Targets[0].Err.Error(), "recorded error": strings.Join(e.rec.finishedRuns(), "\n")} {
 		assertNoSecrets(t, what, text)
 	}
@@ -226,6 +237,9 @@ func TestVolumeWithUnreadableFilesIsStoredWithAWarning(t *testing.T) {
 	}
 	if res.Status != StatusSucceeded {
 		t.Errorf("status = %s", res.Status)
+	}
+	if r := e.rec.targets[0]; len(r) != 1 || r[0].Status != TargetWarning || r[0].Error != got.Warning {
+		t.Errorf("records = %+v", r)
 	}
 }
 

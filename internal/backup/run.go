@@ -245,7 +245,7 @@ func (m *Manager) execute(ctx context.Context, run *Run, p plan) (RunResult, err
 		// The run must be closed even when ctx was canceled.
 		recCtx, cancel := cleanupContext(ctx, 30*time.Second)
 		defer cancel()
-		if rerr := m.opts.Recorder.FinishRun(recCtx, res.ID, res.Status, res.Error, res.FinishedAt); rerr != nil {
+		if rerr := m.opts.Recorder.FinishRun(recCtx, res.ID, res.Status, res.Error, res.FinishedAt, m.targetRecords(res)); rerr != nil {
 			log.Error("recording the end of the backup run failed", "error", rerr)
 			err = errors.Join(err, fmt.Errorf("record the end of the backup run: %w", rerr))
 		}
@@ -268,6 +268,32 @@ func (m *Manager) prepare(ctx context.Context, create bool) error {
 // errorSummaryBytes bounds the error text stored for a run.
 const errorSummaryBytes = 1000
 
+// targetRecords turns the targets of a run into what the Recorder keeps, with the
+// messages masked and shortened like the run's summary.
+func (m *Manager) targetRecords(res RunResult) []TargetRecord {
+	out := make([]TargetRecord, 0, len(res.Targets))
+	for _, t := range res.Targets {
+		rec := TargetRecord{App: t.App, Kind: t.Kind, Target: t.Target, Status: TargetSucceeded}
+		switch {
+		case t.Err != nil:
+			rec.Status, rec.Error = TargetFailed, m.shorten(t.Err.Error())
+		case t.Warning != "":
+			rec.Status, rec.Error = TargetWarning, m.shorten(t.Warning)
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+// shorten masks a message and bounds it like the run's summary.
+func (m *Manager) shorten(msg string) string {
+	text := m.masker.Mask(msg)
+	if len(text) > errorSummaryBytes {
+		text = strings.ToValidUTF8(text[:errorSummaryBytes], "") + "..."
+	}
+	return text
+}
+
 // summarize builds the short error text of a run. Empty means success.
 func (m *Manager) summarize(res RunResult) string {
 	var parts []string
@@ -285,11 +311,7 @@ func (m *Manager) summarize(res RunResult) string {
 	if res.CheckErr != nil {
 		parts = append(parts, "repository check: "+res.CheckErr.Error())
 	}
-	text := m.masker.Mask(strings.Join(parts, " | "))
-	if len(text) > errorSummaryBytes {
-		text = strings.ToValidUTF8(text[:errorSummaryBytes], "") + "..."
-	}
-	return text
+	return m.shorten(strings.Join(parts, " | "))
 }
 
 // backupApp stores one snapshot per volume and one for the dump hook. A

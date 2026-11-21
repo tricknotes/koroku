@@ -1,6 +1,9 @@
 import type { TOC } from '@ember/component/template-only';
 import { LinkTo } from '@ember/routing';
-import type { AttentionItem } from 'koroku-console/utils/attention';
+import {
+  hasBackupFailure,
+  type AttentionItem,
+} from 'koroku-console/utils/attention';
 import { formatPercent } from 'koroku-console/utils/format';
 import Banner from './banner';
 import RelativeTime from './relative-time';
@@ -42,6 +45,36 @@ function line(item: AttentionItem): Line {
         models: [],
         link: 'システムを確認',
       };
+    case 'backup-run':
+      return {
+        key: 'backup-run',
+        kind: item.kind,
+        subject: '',
+        text: '直近のバックアップの実行が、取得の前に失敗しました。どのアプリも取得できていません。',
+        route: 'system',
+        models: [],
+        link: 'システムを確認',
+      };
+    case 'backup-system':
+      return {
+        key: 'backup-system',
+        kind: item.kind,
+        subject: '',
+        text: '基盤（koroku の DB と設定）の直近のバックアップが失敗しました。',
+        route: 'system',
+        models: [],
+        link: 'システムを確認',
+      };
+    case 'backup-app':
+      return {
+        key: `backup-app:${item.slug}`,
+        kind: item.kind,
+        subject: item.slug,
+        text: 'の直近のバックアップが失敗しました。',
+        route: 'app.backups',
+        models: [item.slug],
+        link: 'バックアップを確認',
+      };
     case 'deployment':
       return {
         key: `deployment:${item.slug}`,
@@ -78,7 +111,7 @@ function lines(items: AttentionItem[], owner: boolean | undefined): Line[] {
 
 /**
  * The warning shown above the app list while something needs the owner's
- * attention, one line per item with a link to where it is dealt with.
+ * attention (an error when a backup failed), one line per item with a link to where it is dealt with.
  * Render it only when there are items: a healthy host shows no banner.
  */
 const AttentionBanner: TOC<{
@@ -89,7 +122,7 @@ const AttentionBanner: TOC<{
   };
 }> = <template>
   <Banner
-    @tone="warning"
+    @tone={{if (hasBackupFailure @items) "error" "warning"}}
     @title="対応が必要な項目が {{@items.length}} 件あります"
     data-test-attention
   >

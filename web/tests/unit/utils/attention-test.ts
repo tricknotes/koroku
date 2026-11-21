@@ -3,6 +3,7 @@ import {
   attentionItems,
   diskLimitPercent,
   diskOverLimit,
+  hasBackupFailure,
 } from 'koroku-console/utils/attention';
 import {
   makeApp,
@@ -48,6 +49,49 @@ module('Unit | Utility | attention', function () {
     assert.deepEqual(
       attentionItems([], makeSystem({ disk: disk(91.2) }), null),
       [{ kind: 'disk', usedPercent: 91.2, limitPercent: 85 }],
+    );
+  });
+
+  test('failed backups are flagged per app, before the stale warning', function (assert) {
+    const items = attentionItems(
+      [],
+      null,
+      makeBackups({
+        warning: true,
+        last_success_at: '2026-11-16T18:00:40Z',
+        system_failed: true,
+        problems: [
+          { app: 'shop', status: 'failed', whole_run: false },
+          { app: 'blog', status: 'warning', whole_run: false },
+        ],
+      }),
+    );
+    assert.deepEqual(items, [
+      { kind: 'backup-system' },
+      { kind: 'backup-app', slug: 'shop' },
+      { kind: 'backup', lastSuccessAt: '2026-11-16T18:00:40Z' },
+    ]);
+    assert.true(hasBackupFailure(items));
+    assert.false(
+      hasBackupFailure([{ kind: 'backup', lastSuccessAt: null }]),
+      'a stale backup alone stays a warning',
+    );
+  });
+
+  test('a run that failed before backing anything up is one line', function (assert) {
+    assert.deepEqual(
+      attentionItems(
+        [],
+        null,
+        makeBackups({
+          system_failed: true,
+          problems: [
+            { app: 'blog', status: 'failed', whole_run: true },
+            { app: 'shop', status: 'failed', whole_run: true },
+          ],
+        }),
+      ),
+      [{ kind: 'backup-run' }],
     );
   });
 

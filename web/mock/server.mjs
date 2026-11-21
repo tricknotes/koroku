@@ -878,6 +878,49 @@ route('POST', '/api/backups', ({ state }) => {
   if (state.backups.running) throw new HttpError(409, 'busy');
   return { status: 202, json: startBackup(state) };
 });
+route('GET', '/api/apps/:slug/backups/status', (context) => {
+  const { slug } = appOf(context);
+  const { backups } = context.state;
+  if (!backups.configured) {
+    return {
+      configured: false,
+      last_success_at: null,
+      warning: false,
+      last_run: null,
+    };
+  }
+  // Unless the scenario says otherwise, the app's part of the latest run
+  // was stored, even when another app made the run fail.
+  const latest = backups.runs?.find((run) => run.status !== 'running');
+  const storedAt = latest ? latest.finished_at : backups.last_success_at;
+  return (
+    context.state.appBackupStatus?.get(slug) ?? {
+      configured: true,
+      last_success_at: storedAt,
+      warning: !storedAt,
+      last_run: storedAt
+        ? {
+            id: latest?.id ?? 40,
+            trigger: latest?.trigger ?? 'scheduled',
+            started_at: latest?.started_at ?? storedAt,
+            finished_at: storedAt,
+            status: 'succeeded',
+            whole_run: false,
+            error: '',
+            targets: [
+              {
+                kind: 'volume',
+                target: 'uploads',
+                status: 'succeeded',
+                error: '',
+              },
+              { kind: 'dump', target: 'db', status: 'succeeded', error: '' },
+            ],
+          }
+        : null,
+    }
+  );
+});
 route('GET', '/api/apps/:slug/backups', (context) => {
   const { slug } = appOf(context);
   if (!context.state.backups.configured) {

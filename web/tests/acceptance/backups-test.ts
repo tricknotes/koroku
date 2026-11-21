@@ -11,6 +11,7 @@ import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   installFakes,
   makeApp,
+  makeAppBackupStatus,
   makeBackups,
   makeDeployment,
   makeVolume,
@@ -96,6 +97,7 @@ module('Acceptance | backups', function (hooks) {
         return app;
       })
       .on('GET', '/api/backups', makeBackups({ runs: [run()] }))
+      .on('GET', '/api/apps/blog/backups/status', makeAppBackupStatus())
       .on('GET', '/api/apps/blog/backups', () => ({ snapshots }))
       .on('GET', '/api/apps/blog/volumes', volumeList);
   });
@@ -159,42 +161,125 @@ module('Acceptance | backups', function (hooks) {
         );
     });
 
-    test('a failed latest run and a stale backup stand out', async function (assert) {
+    test("this app's failed targets stand out, with the stale warning", async function (assert) {
       fakes.api.on(
         'GET',
-        '/api/backups',
-        makeBackups({
-          warning: true,
-          last_success_at: '2026-11-15T18:00:40Z',
-          runs: [
-            run({
-              id: 14,
-              status: 'failed',
-              error: 'restic backup: no space left on device',
-            }),
-            run({ id: 13 }),
-          ],
-        }),
+        '/api/apps/blog/backups/status',
+        makeAppBackupStatus(
+          { warning: true, last_success_at: '2026-11-15T18:00:40Z' },
+          {
+            id: 14,
+            status: 'failed',
+            targets: [
+              {
+                kind: 'volume',
+                target: 'uploads',
+                status: 'succeeded',
+                error: '',
+              },
+              {
+                kind: 'dump',
+                target: 'db',
+                status: 'failed',
+                error: 'pg_dump: connection refused',
+              },
+            ],
+          },
+        ),
       );
 
       await visit('/apps/blog/backups');
 
-      assert.dom('[data-test-backup-state]').hasText('直近の実行が失敗');
+      assert.dom('[data-test-backup-state]').hasText('直近の取得が失敗');
       assert
         .dom('[data-test-backup-state] [data-status]')
         .hasAttribute('data-status', 'failed');
       assert
         .dom('[data-test-backup-failed]')
-        .includesText('直近のバックアップが失敗しました')
-        .includesText('restic backup: no space left on device')
+        .includesText('このアプリの取得に失敗しました')
+        .includesText('DB のダンプ（db）: pg_dump: connection refused')
         .includesText('24 時間以上');
+      assert
+        .dom('[data-test-backup-failures] li')
+        .exists({ count: 1 }, 'only what failed is listed');
+    });
+
+    test("another app's failure does not show here", async function (assert) {
+      // The host's latest run failed because of shop; blog's part was fine.
+      fakes.api.on(
+        'GET',
+        '/api/backups',
+        makeBackups({
+          runs: [
+            run({ id: 14, status: 'failed', error: 'shop dump db: exit 1' }),
+          ],
+          problems: [{ app: 'shop', status: 'failed', whole_run: false }],
+        }),
+      );
+
+      await visit('/apps/blog/backups');
+
+      assert.dom('[data-test-backup-state]').hasText('正常');
+      assert.dom('[data-test-backup-failed]').doesNotExist();
+      assert.dom('main').doesNotIncludeText('shop');
+    });
+
+    test('a run that failed before backing anything up concerns this app too', async function (assert) {
+      fakes.api.on(
+        'GET',
+        '/api/apps/blog/backups/status',
+        makeAppBackupStatus(
+          {},
+          {
+            status: 'failed',
+            whole_run: true,
+            error: 'open the repository: unreachable',
+            targets: [],
+          },
+        ),
+      );
+
+      await visit('/apps/blog/backups');
+
+      assert
+        .dom('[data-test-backup-failed]')
+        .includesText('取得の前に失敗しました')
+        .includesText('open the repository: unreachable');
+    });
+
+    test('files that could not be read are a warning, not a failure', async function (assert) {
+      fakes.api.on(
+        'GET',
+        '/api/apps/blog/backups/status',
+        makeAppBackupStatus(
+          {},
+          {
+            status: 'warning',
+            targets: [
+              {
+                kind: 'volume',
+                target: 'uploads',
+                status: 'warning',
+                error: 'some files could not be read: open tmp/x',
+              },
+            ],
+          },
+        ),
+      );
+
+      await visit('/apps/blog/backups');
+
+      assert.dom('[data-test-backup-failed]').doesNotExist();
+      assert
+        .dom('[data-test-backup-target-warnings]')
+        .includesText('volume uploads: some files could not be read');
     });
 
     test('no success for a day is a warning of its own', async function (assert) {
       fakes.api.on(
         'GET',
-        '/api/backups',
-        makeBackups({ warning: true, runs: [run()] }),
+        '/api/apps/blog/backups/status',
+        makeAppBackupStatus({ warning: true }),
       );
 
       await visit('/apps/blog/backups');
@@ -202,7 +287,9 @@ module('Acceptance | backups', function (hooks) {
       assert.dom('[data-test-backup-state]').hasText('24 時間以上成功なし');
       assert
         .dom('[data-test-backup-warning]')
-        .includesText('24 時間以上、バックアップが成功していません');
+        .includesText(
+          '24 時間以上、このアプリのバックアップが成功していません',
+        );
       assert.dom('[data-test-backup-failed]').doesNotExist();
     });
   });
@@ -679,6 +766,11 @@ module('Acceptance | backups', function (hooks) {
         '/api/backups',
         makeBackups({ last_success_at: null, warning: true, runs: [] }),
       );
+      fakes.api.on(
+        'GET',
+        '/api/apps/blog/backups/status',
+        makeAppBackupStatus({ last_success_at: null, last_run: null }),
+      );
 
       await visit('/apps/blog/backups');
 
@@ -690,7 +782,7 @@ module('Acceptance | backups', function (hooks) {
         .exists({ count: 1 }, 'the one action is in the empty state');
       assert.dom('[data-test-no-snapshots] [data-test-backup-run]').exists();
       assert.dom('[data-test-backup-last-success]').hasText('まだありません');
-      assert.dom('[data-test-backup-state]').hasText('まだ成功していません');
+      assert.dom('[data-test-backup-state]').hasText('まだ取得していません');
       assert.dom('[data-test-no-volumes]').exists();
       assert.dom('[data-test-dump-help]').doesNotExist();
     });
