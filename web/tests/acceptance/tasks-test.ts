@@ -148,6 +148,78 @@ module('Acceptance | tasks', function (hooks) {
     assert.dom('[data-test-command-input]').hasValue('', 'the form is cleared');
   });
 
+  test('a past run runs again', async function (assert) {
+    runs = [
+      makeRun({ id: 7 }),
+      makeRun({
+        id: 6,
+        task_name: '',
+        service: 'db',
+        command: 'psql -c "select 1"',
+      }),
+    ];
+    serveApp({ slug: 'blog' });
+    await visit('/apps/blog/tasks');
+    await fillIn('[data-test-command-input]', 'bin/rails about');
+
+    await click('[data-test-task-run="7"] [data-test-rerun]');
+    assert.deepEqual(
+      fakes.api.callsTo('POST', '/api/apps/blog/task-runs')[0]?.body,
+      { task: 'status' },
+      'a registered task that is unchanged runs by its name',
+    );
+    assert.dom('[data-test-task-run="8"]').exists('the new run shows');
+    assert
+      .dom('[data-test-rerun]')
+      .isDisabled('one command at a time, while the new one runs');
+  });
+
+  test('a command typed on the spot, or a changed task, runs as it was', async function (assert) {
+    tasks = [{ ...STATUS_TASK, command: 'bin/rails db:version' }];
+    runs = [
+      makeRun({ id: 7 }),
+      makeRun({
+        id: 6,
+        task_name: '',
+        service: 'db',
+        command: 'psql -c "select 1"',
+      }),
+    ];
+    serveApp({ slug: 'blog' });
+    await visit('/apps/blog/tasks');
+    await fillIn('[data-test-command-input]', 'bin/rails about');
+
+    await click('[data-test-task-run="6"] [data-test-rerun]');
+    assert.deepEqual(
+      fakes.api.callsTo('POST', '/api/apps/blog/task-runs')[0]?.body,
+      { service: 'db', command: 'psql -c "select 1"' },
+    );
+    assert
+      .dom('[data-test-command-input]')
+      .hasValue('bin/rails about', 'the form keeps what was typed');
+  });
+
+  test('a production app asks before running a past run again', async function (assert) {
+    serveApp({ environment: 'production' });
+    await visit('/apps/blog/tasks');
+    await click('[data-test-task-run="7"] [data-test-rerun]');
+
+    assert.dom('[data-test-dialog]').exists();
+    assert.deepEqual(fakes.api.callsTo('POST', '/api/apps/blog/task-runs'), []);
+    await click('[data-test-dialog-confirm]');
+    assert.deepEqual(
+      fakes.api.callsTo('POST', '/api/apps/blog/task-runs')[0]?.body,
+      { task: 'status' },
+    );
+  });
+
+  test('without manage there is nothing to run again', async function (assert) {
+    serveApp({ role: 'deploy' });
+    await visit('/apps/blog/tasks');
+    assert.dom('[data-test-task-run="7"]').exists();
+    assert.dom('[data-test-rerun]').doesNotExist();
+  });
+
   test('a production app asks before running anything', async function (assert) {
     serveApp({ environment: 'production' });
     await visit('/apps/blog/tasks');
