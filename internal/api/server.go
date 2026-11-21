@@ -39,6 +39,9 @@ type Options struct {
 	Deployer Deployer
 	// Promoter queues promotions (ARCHITECTURE 9.7). Optional.
 	Promoter Promoter
+	// PushDeployer queues deployments of GitHub pushes (ARCHITECTURE 5.2).
+	// Optional; without it the webhook refuses every delivery.
+	PushDeployer PushDeployer
 	// Refs resolves branch names for deployments. Optional.
 	Refs RefResolver
 	// PublicFiles reads public repositories without credentials, for
@@ -82,18 +85,23 @@ type Server struct {
 	box      *secrets.Box
 	deployer Deployer
 	promoter Promoter
-	refs     RefResolver
-	router   Router
-	domains  DomainChecker
-	auth     AuthOptions
-	ops      AppOperator
-	tasks    TaskRunner
-	logs     AppLogs
-	backups  Backups
-	volumes  AppVolumes
-	copier   DBCopier
-	users    UserLookup
-	envReqs  *envreq.Reader
+	// pushDeployer, webhookLimiter and deliveries serve the GitHub webhook
+	// (ARCHITECTURE 5.2).
+	pushDeployer   PushDeployer
+	webhookLimiter *rateLimiter
+	deliveries     *deliverySet
+	refs           RefResolver
+	router         Router
+	domains        DomainChecker
+	auth           AuthOptions
+	ops            AppOperator
+	tasks          TaskRunner
+	logs           AppLogs
+	backups        Backups
+	volumes        AppVolumes
+	copier         DBCopier
+	users          UserLookup
+	envReqs        *envreq.Reader
 	// envPresets reads repositories for the create screen (ARCHITECTURE 9.8).
 	envPresets *envpresets.Reader
 	// publicFiles reads public repositories anonymously (Options.PublicFiles).
@@ -154,6 +162,12 @@ func New(opts Options) *Server {
 		// One person logs in a few times a week; ten a minute is generous.
 		callbackLimiter: &rateLimiter{limit: 10, window: time.Minute},
 		tokenLimiter:    &tokenLimiter{},
+
+		pushDeployer: opts.PushDeployer,
+		// Pushes come a few at a time; the limit keeps a flood of signed or
+		// unsigned deliveries from costing more than reading their bodies.
+		webhookLimiter: &rateLimiter{limit: 60, window: time.Minute},
+		deliveries:     newDeliverySet(deliveryLimit, deliveryTTL),
 	}
 }
 
@@ -172,6 +186,13 @@ func (s *Server) routes() *http.ServeMux {
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /auth/gate", s.handleGateStart)
 	mux.HandleFunc("/auth/", func(w http.ResponseWriter, _ *http.Request) {
+		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
+	})
+
+	// The webhook authenticates by its signature, not by a session or a
+	// role (ARCHITECTURE 5.2).
+	mux.HandleFunc("POST "+WebhookPath, s.handleGitHubWebhook)
+	mux.HandleFunc("/webhooks/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 	})
 

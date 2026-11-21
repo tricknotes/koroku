@@ -239,6 +239,13 @@ func (s *Server) guard(mux *http.ServeMux) http.Handler {
 	var next http.Handler = mux
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+		if path == WebhookPath && r.Method == http.MethodPost {
+			// GitHub, not a browser, posts here: no session, Origin or
+			// Content-Type rules apply. The handler authenticates the
+			// delivery by its signature (ARCHITECTURE 5.2).
+			next.ServeHTTP(w, r)
+			return
+		}
 		isAPI := strings.HasPrefix(path, "/api/")
 		// Browsers label where a request comes from. The console only ever
 		// calls its API from its own origin, so anything a browser marks as

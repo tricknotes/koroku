@@ -1026,6 +1026,87 @@ SHOTS.push(
   },
 );
 
+// Automatic deployment on push (ARCHITECTURE 5.2): the settings section,
+// the production confirmation and the mark in the deploy history.
+const AUTO_DEPLOY = '[data-test-auto-deploy-group]';
+const TURN_ON_AUTO_DEPLOY = `(() => {
+  document.querySelector('[data-test-field="auto_deploy"]').click();
+  setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 300);
+})()`;
+SHOTS.push(
+  {
+    name: 'autodeploy-settings',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: '[data-test-webhook-url]',
+    script: scrollTo(AUTO_DEPLOY),
+  },
+  {
+    name: 'autodeploy-settings-phone',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: '[data-test-webhook-url]',
+    script: scrollTo(AUTO_DEPLOY),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'autodeploy-settings-off',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: AUTO_DEPLOY,
+    script: scrollTo(AUTO_DEPLOY),
+    themes: ['light'],
+  },
+  {
+    name: 'autodeploy-secret-missing',
+    path: '/apps/blog-staging/settings?scenario=webhook-unset',
+    wait: '[data-test-webhook-secret-missing]',
+    script: scrollTo(AUTO_DEPLOY),
+  },
+  {
+    name: 'autodeploy-secret-missing-phone',
+    path: '/apps/blog-staging/settings?scenario=webhook-unset',
+    wait: '[data-test-webhook-secret-missing]',
+    script: scrollTo(AUTO_DEPLOY),
+    ...PHONE,
+    fullPage: false,
+    themes: ['dark'],
+  },
+  {
+    name: 'autodeploy-production-confirm',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: AUTO_DEPLOY,
+    script: TURN_ON_AUTO_DEPLOY,
+    then: '[data-test-auto-deploy-confirm]',
+  },
+  {
+    name: 'autodeploy-production-confirm-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: AUTO_DEPLOY,
+    script: TURN_ON_AUTO_DEPLOY,
+    then: '[data-test-auto-deploy-confirm]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'autodeploy-history',
+    path: '/apps/blog-staging/deploy?scenario=healthy',
+    wait: '[data-test-push-badge]',
+  },
+  {
+    name: 'autodeploy-history-open',
+    path: '/apps/blog-staging/deploy?scenario=healthy',
+    wait: '[data-test-push-badge]',
+    click: '[data-test-show-log]',
+    then: '[data-test-push-trigger]',
+    themes: ['light'],
+  },
+  {
+    name: 'autodeploy-history-phone',
+    path: '/apps/blog-staging/deploy?scenario=healthy',
+    wait: '[data-test-push-badge]',
+    ...PHONE,
+  },
+);
+
 // Settings tab.
 const SETTINGS = '[data-test-settings-form]';
 SHOTS.push(

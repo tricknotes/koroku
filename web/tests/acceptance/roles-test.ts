@@ -105,6 +105,10 @@ module('Acceptance | roles', function (hooks) {
     assert.dom('[data-test-settings-form] fieldset').isNotDisabled();
     assert.dom('[data-test-field="relax_policy"]').isDisabled();
     assert.dom('[data-test-owner-only-note]').exists();
+    assert
+      .dom('[data-test-environment-option="production"]')
+      .isDisabled('the environment is the owner’s');
+    assert.dom('[data-test-environment-owner-note]').exists();
     assert.dom('[data-test-control="restart"]').exists('may restart');
     assert.dom('[data-test-control="stop"]').exists('may stop');
     assert.dom('[data-test-delete]').doesNotExist('deleting is the owner’s');

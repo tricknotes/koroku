@@ -11,6 +11,7 @@
 - 変更系のリクエストには、管理 UI のオリジンと一致する `Origin` ヘッダーが要る（ブラウザーの `fetch` は自動で付ける）。なければ `403 forbidden_origin`。
 - ボディのある変更系リクエストは `Content-Type: application/json` でなければ `415 unsupported_media_type`。
 - ブラウザーが `Sec-Fetch-Site` で同一オリジン以外（`same-site`、`cross-site`）と申告した API リクエストは、参照系も含めて `403 forbidden_origin`。
+- GitHub の Webhook（`POST /webhooks/github`）は、上の 3 つの規則とセッションの対象外。署名で認証する（下の「GitHub の Webhook」の節）。
 - `--insecure-no-auth`（開発用）のときは、Host がループバック名（`localhost`、`127.0.0.1` など）でなければ `403 forbidden_host`。
 - エラーは次の形。`code` は安定した識別子で、UI はこれを日本語の文言に対応づける。`message` は英語の補足。
 
@@ -48,7 +49,7 @@
 | `manage` | `PATCH /api/apps/{slug}`（オーナー専用の項目を除く）、環境変数の変更系、ドメインの変更系、`POST /api/apps/{slug}/backups/restore`、`GET /api/apps/{slug}/backups/{snapshot}/download`、`POST /api/apps/{slug}/db-copies`（送り側の `manage` も要る。送り側にロールがなければ `404 source_not_found`）、`PUT /api/apps/{slug}/tasks`、`POST /api/apps/{slug}/task-runs`、`POST /api/task-runs/{id}/cancel`。`POST /api/backups` は、どれかのアプリに `manage` があれば使える（実行はホスト全体の 1 回） |
 
 - 要件を満たさなければ `403 forbidden_role`。ロールのないアプリに関わるものは `404`（共通の表）。判定は再ログイン（`reauth_required`）より先に行う。
-- `PATCH /api/apps/{slug}` で `relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。今と同じ値を送るのはかまわない。
+- `PATCH /api/apps/{slug}` で `environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。本番アプリの `auto_deploy` を有効にすること（と、有効なまま追うブランチを変えること）もオーナーだけ（`details.fields` に `auto_deploy`）。今と同じ値を送るのはかまわない。
 - API トークンも、トークンのユーザーとして同じ要件で判定する。
 
 ## メンバー（2026-11-21）
@@ -90,7 +91,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## API トークン（2026-11-21）
 
@@ -167,12 +168,14 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 {
   "disk_limit_percent": 85,
   "log_archive": { "configured": true, "last_success_at": "2026-11-18T03:10:05Z", "last_error": "" },
-  "caddy": { "enabled": true, "last_loaded_at": "2026-11-18T03:00:02Z", "last_error": "" }
+  "caddy": { "enabled": true, "last_loaded_at": "2026-11-18T03:00:02Z", "last_error": "" },
+  "webhook": { "url": "https://console.dev.example.com/webhooks/github", "secret_configured": true }
 }
 ```
 
 - `disk_limit_percent` を超えるとデプロイが拒否される。UI はこの値で警告を出す。
 - `log_archive.last_success_at` はログ退避が最後に成功した時刻（まだなければ `null`）。オブジェクトストレージが未設定なら `configured: false`。
+- `webhook` は自動デプロイ（ARCHITECTURE 5.2）のための GitHub App の Webhook。`url` は App に設定する Webhook URL（`console_url` + `/webhooks/github`）、`secret_configured` は `[github] webhook_secret` が設定されているか。
 - `caddy.last_loaded_at` は Caddy へ設定を最後に投入できた時刻、`last_error` は直近の投入が失敗していればその理由（成功していれば空文字）。`[caddy] enabled = false` なら `enabled: false`。
 
 システム画面のために、さらに次が加わる（ARCHITECTURE 9.1）:
@@ -266,6 +269,8 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "access_protection": true,
   "protection_exempt_paths": ["/webhooks/"],
   "promote_from": "",
+  "auto_deploy": false,
+  "auto_deploy_branch": "",
   "url": "https://blog.dev.example.com",
   "primary_url": "https://www.example.org",
   "pending_domains": 0,
@@ -287,6 +292,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - 必要な環境変数の読み取り方（ARCHITECTURE 9.4）: `env_source` は `compose`（既定。Compose ファイルの `${VAR}`）/ `dotenv`（`.env.example`）/ `off`。`env_example_path` は `dotenv` で読むファイルのパスで、空なら `.env.example`。
 - アクセスの保護（ARCHITECTURE 8.3、2026-11-21）: `access_protection` が `true` なら、アプリのホスト名（自動割当と有効な独自ドメイン）を開けるのは管理 UI にログインした本人だけになる。`POST` で省略すると `environment` が `staging` なら `true`、`production` なら `false`。`protection_exempt_paths` は保護を外すパスの前方一致の一覧（既定は空）。各要素は `/` で始まり、英数字と `. _ ~ - / @ : +` だけからなる 200 文字以内で、20 件まで。`/` そのもの、`/.koroku` で始まるもの、`.` や `..` の区切り、`//` は `422 validation_failed`（`details.protection_exempt_paths`）。重複は 1 つにまとめる。どちらも変えると Caddy の設定を投入し直す。
 - `promote_from` は昇格元の staging アプリの slug（ARCHITECTURE 9.7）。空なら組み合わせなし。`PATCH` で設定できるのは、自分が `production`（同じリクエストで変える値を含む）で、相手が同じリポジトリの `staging` アプリのときだけ。違えば 422 `validation_failed`（`details.promote_from`）。空文字で外す。
+- 自動デプロイ（ARCHITECTURE 5.2、2026-11-21）: `auto_deploy` が `true` なら、GitHub に `auto_deploy_branch`（空なら `default_branch`）が push されたとき、そのコミットをデプロイする。既定は `false` と空。`true` にできるのは GitHub App で取得するアプリ（`repo_full_name` があり `repo_url` が空）だけで、ほかは `422 validation_failed`（`details.auto_deploy`）。`repo_url` に切り替えるときは先に `false` にする。`auto_deploy_branch` の書式は `default_branch` と同じ（違えば `details.auto_deploy_branch`）。
 - バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。
 
 | メソッドとパス | 内容 |
@@ -420,13 +426,17 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
   "source_deployment_id": null,
   "rollback_available": true,
   "promoted_from": null,
-  "actor": {"id": 1, "login": "octo"}
+  "actor": {"id": 1, "login": "octo"},
+  "trigger": "manual",
+  "pusher": ""
 }
 ```
 
 `actor` はデプロイを始めたユーザー（ロールバックと昇格も同じ）。koroku 自身が始めたものと、記録する前の古いデプロイは `null`。`login` は始めた時点のもの。
 
 `status` は `queued` / `running` / `succeeded` / `failed` / `canceled`。`source_deployment_id` は、ロールバック（ARCHITECTURE 7.1）の記録なら戻す先のデプロイの ID（`ref` は `rollback`）、通常のデプロイなら `null`。`rollback_available` は、そのデプロイのリリースへ再ビルドなしで戻せるか（成功していて、ファイルが残っている。ロールバックの記録なら戻す先について）。
+
+`trigger` は何がデプロイを始めたか（ARCHITECTURE 5.2）。`manual`（管理 UI か API。ロールバックと昇格を含む）か `push`（GitHub への push による自動デプロイ）。`pusher` は `push` のとき push した GitHub の login、それ以外は空文字。`push` のデプロイの `ref` は push されたブランチ名。
 
 `promoted_from` は昇格（ARCHITECTURE 9.7）で積んだデプロイのとき `{"deployment_id": 12, "app_slug": "blog-staging"}`、それ以外（ロールバックの記録を含む）と、昇格元のアプリを削除したあとは `null`。
 
@@ -557,6 +567,25 @@ ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose ru
 **ログの行**: 先頭に `$ <コマンド>`、続いて `Running in service <service> of deployment #<id>.`。終わりに `Exited with code <N>.`、`Timed out after <時間>.`、`Canceled.`、`Failed to run: <理由>` のどれか。コマンドの出力は環境変数の値をマスクしてある。
 
 アプリの実行中（`running` の記録がある間）は、そのアプリへの `POST /api/apps/{slug}/deployments` も `409 busy` になる。起動・停止・再起動・削除・リストアも同じ。
+
+## GitHub の Webhook（2026-11-21）
+
+`POST /webhooks/github` は GitHub App の Webhook の受け口で、push での自動デプロイ（ARCHITECTURE 5.2）に使う。管理 UI からは呼ばない。セッション、`Origin`、`Sec-Fetch-Site` の規則は適用せず、`[github] webhook_secret` による署名で認証する。
+
+- ヘッダー: `X-Hub-Signature-256`（`sha256=<本文の HMAC-SHA256 の 16 進>`）、`X-GitHub-Event`、`X-GitHub-Delivery`。`Content-Type: application/json`（App の Webhook の既定）。
+- `ping` は 200 で `{"result": "pong"}`。`push` 以外のイベント、タグ、ブランチの削除、どのアプリも追っていないブランチは 200 で `{"result": "ignored", "reason": "..."}`。
+- `push` に応じたアプリがあれば `{"result": "deployed", "apps": [{"app": "blog-staging", "status": "queued", "deployment_id": 43}]}`。`status` は `queued`（デプロイを積んだ）、`duplicate`（同じ配送か同じ本文をすでに受けた）、`stopped`（停止中なので積まない）、`failed`（`error` は `busy`、`disk_full`、`internal`）。`failed` が 1 つでもあれば応答は 503 で、GitHub から再配送すると失敗したアプリだけが積まれる。
+
+| ステータス | `code` | 意味 |
+| --- | --- | --- |
+| 400 | `bad_headers`、`bad_payload`、`unreadable_body` | イベント名か配送 ID がない、本文が push の形でない、`after` が SHA でない |
+| 401 | `bad_signature` | 署名がない、形が違う、一致しない |
+| 403 | `webhook_disabled` | `webhook_secret` が未設定。すべての配送を断る |
+| 413 | `body_too_large` | 本文が 5 MiB を超えた |
+| 415 | `unsupported_media_type` | `application/json` でない |
+| 429 | `rate_limited` | 1 分あたり 60 件を超えた。`Retry-After` あり |
+
+`GET` などほかのメソッドと、`/webhooks/` の下のほかのパスは 404。
 
 ## GitHub リポジトリ（M3）
 

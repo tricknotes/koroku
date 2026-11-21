@@ -57,6 +57,10 @@ type deploymentJSON struct {
 	PromotedFrom *promotedFromJSON `json:"promoted_from"`
 	// Actor is who asked for the deployment; null when nobody did.
 	Actor *actorJSON `json:"actor"`
+	// Trigger is manual or push (ARCHITECTURE 5.2); Pusher is the GitHub
+	// login behind a push, "" otherwise.
+	Trigger string `json:"trigger"`
+	Pusher  string `json:"pusher"`
 }
 
 // actorJSON names the user who started an operation.
@@ -112,6 +116,8 @@ func deploymentToJSON(d store.Deployment, slug string) deploymentJSON {
 		StartedAt:          d.StartedAt,
 		FinishedAt:         d.FinishedAt,
 		Actor:              actorToJSON(d.Actor),
+		Trigger:            d.Trigger,
+		Pusher:             d.Pusher,
 	}
 }
 

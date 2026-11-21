@@ -2,10 +2,14 @@ package preflight
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,9 +45,14 @@ type fakeApp struct {
 	app      github.App
 	appErr   error
 	installs []github.Installation
+	hook     github.WebhookConfig
+	hookErr  error
 }
 
 func (f fakeApp) App(context.Context) (github.App, error) { return f.app, f.appErr }
+func (f fakeApp) WebhookConfig(context.Context) (github.WebhookConfig, error) {
+	return f.hook, f.hookErr
+}
 func (f fakeApp) Installations(context.Context) ([]github.Installation, error) {
 	return f.installs, nil
 }
@@ -92,7 +101,8 @@ func healthy(t *testing.T) Deps {
 	cfg.PublicIP = testIP
 	cfg.MasterKeyFile = keyFile
 	cfg.Caddy.AdminURL = caddy.URL
-	cfg.GitHub = config.GitHub{AppID: 42, ClientID: "Iv1.abc", ClientSecret: "s", PrivateKeyFile: "/k", AllowedUserID: 7}
+	cfg.GitHub = config.GitHub{AppID: 42, ClientID: "Iv1.abc", ClientSecret: "s", PrivateKeyFile: "/k", AllowedUserID: 7,
+		WebhookSecret: "0123456789abcdef0123"}
 	cfg.Storage = config.Storage{Endpoint: "https://s3.test", Region: "auto", Bucket: "koroku", AccessKeyID: "a", SecretAccessKey: "b"}
 
 	console := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -122,13 +132,16 @@ func healthy(t *testing.T) Deps {
 		HTTP: client,
 		GitHub: fakeApp{
 			app: github.App{ID: 42, Slug: "koroku-test", ClientID: "Iv1.abc", HTMLURL: "https://github.com/apps/koroku-test",
-				Permissions: map[string]string{"contents": "read", "metadata": "read", "deployments": "write"}},
+				Permissions: map[string]string{"contents": "read", "metadata": "read", "deployments": "write"},
+				Events:      []string{"push"}},
+			hook:     github.WebhookConfig{URL: "https://console.apps.test/webhooks/github", ContentType: "json"},
 			installs: []github.Installation{{ID: 1, Account: "octocat", RepositorySelection: "all", Allowed: true}},
 		},
-		Users:   fakeUsers{7: "octocat"},
-		Objects: objstore.NewMemory(),
-		Backups: fakeBackups{snaps: []backup.Snapshot{{ID: "abcd1234", Time: now.Add(-3 * time.Hour)}}},
-		Now:     func() time.Time { return now },
+		Users:          fakeUsers{7: "octocat"},
+		AutoDeployApps: []string{"blog"},
+		Objects:        objstore.NewMemory(),
+		Backups:        fakeBackups{snaps: []backup.Snapshot{{ID: "abcd1234", Time: now.Add(-3 * time.Hour)}}},
+		Now:            func() time.Time { return now },
 	}
 }
 
@@ -148,7 +161,7 @@ func TestHealthyHost(t *testing.T) {
 		}
 	}
 	want := []string{"config", "public_ip", "dns.console", "dns.apps", "caddy", "https", "master_key",
-		"github.app", "github.install", "github.user", "storage", "backup"}
+		"github.app", "github.install", "github.user", "github.webhook", "storage", "backup"}
 	if len(results) != len(want) {
 		t.Fatalf("got %d results, want %d", len(results), len(want))
 	}
@@ -346,4 +359,33 @@ type refusingStore struct{ objstore.Store }
 
 func (refusingStore) Put(context.Context, string, []byte, string) error {
 	return errors.New("403 AccessDenied")
+}
+
+func TestHTTPSFailureTellsCertificatesApart(t *testing.T) {
+	unknown := func(cn string, org ...string) error {
+		cert := &x509.Certificate{Issuer: pkix.Name{CommonName: cn, Organization: org}}
+		return &url.Error{Op: "Get", URL: "https://console.example.com/api/system",
+			Err: &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{Cert: cert}}}
+	}
+	cases := map[string]struct {
+		err     error
+		staging bool
+		want    Status
+		text    string
+		hint    string
+	}{
+		"staging while configured":      {unknown("(STAGING) Pretend Pear X1"), true, Warn, "staging certificate", "delete the acme_ca line"},
+		"staging after switching away":  {unknown("(STAGING) Pretend Pear X1"), false, Fail, "still serves", "systemctl restart caddy"},
+		"staging named by organization": {unknown("", "(STAGING) Let's Encrypt"), false, Fail, "still serves", "restart caddy"},
+		"some other authority":          {unknown("Example Private CA"), false, Fail, "Example Private CA", "journalctl -u caddy"},
+		"no answer at all":              {errors.New("dial tcp: connection refused"), false, Fail, "connection refused", "80/443"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := httpsFailure(tc.err, "https://console.example.com", "console.example.com", tc.staging)
+			if r.Status != tc.want || !strings.Contains(r.Message, tc.text) || !strings.Contains(r.Hint, tc.hint) {
+				t.Errorf("got %s %q (hint %q)", r.Status, r.Message, r.Hint)
+			}
+		})
+	}
 }

@@ -10,6 +10,7 @@ import type Transition from '@ember/routing/transition';
 import Banner from 'koroku-console/components/banner';
 import Button from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import CopyButton from 'koroku-console/components/copy-button';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
@@ -46,6 +47,7 @@ import type {
   EnvRequirements,
   EnvSource,
   Environment,
+  SystemInfo,
 } from 'koroku-console/utils/types';
 
 /** Settings that change what the requirements check reads. */
@@ -72,6 +74,8 @@ const KNOWN_FIELDS = new Set([
   'access_protection',
   'protection_exempt_paths',
   'promote_from',
+  'auto_deploy',
+  'auto_deploy_branch',
 ]);
 
 type ControlAction = 'start' | 'stop' | 'restart';
@@ -104,6 +108,11 @@ function repositoryUrl(app: App): string | null {
   return /^https?:\/\//.test(app.repo_url) ? app.repo_url : null;
 }
 
+/** Pushes reach koroku through the GitHub App (ARCHITECTURE 5.2). */
+function usesGitHubApp(app: App): boolean {
+  return app.repo_full_name !== '' && !app.repo_url;
+}
+
 function repositoryName(app: App): string {
   return app.repo_full_name || app.repo_url;
 }
@@ -134,6 +143,8 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   /** A save that changes the protection of a production app, held for confirmation. */
   @tracked pendingProtection: AppPatch | null = null;
+  /** A save that makes a production app deploy pushes, held for confirmation. */
+  @tracked pendingAutoDeploy: AppPatch | null = null;
 
   @tracked controlling: ControlAction | null = null;
   @tracked controlNotice = '';
@@ -144,6 +155,9 @@ export default class AppSettingsTemplate extends Component<Signature> {
   @tracked deleteVolumes = false;
   @tracked deleting = false;
   @tracked deleteError: unknown = null;
+
+  /** The webhook URL and whether its secret is set (ARCHITECTURE 5.2). */
+  system = new Loadable<SystemInfo>(() => this.api.getSystem());
 
   /** The other apps, for the promotion source (ARCHITECTURE 9.7). */
   apps = new Loadable<App[]>(() => this.api.listApps());
@@ -166,6 +180,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
     super(owner, args);
     this.form = new SettingsForm(this.app);
     void this.requirements.load();
+    void this.system.load();
     this.router.on('routeWillChange', this.guardLeave);
     if (this.app.environment === 'production' || this.app.promote_from) {
       void this.apps.load();
@@ -199,9 +214,10 @@ export default class AppSettingsTemplate extends Component<Signature> {
     this.leaveAfterSave = transition;
     this.pendingLeave = null;
     await this.save();
-    // A production protection change asks once more; the move then waits
-    // for that confirmation (see confirmProtection).
-    if (!this.pendingProtection) this.continueLeave();
+    // A production protection or auto-deploy change asks once more; the
+    // move then waits for that confirmation (see confirmProtection).
+    if (!this.pendingProtection && !this.pendingAutoDeploy)
+      this.continueLeave();
   };
 
   leaveWithoutSaving = () => {
@@ -420,12 +436,36 @@ export default class AppSettingsTemplate extends Component<Signature> {
       this.pendingProtection = patch;
       return;
     }
+    if (this.startsProductionAutoDeploy(patch)) {
+      this.pendingAutoDeploy = patch;
+      return;
+    }
     await this.commit(patch);
   };
+
+  /**
+   * Whether a save makes a production app deploy pushes, or pushes of
+   * another branch, without anyone pressing a button (ARCHITECTURE 5.2).
+   */
+  startsProductionAutoDeploy(patch: AppPatch): boolean {
+    if (!this.isProductionForm || !this.form.autoDeploy) return false;
+    return (
+      patch.auto_deploy === true ||
+      patch.environment === 'production' ||
+      patch.auto_deploy_branch !== undefined ||
+      patch.default_branch !== undefined
+    );
+  }
 
   confirmProtection = async () => {
     const patch = this.pendingProtection;
     if (!patch) return;
+    if (this.startsProductionAutoDeploy(patch)) {
+      // One more question before anything is saved.
+      this.pendingProtection = null;
+      this.pendingAutoDeploy = patch;
+      return;
+    }
     await this.commit(patch);
     this.pendingProtection = null;
     this.continueLeave();
@@ -435,6 +475,35 @@ export default class AppSettingsTemplate extends Component<Signature> {
     this.pendingProtection = null;
     this.leaveAfterSave = null;
   };
+
+  confirmAutoDeploy = async () => {
+    const patch = this.pendingAutoDeploy;
+    if (!patch) return;
+    await this.commit(patch);
+    this.pendingAutoDeploy = null;
+    this.continueLeave();
+  };
+
+  cancelAutoDeploy = () => {
+    this.pendingAutoDeploy = null;
+    this.leaveAfterSave = null;
+  };
+
+  get canAutoDeploy(): boolean {
+    return usesGitHubApp(this.app);
+  }
+
+  /** Off and impossible: nothing to switch on. */
+  get autoDeployDisabled(): boolean {
+    // Making a production app deploy pushes by itself is the owner's call
+    // (ARCHITECTURE 10.7).
+    if (this.app.environment === 'production' && !this.isOwner) return true;
+    return !this.canAutoDeploy && !this.form.autoDeploy;
+  }
+
+  get webhookSecretMissing(): boolean {
+    return this.system.value?.webhook?.secret_configured === false;
+  }
 
   commit = async (patch: AppPatch) => {
     this.saving = true;
@@ -591,6 +660,120 @@ export default class AppSettingsTemplate extends Component<Signature> {
           </div>
         </div>
 
+        <div class="form-group auto-deploy-group" data-test-auto-deploy-group>
+          <div>
+            <h2 class="form-group-title">自動デプロイ</h2>
+            <p class="form-group-description">
+              GitHub にブランチが push
+              されたら、そのコミットを自動でデプロイします。結果は手動のデプロイと同じく履歴に残ります。
+            </p>
+          </div>
+          <div class="form-group-body">
+            <label class="option">
+              <input
+                type="checkbox"
+                checked={{this.form.autoDeploy}}
+                disabled={{this.autoDeployDisabled}}
+                aria-describedby="settings-auto-deploy-hint"
+                data-test-field="auto_deploy"
+                {{on "change" (setChecked this.form "autoDeploy")}}
+              />
+              <span class="option-body">
+                <span class="option-label">push されたら自動でデプロイする</span>
+                <span class="option-hint" id="settings-auto-deploy-hint">
+                  {{#if this.canAutoDeploy}}
+                    続けて push
+                    したときは、待っているデプロイを新しいコミットに置き換えます。停止中のアプリはデプロイしません。
+                  {{else}}
+                    GitHub App
+                    で取得するリポジトリ（作成画面の一覧から選んだもの）だけで使えます。URL
+                    で指定したリポジトリには push が届きません。
+                  {{/if}}
+                </span>
+              </span>
+            </label>
+
+            {{#if this.form.autoDeploy}}
+              <FormField
+                class="field-narrow"
+                @label="デプロイするブランチ"
+                @hint="空なら既定のブランチ（{{this.form.defaultBranch}}）に従います。"
+                @error={{this.errors.auto_deploy_branch}}
+                data-test-field-group="auto_deploy_branch"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="text"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder={{this.form.defaultBranch}}
+                  value={{this.form.autoDeployBranch}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="auto_deploy_branch"
+                  {{on "input" (setValue this.form "autoDeployBranch")}}
+                />
+              </FormField>
+
+              {{#if this.webhookSecretMissing}}
+                <Banner
+                  @tone="warning"
+                  @title="Webhook の secret が設定されていません"
+                  data-test-webhook-secret-missing
+                >
+                  <code>config.toml</code>
+                  の
+                  <code>[github] webhook_secret</code>
+                  を設定して koroku を再起動するまで、push
+                  は届いても受け付けません。
+                </Banner>
+              {{/if}}
+
+              <div class="auto-deploy-setup" data-test-webhook-setup>
+                <p class="field-hint">
+                  GitHub App の設定で、次の 3 つが必要です（App
+                  ごとに一度だけ）。
+                </p>
+                <ol class="auto-deploy-steps">
+                  <li>
+                    Webhook を
+                    <strong>Active</strong>
+                    にし、Webhook URL に次のアドレスを入れる。
+                    {{#if this.system.value.webhook}}
+                      <span class="auto-deploy-url">
+                        <code
+                          data-test-webhook-url
+                        >{{this.system.value.webhook.url}}</code>
+                        <CopyButton
+                          @text={{this.system.value.webhook.url}}
+                          @label="Webhook URL"
+                        />
+                      </span>
+                    {{/if}}
+                  </li>
+                  <li>
+                    Webhook secret に、<code>config.toml</code>
+                    の
+                    <code>[github] webhook_secret</code>
+                    と同じ値を入れる。
+                  </li>
+                  <li>
+                    Permissions &amp; events の Subscribe to events で
+                    <strong>Push</strong>
+                    を選ぶ。
+                  </li>
+                </ol>
+              </div>
+            {{/if}}
+            {{#if this.errors.auto_deploy}}
+              <p class="field-error" data-test-field-error>
+                {{this.errors.auto_deploy}}
+              </p>
+            {{/if}}
+          </div>
+        </div>
+
         <div class="form-group">
           <div>
             <h2 class="form-group-title">公開</h2>
@@ -682,6 +865,15 @@ export default class AppSettingsTemplate extends Component<Signature> {
             </p>
           </div>
           <div class="form-group-body">
+            {{#unless this.isOwner}}
+              {{#unless this.readOnly}}
+                <RoleNote
+                  @needed="owner"
+                  @what="環境"
+                  data-test-environment-owner-note
+                />
+              {{/unless}}
+            {{/unless}}
             <fieldset class="option-group">
               <legend class="visually-hidden">環境</legend>
               <label class="option">
@@ -690,6 +882,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                   name="environment"
                   value="staging"
                   checked={{isChecked this.form.environment "staging"}}
+                  disabled={{if this.isOwner false true}}
                   data-test-environment-option="staging"
                   {{on "change" this.setEnvironment}}
                 />
@@ -706,6 +899,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                   name="environment"
                   value="production"
                   checked={{isChecked this.form.environment "production"}}
+                  disabled={{if this.isOwner false true}}
                   data-test-environment-option="production"
                   {{on "change" this.setEnvironment}}
                 />
@@ -1361,6 +1555,25 @@ export default class AppSettingsTemplate extends Component<Signature> {
             は誰でも開けるようになります。
           </p>
         {{/if}}
+      </ConfirmDialog>
+    {{/if}}
+
+    {{#if this.pendingAutoDeploy}}
+      <ConfirmDialog
+        @title="本番アプリを push で自動デプロイしますか？"
+        @confirmLabel="保存する"
+        @busy={{this.saving}}
+        @onConfirm={{this.confirmAutoDeploy}}
+        @onCancel={{this.cancelAutoDeploy}}
+      >
+        <p data-test-auto-deploy-confirm>
+          保存すると、ブランチ
+          <strong class="mono">{{this.form.effectiveAutoDeployBranch}}</strong>
+          に push されたコミットが、確認なしで本番アプリ
+          <strong>{{this.app.slug}}</strong>
+          にデプロイされます。そのブランチに push
+          できる人は、本番を更新できるようになります。
+        </p>
       </ConfirmDialog>
     {{/if}}
 

@@ -63,6 +63,8 @@ type appJSON struct {
 	AccessProtection     bool              `json:"access_protection"`
 	ProtectionExempt     []string          `json:"protection_exempt_paths"`
 	PromoteFrom          string            `json:"promote_from"`
+	AutoDeploy           bool              `json:"auto_deploy"`
+	AutoDeployBranch     string            `json:"auto_deploy_branch"`
 	URL                  string            `json:"url"`
 	PrimaryURL           string            `json:"primary_url"`
 	PendingDomains       int               `json:"pending_domains"`
@@ -103,6 +105,8 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		EnvExamplePath:       app.EnvExamplePath,
 		AccessProtection:     app.AccessProtection,
 		ProtectionExempt:     app.ProtectionExemptPaths,
+		AutoDeploy:           app.AutoDeploy,
+		AutoDeployBranch:     app.AutoDeployBranch,
 		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
 		CreatedAt:            app.CreatedAt,
 		UpdatedAt:            app.UpdatedAt,
@@ -182,6 +186,8 @@ type appInput struct {
 	AccessProtection     *bool              `json:"access_protection"`
 	ProtectionExempt     *[]string          `json:"protection_exempt_paths"`
 	PromoteFrom          *string            `json:"promote_from"`
+	AutoDeploy           *bool              `json:"auto_deploy"`
+	AutoDeployBranch     *string            `json:"auto_deploy_branch"`
 }
 
 // fieldErrors collects validation problems keyed by JSON field name.
@@ -284,6 +290,13 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 		}
 	}
 
+	if in.AutoDeploy != nil {
+		app.AutoDeploy = *in.AutoDeploy
+	}
+	if in.AutoDeployBranch != nil {
+		app.AutoDeployBranch = strings.TrimSpace(*in.AutoDeployBranch)
+	}
+
 	if app.RepoFullName == "" && app.RepoURL == "" {
 		errs.add("repo_full_name", "a repository is required (repo_full_name or repo_url)")
 	}
@@ -297,6 +310,13 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	}
 	if !branchPattern.MatchString(app.DefaultBranch) || strings.Contains(app.DefaultBranch, "..") {
 		errs.add("default_branch", "is not a valid branch name")
+	}
+	if b := app.AutoDeployBranch; b != "" && (!branchPattern.MatchString(b) || strings.Contains(b, "..") || len(b) > 255) {
+		errs.add("auto_deploy_branch", "is not a valid branch name")
+	}
+	if app.AutoDeploy && !app.UsesGitHubApp() {
+		// Pushes arrive through the GitHub App's webhook (ARCHITECTURE 5.2).
+		errs.add("auto_deploy", "needs a repository fetched through the GitHub App (repo_full_name without repo_url)")
 	}
 	if app.ComposePath != "" {
 		clean := filepath.Clean(app.ComposePath)
@@ -525,7 +545,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	// Saving variables needs a recent login (ARCHITECTURE 10.3); it is
 	// checked before anything is created.
-	if len(body.Env) > 0 && !s.requireRecentAuth(w, r) {
+	if (len(body.Env) > 0 || enablesProductionAutoDeploy(store.App{}, app)) && !s.requireRecentAuth(w, r) {
 		return
 	}
 	created, err := s.store.CreateAppWithEnv(r.Context(), app, s.cfg.Deploy.PortRangeStart, s.cfg.Deploy.PortRangeEnd, s.clock.Now(), sealEnv)
@@ -602,7 +622,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, errs)
 		return
 	}
-	if touchesSafeguards(before, app) && !s.requireRecentAuth(w, r) {
+	if (touchesSafeguards(before, app) || enablesProductionAutoDeploy(before, app)) && !s.requireRecentAuth(w, r) {
 		return
 	}
 	if err := s.store.UpdateApp(r.Context(), app, s.clock.Now()); err != nil {
@@ -626,12 +646,20 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 }
 
 // ownerOnlyChanges lists the settings an update changes that only the owner
-// may change (ARCHITECTURE 10.7): turning the policy check off, where the
-// code comes from, and links to other apps.
+// may change (ARCHITECTURE 10.7): the environment (production asks for a
+// confirmation before each deploy), turning the policy check off, where the
+// code comes from, links to other apps, and making a production app deploy
+// pushes by itself.
 // after has the input applied except promote_from, which is compared by
 // name.
 func (s *Server) ownerOnlyChanges(r *http.Request, before, after store.App, in appInput) ([]string, error) {
 	var fields []string
+	if before.Environment != after.Environment {
+		fields = append(fields, "environment")
+	}
+	if enablesProductionAutoDeploy(before, after) {
+		fields = append(fields, "auto_deploy")
+	}
 	if before.RelaxPolicy != after.RelaxPolicy {
 		fields = append(fields, "relax_policy")
 	}
@@ -670,6 +698,17 @@ func touchesSafeguards(before, after store.App) bool {
 		// Opening the app to everyone (ARCHITECTURE 8.3).
 		(before.AccessProtection && !after.AccessProtection) ||
 		!slices.Equal(before.ProtectionExemptPaths, after.ProtectionExemptPaths)
+}
+
+// enablesProductionAutoDeploy reports whether an update makes a production
+// app deploy pushes, or pushes of another branch, without anyone pressing
+// a button. Like deploying it by hand, that needs a recent login
+// (ARCHITECTURE 10.3).
+func enablesProductionAutoDeploy(before, after store.App) bool {
+	if after.Environment != store.EnvironmentProduction || !after.AutoDeploy {
+		return false
+	}
+	return !before.AutoDeploy || before.EffectiveAutoDeployBranch() != after.EffectiveAutoDeployBranch()
 }
 
 // syncRoutes reloads the reverse proxy after a routing-relevant change. A

@@ -57,6 +57,8 @@ type App struct {
 	// Permissions maps a permission name (contents, metadata, ...) to its
 	// level (read, write, admin).
 	Permissions map[string]string
+	// Events are the webhook events the App subscribes to (push, ...).
+	Events []string
 }
 
 // Installation is one account the App is installed on.
@@ -84,6 +86,7 @@ func (c *Client) App(ctx context.Context) (App, error) {
 		ClientID    string            `json:"client_id"`
 		HTMLURL     string            `json:"html_url"`
 		Permissions map[string]string `json:"permissions"`
+		Events      []string          `json:"events"`
 		Owner       struct {
 			Login string `json:"login"`
 			Type  string `json:"type"`
@@ -103,6 +106,7 @@ func (c *Client) App(ctx context.Context) (App, error) {
 		Owner:       resp.Owner.Login,
 		OwnerIsOrg:  resp.Owner.Type == "Organization",
 		Permissions: resp.Permissions,
+		Events:      resp.Events,
 	}, nil
 }
 
@@ -127,6 +131,30 @@ func (a App) InstallURL() string {
 		return ""
 	}
 	return a.HTMLURL + "/installations/new"
+}
+
+// WebhookConfig is where the App delivers its webhooks. GitHub never
+// returns the secret.
+type WebhookConfig struct {
+	URL         string
+	ContentType string
+}
+
+// WebhookConfig returns the App's webhook settings (GET /app/hook/config).
+// Whether the webhook is active is not part of the response.
+func (c *Client) WebhookConfig(ctx context.Context) (WebhookConfig, error) {
+	jwt, err := c.appJWT()
+	if err != nil {
+		return WebhookConfig{}, err
+	}
+	var resp struct {
+		URL         string `json:"url"`
+		ContentType string `json:"content_type"`
+	}
+	if _, err := c.do(ctx, call{method: http.MethodGet, path: "/app/hook/config", bearer: jwt}, &resp); err != nil {
+		return WebhookConfig{}, fmt.Errorf("github: webhook config: %w", err)
+	}
+	return WebhookConfig{URL: resp.URL, ContentType: resp.ContentType}, nil
 }
 
 // Installations lists the accounts the App is installed on.

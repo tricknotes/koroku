@@ -67,14 +67,27 @@ type Deployment struct {
 	// Actor is who asked for the deployment; nil when nobody did (records
 	// from before members existed, or koroku itself).
 	Actor *Actor
+	// Trigger is what started the deployment: TriggerManual or TriggerPush
+	// (ARCHITECTURE 5.2). Pusher is the GitHub login that pushed.
+	Trigger string
+	Pusher  string
 }
+
+// Deployment triggers.
+const (
+	// TriggerManual is a deployment started from the console or the API,
+	// including rollbacks and promotions.
+	TriggerManual = "manual"
+	// TriggerPush is a deployment started by a GitHub push (ARCHITECTURE 5.2).
+	TriggerPush = "push"
+)
 
 // RollbackRef is the ref recorded on rollbacks.
 const RollbackRef = "rollback"
 
 const deploymentColumns = `id, app_id, ref, commit_sha, commit_message, status, error,
 	queued_at, started_at, finished_at, source_deployment_id, promoted_from_deployment_id,
-	actor_user_id, actor_login`
+	actor_user_id, actor_login, trigger_kind, pusher`
 
 func scanDeployment(row rowScanner) (Deployment, error) {
 	var (
@@ -88,7 +101,7 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 		actor    string
 	)
 	err := row.Scan(&d.ID, &d.AppID, &d.Ref, &d.CommitSHA, &d.CommitMessage, &d.Status, &d.Error,
-		&queued, &started, &finished, &source, &promoted, &actorID, &actor)
+		&queued, &started, &finished, &source, &promoted, &actorID, &actor, &d.Trigger, &d.Pusher)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -112,13 +125,27 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 // of the same app are canceled because only the newest request matters; their
 // IDs are returned.
 func (s *Store) EnqueueDeployment(ctx context.Context, appID int64, ref, sha, message string, now time.Time) (Deployment, []int64, error) {
-	return s.enqueue(ctx, appID, ref, sha, message, nil, nil, now)
+	return s.enqueue(ctx, appID, ref, sha, message, nil, nil, Origin{}, now)
 }
 
 // EnqueuePromotion is EnqueueDeployment for a deployment that promotes
 // another app's deployment (ARCHITECTURE 9.7). promotedFrom may be nil.
 func (s *Store) EnqueuePromotion(ctx context.Context, appID int64, ref, sha, message string, promotedFrom *int64, now time.Time) (Deployment, []int64, error) {
-	return s.enqueue(ctx, appID, ref, sha, message, nil, promotedFrom, now)
+	return s.enqueue(ctx, appID, ref, sha, message, nil, promotedFrom, Origin{}, now)
+}
+
+// Origin says what started a deployment. The zero value is a manual one.
+type Origin struct {
+	// Trigger is TriggerManual ("" means the same) or TriggerPush.
+	Trigger string
+	// Pusher is the GitHub login behind a push.
+	Pusher string
+}
+
+// EnqueueTriggered is EnqueueDeployment (or EnqueuePromotion, with
+// promotedFrom) recorded with what started it.
+func (s *Store) EnqueueTriggered(ctx context.Context, appID int64, ref, sha, message string, promotedFrom *int64, origin Origin, now time.Time) (Deployment, []int64, error) {
+	return s.enqueue(ctx, appID, ref, sha, message, nil, promotedFrom, origin, now)
 }
 
 // EnqueueRollback records a queued rollback to the kept release of source
@@ -126,10 +153,16 @@ func (s *Store) EnqueuePromotion(ctx context.Context, appID int64, ref, sha, mes
 // supersedes the app's other queued deployments. A rollback is not a
 // promotion even when source was one.
 func (s *Store) EnqueueRollback(ctx context.Context, source Deployment, now time.Time) (Deployment, []int64, error) {
-	return s.enqueue(ctx, source.AppID, RollbackRef, source.CommitSHA, source.CommitMessage, &source.ID, nil, now)
+	return s.enqueue(ctx, source.AppID, RollbackRef, source.CommitSHA, source.CommitMessage, &source.ID, nil, Origin{}, now)
 }
 
-func (s *Store) enqueue(ctx context.Context, appID int64, ref, sha, message string, source, promotedFrom *int64, now time.Time) (Deployment, []int64, error) {
+func (s *Store) enqueue(ctx context.Context, appID int64, ref, sha, message string, source, promotedFrom *int64, origin Origin, now time.Time) (Deployment, []int64, error) {
+	if origin.Trigger == "" {
+		origin.Trigger = TriggerManual
+	}
+	if origin.Trigger != TriggerManual && origin.Trigger != TriggerPush {
+		return Deployment{}, nil, fmt.Errorf("enqueue deployment: unknown trigger %q", origin.Trigger)
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
@@ -161,9 +194,9 @@ func (s *Store) enqueue(ctx context.Context, appID int64, ref, sha, message stri
 	actorID, actorLogin := actorColumns(ctx)
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO deployments (app_id, ref, commit_sha, commit_message, status, queued_at,
-			source_deployment_id, promoted_from_deployment_id, actor_user_id, actor_login)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, appID, ref, sha, message, StatusQueued, toMillis(now),
-		nullInt(source), nullInt(promotedFrom), actorID, actorLogin)
+			source_deployment_id, promoted_from_deployment_id, actor_user_id, actor_login, trigger_kind, pusher)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, appID, ref, sha, message, StatusQueued, toMillis(now),
+		nullInt(source), nullInt(promotedFrom), actorID, actorLogin, origin.Trigger, origin.Pusher)
 	if err != nil {
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
 	}

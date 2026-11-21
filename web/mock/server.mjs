@@ -249,9 +249,28 @@ route('POST', '/api/apps', ({ state, body: { env, ...body }, scenario }) => {
   return { status: 201, json: app };
 });
 route('GET', '/api/apps/:slug', appOf);
-route('PATCH', '/api/apps/:slug', (context) =>
-  Object.assign(appOf(context), context.body),
-);
+route('PATCH', '/api/apps/:slug', (context) => {
+  const target = appOf(context);
+  const { body } = context;
+  // Making a production app deploy pushes needs a recent login (10.3).
+  if (
+    context.scenario === 'stale-login' &&
+    target.environment === 'production' &&
+    body.auto_deploy === true
+  ) {
+    throw new HttpError(403, 'reauth_required');
+  }
+  if (
+    body.auto_deploy === true &&
+    (!target.repo_full_name || target.repo_url)
+  ) {
+    throw new HttpError(422, 'validation_failed', {
+      auto_deploy:
+        'needs a repository fetched through the GitHub App (repo_full_name without repo_url)',
+    });
+  }
+  return Object.assign(target, body);
+});
 route('DELETE', '/api/apps/:slug', (context) => {
   context.state.apps.delete(appOf(context).slug);
   return { status: 204 };

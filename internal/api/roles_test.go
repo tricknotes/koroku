@@ -325,6 +325,7 @@ func TestOwnerOnlySettings(t *testing.T) {
 		`{"relax_policy":true}`,
 		`{"repo_full_name":"octo/other"}`,
 		`{"promote_from":"shop"}`,
+		`{"environment":"production"}`,
 	} {
 		rec := manager.do(http.MethodPatch, "/api/apps/blog", body, originHeader)
 		if rec.Code != http.StatusForbidden || errorCode(t, rec) != "forbidden_role" {
@@ -342,6 +343,29 @@ func TestOwnerOnlySettings(t *testing.T) {
 	}
 	if rec := f.owner.do(http.MethodPatch, "/api/apps/blog", `{"relax_policy":true}`, originHeader); rec.Code != http.StatusOK {
 		t.Errorf("owner PATCH: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// Automatic deployment on push is the manager's to turn on for a staging
+// app, but only the owner makes a production app deploy pushes by itself.
+func TestProductionAutoDeployIsOwnerOnly(t *testing.T) {
+	f := newRoleFixture(t)
+	manager := f.as[managerID]
+	if rec := manager.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy":true}`, originHeader); rec.Code != http.StatusOK {
+		t.Fatalf("staging auto-deploy by the manager: %d %s", rec.Code, rec.Body)
+	}
+	if rec := manager.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy":false}`, originHeader); rec.Code != http.StatusOK {
+		t.Fatalf("turning it off: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.owner.do(http.MethodPatch, "/api/apps/blog", `{"environment":"production"}`, originHeader); rec.Code != http.StatusOK {
+		t.Fatalf("owner makes blog production: %d %s", rec.Code, rec.Body)
+	}
+	rec := manager.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy":true}`, originHeader)
+	if rec.Code != http.StatusForbidden || errorCode(t, rec) != "forbidden_role" || !strings.Contains(rec.Body.String(), "auto_deploy") {
+		t.Errorf("production auto-deploy by the manager: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.owner.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy":true}`, originHeader); rec.Code != http.StatusOK {
+		t.Errorf("production auto-deploy by the owner: %d %s", rec.Code, rec.Body)
 	}
 }
 
