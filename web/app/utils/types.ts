@@ -687,3 +687,24 @@ export interface Promotion {
   env: { only_in_source: string[]; only_in_target: string[] };
   images: { status: 'checked' | 'unavailable'; services: PromotionImage[] };
 }
+
+/**
+ * One thing someone did to an app (`GET /api/apps/{slug}/activity`,
+ * ARCHITECTURE 10.7). The shape of `details` depends on `action`; it never
+ * holds secret values.
+ */
+export interface ActivityEntry {
+  id: number;
+  at: string;
+  /** Who did it; `null` for koroku itself. */
+  actor: Actor | null;
+  action: string;
+  details: Record<string, unknown>;
+}
+
+/** A page of activity, newest first. */
+export interface ActivityPage {
+  entries: ActivityEntry[];
+  /** Pass as `before` for the next page; `null` on the last one. */
+  next_before: number | null;
+}

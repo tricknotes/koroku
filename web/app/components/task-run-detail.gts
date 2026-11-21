@@ -188,6 +188,12 @@ export default class TaskRunDetail extends Component<TaskRunDetailSignature> {
             <dt>開始</dt>
             <dd>{{formatDateTimeJst @run.started_at}}</dd>
           </div>
+          {{#if @run.actor}}
+            <div>
+              <dt>実行した人</dt>
+              <dd data-test-run-detail-actor>{{@run.actor.login}}</dd>
+            </div>
+          {{/if}}
         </dl>
 
         <div class="deploy-detail-actions">

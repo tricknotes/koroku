@@ -43,6 +43,7 @@ import {
   startDeployment,
   startRollback,
 } from './fixtures.mjs';
+import { activityPage, recordActivity } from './activity.mjs';
 import { deploymentLog } from './deploy-log.mjs';
 import { copyHistory, copyLog, newCopy, settleCopies } from './db-copy.mjs';
 import { LOG_SCENARIOS, registerLogRoutes } from './logs.mjs';
@@ -269,24 +270,60 @@ route('PATCH', '/api/apps/:slug', (context) => {
         'needs a repository fetched through the GitHub App (repo_full_name without repo_url)',
     });
   }
+  const changes = Object.entries(body)
+    .filter(
+      ([field, value]) =>
+        JSON.stringify(target[field] ?? '') !== JSON.stringify(value ?? ''),
+    )
+    .map(([field, to]) => ({ field, from: target[field] ?? '', to }));
+  if (changes.length) {
+    record(context, target.slug, 'app.settings_changed', { changes });
+  }
   return Object.assign(target, body);
 });
 route('DELETE', '/api/apps/:slug', (context) => {
   context.state.apps.delete(appOf(context).slug);
   return { status: 204 };
 });
-for (const [action, desired] of [
-  ['start', 'running'],
-  ['stop', 'stopped'],
-  ['restart', 'running'],
+for (const [action, desired, done] of [
+  ['start', 'running', 'app.started'],
+  ['stop', 'stopped', 'app.stopped'],
+  ['restart', 'running', 'app.restarted'],
 ]) {
   route('POST', `/api/apps/:slug/${action}`, (context) => {
     const app = appOf(context);
     if (!app.current_deployment) throw new HttpError(409, 'not_deployed');
     app.desired_state = desired;
+    record(context, app.slug, done);
     return app;
   });
 }
+
+/** Adds an activity entry by the scenario's user (ARCHITECTURE 10.7). */
+function record(context, slug, action, details) {
+  recordActivity(
+    context.state,
+    slug,
+    userOf(context.scenario),
+    action,
+    details,
+  );
+}
+
+function envChange(change) {
+  return {
+    added: [],
+    changed: [],
+    removed: [],
+    renamed: [],
+    replaced: false,
+    ...change,
+  };
+}
+
+route('GET', '/api/apps/:slug/activity', (context) =>
+  activityPage(context.state, appOf(context).slug, context.query),
+);
 route('GET', '/api/apps/:slug/services', (context) => ({
   services:
     context.state.services?.get(context.params.slug) ??
@@ -349,8 +386,24 @@ function envList(context) {
 
 route('GET', '/api/apps/:slug/env', envList);
 route('PUT', '/api/apps/:slug/env', (context) => {
-  appOf(context);
-  storeEnv(context, context.body.vars ?? []);
+  const app = appOf(context);
+  const before = new Map(savedEnv(context).map((v) => [v.key, v.value]));
+  const vars = context.body.vars ?? [];
+  storeEnv(context, vars);
+  const after = new Map(vars.map((v) => [v.key, v.value]));
+  record(
+    context,
+    app.slug,
+    'env.changed',
+    envChange({
+      added: [...after.keys()].filter((key) => !before.has(key)),
+      changed: [...after.keys()].filter(
+        (key) => before.has(key) && before.get(key) !== after.get(key),
+      ),
+      removed: [...before.keys()].filter((key) => !after.has(key)),
+      replaced: true,
+    }),
+  );
   return envList(context);
 });
 route('PUT', '/api/apps/:slug/env/:key', (context) => {
@@ -373,6 +426,18 @@ route('PUT', '/api/apps/:slug/env/:key', (context) => {
     ...vars.filter((v) => v.key !== from && v.key !== key),
     { key, value },
   ]);
+  record(
+    context,
+    context.params.slug,
+    'env.changed',
+    envChange(
+      key !== from
+        ? { renamed: [{ from, to: key }] }
+        : current
+          ? { changed: [key] }
+          : { added: [key] },
+    ),
+  );
   return envList(context);
 });
 route('DELETE', '/api/apps/:slug/env/:key', (context) => {
@@ -383,6 +448,12 @@ route('DELETE', '/api/apps/:slug/env/:key', (context) => {
   storeEnv(
     context,
     vars.filter((v) => v.key !== key),
+  );
+  record(
+    context,
+    context.params.slug,
+    'env.changed',
+    envChange({ removed: [key] }),
   );
   return envList(context);
 });
@@ -671,10 +742,15 @@ route('POST', '/api/apps/:slug/task-runs', (context) => {
     .get(app.slug)
     .some((run) => run.status === 'running');
   if (deploying || running) throw new HttpError(409, 'busy');
-  return {
-    status: 202,
-    json: publicRun(startTaskRun(taskState, app, spec)),
-  };
+  const run = startTaskRun(taskState, app, spec);
+  run.actor = userOf(context.scenario);
+  record(context, app.slug, 'task_run.started', {
+    run_id: run.id,
+    task_name: run.task_name,
+    service: run.service,
+    command: run.command,
+  });
+  return { status: 202, json: publicRun(run) };
 });
 route('GET', '/api/task-runs/:id', (context) =>
   publicRun(findTaskRun(context)),
@@ -712,6 +788,10 @@ route('POST', '/api/apps/:slug/domains', (context) => {
   const created = newDomain(1 + all.length * 7, hostname, app.slug);
   state.domains.get(app.slug).push(created);
   countPending(state, app.slug);
+  record(context, app.slug, 'domain.added', {
+    hostname,
+    status: created.status,
+  });
   return { status: 201, json: created };
 });
 route('POST', '/api/apps/:slug/domains/:id/verify', (context) => {
@@ -752,6 +832,9 @@ route('DELETE', '/api/apps/:slug/domains/:id', (context) => {
   if (found.is_primary)
     state.apps.get(params.slug).primary_url = appOf(context).url;
   countPending(state, params.slug);
+  record(context, params.slug, 'domain.deleted', {
+    hostname: found.hostname,
+  });
   return { status: 204 };
 });
 
@@ -833,7 +916,13 @@ route('POST', '/api/apps/:slug/db-copies', (context) => {
     throw new HttpError(409, 'busy');
   }
   const entry = newCopy(state, app.slug, body);
+  entry.actor = userOf(context.scenario);
   state.dbCopies.set(app.slug, [entry, ...list]);
+  record(context, app.slug, 'db_copy.started', {
+    copy_id: entry.id,
+    source: entry.source_app,
+    source_kind: entry.source_kind,
+  });
   return { status: 202, json: copyJson(entry) };
 });
 route('GET', '/api/db-copies/:id', ({ state, params }) =>

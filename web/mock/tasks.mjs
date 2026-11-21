@@ -99,6 +99,7 @@ function makeRun(slug, deploymentId, task, startedAgo, overrides = {}) {
     error: output.exit === 0 ? '' : `exited with code ${output.exit}`,
     started_at: ago(startedAgo),
     finished_at: ago(Math.max(0, startedAgo - duration)),
+    actor: { id: 1, login: 'octo' },
     ...overrides,
   };
   return run;
@@ -113,7 +114,9 @@ function blogRuns(deploymentId, headFailed) {
   };
   const runs = [
     makeRun('blog', deploymentId, status, 25 * MINUTE),
-    makeRun('blog', deploymentId, reindex, 3 * HOUR),
+    makeRun('blog', deploymentId, reindex, 3 * HOUR, {
+      actor: { id: 2, login: 'mia' },
+    }),
     makeRun('blog', deploymentId, status, 2 * DAY),
   ];
   if (headFailed)
