@@ -12,7 +12,7 @@ import (
 )
 
 // The activity of an app (ARCHITECTURE 10.7): who changed its settings,
-// variables and domains, started or stopped it, restored data, started a
+// variables, domains and the container registry credential, started or stopped it, restored data, started a
 // task or a database copy, or changed a member's role on it. Deployments
 // are not repeated here; they keep their own history with the actor.
 //
@@ -30,6 +30,8 @@ const (
 	actDomainPrimary    = "domain.primary"    // {"hostname", "is_primary"}
 	actDomainForced     = "domain.forced"     // {"hostname", "force_active"}
 	actDomainDeleted    = "domain.deleted"    // {"hostname"}
+	actRegistrySet      = "registry.set"      // {"registry", "username", "created", "token_replaced", "from": {"registry", "username"}}
+	actRegistryRemoved  = "registry.removed"  // {"registry", "username"}
 	actVolumeRestored   = "backup.restored"   // {"snapshot_id"}
 	actDumpDownloaded   = "backup.downloaded" // {"snapshot_id"}
 	actDBCopyStarted    = "db_copy.started"   // {"copy_id", "source", "source_kind"}

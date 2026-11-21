@@ -523,6 +523,19 @@ route('PUT', '/api/apps/:slug/registry-credential', (context) => {
     updated_at: new Date().toISOString(),
   };
   context.state.registry.set(app.slug, next);
+  const moved =
+    saved && (saved.registry !== registry || saved.username !== username);
+  if (!saved || moved || token) {
+    record(context, app.slug, 'registry.set', {
+      registry,
+      username,
+      created: !saved,
+      token_replaced: Boolean(token),
+      ...(moved
+        ? { from: { registry: saved.registry, username: saved.username } }
+        : {}),
+    });
+  }
   return registryJSON(next);
 });
 route('DELETE', '/api/apps/:slug/registry-credential', (context) => {
@@ -532,6 +545,10 @@ route('DELETE', '/api/apps/:slug/registry-credential', (context) => {
   }
   if (!saved) throw notFound('registry_credential_not_found');
   context.state.registry.delete(app.slug);
+  record(context, app.slug, 'registry.removed', {
+    registry: saved.registry,
+    username: saved.username,
+  });
   return registryJSON(null);
 });
 

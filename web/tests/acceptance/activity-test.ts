@@ -132,6 +132,51 @@ module('Acceptance | activity', function (hooks) {
       .doesNotExist('nothing older is left');
   });
 
+  test('registry credentials are worded without the token', async function (assert) {
+    fakes.api.on('GET', '/api/apps/blog/activity', () => ({
+      entries: [
+        entry(3, 'registry.removed', {
+          registry: 'registry.example.com:5000',
+          username: 'bot',
+        }),
+        entry(2, 'registry.set', {
+          registry: 'registry.example.com:5000',
+          username: 'bot',
+          created: false,
+          token_replaced: true,
+          from: { registry: 'ghcr.io', username: 'octo-bot' },
+        }),
+        entry(1, 'registry.set', {
+          registry: 'ghcr.io',
+          username: 'octo-bot',
+          created: true,
+          token_replaced: true,
+        }),
+      ],
+      next_before: null,
+    }));
+
+    await visit('/apps/blog');
+
+    const items = findAll('[data-test-activity]');
+    assert
+      .dom(items[0])
+      .includesText(
+        'コンテナレジストリ registry.example.com:5000 の認証を削除',
+      );
+    assert
+      .dom(items[1])
+      .includesText('コンテナレジストリ registry.example.com:5000 の認証を変更')
+      .includesText('レジストリ: ghcr.io → registry.example.com:5000')
+      .includesText('ユーザー名: octo-bot → bot')
+      .includesText('トークンを入れ替え');
+    assert
+      .dom(items[2])
+      .includesText('コンテナレジストリ ghcr.io の認証を設定')
+      .includesText('ユーザー名: octo-bot')
+      .doesNotIncludeText('トークン');
+  });
+
   test('an app without activity says so', async function (assert) {
     fakes.api.on('GET', '/api/apps/blog/activity', {
       entries: [],

@@ -46,6 +46,12 @@ function blogActivity() {
         { field: 'memory_limit', from: '512m', to: '768m' },
       ],
     }),
+    entry(6 * HOUR, OCTO, 'registry.set', {
+      registry: 'ghcr.io',
+      username: 'octo-bot',
+      created: false,
+      token_replaced: true,
+    }),
     entry(1 * DAY, OCTO, 'domain.primary', {
       hostname: 'www.example.com',
       is_primary: true,

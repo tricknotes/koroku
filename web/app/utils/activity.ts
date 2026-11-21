@@ -131,6 +131,31 @@ function memberName(details: Record<string, unknown>): string {
   return 'メンバー';
 }
 
+/** What changed in a saved registry credential; the token is never shown. */
+function registryDetails(details: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  const from = details['from'];
+  if (details['created'] === true) {
+    lines.push(`ユーザー名: ${str(details['username'])}`);
+  } else if (from && typeof from === 'object') {
+    const before = from as Record<string, unknown>;
+    if (str(before['registry']) !== str(details['registry'])) {
+      lines.push(
+        `レジストリ: ${str(before['registry'])} → ${str(details['registry'])}`,
+      );
+    }
+    if (str(before['username']) !== str(details['username'])) {
+      lines.push(
+        `ユーザー名: ${str(before['username'])} → ${str(details['username'])}`,
+      );
+    }
+  }
+  if (details['created'] !== true && details['token_replaced'] === true) {
+    lines.push('トークンを入れ替え');
+  }
+  return lines;
+}
+
 function role(value: unknown): string {
   return roleLabel(typeof value === 'string' ? (value as AppRole) : null);
 }
@@ -197,6 +222,19 @@ export function describeActivity(entry: ActivityEntry): ActivityText {
       };
     case 'domain.deleted':
       return { summary: `ドメイン ${hostname} を削除`, details: [] };
+    case 'registry.set':
+      return {
+        summary:
+          d['created'] === true
+            ? `コンテナレジストリ ${str(d['registry'])} の認証を設定`
+            : `コンテナレジストリ ${str(d['registry'])} の認証を変更`,
+        details: registryDetails(d),
+      };
+    case 'registry.removed':
+      return {
+        summary: `コンテナレジストリ ${str(d['registry'])} の認証を削除`,
+        details: [],
+      };
     case 'backup.restored':
       return {
         summary: 'volume をリストア',

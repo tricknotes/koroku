@@ -383,6 +383,8 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `domain.primary` | `{"hostname", "is_primary"}` |
 | `domain.forced` | `{"hostname", "force_active"}` |
 | `domain.deleted` | `{"hostname"}` |
+| `registry.set` | `{"registry", "username", "created", "token_replaced", "from": {"registry", "username"}}`。`from` は既存の認証のレジストリかユーザー名を変えたときだけ。トークンは記録しない（`token_replaced` は新しいトークンを保存したか）。同じレジストリとユーザー名をトークンなしで保存し直したものは残さない |
+| `registry.removed` | `{"registry", "username"}` |
 | `backup.restored`、`backup.downloaded` | `{"snapshot_id"}` |
 | `db_copy.started` | `{"copy_id", "source", "source_kind"}`（受け側のアプリ） |
 | `db_copy.sent` | `{"source_kind"}`（送り側のアプリ。受け側は書かない） |
