@@ -44,9 +44,9 @@
 | --- | --- |
 | 全ユーザー | `GET /api/session`、`GET /api/apps`（メンバーにはロールのあるアプリだけ）、`GET /api/system`（メンバーには `log_archive.last_error` と `caddy.last_error` を空にして返す）、`GET /api/backups`（メンバーには `runs` を空にして返す）、セッション・ログイン履歴・API トークン（メンバーは自分のものだけ） |
 | オーナーだけ | `POST /api/apps`、`DELETE /api/apps/{slug}`、`GET /api/repos`、`GET /api/repos/{owner}/{repo}/compose`、`GET /api/repos/{owner}/{repo}/env-presets`、`/api/system/*`（`docker`、`containers`、`github`、`prune`）、`/api/members*` |
-| `view` | アプリと、その下の参照系（`GET /api/apps/{slug}`、`services`、`memory`、`env`（キーだけ）、`env/requirements`、`deployments`、`domains`、`logs`、`logs/history`、`logs/archives`、`logs/archives/url`、`backups`、`volumes`、`db-copies`、`tasks`、`task-runs`）、`GET /api/deployments/{id}`（と `logs`）、`GET /api/task-runs/{id}`（と `logs`）、`GET /api/db-copies/{id}`（と `logs`）。`GET /api/repos/{owner}/{repo}/branches` と `commits` は、そのリポジトリ（`repo_full_name`）から作ったアプリに `view` 以上があれば使える |
+| `view` | アプリと、その下の参照系（`GET /api/apps/{slug}`、`services`、`memory`、`env`（キーだけ）、`env/requirements`、`registry-credential`（トークンは返さない）、`deployments`、`domains`、`logs`、`logs/history`、`logs/archives`、`logs/archives/url`、`backups`、`volumes`、`db-copies`、`tasks`、`task-runs`）、`GET /api/deployments/{id}`（と `logs`）、`GET /api/task-runs/{id}`（と `logs`）、`GET /api/db-copies/{id}`（と `logs`）。`GET /api/repos/{owner}/{repo}/branches` と `commits` は、そのリポジトリ（`repo_full_name`）から作ったアプリに `view` 以上があれば使える |
 | `deploy` | `POST /api/apps/{slug}/deployments`（ロールバックと昇格を含む）、`GET /api/apps/{slug}/promotion`、`POST /api/apps/{slug}/start`・`stop`・`restart`、`POST /api/deployments/{id}/cancel` |
-| `manage` | `PATCH /api/apps/{slug}`（オーナー専用の項目を除く）、環境変数の変更系、ドメインの変更系、`POST /api/apps/{slug}/backups/restore`、`GET /api/apps/{slug}/backups/{snapshot}/download`、`POST /api/apps/{slug}/db-copies`（送り側の `manage` も要る。送り側にロールがなければ `404 source_not_found`）、`PUT /api/apps/{slug}/tasks`、`POST /api/apps/{slug}/task-runs`、`POST /api/task-runs/{id}/cancel`。`POST /api/backups` は、どれかのアプリに `manage` があれば使える（実行はホスト全体の 1 回） |
+| `manage` | `PATCH /api/apps/{slug}`（オーナー専用の項目を除く）、環境変数の変更系、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、ドメインの変更系、`POST /api/apps/{slug}/backups/restore`、`GET /api/apps/{slug}/backups/{snapshot}/download`、`POST /api/apps/{slug}/db-copies`（送り側の `manage` も要る。送り側にロールがなければ `404 source_not_found`）、`PUT /api/apps/{slug}/tasks`、`POST /api/apps/{slug}/task-runs`、`POST /api/task-runs/{id}/cancel`。`POST /api/backups` は、どれかのアプリに `manage` があれば使える（実行はホスト全体の 1 回） |
 
 - 要件を満たさなければ `403 forbidden_role`。ロールのないアプリに関わるものは `404`（共通の表）。判定は再ログイン（`reauth_required`）より先に行う。
 - `PATCH /api/apps/{slug}` で `environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。本番アプリの `auto_deploy` を有効にすること（と、有効なまま追うブランチを変えること）もオーナーだけ（`details.fields` に `auto_deploy`）。今と同じ値を送るのはかまわない。
@@ -91,7 +91,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## API トークン（2026-11-21）
 
@@ -302,7 +302,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `GET /api/apps/{slug}` | アプリ |
 | `PATCH /api/apps/{slug}` | 送ったフィールドだけ更新。200 でアプリ |
 | `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204 |
-| `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る） |
+| `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る）。起動でイメージの取得がレジストリに拒否されたら `502 registry_denied`（アプリのコンテナレジストリの認証を確かめる） |
 | `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）と `memory_limit_bytes`（上限。無制限なら 0）も付く。取得できなければどちらも `null` |
 
 - 作成時の環境変数（ARCHITECTURE 9.8、2026-11-21）: `POST /api/apps` の `env` は `PUT /api/apps/{slug}/env` の `vars` と同じ形と検査（key の形式、`KOROKU_` で始まらない、重複なし、500 件まで、値は 64 KiB まで）。不正なら `422 validation_failed`（`details.env`）で、アプリも作らない。空でない `env` は環境変数の保存なので、直近 10 分以内のログインでなければ `403 reauth_required`（アプリは作らない）。`PATCH` では受け付けない（`400 invalid_json`）。
@@ -378,6 +378,30 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - 変更系はすべて、直近 10 分以内のログインでなければ `403 reauth_required`。
 
 key は英字かアンダースコアで始まる英数字とアンダースコア。重複は 422。
+
+### コンテナレジストリの認証（2026-11-21）
+
+アプリが private なイメージを取得するためのログイン（ARCHITECTURE 6.1）。アプリごとに 1 つ。
+
+| メソッドとパス | 内容 |
+| --- | --- |
+| `GET /api/apps/{slug}/registry-credential` | 下の形。トークンは返さない。設定していなければ `configured: false`、`registry` は既定の `ghcr.io`、`username` は空文字、`updated_at` は `null` |
+| `PUT /api/apps/{slug}/registry-credential` | 本文 `{"registry": "ghcr.io", "username": "octo-bot", "token": "..."}` で設定する（前のものは置き換える）。`token` を空文字か省略にすると保存済みのトークンを残す（まだなければ 422）。200 で `GET` と同じ形 |
+| `DELETE /api/apps/{slug}/registry-credential` | 削除し、koroku が書いた Docker の設定ファイルも消す。200 で `GET` と同じ形（`configured: false`）。なければ `404 registry_credential_not_found` |
+
+```json
+{
+  "configured": true,
+  "registry": "ghcr.io",
+  "username": "octo-bot",
+  "updated_at": "2026-11-21T03:00:00Z"
+}
+```
+
+- `registry` はホスト名（必要ならポート）。小文字にそろえ、`https://` やパスは受け付けない（422、`details.registry`）。Docker Hub は `docker.io`。
+- `username` は空にできず、コロンと空白を含められない。`token` は空白を含められず、4096 バイトまで。エラーの本文にトークンは入れない。
+- `PUT` と `DELETE` は、直近 10 分以内のログインでなければ `403 reauth_required`。
+- 保存しただけでは何も起きず、次のデプロイ・ロールバック・起動から使う。
 
 ### 必要な環境変数との照合（2026-11-20）
 
@@ -464,6 +488,13 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | `Rollback failed: ...` / `Rollback is not possible: ...` | 戻せなかった |
 | `==> <時刻> rollback No previous release; removing the failed containers` | 初回デプロイで戻す先がなく、起動しかけたコンテナを消した（失敗すると `Removing the containers failed: ...`） |
 | `koroku is shutting down; the previous release is not restored automatically.` | `koroku` の停止と重なり、ロールバックを実行しなかった |
+
+次の行は UI が解釈しない案内で、手順のログの末尾に入る。
+
+| 行 | 意味 |
+| --- | --- |
+| `Container registry credential: set for this app` | `prepare` の手順で、アプリのコンテナレジストリの認証（ARCHITECTURE 6.1）をこのデプロイで使うことを示す |
+| `The registry refused access (unauthorized or denied). ...` | `build`・`pull`・`start` の手順が、レジストリにイメージの取得を拒否されて失敗した。認証を設定したアプリには、レジストリ・ユーザー名・トークンの期限と `read:packages` を確かめる案内が、設定していないアプリには設定を促す案内が続く。デプロイの `error` は `the registry refused access to an image; ...` で始まる |
 
 最初の見出しより前の行（`Queued deployment of <sha>.` など）は受付の記録。`koroku` の再起動で中断されたデプロイには `failed` の見出しがなく、末尾に `Failed: ...` の行だけが付く。
 
