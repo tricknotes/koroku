@@ -302,10 +302,16 @@ func (e *Engine) CheckDisk() error {
 // Enqueue records a deployment of the given commit and wakes the worker.
 // Older queued deployments of the same app are canceled.
 func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message string) (store.Deployment, error) {
-	return e.enqueue(ctx, app, ref, sha, message, nil)
+	return e.enqueue(ctx, app, ref, sha, message, nil, store.Origin{})
 }
 
-func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message string, promotedFrom *int64) (store.Deployment, error) {
+// EnqueuePush is Enqueue for a deployment started by a GitHub push to
+// branch (ARCHITECTURE 5.2), recorded with the login that pushed.
+func (e *Engine) EnqueuePush(ctx context.Context, app store.App, branch, sha, message, pusher string) (store.Deployment, error) {
+	return e.enqueue(ctx, app, branch, sha, message, nil, store.Origin{Trigger: store.TriggerPush, Pusher: pusher})
+}
+
+func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message string, promotedFrom *int64, origin store.Origin) (store.Deployment, error) {
 	if !gitrepo.IsFullSHA(sha) {
 		return store.Deployment{}, fmt.Errorf("commit %q is not a full SHA", sha)
 	}
@@ -321,7 +327,7 @@ func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message s
 	}
 	e.queueing.Lock()
 	defer e.queueing.Unlock()
-	d, superseded, err := e.opts.Store.EnqueuePromotion(ctx, app.ID, ref, sha, message, promotedFrom, e.opts.Clock.Now())
+	d, superseded, err := e.opts.Store.EnqueueTriggered(ctx, app.ID, ref, sha, message, promotedFrom, origin, e.opts.Clock.Now())
 	if err != nil {
 		return store.Deployment{}, err
 	}
@@ -340,9 +346,12 @@ func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message s
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		e.opts.Logger.Warn("removing a stale deploy log failed", "path", path, "error", err)
 	}
-	if promotedFrom != nil {
+	switch {
+	case promotedFrom != nil:
 		appendLogLine(path, fmt.Sprintf("Queued deployment of %s, promoting deployment #%d.", sha, *promotedFrom))
-	} else {
+	case origin.Trigger == store.TriggerPush:
+		appendLogLine(path, fmt.Sprintf("Queued deployment of %s, pushed to %s by %s.", sha, ref, origin.Pusher))
+	default:
 		appendLogLine(path, fmt.Sprintf("Queued deployment of %s.", sha))
 	}
 	e.notify()

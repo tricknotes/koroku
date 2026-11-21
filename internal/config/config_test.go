@@ -167,6 +167,20 @@ allowed_user_id = 42
 	if err == nil || strings.Contains(err.Error(), "super-secret-value") {
 		t.Errorf("err = %v", err)
 	}
+
+	// The webhook secret (ARCHITECTURE 5.2) is optional, long, and a secret.
+	cfg, err = Parse(full + "webhook_secret = \"0123456789abcdef0123456789abcdef\"\n")
+	if err != nil || cfg.GitHub.WebhookSecret == "" || !cfg.HasSecrets() {
+		t.Errorf("webhook_secret: %v, %+v", err, cfg.GitHub)
+	}
+	_, err = Parse(full + "webhook_secret = \"short-secret\"\n")
+	if err == nil || strings.Contains(err.Error(), "short-secret") {
+		t.Errorf("short webhook_secret: %v", err)
+	}
+	// Alone it is a half-configured App.
+	if _, err := Parse("base_domain = \"dev.example.com\"\n[github]\nwebhook_secret = \"0123456789abcdef0123456789abcdef\"\n"); err == nil {
+		t.Error("webhook_secret without the App was accepted")
+	}
 }
 
 func TestStorageLogsAndBackupConfig(t *testing.T) {

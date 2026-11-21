@@ -17,6 +17,7 @@ import {
 } from 'koroku-console/utils/deploy-steps';
 import { formatDateTimeJst } from 'koroku-console/utils/format';
 import { isRollback, releaseId } from 'koroku-console/utils/rollback';
+import { isPush, pushTitle } from 'koroku-console/utils/trigger';
 import { isActiveDeployment } from 'koroku-console/utils/status';
 import type { Deployment } from 'koroku-console/utils/types';
 import Banner, { type BannerTone } from './banner';
@@ -234,6 +235,12 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
             <div>
               <dt>ブランチ</dt>
               <dd>{{@deployment.ref}}</dd>
+            </div>
+          {{/if}}
+          {{#if (isPush @deployment)}}
+            <div>
+              <dt>きっかけ</dt>
+              <dd data-test-push-trigger>{{pushTitle @deployment}}</dd>
             </div>
           {{/if}}
           {{#if @deployment.started_at}}

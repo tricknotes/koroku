@@ -97,6 +97,9 @@ export default class SettingsForm {
   @tracked exemptPaths: ExemptRow[];
   /** Slug of the staging app to promote from; '' for none. */
   @tracked promoteFrom: string;
+  /** Deploy on push (ARCHITECTURE 5.2); the branch '' follows the default. */
+  @tracked autoDeploy: boolean;
+  @tracked autoDeployBranch: string;
 
   constructor(app: App) {
     this.defaultBranch = app.default_branch;
@@ -117,6 +120,13 @@ export default class SettingsForm {
       (path) => new ExemptRow(path),
     );
     this.promoteFrom = app.promote_from ?? '';
+    this.autoDeploy = app.auto_deploy ?? false;
+    this.autoDeployBranch = app.auto_deploy_branch ?? '';
+  }
+
+  /** The branch whose pushes would deploy, as the form stands. */
+  get effectiveAutoDeployBranch(): string {
+    return this.autoDeployBranch.trim() || this.defaultBranch.trim();
   }
 
   /** The exempt paths as they would be saved: trimmed, no blanks or repeats. */
@@ -219,6 +229,13 @@ export default class SettingsForm {
     }
     if (this.promoteFrom !== (app.promote_from ?? '')) {
       patch.promote_from = this.promoteFrom;
+    }
+    if (this.autoDeploy !== (app.auto_deploy ?? false)) {
+      patch.auto_deploy = this.autoDeploy;
+    }
+    const autoDeployBranch = this.autoDeployBranch.trim();
+    if (autoDeployBranch !== (app.auto_deploy_branch ?? '')) {
+      patch.auto_deploy_branch = autoDeployBranch;
     }
     return patch;
   }

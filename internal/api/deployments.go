@@ -55,6 +55,10 @@ type deploymentJSON struct {
 	RollbackAvailable  bool   `json:"rollback_available"`
 	// PromotedFrom names the staging deployment a promotion deployed.
 	PromotedFrom *promotedFromJSON `json:"promoted_from"`
+	// Trigger is manual or push (ARCHITECTURE 5.2); Pusher is the GitHub
+	// login behind a push, "" otherwise.
+	Trigger string `json:"trigger"`
+	Pusher  string `json:"pusher"`
 }
 
 type promotedFromJSON struct {
@@ -96,6 +100,8 @@ func deploymentToJSON(d store.Deployment, slug string) deploymentJSON {
 		QueuedAt:           d.QueuedAt,
 		StartedAt:          d.StartedAt,
 		FinishedAt:         d.FinishedAt,
+		Trigger:            d.Trigger,
+		Pusher:             d.Pusher,
 	}
 }
 

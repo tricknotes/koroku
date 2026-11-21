@@ -65,7 +65,7 @@ var ErrSourceReleaseMissing = errors.New("the promoted release is no longer on d
 // as a promotion of source (ARCHITECTURE 9.7). The caller checks that the
 // apps are paired and that source is the source app's current release.
 func (e *Engine) EnqueuePromotion(ctx context.Context, app store.App, source store.Deployment) (store.Deployment, error) {
-	return e.enqueue(ctx, app, "", source.CommitSHA, source.CommitMessage, &source.ID)
+	return e.enqueue(ctx, app, "", source.CommitSHA, source.CommitMessage, &source.ID, store.Origin{})
 }
 
 // sourceProject reads the normalized configuration of a stored release's

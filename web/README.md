@@ -71,7 +71,7 @@ The page URL selects what the API answers and, optionally, the theme:
 
 Further scenarios cover single screens (`host-trouble`, `unconfigured`,
 `fresh`, `backups-down`, `volumes-down`, `stale-login`, `rollback`, `copy-running`,
-`copy-failed`); `/__mock` lists every scenario with
+`copy-failed`, `webhook-unset`); `/__mock` lists every scenario with
 what it shows.
 
 The scenario is kept in a cookie, so it stays while navigating; changes made

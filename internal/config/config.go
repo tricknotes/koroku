@@ -107,6 +107,10 @@ type GitHub struct {
 	// AllowedUserID, which is always used. Needed when the App is installed
 	// on an organization (ARCHITECTURE 5).
 	InstallationAccounts []string `toml:"installation_accounts"`
+	// WebhookSecret is the secret of the App's webhook, which signs push
+	// events for automatic deployment (ARCHITECTURE 5.2). Empty refuses
+	// every webhook delivery.
+	WebhookSecret string `toml:"webhook_secret"`
 	// ObsoleteRequireTwoFactor is accepted, and ignored, so that a
 	// config.toml written for an older version still loads. GitHub does not
 	// report the two-factor status to a GitHub App, so koroku cannot check it
@@ -116,8 +120,12 @@ type GitHub struct {
 
 // Configured reports whether a GitHub App is set up at all.
 func (g GitHub) Configured() bool {
-	return g.AppID != 0 || g.ClientID != "" || g.ClientSecret != "" || g.AllowedUserID != 0
+	return g.AppID != 0 || g.ClientID != "" || g.ClientSecret != "" || g.AllowedUserID != 0 || g.WebhookSecret != ""
 }
+
+// MinWebhookSecretLength is the shortest webhook secret accepted. GitHub
+// takes any string; a short one could be guessed.
+const MinWebhookSecretLength = 20
 
 // Caddy holds reverse proxy settings.
 type Caddy struct {
@@ -216,7 +224,7 @@ func Load(path string) (Config, error) {
 // HasSecrets reports whether the configuration itself contains credentials
 // (as opposed to pointing at key files).
 func (c Config) HasSecrets() bool {
-	return c.GitHub.ClientSecret != "" || c.Storage.SecretAccessKey != ""
+	return c.GitHub.ClientSecret != "" || c.GitHub.WebhookSecret != "" || c.Storage.SecretAccessKey != ""
 }
 
 // Parse decodes TOML text, applies defaults and validates the result.
@@ -336,6 +344,9 @@ func (c Config) Validate() error {
 		}
 		if g.AllowedUserID <= 0 {
 			errs = append(errs, errors.New("github.allowed_user_id is required"))
+		}
+		if g.WebhookSecret != "" && len(g.WebhookSecret) < MinWebhookSecretLength {
+			errs = append(errs, fmt.Errorf("github.webhook_secret must be at least %d characters; generate one with: openssl rand -hex 32", MinWebhookSecretLength))
 		}
 	}
 	if c.Caddy.Enabled {

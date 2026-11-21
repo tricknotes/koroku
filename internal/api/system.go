@@ -43,6 +43,16 @@ type systemResponse struct {
 	DiskLimitPercent int              `json:"disk_limit_percent"`
 	LogArchive       LogArchiveStatus `json:"log_archive"`
 	Caddy            caddyStatusJSON  `json:"caddy"`
+	// Webhook is where the GitHub App delivers pushes for automatic
+	// deployment (ARCHITECTURE 5.2).
+	Webhook webhookStatusJSON `json:"webhook"`
+}
+
+type webhookStatusJSON struct {
+	URL string `json:"url"`
+	// SecretConfigured says whether [github] webhook_secret is set; without
+	// it every delivery is refused.
+	SecretConfigured bool `json:"secret_configured"`
 }
 
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +62,10 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		Info:             s.system.Info(r.Context()),
 		DiskLimitPercent: s.cfg.Deploy.DiskUsageLimitPercent,
 		Caddy:            caddyStatusJSON{Enabled: s.cfg.Caddy.Enabled},
+		Webhook: webhookStatusJSON{
+			URL:              s.cfg.ConsoleURL + WebhookPath,
+			SecretConfigured: s.cfg.GitHub.WebhookSecret != "",
+		},
 	}
 	if s.logs != nil {
 		resp.LogArchive = s.logs.ArchiveStatus()
