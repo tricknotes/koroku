@@ -176,9 +176,17 @@ func (s *Server) handleDeleteMember(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	member, err := s.store.GetMember(r.Context(), id)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if err := s.store.DeleteMember(r.Context(), id); err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	for appID, role := range member.Roles {
+		s.recordActivity(r, appID, actMemberRoleRemove, roleChange(member, role, ""))
 	}
 	s.log.Info("member removed", "github_user_id", id)
 	w.WriteHeader(http.StatusNoContent)
@@ -217,6 +225,11 @@ func (s *Server) handlePutMemberRole(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	if body.Role != current {
+		if member, err := s.store.GetMember(r.Context(), id); err == nil {
+			s.recordActivity(r, app.ID, actMemberRoleSet, roleChange(member, current, body.Role))
+		}
+	}
 	s.log.Info("member role set", "github_user_id", id, "app", app.Slug, "role", body.Role)
 	s.writeMember(w, r, http.StatusOK, id)
 }
@@ -232,9 +245,19 @@ func (s *Server) handleDeleteMemberRole(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	current, err := s.store.AppRole(r.Context(), app.ID, id)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if err := s.store.SetAppRole(r.Context(), app.ID, id, ""); err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	if current != "" {
+		if member, err := s.store.GetMember(r.Context(), id); err == nil {
+			s.recordActivity(r, app.ID, actMemberRoleRemove, roleChange(member, current, ""))
+		}
 	}
 	s.revokeCredentialsWithoutAccess(r)
 	s.log.Info("member role removed", "github_user_id", id, "app", app.Slug)
@@ -255,5 +278,14 @@ func (s *Server) revokeCredentialsWithoutAccess(r *http.Request) {
 	}
 	if n > 0 {
 		s.log.Info("revoked credentials of users without a role", "count", n)
+	}
+}
+
+// roleChange is the details of member.role_set and member.role_removed.
+// from or to is "" when the member had or keeps no role on the app.
+func roleChange(m store.Member, from, to string) map[string]any {
+	return map[string]any{
+		"member": map[string]any{"id": m.GitHubUserID, "login": m.Login},
+		"from":   from, "to": to,
 	}
 }

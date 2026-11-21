@@ -186,11 +186,52 @@ func (s *Server) handlePutEnv(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, errs)
 		return
 	}
+	previous, err := s.store.ListEnvVars(r.Context(), app.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if err := s.store.ReplaceEnvVars(r.Context(), app.ID, rows); err != nil {
 		s.internalError(w, r, err)
 		return
 	}
+	next := make(map[string]string, len(in.Vars))
+	for _, v := range in.Vars {
+		next[v.Key] = v.Value
+	}
+	change := s.envReplaceChange(app, previous, next)
+	change.Replaced = true
+	if !change.empty() {
+		s.recordActivity(r, app.ID, actEnvChanged, change)
+	}
 	s.writeEnv(w, r, app)
+}
+
+// envReplaceChange compares the saved variables with the ones replacing
+// them. The values are compared in memory only; the result holds keys.
+func (s *Server) envReplaceChange(app store.App, previous []store.EnvVar, next map[string]string) envChange {
+	change := newEnvChange()
+	old := map[string]bool{}
+	for _, row := range previous {
+		old[row.Key] = true
+		value, ok := next[row.Key]
+		if !ok {
+			change.Removed = append(change.Removed, row.Key)
+			continue
+		}
+		if plain, err := s.box.Open(row.ValueEncrypted, secrets.EnvVarContext(app.ID, row.Key)); err != nil || string(plain) != value {
+			change.Changed = append(change.Changed, row.Key)
+		}
+	}
+	for key := range next {
+		if !old[key] {
+			change.Added = append(change.Added, key)
+		}
+	}
+	sort.Strings(change.Added)
+	sort.Strings(change.Changed)
+	sort.Strings(change.Removed)
+	return change
 }
 
 // handlePutEnvVar adds, changes or renames one variable. The change takes
@@ -263,6 +304,19 @@ func (s *Server) handlePutEnvVar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	change := newEnvChange()
+	switch {
+	case rename:
+		change.Renamed = append(change.Renamed, envRenameJSON{From: from, To: key})
+		if in.Value != nil && !s.envValueEquals(app, *current, value) {
+			change.Changed = append(change.Changed, key)
+		}
+	case current == nil:
+		change.Added = append(change.Added, key)
+	case !s.envValueEquals(app, *current, value):
+		change.Changed = append(change.Changed, key)
+	}
+
 	// The ciphertext is bound to the key, so a rename seals the value again.
 	sealed, err := s.box.Seal([]byte(value), secrets.EnvVarContext(app.ID, key))
 	if err != nil {
@@ -286,7 +340,16 @@ func (s *Server) handlePutEnvVar(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	if !change.empty() {
+		s.recordActivity(r, app.ID, actEnvChanged, change)
+	}
 	s.writeEnv(w, r, app)
+}
+
+// envValueEquals reports whether a saved variable already holds value.
+func (s *Server) envValueEquals(app store.App, saved store.EnvVar, value string) bool {
+	plain, err := s.box.Open(saved.ValueEncrypted, secrets.EnvVarContext(app.ID, saved.Key))
+	return err == nil && string(plain) == value
 }
 
 // handleDeleteEnvVar removes one variable. The change takes effect with the
@@ -296,7 +359,8 @@ func (s *Server) handleDeleteEnvVar(w http.ResponseWriter, r *http.Request) {
 	if !ok || !s.requireRecentAuth(w, r) {
 		return
 	}
-	err := s.store.DeleteEnvVar(r.Context(), app.ID, r.PathValue("key"))
+	key := r.PathValue("key")
+	err := s.store.DeleteEnvVar(r.Context(), app.ID, key)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "env_var_not_found", "no such variable")
 		return
@@ -305,6 +369,9 @@ func (s *Server) handleDeleteEnvVar(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	change := newEnvChange()
+	change.Removed = append(change.Removed, key)
+	s.recordActivity(r, app.ID, actEnvChanged, change)
 	s.writeEnv(w, r, app)
 }
 

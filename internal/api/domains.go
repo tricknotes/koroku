@@ -95,6 +95,7 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 	// Verify right away so that a domain whose DNS is already in place
 	// becomes active without waiting for the periodic retry.
 	d = s.checkDomain(r, d)
+	s.recordActivity(r, app.ID, actDomainAdded, map[string]any{"hostname": d.Hostname, "status": d.Status})
 	writeJSON(w, http.StatusCreated, s.domainToJSON(app, d))
 }
 
@@ -142,7 +143,9 @@ func (s *Server) handleVerifyDomain(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.domainToJSON(app, s.checkDomain(r, d)))
+	checked := s.checkDomain(r, d)
+	s.recordActivity(r, app.ID, actDomainVerified, map[string]any{"hostname": d.Hostname, "status": checked.Status})
+	writeJSON(w, http.StatusOK, s.domainToJSON(app, checked))
 }
 
 func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +188,12 @@ func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 		// No longer forced: let DNS decide right away.
 		updated = s.checkDomain(r, updated)
 	}
+	if updated.ForceActive != d.ForceActive {
+		s.recordActivity(r, app.ID, actDomainForced, map[string]any{"hostname": d.Hostname, "force_active": updated.ForceActive})
+	}
+	if updated.IsPrimary != d.IsPrimary {
+		s.recordActivity(r, app.ID, actDomainPrimary, map[string]any{"hostname": d.Hostname, "is_primary": updated.IsPrimary})
+	}
 	s.syncRoutes(r, "domain updated")
 	writeJSON(w, http.StatusOK, s.domainToJSON(app, updated))
 }
@@ -198,6 +207,7 @@ func (s *Server) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	s.recordActivity(r, app.ID, actDomainDeleted, map[string]any{"hostname": d.Hostname})
 	s.syncRoutes(r, "domain deleted")
 	w.WriteHeader(http.StatusNoContent)
 }
