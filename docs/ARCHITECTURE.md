@@ -967,7 +967,7 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
 | 項目 | 仕様 |
 | --- | --- |
 | 対象 | 全サービスの stdout / stderr、Caddy のアクセスログ（アプリ別）、デプロイログ |
-| 収集 | アプリごとに `docker compose logs --follow --timestamps --no-color` を読み続け、`/var/lib/koroku/logs/<slug>/<service>/YYYY-MM-DD.log` に追記 |
+| 収集 | アプリごとに `docker compose logs --follow --timestamps --no-color` を読み続け、`/var/lib/koroku/logs/<slug>/<service>/YYYY-MM-DD.log` に追記。Compose のプラグインのバイナリを直接起動する（下の細則） |
 | 再開 | `koroku` 再起動時は最後に書いた時刻を `--since` に渡す。直近分は Docker 側に残っているので短い停止は埋まる |
 | ローカル保持 | 14 日。日付が変わったファイルは gzip 圧縮 |
 | オブジェクトストレージへの退避 | 4 時間ごと（00:10 JST 起点）に、前回以降の差分を gzip して `logs/<slug>/<service>/YYYY/MM/DD/HH.log.gz` へアップロード |
@@ -979,6 +979,7 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
 **ログ収集の細則**
 
 - ローカルのファイルは 1 行が `<UTC の時刻（ナノ秒まで）> <本文>`。日付の区切りと退避の時間枠は `config.toml` の `timezone`（既定 `Asia/Tokyo`）で決める。
+- 常駐する `logs --follow` は、`docker compose` ではなく Compose のプラグインのバイナリ（`docker-compose`）を直接起動する。`docker compose` は docker CLI がプラグインを子プロセスとして起動するため、アプリごとに 2 つのプロセスが常駐し、docker CLI の側だけで 1 アプリあたり約 7 MB と、その実行ファイルの読み込み分が `koroku` の unit のメモリに加わる。プラグインは単体で起動しても同じ出力を返す。プラグインは docker CLI と同じ順で探す（`$DOCKER_CONFIG/cli-plugins`（既定 `~/.docker/cli-plugins`）、`/usr/local/lib/docker/cli-plugins`、`/usr/local/libexec/docker/cli-plugins`、`/usr/lib/docker/cli-plugins`、`/usr/libexec/docker/cli-plugins`）。見つからなければ `docker compose` で起動する。起動のたびに探すので、プラグインを入れ直しても `koroku` の再起動はいらない。デプロイなどの短い Compose の操作は `docker compose` のまま。
 - サービス名は `docker compose logs` の行頭（コンテナ名からプロジェクト名を除いたもの）から末尾の `-<番号>` を落として求める。`container_name` を独自に指定したサービスはその名前で記録される（Compose がそう出力するため）。
 - 再開時は、サービスごとに最後に書いた時刻の 30 秒前から `--since` で読み直し、「サービス・時刻・本文」が一致する行を数えて重複を落とす。同じ時刻の別の行は残す。Docker 側に行が残っている限り欠落しない。
 - 1 回の `logs --follow` の中で、同じコンテナの「時刻・本文」が一致する行がもう一度出たら捨てる（コンテナごとに直近 4096 行を覚えておく）。`docker compose logs --follow` は、コンテナの起動と重なって開始されると同じコンテナに二重に接続し、以後その行をすべて時刻まで同じ内容で 2 回ずつ出すことがある。停止中のアプリを待っているフォロワーはデプロイのたびにこの状況になるので、対処しないと保存されるログとオブジェクトストレージへの退避が倍になる。Docker は行ごとにナノ秒の時刻を付けるので、同じコンテナで時刻も本文も同じ行はアプリが 2 回出力したものではない。別レプリカ（`web-1` と `web-2`）の同じ行は残す。

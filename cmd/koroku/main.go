@@ -269,6 +269,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		Clock:         clk,
 		Location:      cfg.Location(),
 		Apps:          collectedApps(st, accessLogDir),
+		ComposePlugin: logs.FindComposePlugin,
 		Logger:        logger,
 		RetentionDays: cfg.Logs.RetentionDays,
 	})

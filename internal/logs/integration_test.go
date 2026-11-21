@@ -96,6 +96,9 @@ func TestCollectFromRealCompose(t *testing.T) {
 		t.Fatalf("docker compose up: %v: %s", err, out)
 	}
 
+	// The collector runs the plugin directly, as in production, when it is
+	// in one of the places the docker CLI looks.
+	t.Logf("compose plugin: %q", FindComposePlugin())
 	dir := t.TempDir()
 	app := App{Slug: "blog", Project: project}
 	newCollector := func(run runner.Runner) *Collector {
@@ -104,6 +107,7 @@ func TestCollectFromRealCompose(t *testing.T) {
 			Runner:            run,
 			Location:          jst,
 			Apps:              oneApp(app),
+			ComposePlugin:     FindComposePlugin,
 			ReconcileInterval: 100 * time.Millisecond,
 			RestartDelay:      100 * time.Millisecond,
 		})
