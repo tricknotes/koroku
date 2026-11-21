@@ -77,7 +77,7 @@ services:
       POSTGRES_DB: app
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U app -d app"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -89,6 +89,7 @@ volumes:
 ```
 
 - `migrate` を分けず、`web` の起動コマンドの前で `bin/rails db:prepare` を実行する形でもよい（Rails 7.1 以降の `bin/docker-entrypoint` はそうなっている）。
+- `db` の healthcheck は `-h 127.0.0.1` で TCP を確かめる。postgres イメージは初回の起動時に、UNIX ソケットだけで待ち受ける仮のサーバーで初期化してから再起動する。ソケットで確かめると、その間に healthy になり、`migrate` が接続に失敗することがある。
 - healthcheck の `curl` はイメージに入っている必要がある。入っていなければ `CMD-SHELL` で `ruby -rnet/http -e ...` などにするか、healthcheck を省いて koroku の HTTP 確認に任せる。
 
 ### 手元の開発用（`compose.override.yaml`、koroku は読まない）
