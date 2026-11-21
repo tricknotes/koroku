@@ -7,7 +7,6 @@ import { pageTitle } from 'ember-page-title';
 import ErrorMessage from 'koroku-console/components/error-message';
 import Icon from 'koroku-console/components/icon';
 import ReauthDialog from 'koroku-console/components/reauth-dialog';
-import RouteProgress from 'koroku-console/components/route-progress';
 import ThemeSwitch from 'koroku-console/components/theme-switch';
 import UserMenu from 'koroku-console/components/user-menu';
 import type SessionService from 'koroku-console/services/session';
@@ -70,7 +69,6 @@ export default class ApplicationTemplate extends Component {
 
   <template>
     {{pageTitle "koroku"}}
-    <RouteProgress />
 
     <header class="topbar">
       <div class="topbar-inner">

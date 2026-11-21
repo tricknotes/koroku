@@ -113,6 +113,68 @@
   overflow: auto;
 }
 
+/*
+ * Loading an app (templates/app-loading): the shape of the detail. It fades
+ * in after a short delay, so a quick load shows a blank moment instead of a
+ * flash of placeholders.
+ */
+.app-loading {
+  animation: app-loading-in 200ms ease-out 150ms both;
+}
+
+@keyframes app-loading-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.app-loading-title {
+  width: 9rem;
+  height: 1.75rem;
+}
+
+.app-loading-meta {
+  width: 14rem;
+}
+
+.app-loading-tabs {
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-3) calc(var(--space-3) + 2px);
+  overflow: hidden;
+}
+
+.app-loading-tab {
+  flex: none;
+  width: 3.5rem;
+}
+
+.app-loading-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.app-loading-line:nth-child(1) {
+  width: 40%;
+}
+
+.app-loading-line:nth-child(2) {
+  width: 75%;
+}
+
+.app-loading-line:nth-child(3) {
+  width: 55%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loading {
+    animation-duration: 0s;
+  }
+}
+
 /* An app that could not be loaded: what went wrong and the way back. */
 
 .app-missing {
