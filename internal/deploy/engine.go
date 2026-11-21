@@ -311,6 +311,14 @@ func (e *Engine) EnqueuePush(ctx context.Context, app store.App, branch, sha, me
 	return e.enqueue(ctx, app, branch, sha, message, nil, store.Origin{Trigger: store.TriggerPush, Pusher: pusher})
 }
 
+// EnqueueWorkflowRun is EnqueuePush for an app that waits for a workflow:
+// the push deploys once a run of workflow succeeded for sha (ARCHITECTURE
+// 5.2).
+func (e *Engine) EnqueueWorkflowRun(ctx context.Context, app store.App, branch, sha, message, pusher, workflow string) (store.Deployment, error) {
+	return e.enqueue(ctx, app, branch, sha, message, nil,
+		store.Origin{Trigger: store.TriggerPush, Pusher: pusher, Workflow: workflow})
+}
+
 func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message string, promotedFrom *int64, origin store.Origin) (store.Deployment, error) {
 	if !gitrepo.IsFullSHA(sha) {
 		return store.Deployment{}, fmt.Errorf("commit %q is not a full SHA", sha)
@@ -349,6 +357,9 @@ func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message s
 	switch {
 	case promotedFrom != nil:
 		appendLogLine(path, fmt.Sprintf("Queued deployment of %s, promoting deployment #%d.", sha, *promotedFrom))
+	case origin.Trigger == store.TriggerPush && origin.Workflow != "":
+		appendLogLine(path, fmt.Sprintf("Queued deployment of %s, pushed to %s by %s, after workflow %s succeeded.",
+			sha, ref, origin.Pusher, origin.Workflow))
 	case origin.Trigger == store.TriggerPush:
 		appendLogLine(path, fmt.Sprintf("Queued deployment of %s, pushed to %s by %s.", sha, ref, origin.Pusher))
 	default:

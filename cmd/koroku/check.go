@@ -42,6 +42,7 @@ func check(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	deps := preflight.Deps{Config: cfg}
 	// Read-only: check never migrates or writes the database.
 	deps.AutoDeployApps, deps.AutoDeployErr = store.AutoDeployApps(ctx, cfg.DBPath())
+	deps.WorkflowApps, deps.WorkflowAppsErr = store.WorkflowGatedApps(ctx, cfg.DBPath())
 	if cfg.GitHub.Configured() {
 		if gh, err := newGitHubClient(cfg.GitHub); err != nil {
 			deps.GitHubErr = err

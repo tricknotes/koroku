@@ -367,6 +367,14 @@ func TestProductionAutoDeployIsOwnerOnly(t *testing.T) {
 	if rec := f.owner.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy":true}`, originHeader); rec.Code != http.StatusOK {
 		t.Errorf("production auto-deploy by the owner: %d %s", rec.Code, rec.Body)
 	}
+	// Which workflow a production app waits for is the owner's too.
+	rec = manager.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy_workflow":".github/workflows/image.yml"}`, originHeader)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "auto_deploy") {
+		t.Errorf("production workflow by the manager: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.owner.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy_workflow":".github/workflows/image.yml"}`, originHeader); rec.Code != http.StatusOK {
+		t.Errorf("production workflow by the owner: %d %s", rec.Code, rec.Body)
+	}
 }
 
 func TestDeploymentsRecordTheActor(t *testing.T) {

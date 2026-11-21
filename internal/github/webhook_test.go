@@ -71,3 +71,64 @@ func TestParsePushEvent(t *testing.T) {
 		}
 	}
 }
+
+func TestParseWorkflowRunEvent(t *testing.T) {
+	body := `{"action": "completed",
+		"workflow": {"id": 7, "path": ".github/workflows/image.yml"},
+		"workflow_run": {"id": 9, "path": ".github/workflows/image.yml@refs/heads/main",
+			"head_branch": "main", "head_sha": "ABCDEF0123456789ABCDEF0123456789ABCDEF01",
+			"conclusion": "success", "event": "workflow_run",
+			"html_url": "https://github.com/octo/blog/actions/runs/9",
+			"head_repository": {"id": 5, "full_name": "octo/blog"},
+			"actor": {"login": "octo"}},
+		"repository": {"id": 5, "full_name": "octo/blog"},
+		"sender": {"login": "octo-bot"}}`
+	ev, err := ParseWorkflowRunEvent([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := WorkflowRunEvent{
+		Action: "completed", Conclusion: "success", WorkflowPath: ".github/workflows/image.yml",
+		HeadBranch: "main", HeadSHA: "abcdef0123456789abcdef0123456789abcdef01",
+		RepoID: 5, RepoFullName: "octo/blog", HeadRepoID: 5, HeadRepoFullName: "octo/blog",
+		Actor: "octo", RunURL: "https://github.com/octo/blog/actions/runs/9",
+	}
+	if ev != want {
+		t.Errorf("got %+v\nwant %+v", ev, want)
+	}
+	if !ev.FromHeadRepository() {
+		t.Error("the run's own repository was taken for a fork")
+	}
+
+	// Without the workflow object the run's path is used, normalized; a
+	// fork is told apart; the sender stands in for a missing actor.
+	fork, err := ParseWorkflowRunEvent([]byte(`{"action": "completed",
+		"workflow_run": {"path": "octo/blog/.github/workflows/ci.yaml@refs/pull/3/merge", "head_branch": "main",
+			"head_repository": {"id": 6, "full_name": "mallory/blog"}},
+		"repository": {"id": 5, "full_name": "octo/blog"}, "sender": {"login": "mallory"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fork.WorkflowPath != ".github/workflows/ci.yaml" || fork.FromHeadRepository() || fork.Actor != "mallory" {
+		t.Errorf("fork = %+v", fork)
+	}
+
+	for _, body := range []string{`{`, `{"action": "completed", "repository": {"id": 5}}`, `{"workflow_run": {}}`} {
+		if _, err := ParseWorkflowRunEvent([]byte(body)); err == nil {
+			t.Errorf("%s was accepted", body)
+		}
+	}
+}
+
+func TestWorkflowFilePath(t *testing.T) {
+	for in, want := range map[string]string{
+		".github/workflows/image.yml":                 ".github/workflows/image.yml",
+		".github/workflows/image.yml@refs/heads/main": ".github/workflows/image.yml",
+		"octo/blog/.github/workflows/image.yml@v1":    ".github/workflows/image.yml",
+		"dynamic/pages/pages-build-deployment":        "dynamic/pages/pages-build-deployment",
+	} {
+		if got := WorkflowFilePath(in); got != want {
+			t.Errorf("WorkflowFilePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

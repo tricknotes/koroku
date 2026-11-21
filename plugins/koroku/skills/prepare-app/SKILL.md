@@ -71,6 +71,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 | 環境変数 | 名前と意味、必須か任意か、秘密かどうか、値の作り方（例 `openssl rand -hex 64`）。値そのものは書かない。Compose に `${VAR}` で宣言したことも書く（koroku の「設定」で照合元が「Compose ファイルの `${VAR}`」になっていれば、環境変数の画面に未設定のものが出る） |
 | メモリ上限 | 512m を超えるサービスがあれば、その値と理由（アプリ設定で上げる） |
 | コンテナレジストリの認証 | private なイメージ（CI がビルドしたイメージや private なベースイメージ）を使うなら、そのレジストリ（例 `ghcr.io`）と、読み取り専用のトークンの作り方（GHCR なら `read:packages` だけの classic な Personal access token か、読み取り専用のボットアカウント）。koroku の「設定」タブの「コンテナレジストリの認証」に入れる。トークンの値は書かない |
+| 先に待つワークフロー | `image:` だけの Compose で、イメージを GitHub Actions がコミットごとにビルドするなら、そのワークフローのファイル（例 `.github/workflows/image.yml`。CI のあとに `on: workflow_run` でつなぐなら、最後にイメージを置くほう）。koroku の「設定」タブの自動デプロイの「先に待つワークフロー」に入れる。push で自動デプロイするときに、イメージができる前に pull して失敗しないようにするため |
 | バックアップ | ダンプフック（サービス名とコマンド。例 `db` / `pg_dump -U postgres app`）と、ファイルのバックアップから外す volume（DB のデータ volume） |
 | 本番の DB を staging へコピーするとき | ロードフック（例 `db` / `pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"`）と、個人情報を消すコマンドがあればそのサービスとコマンド（`references/requirements.md` の「本番の DB を staging にコピーする」） |
 | タスク | 管理画面に登録しておくと便利なコマンド（名前、サービス、コマンド。例 `マイグレーションの状態` / `web` / `bin/rails db:migrate:status`）。対話的なコマンドは使えない |

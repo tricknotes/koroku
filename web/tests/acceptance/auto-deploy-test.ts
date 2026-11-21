@@ -103,6 +103,68 @@ module('Acceptance | automatic deployment on push', function (hooks) {
     });
   });
 
+  test('it can wait for a workflow, with the App setup it needs', async function (assert) {
+    await visit('/apps/blog/settings');
+
+    await click('[data-test-field="auto_deploy"]');
+    assert
+      .dom('[data-test-field="auto_deploy_workflow"]')
+      .hasValue('')
+      .hasAttribute('placeholder', '.github/workflows/image.yml');
+    assert.dom('[data-test-workflow-setup]').doesNotExist();
+
+    await fillIn(
+      '[data-test-field="auto_deploy_workflow"]',
+      ' .github/workflows/image.yml ',
+    );
+    assert
+      .dom('[data-test-workflow-setup]')
+      .includesText('Actions')
+      .includesText('Workflow run');
+    await click('[data-test-settings-save]');
+    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+      auto_deploy: true,
+      auto_deploy_workflow: '.github/workflows/image.yml',
+    });
+  });
+
+  test('a refused workflow path is shown at the field', async function (assert) {
+    app = { ...app, auto_deploy: true };
+    fakes.api.on('PATCH', '/api/apps/blog', () => {
+      throw apiError(422, 'validation_failed', {
+        auto_deploy_workflow:
+          'must be a .yml or .yaml file directly in .github/workflows/',
+      });
+    });
+    await visit('/apps/blog/settings');
+
+    await fillIn('[data-test-field="auto_deploy_workflow"]', 'image.yml');
+    await click('[data-test-settings-save]');
+    assert
+      .dom(
+        '[data-test-field-group="auto_deploy_workflow"] [data-test-field-error]',
+      )
+      .includesText('.github/workflows/');
+  });
+
+  test('a production app asks again when the workflow changes', async function (assert) {
+    app = { ...app, environment: 'production', auto_deploy: true };
+    await visit('/apps/blog/settings');
+
+    await fillIn(
+      '[data-test-field="auto_deploy_workflow"]',
+      '.github/workflows/image.yml',
+    );
+    await click('[data-test-settings-save]');
+    assert
+      .dom('[data-test-auto-deploy-confirm]')
+      .includesText('.github/workflows/image.yml');
+    await click('[data-test-dialog-confirm]');
+    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+      auto_deploy_workflow: '.github/workflows/image.yml',
+    });
+  });
+
   test('a stale login is asked to log in again', async function (assert) {
     app = { ...app, environment: 'production' };
     fakes.api.on('PATCH', '/api/apps/blog', () => {

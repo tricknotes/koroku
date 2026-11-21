@@ -2,6 +2,8 @@
 // fresh relative to "now", so relative times always look alive. Nothing
 // here is real: names, domains and addresses are placeholders.
 
+import { useWorkflowGatedActivity } from './activity.mjs';
+
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -58,6 +60,8 @@ export const SCENARIOS = {
     'logged in as the member mia, not the owner: deploy on blog, manage on blog-staging, view on shop, no role on shop-staging',
   'webhook-unset':
     'everything fine, but blog-staging deploys on push while the webhook secret is not set in config.toml',
+  'workflow-gated':
+    'everything fine; blog-staging deploys after its image workflow succeeds, and the last run failed',
 };
 
 /** The owner of every scenario, and the members it let in (ARCHITECTURE 10.7). */
@@ -217,6 +221,7 @@ function app(slug, overrides = {}) {
     promote_from: '',
     auto_deploy: false,
     auto_deploy_branch: '',
+    auto_deploy_workflow: '',
     url,
     primary_url: url,
     pending_domains: 0,
@@ -528,6 +533,13 @@ export function buildScenario(name) {
     case 'webhook-unset': {
       const state = scenario(healthyApps());
       state.system.webhook.secret_configured = false;
+      return state;
+    }
+    case 'workflow-gated': {
+      const state = scenario(healthyApps());
+      state.apps.get('blog-staging').auto_deploy_workflow =
+        '.github/workflows/image.yml';
+      useWorkflowGatedActivity(state);
       return state;
     }
     case 'backups-down':

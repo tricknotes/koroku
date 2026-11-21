@@ -131,3 +131,111 @@ func ParsePushEvent(body []byte) (PushEvent, error) {
 	}
 	return ev, nil
 }
+
+// WorkflowRunEvent is the part of a workflow_run webhook payload koroku
+// uses (ARCHITECTURE 5.2).
+type WorkflowRunEvent struct {
+	// Action is requested, in_progress or completed.
+	Action string
+	// Conclusion is success, failure, cancelled, ... once completed.
+	Conclusion string
+	// WorkflowPath is the workflow file, normalized by WorkflowFilePath.
+	WorkflowPath string
+	// HeadBranch and HeadSHA are the commit the run is for. A run started
+	// by another run's completion (on: workflow_run) carries the commit of
+	// the first run.
+	HeadBranch string
+	HeadSHA    string
+	// RepoID and RepoFullName identify the repository the run belongs to;
+	// HeadRepoID and HeadRepoFullName the one its commit came from (a fork
+	// for pull requests from forks).
+	RepoID           int64
+	RepoFullName     string
+	HeadRepoID       int64
+	HeadRepoFullName string
+	// Actor is the login behind the run's commit (whoever pushed), or the
+	// sender when the run has no actor.
+	Actor string
+	// RunURL is the run's page on GitHub.
+	RunURL string
+}
+
+// FromHeadRepository reports whether the run's commit came from the
+// run's own repository rather than from a fork.
+func (e WorkflowRunEvent) FromHeadRepository() bool {
+	if e.RepoID != 0 && e.HeadRepoID != 0 {
+		return e.RepoID == e.HeadRepoID
+	}
+	return e.HeadRepoFullName != "" && strings.EqualFold(e.RepoFullName, e.HeadRepoFullName)
+}
+
+// WorkflowFilePath normalizes the path of a workflow as webhooks report it
+// to the file path in the repository: an "@<ref>" suffix and an
+// "<owner>/<repo>/" prefix, which references to workflows can carry, are
+// removed.
+func WorkflowFilePath(path string) string {
+	if at := strings.IndexByte(path, '@'); at >= 0 {
+		path = path[:at]
+	}
+	if i := strings.Index(path, ".github/workflows/"); i > 0 {
+		path = path[i:]
+	}
+	return path
+}
+
+// ParseWorkflowRunEvent decodes a workflow_run webhook payload.
+func ParseWorkflowRunEvent(body []byte) (WorkflowRunEvent, error) {
+	type repo struct {
+		ID       int64  `json:"id"`
+		FullName string `json:"full_name"`
+	}
+	var raw struct {
+		Action   string `json:"action"`
+		Workflow *struct {
+			Path string `json:"path"`
+		} `json:"workflow"`
+		WorkflowRun *struct {
+			Path           string `json:"path"`
+			HeadBranch     string `json:"head_branch"`
+			HeadSHA        string `json:"head_sha"`
+			Conclusion     string `json:"conclusion"`
+			HTMLURL        string `json:"html_url"`
+			HeadRepository repo   `json:"head_repository"`
+			Actor          struct {
+				Login string `json:"login"`
+			} `json:"actor"`
+		} `json:"workflow_run"`
+		Repository repo `json:"repository"`
+		Sender     struct {
+			Login string `json:"login"`
+		} `json:"sender"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return WorkflowRunEvent{}, fmt.Errorf("github: decode workflow_run event: %w", err)
+	}
+	if raw.WorkflowRun == nil || (raw.Repository.ID == 0 && raw.Repository.FullName == "") {
+		return WorkflowRunEvent{}, errors.New("github: workflow_run event lacks workflow_run or repository")
+	}
+	run := raw.WorkflowRun
+	path := run.Path
+	if raw.Workflow != nil && raw.Workflow.Path != "" {
+		path = raw.Workflow.Path
+	}
+	ev := WorkflowRunEvent{
+		Action:           raw.Action,
+		Conclusion:       run.Conclusion,
+		WorkflowPath:     WorkflowFilePath(path),
+		HeadBranch:       run.HeadBranch,
+		HeadSHA:          strings.ToLower(run.HeadSHA),
+		RepoID:           raw.Repository.ID,
+		RepoFullName:     raw.Repository.FullName,
+		HeadRepoID:       run.HeadRepository.ID,
+		HeadRepoFullName: run.HeadRepository.FullName,
+		Actor:            run.Actor.Login,
+		RunURL:           run.HTMLURL,
+	}
+	if ev.Actor == "" {
+		ev.Actor = raw.Sender.Login
+	}
+	return ev, nil
+}

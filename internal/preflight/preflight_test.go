@@ -132,13 +132,14 @@ func healthy(t *testing.T) Deps {
 		HTTP: client,
 		GitHub: fakeApp{
 			app: github.App{ID: 42, Slug: "koroku-test", ClientID: "Iv1.abc", HTMLURL: "https://github.com/apps/koroku-test",
-				Permissions: map[string]string{"contents": "read", "metadata": "read", "deployments": "write"},
-				Events:      []string{"push"}},
+				Permissions: map[string]string{"contents": "read", "metadata": "read", "deployments": "write", "actions": "read"},
+				Events:      []string{"push", "workflow_run"}},
 			hook:     github.WebhookConfig{URL: "https://console.apps.test/webhooks/github", ContentType: "json"},
 			installs: []github.Installation{{ID: 1, Account: "octocat", RepositorySelection: "all", Allowed: true}},
 		},
 		Users:          fakeUsers{7: "octocat"},
-		AutoDeployApps: []string{"blog"},
+		AutoDeployApps: []string{"blog", "shop"},
+		WorkflowApps:   []string{"shop"},
 		Objects:        objstore.NewMemory(),
 		Backups:        fakeBackups{snaps: []backup.Snapshot{{ID: "abcd1234", Time: now.Add(-3 * time.Hour)}}},
 		Now:            func() time.Time { return now },
@@ -161,7 +162,7 @@ func TestHealthyHost(t *testing.T) {
 		}
 	}
 	want := []string{"config", "public_ip", "dns.console", "dns.apps", "caddy", "https", "master_key",
-		"github.app", "github.install", "github.user", "github.webhook", "storage", "backup"}
+		"github.app", "github.install", "github.user", "github.webhook", "github.workflow", "storage", "backup"}
 	if len(results) != len(want) {
 		t.Fatalf("got %d results, want %d", len(results), len(want))
 	}

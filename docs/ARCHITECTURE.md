@@ -104,7 +104,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 
 ## 5. GitHub 連携
 
-自分のアカウントに GitHub App を 1 つ登録し、UI ログインとリポジトリ取得の両方に使う。権限は Contents: Read-only と Metadata: Read-only に、デプロイを GitHub に写すための Deployments: Read and write（5.1）を加えたもの。
+自分のアカウントに GitHub App を 1 つ登録し、UI ログインとリポジトリ取得の両方に使う。権限は Contents: Read-only と Metadata: Read-only に、デプロイを GitHub に写すための Deployments: Read and write（5.1）を加えたもの。ワークフローを待つ自動デプロイ（5.2）を使うなら Actions: Read-only も加える。
 
 **デプロイできるリポジトリ**
 
@@ -125,7 +125,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 | clone | デプロイのたびに installation access token を発行し、HTTP パスワードとして使う。形式は `https://x-access-token:TOKEN@github.com/owner/repo.git`、有効期限は 1 時間（[installation としての認証](https://docs.github.com/en/enterprise-cloud@latest/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)） |
 
 - トークンは `.git/config` やデプロイログに残さない。`GIT_ASKPASS` か `http.extraheader` で渡し、fetch 後に破棄する。
-- Webhook は自動デプロイ（5.2）のために push のイベントだけを使う。自動デプロイを有効にしたアプリがなければ、デプロイは常に UI か API から手動で始まる。
+- Webhook は自動デプロイ（5.2）のために push と workflow_run のイベントだけを使う。自動デプロイを有効にしたアプリがなければ、デプロイは常に UI か API から手動で始まる。
 
 **ログインと保護の細則**
 
@@ -195,7 +195,7 @@ koroku のデプロイを、リポジトリの GitHub Deployments（`POST /repos
 - 署名: `X-Hub-Signature-256`（本文の HMAC-SHA256、`sha256=<16 進>`）を secret で計算した値と定数時間で比べる。ヘッダーがない、形が違う、一致しない配送は 401。署名と本文はログに出さない。
 - 大きさと頻度: 本文は 5 MiB まで（超えたら 413）。受け付けは全体で 1 分 60 件まで（超えたら 429）。署名の検査より前に数えるので、偽の配送をいくら送っても本文を読む以上の負荷はかからない。そのかわり、溢れている間は本物の push も断られる（GitHub の画面から再配送できる）。
 - Content-Type は `application/json` だけ（App の Webhook は常に JSON）。
-- イベント: `X-GitHub-Event` が `ping` なら 200 で応え、`push` 以外は 200 で何もしない。`push` でも、タグ、ブランチの削除（`deleted: true` か `after` がゼロの SHA）、どのアプリも追っていないブランチは何もしない。
+- イベント: `X-GitHub-Event` が `ping` なら 200 で応え、`push` と `workflow_run` 以外は 200 で何もしない。`push` でも、タグ、ブランチの削除（`deleted: true` か `after` がゼロの SHA）、どのアプリも追っていないブランチは何もしない。`workflow_run` は下の「ワークフローを待つ」。
 - 重複: 同じ配送を 2 回デプロイしない。`X-GitHub-Delivery` と本文の SHA-256 を、アプリごとの鍵としてメモリに 24 時間（最大 4096 件）覚える。GitHub の再配送は同じ配送 ID と本文で来るので、デプロイ済みのアプリには何もしない。本文を見て弾くのは、署名付きの本文が配送 ID だけ変えて送り直された場合のため。覚えた内容は `koroku` の再起動で消える。署名には時刻が入らないので、盗まれた配送を再起動のあとに送り直されると古いコミットがデプロイされうる。配送は TLS の中を通り、GitHub の配送の記録は App の持ち主にしか見えないので、この残りは受け入れる。
 
 **どのアプリが動くか**
@@ -211,11 +211,31 @@ koroku のデプロイを、リポジトリの GitHub Deployments（`POST /repos
 - 応じたアプリごとに、push の `after`（ブランチの新しい先頭）のコミットを、手動のデプロイと同じ経路（7 章）でキューに積む。ref はブランチ名、コミットメッセージは `head_commit` のもの。ディスクの検査、同時実行 1、「後から積まれたデプロイが待っている古いデプロイを置き換える」規則、本番の自動ロールバック、GitHub Deployments への反映（5.1）は、手動のデプロイと同じ。続けて push すると、待っている古い push のデプロイは新しいものに置き換わる。
 - `deployments` に、何が始めたか（`trigger_kind`: `manual` か `push`）と push した人の login（`pusher`。配送の `sender.login`、なければ `pusher.name`）を残す。デプロイの JSON の `trigger` と `pusher` で返し、UI は履歴に「push で自動デプロイ」と出す。デプロイログの最初の行にも `pushed to <branch> by <login>` と書く。
 - キューに積めなかったアプリ（コマンドの実行中、ディスク使用率の超過、DB の失敗）があれば 503 で応え、そのアプリの重複の記録を消す。GitHub の配送の記録に失敗として残り、原因を取り除いてから再配送すると、積めなかったアプリだけがデプロイされる。応答の本文はアプリごとの結果（`queued`、`duplicate`、`stopped`、`failed` と理由）。
-- push で始まるデプロイには確認ダイアログも再ログインもない（誰も画面の前にいない）。その代わり、本番アプリで自動デプロイを有効にすること（と、追うブランチを変えること）を、確認ダイアログと再ログイン（10.3）の対象にする。そのブランチに push できる人が、本番を更新できるようになるため。
+- push で始まるデプロイには確認ダイアログも再ログインもない（誰も画面の前にいない）。その代わり、本番アプリで自動デプロイを有効にすること（と、追うブランチや待つワークフローを変えること）を、確認ダイアログと再ログイン（10.3）の対象にする。そのブランチに push できる人が、本番を更新できるようになるため。
+
+**ワークフローを待つ**
+
+Compose が `image:` だけで、イメージを GitHub Actions がコミットごとにビルドする（`ghcr.io/<owner>/<repo>:sha-${KOROKU_COMMIT_SHA}` など。6 章）アプリでは、push の直後にデプロイするとイメージがまだなく、pull が `not found` で失敗する。そこでアプリごとに「先に待つワークフロー」（`auto_deploy_workflow`）を選べるようにし、設定したアプリは push ではなくそのワークフローの成功でデプロイする。
+
+- 値はワークフローのファイルのパス（`.github/workflows/image.yml` など）。`.github/workflows/` の直下の `.yml` か `.yaml` だけを受け付ける（GitHub がワークフローとして読むのはそこだけ）。空なら待たない（push の直後にデプロイする）。
+- 設定したアプリには、push の配送では何もしない（応答の本文のそのアプリの結果は `waiting_workflow`）。
+- GitHub App の Webhook で `workflow_run` のイベントを受ける。このイベントの購読には Repository permissions の **Actions: Read-only** が要る（[workflow_run](https://docs.github.com/en/webhooks/webhook-events-and-payloads#workflow_run)）。koroku は Actions の API を呼ばない。
+- 次がすべて成り立つ配送で、そのアプリをデプロイする。
+  - `action` が `completed` で、`workflow_run.conclusion` が `success`。
+  - 走ったワークフローのパスが設定と完全一致する。パスは配送の `workflow.path`（なければ `workflow_run.path`）で、`@<ref>` が付いていれば外し、`<owner>/<repo>/` が前に付いていれば外してから比べる（再利用のワークフローなどでは参照の形で書かれうるため）。
+  - 配送の `repository` がアプリのリポジトリ（照合は push と同じ）で、`workflow_run.head_repository` も同じリポジトリ。fork からの pull request で走ったものはデプロイしない（fork の同名のブランチを追うブランチと取り違えないため）。
+  - `workflow_run.head_branch` がアプリの追うブランチ（push と同じ規則）。
+  - `workflow_run.head_sha` が、いまのブランチの先頭である。
+- 先頭かどうかは、配送を受けたときに GitHub にブランチの先頭を問い合わせて決める（手動のデプロイでブランチ名を SHA にするのと同じ経路。installation token の REST API で、読めなければ `git ls-remote`）。koroku が覚えている最後の push とは比べない。push の配送を取り逃したとき、`koroku` を再起動して記憶が消えたとき、ワークフローの順序が入れ替わったときにも、GitHub の今の状態で決まるため。先頭でなければ何もしない（結果は `stale`）。後の push のワークフローが成功したときにその版が出る。後の push でワークフローが走らない（`paths` の絞り込みなど）と、そのブランチは次にワークフローが走るまで自動では出ない。問い合わせに失敗したら、積めなかったときと同じく 503 で応え、重複の記録を消す（再配送でやり直せる）。
+- 連鎖したワークフロー（CI が終わってから `on: workflow_run` で動くイメージのワークフロー）もそのまま使える。後ろのワークフローの `workflow_run` の配送では、`head_branch` と `head_sha` は元の push のものになるので、待つワークフローには最後にイメージを置くもの（後ろのもの）を書く。
+- デプロイは push と同じ経路で積む。`trigger_kind` は `push`（push が始まりで、ワークフローを待っただけなので）、`pusher` は `workflow_run.actor.login`（push した人。なければ `sender.login`）、コミットメッセージはブランチの先頭を問い合わせたときのもの。デプロイログの最初の行は `pushed to <branch> by <login>, after workflow <path> succeeded` になる。GitHub Deployments への反映（5.1）も push と同じで、積んだときから始まる。
+- `conclusion` が `success` 以外（`failure`、`cancelled`、`timed_out` など）なら、デプロイしない。応じたアプリ（パス・リポジトリ・ブランチが合い、停止中でないもの）ごとに、操作の記録（10.7）に koroku 自身の操作として `auto_deploy.skipped` を残す（ワークフロー、結論、コミット、ブランチ、実行の URL）。デプロイは始まっていないので GitHub Deployments には何も送らない（失敗したワークフローは GitHub の Actions の画面に出ている）。先頭でない（`stale`）ものは記録しない。ふつうに起きることで、記録が溢れるため。サーバーログには残す。
+- `completed` 以外の `action`（`requested`、`in_progress`）、どのアプリも待っていないワークフローは何もしない。
+- 重複の記録は push と同じ（配送 ID と本文、アプリごと）。ワークフローを再実行して成功したときは別の配送になるので、同じコミットをもう一度デプロイする。
 
 **点検**
 
-- `koroku check`（10.4）は、自動デプロイが有効なアプリがあるのに `webhook_secret` がないとき、App が push のイベントを購読していないとき（`GET /app` の `events`）、App の Webhook の URL が違うとき（`GET /app/hook/config`）に警告する。どのアプリが有効かは DB を読み取り専用で開いて読む（マイグレーションを当てない）。
+- `koroku check`（10.4）は、自動デプロイが有効なアプリがあるのに `webhook_secret` がないとき、App が push のイベントを購読していないとき（`GET /app` の `events`）、App の Webhook の URL が違うとき（`GET /app/hook/config`）に警告する。ワークフローを待つアプリがあるのに、App に Actions の read の権限がないとき、App が workflow_run のイベントを購読していないときも警告する。どのアプリが有効かは DB を読み取り専用で開いて読む（マイグレーションを当てない）。
 - 管理 UI の設定タブは、Webhook の URL（コピーできる）と App 側に要る設定を示し、secret が未設定なら警告を出す（`GET /api/system` の `webhook`）。
 
 ## 6. Compose の扱い
@@ -578,7 +598,7 @@ GET /page   ───────▶ forward_auth ──────────
 
 | テーブル | 内容 |
 | --- | --- |
-| `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、DB のコピーの設定（ロードフック、コピー後のコマンド。10.6）、必要な変数の読み方（`env_source`、`env_example_path`、9.4）、アクセスの保護（`access_protection`、`protection_exempt_paths`、8.3）、昇格元のアプリ（`promote_from_app_id`、9.7）、自動デプロイ（`auto_deploy`、`auto_deploy_branch`、5.2） |
+| `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、DB のコピーの設定（ロードフック、コピー後のコマンド。10.6）、必要な変数の読み方（`env_source`、`env_example_path`、9.4）、アクセスの保護（`access_protection`、`protection_exempt_paths`、8.3）、昇格元のアプリ（`promote_from_app_id`、9.7）、自動デプロイ（`auto_deploy`、`auto_deploy_branch`、`auto_deploy_workflow`、5.2） |
 | `env_vars` | 環境変数。値は暗号化して保存（`app_id` + `key` で一意） |
 | `registry_credentials` | アプリのコンテナレジストリの認証（`app_id` で一意。レジストリ、ユーザー名、暗号化したトークン、更新時刻。6.1） |
 | `deployments` | ref、コミット、状態、エラー、時刻、環境変数の指紋（9.2）、ロールバックの戻す先（`source_deployment_id`、7.1）、昇格元のデプロイ（`promoted_from_deployment_id`、9.7）、始めたユーザー（`actor_user_id`、`actor_login`。10.7）、何が始めたか（`trigger_kind`、`pusher`、5.2） |
@@ -1081,8 +1101,9 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
   - DNS: `console_host` と、登録していない名前（`koroku-check-<乱数>.<base_domain>`）が `public_ip` だけに解決されること。後者が解決されなければワイルドカードがないとして警告する（アプリごとの登録でも運用できるため）。判定は独自ドメインの検証（8 章）と同じ関数。
   - Caddy の admin API が応答すること。`console_url` に HTTPS で接続でき、証明書が信頼できること。`acme_ca` が Let's Encrypt の staging なら、信頼できない証明書は警告にとどめ、本番への切り替えを促す。
   - `master.key` があり 0600 であること（ないときは警告。初回起動で作られる）。
-  - GitHub App: App の JWT で `GET /app` が通り、`app_id`・`client_id` が一致し、権限が Contents と Metadata の read（足りなければ失敗）と Deployments の write（なければ GitHub への反映が止まる旨の警告）で、それ以外がないこと（余分なら警告）。`GET /app/installations` で 1 つ以上インストールされていること。`allowed_user_id` が実在するアカウントであること（`GET /user/{id}`、認証なし）。callback URL は API で読めないので、正しい値を表示するだけにする。
+  - GitHub App: App の JWT で `GET /app` が通り、`app_id`・`client_id` が一致し、権限が Contents と Metadata の read（足りなければ失敗）と Deployments の write（なければ GitHub への反映が止まる旨の警告）で、それ以外がないこと（余分なら警告。Actions の read は余分に数えない）。`GET /app/installations` で 1 つ以上インストールされていること。`allowed_user_id` が実在するアカウントであること（`GET /user/{id}`、認証なし）。callback URL は API で読めないので、正しい値を表示するだけにする。
   - 自動デプロイ（5.2）: 有効なアプリがあるのに `webhook_secret` がない、App が push のイベントを購読していない（`GET /app` の `events`）、App の Webhook の URL が `<console_url>/webhooks/github` でない（`GET /app/hook/config`）、のいずれかなら警告。有効なアプリは DB を読み取り専用で開いて数える。Webhook が Active かどうかは API で読めないので、表示するだけにする。
+  - ワークフローを待つ自動デプロイ（5.2）: 待つワークフローを設定した、自動デプロイが有効なアプリがあるのに、App に Actions の read がない、または workflow_run のイベントを購読していない（`GET /app` の `permissions` と `events`）なら警告。
   - オブジェクトストレージ: `koroku-check/<乱数>` に書き、読み、一覧し、消す。`logs/` と `restic/` の外なので、ライフサイクルルールにも restic にも触れない。トークンの権限不足をここで見つける。
   - restic: 基盤のスナップショットを一覧できること（パスワードの誤りはここで失敗する）。まだ 1 つもなければ警告（リポジトリは最初のバックアップで作られる）。最新が 26 時間より古ければ警告。
 - 外部への書き込みはストレージの確認用オブジェクト 1 つだけで、終わったら消す。DNS、GitHub、Caddy は読むだけ。秘密は表示しない。
@@ -1223,7 +1244,7 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 **オーナーだけの操作**
 
 - アプリの作成と削除。リポジトリの一覧、作成画面の Compose 検出と環境変数の初期値（作成と、リポジトリの変更のためのもの）
-- アプリ設定のうち、`environment`（本番 / staging。本番ではデプロイの前に確認が入るので、これを staging に変えると確認を外せる）、本番アプリの自動デプロイを有効にすることと、追うブランチを変えること（push だけで本番に出るようになる。5.2）、`relax_policy`（ポリシー検査を緩める）、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、ほかのアプリとの組み合わせ（昇格元 `promote_from`）の変更。ホストを守る検査を外す、別のコードを動かす、ほかのアプリに関わる、のいずれかで、1 つのアプリを任せる範囲を超えるため。管理のメンバーが設定の `PATCH` でこれらを今と違う値にすると `403 forbidden_role`（`details.fields` に項目名）。今と同じ値を送るのはかまわない（設定画面は全項目を送るため）
+- アプリ設定のうち、`environment`（本番 / staging。本番ではデプロイの前に確認が入るので、これを staging に変えると確認を外せる）、本番アプリの自動デプロイを有効にすることと、追うブランチや待つワークフローを変えること（push だけで本番に出るようになる。5.2）、`relax_policy`（ポリシー検査を緩める）、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、ほかのアプリとの組み合わせ（昇格元 `promote_from`）の変更。ホストを守る検査を外す、別のコードを動かす、ほかのアプリに関わる、のいずれかで、1 つのアプリを任せる範囲を超えるため。管理のメンバーが設定の `PATCH` でこれらを今と違う値にすると `403 forbidden_role`（`details.fields` に項目名）。今と同じ値を送るのはかまわない（設定画面は全項目を送るため）
 - システム画面（ホストのリソース、Docker のディスク、コンテナの内訳、prune、GitHub App）、ホスト全体のバックアップの実行履歴
 - メンバーとロールの管理、ほかのユーザーのセッション・ログイン履歴・API トークン
 
@@ -1266,6 +1287,7 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 | `db_copy.started`、`db_copy.sent` | DB のコピーの開始（受け側と送り側の両方に残す） | 受け側には送り側の slug と取り元、送り側には取り元だけ |
 | `task_run.started`、`tasks.changed` | コマンドとタスクの実行、登録タスクの変更 | 実行の ID・タスク名・サービス・コマンド、変わったタスクの名前 |
 | `member.role_set`、`member.role_removed` | そのアプリでのメンバーのロールの変更（メンバーの削除で外れたロールを含む） | メンバーの ID と login、前後のロール |
+| `auto_deploy.skipped` | 待つワークフローが成功しなかったので自動デプロイしなかった（koroku 自身の記録。5.2） | ワークフローのパス、結論、コミット、ブランチ、実行の URL |
 
   - **環境変数の値は記録しない**。変更かどうかはメモリの上で復号した値を比べて決め、残すのはキーだけ。同じ値で保存し直したものは残さない。アプリ設定は値を残すが、秘密として扱う項目（API の項目の一覧に印を付ける）は「変わった」ことだけを残す。コマンドの文字列は 9.6 と同じく秘密として扱わない。
   - 送り側の `db_copy.sent` は受け側の slug を書かない。送り側のメンバーが受け側にロールを持つとは限らず、見えないアプリの名前を漏らさないため。

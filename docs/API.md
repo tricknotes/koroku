@@ -49,7 +49,7 @@
 | `manage` | `PATCH /api/apps/{slug}`（オーナー専用の項目を除く）、環境変数の変更系、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、ドメインの変更系、`POST /api/apps/{slug}/backups/restore`、`GET /api/apps/{slug}/backups/{snapshot}/download`、`POST /api/apps/{slug}/db-copies`（送り側の `manage` も要る。送り側にロールがなければ `404 source_not_found`）、`PUT /api/apps/{slug}/tasks`、`POST /api/apps/{slug}/task-runs`、`POST /api/task-runs/{id}/cancel`。`POST /api/backups` は、どれかのアプリに `manage` があれば使える（実行はホスト全体の 1 回） |
 
 - 要件を満たさなければ `403 forbidden_role`。ロールのないアプリに関わるものは `404`（共通の表）。判定は再ログイン（`reauth_required`）より先に行う。
-- `PATCH /api/apps/{slug}` で `environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。本番アプリの `auto_deploy` を有効にすること（と、有効なまま追うブランチを変えること）もオーナーだけ（`details.fields` に `auto_deploy`）。今と同じ値を送るのはかまわない。
+- `PATCH /api/apps/{slug}` で `environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。本番アプリの `auto_deploy` を有効にすること（と、有効なまま追うブランチや `auto_deploy_workflow` を変えること）もオーナーだけ（`details.fields` に `auto_deploy`）。今と同じ値を送るのはかまわない。
 - API トークンも、トークンのユーザーとして同じ要件で判定する。
 
 ## メンバー（2026-11-21）
@@ -91,7 +91,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）か `auto_deploy_workflow` を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## API トークン（2026-11-21）
 
@@ -271,6 +271,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "promote_from": "",
   "auto_deploy": false,
   "auto_deploy_branch": "",
+  "auto_deploy_workflow": "",
   "url": "https://blog.dev.example.com",
   "primary_url": "https://www.example.org",
   "pending_domains": 0,
@@ -293,6 +294,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - アクセスの保護（ARCHITECTURE 8.3、2026-11-21）: `access_protection` が `true` なら、アプリのホスト名（自動割当と有効な独自ドメイン）を開けるのは管理 UI にログインした本人だけになる。`POST` で省略すると `environment` が `staging` なら `true`、`production` なら `false`。`protection_exempt_paths` は保護を外すパスの前方一致の一覧（既定は空）。各要素は `/` で始まり、英数字と `. _ ~ - / @ : +` だけからなる 200 文字以内で、20 件まで。`/` そのもの、`/.koroku` で始まるもの、`.` や `..` の区切り、`//` は `422 validation_failed`（`details.protection_exempt_paths`）。重複は 1 つにまとめる。どちらも変えると Caddy の設定を投入し直す。
 - `promote_from` は昇格元の staging アプリの slug（ARCHITECTURE 9.7）。空なら組み合わせなし。`PATCH` で設定できるのは、自分が `production`（同じリクエストで変える値を含む）で、相手が同じリポジトリの `staging` アプリのときだけ。違えば 422 `validation_failed`（`details.promote_from`）。空文字で外す。
 - 自動デプロイ（ARCHITECTURE 5.2、2026-11-21）: `auto_deploy` が `true` なら、GitHub に `auto_deploy_branch`（空なら `default_branch`）が push されたとき、そのコミットをデプロイする。既定は `false` と空。`true` にできるのは GitHub App で取得するアプリ（`repo_full_name` があり `repo_url` が空）だけで、ほかは `422 validation_failed`（`details.auto_deploy`）。`repo_url` に切り替えるときは先に `false` にする。`auto_deploy_branch` の書式は `default_branch` と同じ（違えば `details.auto_deploy_branch`）。
+- 先に待つワークフロー（ARCHITECTURE 5.2）: `auto_deploy_workflow` はワークフローのファイルのパス（例 `.github/workflows/image.yml`）。空（既定）なら push の直後にデプロイする。設定すると push ではデプロイせず、そのワークフローの実行がこのブランチの最新のコミットで成功したとき（Webhook の `workflow_run`）にデプロイする。`.github/workflows/` の直下の `.yml` か `.yaml`（255 文字まで）でなければ `422 validation_failed`（`details.auto_deploy_workflow`）。前後の空白は除く。
 - バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。
 
 | メソッドとパス | 内容 |
@@ -392,6 +394,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `tasks.changed` | `{"added", "changed", "removed": [タスク名], "reordered"}` |
 | `member.role_set` | `{"member": {"id", "login"}, "from", "to"}`（`from` はロールがなければ `""`） |
 | `member.role_removed` | `{"member": {"id", "login"}, "from", "to": ""}` |
+| `auto_deploy.skipped` | `{"workflow", "conclusion", "commit_sha", "branch", "run_url"}`。待つワークフロー（`auto_deploy_workflow`）の実行が成功しなかったので自動デプロイしなかった。`actor` は `null`（koroku 自身）。`run_url` は GitHub の実行の画面（https でなければ空） |
 
 UI は知らない `action` をそのまま表示する。
 
@@ -505,7 +508,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 
 `status` は `queued` / `running` / `succeeded` / `failed` / `canceled`。`source_deployment_id` は、ロールバック（ARCHITECTURE 7.1）の記録なら戻す先のデプロイの ID（`ref` は `rollback`）、通常のデプロイなら `null`。`rollback_available` は、そのデプロイのリリースへ再ビルドなしで戻せるか（成功していて、ファイルが残っている。ロールバックの記録なら戻す先について）。
 
-`trigger` は何がデプロイを始めたか（ARCHITECTURE 5.2）。`manual`（管理 UI か API。ロールバックと昇格を含む）か `push`（GitHub への push による自動デプロイ）。`pusher` は `push` のとき push した GitHub の login、それ以外は空文字。`push` のデプロイの `ref` は push されたブランチ名。
+`trigger` は何がデプロイを始めたか（ARCHITECTURE 5.2）。`manual`（管理 UI か API。ロールバックと昇格を含む）か `push`（GitHub への push による自動デプロイ。待つワークフローの成功で始まったものも `push`）。`pusher` は `push` のとき push した GitHub の login（ワークフローを待ったものは実行の `actor`）、それ以外は空文字。`push` のデプロイの `ref` は push されたブランチ名。
 
 `promoted_from` は昇格（ARCHITECTURE 9.7）で積んだデプロイのとき `{"deployment_id": 12, "app_slug": "blog-staging"}`、それ以外（ロールバックの記録を含む）と、昇格元のアプリを削除したあとは `null`。
 
@@ -646,15 +649,16 @@ ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose ru
 
 ## GitHub の Webhook（2026-11-21）
 
-`POST /webhooks/github` は GitHub App の Webhook の受け口で、push での自動デプロイ（ARCHITECTURE 5.2）に使う。管理 UI からは呼ばない。セッション、`Origin`、`Sec-Fetch-Site` の規則は適用せず、`[github] webhook_secret` による署名で認証する。
+`POST /webhooks/github` は GitHub App の Webhook の受け口で、push での自動デプロイと、ワークフローの成功を待つ自動デプロイ（ARCHITECTURE 5.2）に使う。管理 UI からは呼ばない。セッション、`Origin`、`Sec-Fetch-Site` の規則は適用せず、`[github] webhook_secret` による署名で認証する。
 
 - ヘッダー: `X-Hub-Signature-256`（`sha256=<本文の HMAC-SHA256 の 16 進>`）、`X-GitHub-Event`、`X-GitHub-Delivery`。`Content-Type: application/json`（App の Webhook の既定）。
-- `ping` は 200 で `{"result": "pong"}`。`push` 以外のイベント、タグ、ブランチの削除、どのアプリも追っていないブランチは 200 で `{"result": "ignored", "reason": "..."}`。
-- `push` に応じたアプリがあれば `{"result": "deployed", "apps": [{"app": "blog-staging", "status": "queued", "deployment_id": 43}]}`。`status` は `queued`（デプロイを積んだ）、`duplicate`（同じ配送か同じ本文をすでに受けた）、`stopped`（停止中なので積まない）、`failed`（`error` は `busy`、`disk_full`、`internal`）。`failed` が 1 つでもあれば応答は 503 で、GitHub から再配送すると失敗したアプリだけが積まれる。
+- `ping` は 200 で `{"result": "pong"}`。`push` と `workflow_run` 以外のイベント、タグ、ブランチの削除、どのアプリも追っていないブランチは 200 で `{"result": "ignored", "reason": "..."}`。
+- `push` に応じたアプリがあれば `{"result": "deployed", "apps": [{"app": "blog-staging", "status": "queued", "deployment_id": 43}]}`。`status` は `queued`（デプロイを積んだ）、`duplicate`（同じ配送か同じ本文をすでに受けた）、`stopped`（停止中なので積まない）、`waiting_workflow`（`auto_deploy_workflow` を設定したアプリ。push では積まない）、`failed`（`error` は `busy`、`disk_full`、`internal`）。`failed` が 1 つでもあれば応答は 503 で、GitHub から再配送すると失敗したアプリだけが積まれる。
+- `workflow_run` は、`action` が `completed` でないもの、fork のコミットの実行、どのアプリも待っていないワークフロー・ブランチ・リポジトリは `ignored`。応じたアプリがあれば `push` と同じ形で、`status` はほかに `skipped`（実行が成功しなかった。`conclusion` に結論。操作の記録に `auto_deploy.skipped` を残す）と `stale`（ブランチの先頭がもう別のコミット）。ブランチの先頭を GitHub から読めなければ `failed`（`error` は `branch_unresolved`）で 503。
 
 | ステータス | `code` | 意味 |
 | --- | --- | --- |
-| 400 | `bad_headers`、`bad_payload`、`unreadable_body` | イベント名か配送 ID がない、本文が push の形でない、`after` が SHA でない |
+| 400 | `bad_headers`、`bad_payload`、`unreadable_body` | イベント名か配送 ID がない、本文が push か workflow_run の形でない、`after` か `head_sha` が SHA でない |
 | 401 | `bad_signature` | 署名がない、形が違う、一致しない |
 | 403 | `webhook_disabled` | `webhook_secret` が未設定。すべての配送を断る |
 | 413 | `body_too_large` | 本文が 5 MiB を超えた |

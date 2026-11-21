@@ -106,8 +106,9 @@
 | Repository permissions → Contents | **Read-only** |
 | Repository permissions → Metadata | Read-only（自動で付く） |
 | Repository permissions → Deployments | **Read and write**（デプロイの状態をリポジトリの Deployments に出す。なくても動くが、反映されない） |
+| Repository permissions → Actions | ワークフローを待つ自動デプロイ（4.6）を使うなら **Read-only**。使わないなら No access |
 | ほかの権限 | すべて No access |
-| Subscribe to events | 自動デプロイを使うなら **Push** だけ。使わないなら何も選ばない |
+| Subscribe to events | 自動デプロイを使うなら **Push**。ワークフローを待つなら **Workflow run** も。使わないなら何も選ばない |
 | Where can this GitHub App be installed? | **Only on this account**（別の org のリポジトリも使うなら **Any account**。4.5） |
 
 あとから Deployments の権限を足した場合は、App の設定画面の **Permissions & events** で変えて保存したあと、インストール先（**Install App** → 自分のアカウントの歯車）に出る権限の変更の依頼を **Accept** する。受け入れるまで、GitHub は koroku からの記録を 403 で断る（koroku は警告を出してデプロイを続ける）。
@@ -186,6 +187,15 @@ rm github-app.pem
 6. アプリの設定タブで自動デプロイを有効にし、追うブランチに push する。デプロイの履歴に「push で自動デプロイ」の行が出る。
 
 `webhook_secret` がない間、`koroku` はすべての配送を 403 で断る。管理画面の設定タブと `koroku check` の `github.webhook` が、足りない設定を知らせる。
+
+**ワークフローを待つ**: Compose が `image:` だけで、イメージを GitHub Actions がコミットごとにビルドするアプリは、push の直後にデプロイするとイメージがまだなく pull に失敗する。アプリの設定タブの「先に待つワークフロー」にイメージを作るワークフローのファイル（`.github/workflows/image.yml` など）を入れると、push ではなく、そのワークフローがブランチの最新のコミットで成功したときにデプロイする（ARCHITECTURE 5.2）。使うときは App に次を足す。
+
+1. App の設定画面の **Permissions & events** → **Repository permissions** で **Actions** を **Read-only** にする。
+2. 同じ画面の **Subscribe to events** で **Workflow run** を選んで保存する（Actions の権限がないと選べない）。
+3. 権限を足したので、インストール先（App の設定画面の **Install App**、またはアカウントの Settings → Applications）で新しい権限を承認する。承認するまで workflow_run の配送は届かない。
+4. `sudo koroku check` の `github.workflow` が `[ ok ]` になることを確かめる。
+
+CI のあとで別のワークフローがイメージを作る（`on: workflow_run` でつなぐ）場合は、最後にイメージを置くほうのワークフローを入れる。成功しなかった実行（失敗・取り消しなど）ではデプロイせず、アプリの概要タブの「操作の記録」に koroku の記録として残る。
 
 ## 5. オブジェクトストレージ
 
@@ -288,10 +298,11 @@ sudo koroku check
 | `caddy` | Caddy の admin API が応答する |
 | `https` | 管理 UI に HTTPS で接続でき、証明書が信頼できる（staging の間は警告） |
 | `master_key` | `master.key` があり、0600 |
-| `github.app` | App ID と秘密鍵の組が正しく、Client ID が一致し、権限が Contents と Metadata の Read-only と Deployments の Read and write だけ（Deployments がなければ警告） |
+| `github.app` | App ID と秘密鍵の組が正しく、Client ID が一致し、権限が Contents と Metadata の Read-only と Deployments の Read and write（と、使うなら Actions の Read-only）だけ（Deployments がなければ警告） |
 | `github.install` | App が 1 つ以上のアカウントにインストールされている |
 | `github.user` | 許可するユーザー ID のアカウントが実在する |
 | `github.webhook` | 自動デプロイを使うアプリがあるとき、`webhook_secret` があり、App が Push を購読し、Webhook URL が `https://<console_host>/webhooks/github`（使うアプリがなく secret もなければ `[skip]`） |
+| `github.workflow` | ワークフローを待つアプリがあるとき、App に Actions の Read-only があり、Workflow run を購読している（待つアプリがなければ `[skip]`） |
 | `storage` | バケットに書き、読み、一覧し、消せる（`koroku-check/` に小さなファイルを書いてすぐ消す） |
 | `backup` | restic のリポジトリを読める（パスワードが合う）。基盤のスナップショットがあり、新しい |
 

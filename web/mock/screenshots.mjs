@@ -1134,6 +1134,66 @@ SHOTS.push(
     ...PHONE,
     fullPage: false,
   },
+  // Waiting for an image workflow before deploying a push (ARCHITECTURE
+  // 5.2): the field and its App setup step, a refused path, the
+  // production confirmation and the failed run in the activity.
+  {
+    name: 'autodeploy-workflow',
+    path: '/apps/blog-staging/settings?scenario=workflow-gated',
+    wait: '[data-test-workflow-setup]',
+    script: scrollTo(AUTO_DEPLOY),
+  },
+  {
+    name: 'autodeploy-workflow-phone',
+    path: '/apps/blog-staging/settings?scenario=workflow-gated',
+    wait: '[data-test-workflow-setup]',
+    script: scrollTo(AUTO_DEPLOY),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'autodeploy-workflow-invalid',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: '[data-test-field="auto_deploy_workflow"]',
+    script: `(() => {
+      const field = document.querySelector('[data-test-field="auto_deploy_workflow"]');
+      field.value = 'image.yml';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 300);
+      setTimeout(() => document.querySelector('${AUTO_DEPLOY}').scrollIntoView(), 800);
+    })()`,
+    then: '[data-test-field-group="auto_deploy_workflow"] [data-test-field-error]',
+    themes: ['light'],
+  },
+  {
+    name: 'autodeploy-workflow-production-confirm',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: AUTO_DEPLOY,
+    script: `(() => {
+      document.querySelector('[data-test-field="auto_deploy"]').click();
+      setTimeout(() => {
+        const field = document.querySelector('[data-test-field="auto_deploy_workflow"]');
+        field.value = '.github/workflows/image.yml';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      }, 300);
+      setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 600);
+    })()`,
+    then: '[data-test-auto-deploy-confirm]',
+  },
+  {
+    name: 'autodeploy-workflow-activity',
+    path: '/apps/blog-staging?scenario=workflow-gated',
+    wait: '[data-test-activity="auto_deploy.skipped"]',
+    script:
+      "document.querySelector('[data-test-activity-log]').scrollIntoView()",
+  },
+  {
+    name: 'autodeploy-workflow-activity-phone',
+    path: '/apps/blog-staging?scenario=workflow-gated',
+    wait: '[data-test-activity="auto_deploy.skipped"]',
+    ...PHONE,
+    themes: ['dark'],
+  },
   {
     name: 'autodeploy-history',
     path: '/apps/blog-staging/deploy?scenario=healthy',

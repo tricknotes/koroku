@@ -140,6 +140,9 @@ type Origin struct {
 	Trigger string
 	// Pusher is the GitHub login behind a push.
 	Pusher string
+	// Workflow is the workflow whose successful run released a push
+	// deployment (ARCHITECTURE 5.2). It is only written to the deploy log.
+	Workflow string
 }
 
 // EnqueueTriggered is EnqueueDeployment (or EnqueuePromotion, with

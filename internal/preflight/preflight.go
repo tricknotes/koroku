@@ -111,6 +111,10 @@ type Deps struct {
 	// AutoDeployErr says why they could not be read.
 	AutoDeployApps []string
 	AutoDeployErr  error
+	// WorkflowApps are the apps among them that deploy only after a
+	// workflow succeeded; WorkflowAppsErr says why they could not be read.
+	WorkflowApps    []string
+	WorkflowAppsErr error
 
 	// Objects is the bucket of [storage], nil when it is not configured.
 	Objects objstore.Store
@@ -350,8 +354,9 @@ var wantedPermissions = map[string]string{"contents": "read", "metadata": "read"
 
 // optionalPermissions are permissions the App may have; without them a
 // feature is off. deployments: write lets koroku record its deployments on
-// GitHub (ARCHITECTURE 5.1).
-var optionalPermissions = map[string]string{"deployments": "write"}
+// GitHub (ARCHITECTURE 5.1); actions: read lets the App subscribe to
+// workflow runs, which apps that wait for a workflow deploy on (5.2).
+var optionalPermissions = map[string]string{"deployments": "write", "actions": "read"}
 
 func checkGitHub(ctx context.Context, d Deps) []Result {
 	cfg := d.Config.GitHub
@@ -388,7 +393,35 @@ func checkGitHub(ctx context.Context, d Deps) []Result {
 	}
 	out = append(out, userResult(ctx, d.Users, cfg.AllowedUserID))
 	out = append(out, webhookResult(ctx, d, app, err == nil))
+	out = append(out, workflowResult(d, app, err == nil))
 	return out
+}
+
+// workflowResult checks what apps that deploy after a workflow succeeded
+// need (ARCHITECTURE 5.2): the Actions read permission, without which the
+// App cannot subscribe to workflow runs, and that subscription.
+func workflowResult(d Deps, app github.App, appKnown bool) Result {
+	const name = "github.workflow"
+	const hint = "docs/SETUP.md 4.6"
+	if d.WorkflowAppsErr != nil {
+		return warn(name, "", "could not read which apps wait for a workflow: %v", d.WorkflowAppsErr)
+	}
+	apps := d.WorkflowApps
+	if len(apps) == 0 {
+		return skip(name, "no app waits for a workflow before deploying")
+	}
+	if !appKnown {
+		return skip(name, "the App could not be read to check its permissions and events")
+	}
+	if level := app.Permissions["actions"]; level != "read" && level != "write" {
+		return warn(name, "set Repository permissions > Actions to Read-only, then accept the new permission on the installation ("+hint+")",
+			"App %q lacks actions: read: %s will not deploy", app.Slug, strings.Join(apps, ", "))
+	}
+	if !slices.Contains(app.Events, "workflow_run") {
+		return warn(name, "subscribe the App to the Workflow run event under Permissions & events > Subscribe to events ("+hint+")",
+			"App %q does not subscribe to workflow_run events: %s will not deploy", app.Slug, strings.Join(apps, ", "))
+	}
+	return ok(name, "the App delivers workflow runs; %s deploy after their workflow succeeds", strings.Join(apps, ", "))
 }
 
 // webhookResult checks what automatic deployment on push needs
@@ -464,7 +497,7 @@ func permissionResult(app github.App, consoleURL string) Result {
 			"App %q lacks %s", app.Slug, strings.Join(missing, ", "))
 	}
 	if len(extra) > 0 {
-		return warn(name, "koroku needs Contents and Metadata read-only and Deployments read and write only; remove the rest (docs/SETUP.md 4)",
+		return warn(name, "koroku needs Contents and Metadata read-only, Deployments read and write, and (to wait for workflows) Actions read-only only; remove the rest (docs/SETUP.md 4)",
 			"App %q also has %s", app.Slug, strings.Join(extra, ", "))
 	}
 	if app.Permissions["deployments"] != optionalPermissions["deployments"] {

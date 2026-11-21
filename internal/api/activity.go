@@ -40,6 +40,9 @@ const (
 	actTasksChanged     = "tasks.changed"     // {"added", "changed", "removed": [names], "reordered"}
 	actMemberRoleSet    = "member.role_set"   // {"member": {"id", "login"}, "from", "to"}
 	actMemberRoleRemove = "member.role_removed"
+	// actAutoDeploySkipped is recorded by koroku itself when the workflow
+	// an app waits for did not succeed (ARCHITECTURE 5.2).
+	actAutoDeploySkipped = "auto_deploy.skipped" // {"workflow", "conclusion", "commit_sha", "branch", "run_url"}
 )
 
 // Bounds of GET /api/apps/{slug}/activity.
@@ -146,6 +149,7 @@ var settingFields = []settingField{
 	{name: "protection_exempt_paths", get: func(a store.App) any { return nonNilSlice(a.ProtectionExemptPaths) }},
 	{name: "auto_deploy", get: func(a store.App) any { return a.AutoDeploy }},
 	{name: "auto_deploy_branch", get: func(a store.App) any { return a.AutoDeployBranch }},
+	{name: "auto_deploy_workflow", get: func(a store.App) any { return a.AutoDeployWorkflow }},
 }
 
 func nonNilMap(m map[string]string) map[string]string {

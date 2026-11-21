@@ -100,6 +100,8 @@ export default class SettingsForm {
   /** Deploy on push (ARCHITECTURE 5.2); the branch '' follows the default. */
   @tracked autoDeploy: boolean;
   @tracked autoDeployBranch: string;
+  /** The workflow to wait for before deploying a push; '' for none. */
+  @tracked autoDeployWorkflow: string;
 
   constructor(app: App) {
     this.defaultBranch = app.default_branch;
@@ -122,6 +124,7 @@ export default class SettingsForm {
     this.promoteFrom = app.promote_from ?? '';
     this.autoDeploy = app.auto_deploy ?? false;
     this.autoDeployBranch = app.auto_deploy_branch ?? '';
+    this.autoDeployWorkflow = app.auto_deploy_workflow ?? '';
   }
 
   /** The branch whose pushes would deploy, as the form stands. */
@@ -236,6 +239,10 @@ export default class SettingsForm {
     const autoDeployBranch = this.autoDeployBranch.trim();
     if (autoDeployBranch !== (app.auto_deploy_branch ?? '')) {
       patch.auto_deploy_branch = autoDeployBranch;
+    }
+    const autoDeployWorkflow = this.autoDeployWorkflow.trim();
+    if (autoDeployWorkflow !== (app.auto_deploy_workflow ?? '')) {
+      patch.auto_deploy_workflow = autoDeployWorkflow;
     }
     return patch;
   }

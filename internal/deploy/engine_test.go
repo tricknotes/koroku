@@ -780,6 +780,24 @@ func TestPushDeploymentSupersedesQueued(t *testing.T) {
 	}
 }
 
+// TestWorkflowRunDeploymentIsAPush: a push released by a workflow run
+// (ARCHITECTURE 5.2) is a push deployment that names the workflow in its
+// log.
+func TestWorkflowRunDeploymentIsAPush(t *testing.T) {
+	h := newHarness(t, nil)
+	app := h.createApp("blog")
+	d, err := h.engine.EnqueueWorkflowRun(context.Background(), app, "main", shaB, "Fix", "octo", ".github/workflows/image.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Trigger != store.TriggerPush || d.Pusher != "octo" {
+		t.Errorf("deployment = %+v", d)
+	}
+	if !strings.Contains(h.log("blog", d.ID), "pushed to main by octo, after workflow .github/workflows/image.yml succeeded") {
+		t.Errorf("log:\n%s", h.log("blog", d.ID))
+	}
+}
+
 func TestCancelQueuedDeployment(t *testing.T) {
 	h := newHarness(t, nil)
 	h.createApp("blog")

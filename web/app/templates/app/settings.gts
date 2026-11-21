@@ -77,6 +77,7 @@ const KNOWN_FIELDS = new Set([
   'promote_from',
   'auto_deploy',
   'auto_deploy_branch',
+  'auto_deploy_workflow',
 ]);
 
 type ControlAction = 'start' | 'stop' | 'restart';
@@ -450,7 +451,8 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   /**
    * Whether a save makes a production app deploy pushes, or pushes of
-   * another branch, without anyone pressing a button (ARCHITECTURE 5.2).
+   * another branch, or after another workflow (or none), without anyone
+   * pressing a button (ARCHITECTURE 5.2).
    */
   startsProductionAutoDeploy(patch: AppPatch): boolean {
     if (!this.isProductionForm || !this.form.autoDeploy) return false;
@@ -458,6 +460,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
       patch.auto_deploy === true ||
       patch.environment === 'production' ||
       patch.auto_deploy_branch !== undefined ||
+      patch.auto_deploy_workflow !== undefined ||
       patch.default_branch !== undefined
     );
   }
@@ -493,6 +496,11 @@ export default class AppSettingsTemplate extends Component<Signature> {
     this.pendingAutoDeploy = null;
     this.leaveAfterSave = null;
   };
+
+  /** The form names a workflow to wait for before deploying a push. */
+  get waitsForWorkflow(): boolean {
+    return this.form.autoDeployWorkflow.trim() !== '';
+  }
 
   get canAutoDeploy(): boolean {
     return usesGitHubApp(this.app);
@@ -721,6 +729,28 @@ export default class AppSettingsTemplate extends Component<Signature> {
                 />
               </FormField>
 
+              <FormField
+                @label="先に待つワークフロー（任意）"
+                @hint="GitHub Actions でイメージを作るなら、そのワークフローのファイルを入れます。push ではなく、そのワークフローがこのブランチの最新のコミットで成功したときにデプロイします。空なら push の直後にデプロイします。"
+                @error={{this.errors.auto_deploy_workflow}}
+                data-test-field-group="auto_deploy_workflow"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="text"
+                  class="mono"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder=".github/workflows/image.yml"
+                  value={{this.form.autoDeployWorkflow}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="auto_deploy_workflow"
+                  {{on "input" (setValue this.form "autoDeployWorkflow")}}
+                />
+              </FormField>
+
               {{#if this.webhookSecretMissing}}
                 <Banner
                   @tone="warning"
@@ -737,8 +767,9 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
               <div class="auto-deploy-setup" data-test-webhook-setup>
                 <p class="field-hint">
-                  GitHub App の設定で、次の 3 つが必要です（App
-                  ごとに一度だけ）。
+                  GitHub App の設定で、次の
+                  {{if this.waitsForWorkflow "4" "3"}}
+                  つが必要です（App ごとに一度だけ）。
                 </p>
                 <ol class="auto-deploy-steps">
                   <li>
@@ -768,6 +799,15 @@ export default class AppSettingsTemplate extends Component<Signature> {
                     <strong>Push</strong>
                     を選ぶ。
                   </li>
+                  {{#if this.waitsForWorkflow}}
+                    <li data-test-workflow-setup>
+                      Repository permissions の
+                      <strong>Actions</strong>
+                      を Read-only にし、Subscribe to events で
+                      <strong>Workflow run</strong>
+                      も選ぶ（権限を変えたら、インストール先で承認する）。
+                    </li>
+                  {{/if}}
                 </ol>
               </div>
             {{/if}}
@@ -1576,7 +1616,9 @@ export default class AppSettingsTemplate extends Component<Signature> {
         <p data-test-auto-deploy-confirm>
           保存すると、ブランチ
           <strong class="mono">{{this.form.effectiveAutoDeployBranch}}</strong>
-          に push されたコミットが、確認なしで本番アプリ
+          に push されたコミットが、{{#if this.waitsForWorkflow}}ワークフロー
+            <strong class="mono">{{this.form.autoDeployWorkflow}}</strong>
+            の成功のあと{{/if}}確認なしで本番アプリ
           <strong>{{this.app.slug}}</strong>
           にデプロイされます。そのブランチに push
           できる人は、本番を更新できるようになります。
