@@ -46,6 +46,26 @@ const CREATE_TOKEN = `(() => {
 const SHOTS = [
   { name: 'list-healthy', path: '/?scenario=healthy', wait: LIST },
   { name: 'list-warnings', path: '/?scenario=warnings', wait: LIST },
+  // Opening an app that takes a while: the loading substate of the app
+  // detail (templates/app-loading), with the bar along the top edge.
+  {
+    name: 'app-loading',
+    path: '/?scenario=app-loading',
+    wait: LIST,
+    click: '[data-test-app-link]',
+    then: '[data-test-app-loading]',
+    settle: 1500,
+  },
+  {
+    name: 'app-loading-phone',
+    path: '/?scenario=app-loading',
+    wait: LIST,
+    click: '[data-test-app-link]',
+    then: '[data-test-app-loading]',
+    settle: 1500,
+    ...PHONE,
+    fullPage: false,
+  },
   {
     name: 'list-healthy-phone',
     path: '/?scenario=healthy',

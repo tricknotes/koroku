@@ -82,7 +82,8 @@ restarts or `/__mock/reset` is opened. `MOCK_PORT` changes the port and
 
 For the tabs of the app detail there are also `tab-error` (apps load, but
 everything a tab asks for fails with 500) and `tab-loading` (the same, taking
-a minute). The app `notes` of `fresh` has no variables and no custom domains,
+a minute). `app-loading` loads the app list but takes a minute to open an
+app, which shows the loading screen of the app detail. The app `notes` of `fresh` has no variables and no custom domains,
 for the empty states. In `warnings`, the app `shop` has services in trouble (a
 failing health check close to its memory limit, a crashed worker) and `blog`
 a domain that is still waiting for its DNS record.

@@ -25,6 +25,7 @@ export const SCENARIOS = {
   error: 'every API call fails with 500',
   'tab-error': 'apps load, everything a tab asks for fails with 500',
   'tab-loading': 'apps load, everything a tab asks for takes a minute',
+  'app-loading': 'the app list loads, opening an app takes a minute',
   loading: 'API calls take a minute to answer',
   login: 'not logged in',
   'host-trouble':
