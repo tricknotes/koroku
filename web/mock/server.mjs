@@ -1497,6 +1497,10 @@ async function handleApi(request, response, url, scenario) {
     await new Promise((done) => setTimeout(done, SLOW));
   }
   if (scenario === 'tab-error' && forTab) throw new HttpError(500, 'internal');
+  // The list loads; opening an app waits (the bar of a screen change).
+  if (scenario === 'app-loading' && /^\/api\/apps\/[^/]+$/.test(url.pathname)) {
+    await new Promise((done) => setTimeout(done, SLOW));
+  }
 
   for (const { method, regexp, names, handler } of routes) {
     const match = request.method === method && regexp.exec(url.pathname);

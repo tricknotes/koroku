@@ -46,6 +46,26 @@ const CREATE_TOKEN = `(() => {
 const SHOTS = [
   { name: 'list-healthy', path: '/?scenario=healthy', wait: LIST },
   { name: 'list-warnings', path: '/?scenario=warnings', wait: LIST },
+  // Opening an app that takes a while: the bar along the top edge while the
+  // list stays (components/route-progress).
+  {
+    name: 'route-progress',
+    path: '/?scenario=app-loading',
+    wait: LIST,
+    click: '[data-test-app-link]',
+    then: '[data-test-route-progress="loading"]',
+    settle: 1500,
+  },
+  {
+    name: 'route-progress-phone',
+    path: '/?scenario=app-loading',
+    wait: LIST,
+    click: '[data-test-app-link]',
+    then: '[data-test-route-progress="loading"]',
+    settle: 1500,
+    ...PHONE,
+    fullPage: false,
+  },
   {
     name: 'list-healthy-phone',
     path: '/?scenario=healthy',
