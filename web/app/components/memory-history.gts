@@ -9,12 +9,15 @@ import AsyncView from 'koroku-console/components/async-view';
 import Badge from 'koroku-console/components/badge';
 import { LinkTo } from '@ember/routing';
 import Button, { buttonClass } from 'koroku-console/components/button';
+import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import EmptyState from 'koroku-console/components/empty-state';
+import ErrorMessage from 'koroku-console/components/error-message';
 import Icon from 'koroku-console/components/icon';
 import MemoryChart from 'koroku-console/components/memory-chart';
 import type ApiService from 'koroku-console/services/api';
 import { formatBytes } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import { can } from 'koroku-console/utils/roles';
 import {
   MEMORY_RANGES,
   READY_HOURS,
@@ -22,6 +25,7 @@ import {
   shareOfLimit,
 } from 'koroku-console/utils/memory-history';
 import type {
+  App,
   MemoryHistory as History,
   MemoryRange,
   MemoryServiceHistory,
@@ -60,18 +64,17 @@ function collectingText(service: MemoryServiceHistory): string {
 interface Signature {
   Element: HTMLElement;
   Args: {
-    slug: string;
-    /** The per-service limits in the form right now, service → setting. */
-    limits: Record<string, string>;
-    /** Puts a suggested limit into the form (saving is the form's job). */
-    onApply: (service: string, limit: string) => void;
+    app: App;
+    /** The app as the server has it after a limit was saved. */
+    onSaved: (app: App) => void;
   };
 }
 
 /**
  * How much memory each service used over time, against its limit, with a
- * suggested limit (ARCHITECTURE 9.5). It sits in the memory section of the
- * settings, whose form takes the suggestion.
+ * suggested limit (ARCHITECTURE 9.5). It sits in the resources tab; a
+ * suggestion is saved as the service's limit from here, after a
+ * confirmation, and applies from the next deployment.
  */
 export default class MemoryHistory extends Component<Signature> {
   @service declare api: ApiService;
@@ -79,9 +82,18 @@ export default class MemoryHistory extends Component<Signature> {
   @tracked range: MemoryRange = '24h';
   name = `memory-range-${guidFor(this)}`;
 
+  /** The service whose suggestion is about to be saved. */
+  @tracked confirming: MemoryServiceHistory | null = null;
+  @tracked saving = false;
+  @tracked error: unknown = null;
+
   history = new Loadable<History>(() =>
-    this.api.getMemoryHistory(this.args.slug, this.range),
+    this.api.getMemoryHistory(this.args.app.slug, this.range),
   );
+
+  get canSave(): boolean {
+    return can(this.args.app, 'manage');
+  }
 
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
@@ -95,14 +107,44 @@ export default class MemoryHistory extends Component<Signature> {
     void this.history.load({ quiet: true });
   };
 
-  isApplied = (service: MemoryServiceHistory): boolean => {
+  /** Saved as the service's limit, waiting for the next deployment. */
+  isSaved = (service: MemoryServiceHistory): boolean => {
     const { limit } = service.suggestion;
-    return limit !== null && this.args.limits[service.name] === limit;
+    return (
+      limit !== null &&
+      this.args.app.service_memory_limits?.[service.name] === limit
+    );
   };
 
-  apply = (service: MemoryServiceHistory) => {
-    if (service.suggestion.limit) {
-      this.args.onApply(service.name, service.suggestion.limit);
+  confirm = (service: MemoryServiceHistory) => {
+    this.error = null;
+    this.confirming = service;
+  };
+
+  cancel = () => {
+    if (!this.saving) this.confirming = null;
+  };
+
+  /** Adds or replaces this service's limit; the others stay as they are. */
+  save = async () => {
+    const service = this.confirming;
+    const limit = service?.suggestion.limit;
+    if (!service || !limit) return;
+    this.saving = true;
+    this.error = null;
+    try {
+      const app = await this.api.updateApp(this.args.app.slug, {
+        service_memory_limits: {
+          ...(this.args.app.service_memory_limits ?? {}),
+          [service.name]: limit,
+        },
+      });
+      this.args.onSaved(app);
+      this.confirming = null;
+    } catch (error) {
+      this.error = error;
+    } finally {
+      this.saving = false;
     }
   };
 
@@ -114,7 +156,7 @@ export default class MemoryHistory extends Component<Signature> {
       ...attributes
     >
       <div class="memory-history-header">
-        <span class="field-label" id="{{this.name}}-title">使用量の履歴</span>
+        <h2 class="pane-title" id="{{this.name}}-title">メモリの履歴</h2>
         <fieldset class="segmented segmented-text" data-test-memory-range>
           <legend class="visually-hidden">期間</legend>
           {{#each MEMORY_RANGES as |option|}}
@@ -226,21 +268,21 @@ export default class MemoryHistory extends Component<Signature> {
                         <Icon @name="check" />
                         いまの上限で足りています
                       </span>
-                    {{else if (this.isApplied svc)}}
+                    {{else if (this.isSaved svc)}}
                       <span
                         class="memory-suggestion-state"
-                        data-test-memory-applied
+                        data-test-memory-saved
                       >
                         <Icon @name="check" />
-                        設定欄に入れました
+                        上限に保存しました。次のデプロイから反映されます
                       </span>
-                    {{else}}
+                    {{else if this.canSave}}
                       <Button
                         @size="small"
-                        aria-label="{{svc.name}} の上限に {{svc.suggestion.limit}} を入れる"
+                        aria-label="{{svc.name}} の上限を {{svc.suggestion.limit}} にする"
                         data-test-memory-apply={{svc.name}}
-                        {{on "click" (fn this.apply svc)}}
-                      >設定に入れる</Button>
+                        {{on "click" (fn this.confirm svc)}}
+                      >上限を {{svc.suggestion.limit}} にする</Button>
                     {{/if}}
                   {{else}}
                     <p
@@ -262,7 +304,7 @@ export default class MemoryHistory extends Component<Signature> {
           <p class="field-hint">
             目安は、いまの上限になってからの直近 14 日のピーク × 1.5 を 64m
             単位に切り上げた値です（128m
-            以上）。「設定に入れる」で上のサービス別の欄に入り、「保存」で保存されます。上限の変更は次のデプロイから反映されます。
+            以上）。上限の変更は次のデプロイから反映されます。上限は設定タブの「メモリ上限」でも変えられます。
           </p>
         {{else}}
           <EmptyState
@@ -273,13 +315,28 @@ export default class MemoryHistory extends Component<Signature> {
             <:action>
               <LinkTo
                 @route="app.deploy"
-                @model={{@slug}}
+                @model={{@app.slug}}
                 class={{buttonClass "default" "small"}}
               >デプロイを開く</LinkTo>
             </:action>
           </EmptyState>
         {{/if}}
       </AsyncView>
+
+      {{#if this.confirming}}
+        <ConfirmDialog
+          @title="{{this.confirming.name}} の上限を {{this.confirming.suggestion.limit}} にしますか？"
+          @confirmLabel="上限を変更"
+          @busy={{this.saving}}
+          @onConfirm={{this.save}}
+          @onCancel={{this.cancel}}
+        >
+          <p>
+            設定のサービス別のメモリ上限に保存します。動いているコンテナはそのままで、次のデプロイから反映されます。
+          </p>
+          <ErrorMessage @error={{this.error}} />
+        </ConfirmDialog>
+      {{/if}}
     </section>
   </template>
 }

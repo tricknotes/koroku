@@ -227,6 +227,11 @@ export default class AppTemplate extends Component<Signature> {
             data-test-tab="logs"
           >ログ</tabs.Tab>
           <tabs.Tab
+            @route="app.resources"
+            @model={{@model.slug}}
+            data-test-tab="resources"
+          >リソース</tabs.Tab>
+          <tabs.Tab
             @route="app.tasks"
             @model={{@model.slug}}
             data-test-tab="tasks"

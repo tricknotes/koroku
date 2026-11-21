@@ -92,6 +92,7 @@ module('Acceptance | app detail', function (hooks) {
       '概要',
       'デプロイ',
       'ログ',
+      'リソース',
       'タスク',
       '環境変数',
       'ドメイン',

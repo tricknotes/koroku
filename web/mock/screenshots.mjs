@@ -1463,7 +1463,7 @@ SHOTS.push(
   },
 );
 
-// Memory history in the settings (ARCHITECTURE 9.5). In `healthy`, blog's
+// The resources tab: usage now and the memory history (ARCHITECTURE 9.5). In `healthy`, blog's
 // web is near its limit, db is fine and worker has a lot of headroom.
 const MEMORY = '[data-test-memory-service]';
 const toMemory = (service = '') =>
@@ -1480,61 +1480,83 @@ const focusChart = (service, steps) => `(() => {
 })()`;
 SHOTS.push(
   {
+    name: 'resources',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: MEMORY,
+  },
+  {
+    name: 'resources-troubled',
+    path: '/apps/shop/resources?scenario=warnings',
+    wait: '[data-test-resource-services]',
+    themes: ['light'],
+  },
+  {
+    name: 'resources-phone',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: MEMORY,
+    ...PHONE,
+  },
+  {
     name: 'memory-normal',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?scenario=healthy',
     wait: MEMORY,
     script: toMemory(),
   },
   {
     name: 'memory-near-limit',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?scenario=healthy',
     wait: MEMORY,
     script: focusChart('web', 22),
     then: '[data-test-memory-readout] dl',
   },
   {
     name: 'memory-generous-7d',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?scenario=healthy',
     wait: MEMORY,
     click: '[data-test-memory-range-option="7d"]',
     script: toMemory('worker'),
     settle: 600,
   },
   {
-    name: 'memory-applied',
-    path: '/apps/blog/settings?scenario=healthy',
+    name: 'memory-confirm',
+    path: '/apps/blog/resources?scenario=healthy',
     wait: MEMORY,
-    clicks: [
-      '[data-test-memory-apply="web"]',
-      '[data-test-memory-apply="worker"]',
-    ],
-    script: `document.querySelector('[data-test-field-group="service_memory_limits"]').scrollIntoView()`,
-    then: '[data-test-memory-applied]',
+    click: '[data-test-memory-apply="web"]',
+    then: '[data-test-dialog]',
+    themes: ['light'],
+  },
+  {
+    name: 'memory-saved',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: MEMORY,
+    clicks: ['[data-test-memory-apply="web"]', '[data-test-dialog-confirm]'],
+    script: toMemory('web'),
+    then: '[data-test-memory-saved]',
     themes: ['light'],
   },
   {
     name: 'memory-collecting',
-    path: '/apps/notes/settings?scenario=fresh',
+    path: '/apps/notes/resources?scenario=fresh',
     wait: MEMORY,
     script: toMemory(),
   },
   {
     name: 'memory-empty',
-    path: '/apps/notes/settings?scenario=undeployed',
+    path: '/apps/notes/resources?scenario=undeployed',
     wait: '[data-test-memory-empty]',
     script: toMemory(),
     themes: ['light'],
   },
   {
     name: 'memory-error',
-    path: '/apps/blog/settings?scenario=tab-error',
+    path: '/apps/blog/resources?scenario=tab-error',
     wait: '[data-test-memory-history] [data-test-error]',
     script: toMemory(),
     themes: ['light'],
   },
   {
     name: 'memory-normal-phone',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?scenario=healthy',
     wait: MEMORY,
     script: toMemory(),
     ...PHONE,
@@ -1542,7 +1564,7 @@ SHOTS.push(
   },
   {
     name: 'memory-near-limit-phone',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?scenario=healthy',
     wait: MEMORY,
     script: focusChart('web', 60),
     then: '[data-test-memory-readout] dl',

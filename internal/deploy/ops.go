@@ -297,6 +297,9 @@ type ServiceStatus struct {
 	// is not running, or docker stats failed).
 	MemoryBytes      *int64 `json:"memory_bytes"`
 	MemoryLimitBytes *int64 `json:"memory_limit_bytes"`
+	// CPUPercent is as docker stats reports it (one core is 100%); nil
+	// when unknown, like the memory figures.
+	CPUPercent *float64 `json:"cpu_percent"`
 
 	container string
 }
@@ -321,11 +324,13 @@ func (e *Engine) Services(ctx context.Context, app store.App) ([]ServiceStatus, 
 			running = append(running, svc.container)
 		}
 	}
-	usage := e.memoryUsage(ctx, running)
+	usage := e.containerUsage(ctx, running)
 	for i := range services {
 		if u, ok := usage[services[i].container]; ok {
-			used, limit := u[0], u[1]
-			services[i].MemoryBytes, services[i].MemoryLimitBytes = &used, &limit
+			services[i].MemoryBytes, services[i].MemoryLimitBytes = &u.memory, &u.limit
+			if u.hasCPU {
+				services[i].CPUPercent = &u.cpu
+			}
 		}
 	}
 	return services, nil
@@ -699,21 +704,29 @@ func parseDockerSize(s string) int64 {
 	return 0
 }
 
-// memoryUsage reads the current memory use and limit of containers with
-// `docker stats`. Containers that are not running are absent from the result.
-func (e *Engine) memoryUsage(ctx context.Context, containers []string) map[string][2]int64 {
-	usage := map[string][2]int64{}
+// usage is what docker stats reports for one container.
+type usage struct {
+	memory, limit int64
+	cpu           float64
+	hasCPU        bool
+}
+
+// containerUsage reads the current memory use, memory limit and CPU of
+// containers with `docker stats`. Containers that are not running are absent
+// from the result.
+func (e *Engine) containerUsage(ctx context.Context, containers []string) map[string]usage {
+	result := map[string]usage{}
 	if len(containers) == 0 {
-		return usage
+		return result
 	}
 	args := append([]string{"stats", "--no-stream", "--format", "json"}, containers...)
 	out, err := runner.Output(ctx, e.opts.Runner, runner.Cmd{Name: "docker", Args: args})
 	if err != nil {
-		// Memory figures are a nicety; the listing works without them.
-		return usage
+		// The figures are a nicety; the listing works without them.
+		return result
 	}
 	for _, line := range bytes.Split(bytes.TrimSpace(out), []byte("\n")) {
-		var row struct{ Name, MemUsage string }
+		var row struct{ Name, MemUsage, CPUPerc string }
 		if json.Unmarshal(bytes.TrimSpace(line), &row) != nil || row.Name == "" {
 			continue
 		}
@@ -721,7 +734,13 @@ func (e *Engine) memoryUsage(ctx context.Context, containers []string) map[strin
 		if !ok {
 			continue
 		}
-		usage[row.Name] = [2]int64{parseDockerSize(used), parseDockerSize(limit)}
+		u := usage{memory: parseDockerSize(used), limit: parseDockerSize(limit)}
+		// docker stats shows "--" for the CPU of a container it could not
+		// measure twice; that is unknown, not zero.
+		if cpu, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(row.CPUPerc, "%")), 64); err == nil && cpu >= 0 {
+			u.cpu, u.hasCPU = roundCPU(cpu), true
+		}
+		result[row.Name] = u
 	}
-	return usage
+	return result
 }

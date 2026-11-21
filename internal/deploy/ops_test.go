@@ -361,7 +361,7 @@ func TestServicesAndPrune(t *testing.T) {
 			return `{"Name":"koroku-blog-web-1","Service":"web","State":"running","Status":"Up 5 seconds","Health":""}` + "\n" +
 				`{"Name":"koroku-blog-job-1","Service":"job","State":"exited","Status":"Exited (0)","Health":""}` + "\n", nil
 		case joined == "stats --no-stream --format json koroku-blog-web-1":
-			return `{"Name":"koroku-blog-web-1","MemUsage":"26.02MiB / 512MiB","CPUPerc":"0.00%"}` + "\n", nil
+			return `{"Name":"koroku-blog-web-1","MemUsage":"26.02MiB / 512MiB","CPUPerc":"12.345%"}` + "\n", nil
 		case joined == "system df --format json":
 			return `{"Active":"8","Reclaimable":"28.32GB (69%)","Size":"40.97GB","TotalCount":"68","Type":"Images"}
 {"Active":"3","Reclaimable":"8.998MB (99%)","Size":"8.998MB","TotalCount":"8","Type":"Containers"}
@@ -389,8 +389,11 @@ func TestServicesAndPrune(t *testing.T) {
 	if web.MemoryBytes == nil || *web.MemoryBytes != 27283947 || web.MemoryLimitBytes == nil || *web.MemoryLimitBytes != 512<<20 {
 		t.Errorf("web memory = %v / %v", web.MemoryBytes, web.MemoryLimitBytes)
 	}
-	if job.MemoryBytes != nil || job.MemoryLimitBytes != nil {
-		t.Errorf("a stopped container has no memory figures: %+v", job)
+	if web.CPUPercent == nil || *web.CPUPercent != 12.35 {
+		t.Errorf("web cpu = %v, want 12.35", web.CPUPercent)
+	}
+	if job.MemoryBytes != nil || job.MemoryLimitBytes != nil || job.CPUPercent != nil {
+		t.Errorf("a stopped container has no figures: %+v", job)
 	}
 
 	usage, err := h.engine.DockerDiskUsage(context.Background())
