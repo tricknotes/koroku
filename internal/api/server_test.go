@@ -65,6 +65,8 @@ func newTestServer(t *testing.T, mutate func(*Options)) *Server {
 			"index.html":        {Data: []byte("<!doctype html><title>console</title>")},
 			"assets/app-abc.js": {Data: []byte("console.log('app')")},
 			"robots.txt":        {Data: []byte("User-agent: *\nDisallow: /\n")},
+			"favicon.ico":       {Data: []byte("\x00\x00\x01\x00\x01\x00 \x00")},
+			"favicon.svg":       {Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)},
 		},
 		Version: "test",
 	}
@@ -169,6 +171,18 @@ func TestSPAServing(t *testing.T) {
 		rec := do(t, h, http.MethodGet, "/robots.txt")
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Disallow") {
 			t.Errorf("status = %d, body = %q", rec.Code, rec.Body)
+		}
+	})
+	// Browsers ask for /favicon.ico on their own; it must not get index.html.
+	t.Run("icons", func(t *testing.T) {
+		for path, want := range map[string]string{
+			"/favicon.ico": "image/",
+			"/favicon.svg": "image/svg+xml",
+		} {
+			rec := do(t, h, http.MethodGet, path)
+			if ct := rec.Header().Get("Content-Type"); rec.Code != http.StatusOK || !strings.HasPrefix(ct, want) {
+				t.Errorf("%s: status = %d, Content-Type = %q", path, rec.Code, ct)
+			}
 		}
 	})
 	t.Run("non-GET is rejected", func(t *testing.T) {
