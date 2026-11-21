@@ -44,7 +44,7 @@
 | --- | --- |
 | 全ユーザー | `GET /api/session`、`GET /api/apps`（メンバーにはロールのあるアプリだけ）、`GET /api/system`（メンバーには `log_archive.last_error` と `caddy.last_error` を空にして返す）、`GET /api/backups`（メンバーには `runs` を空にして返す）、セッション・ログイン履歴・API トークン（メンバーは自分のものだけ） |
 | オーナーだけ | `POST /api/apps`、`DELETE /api/apps/{slug}`、`GET /api/repos`、`GET /api/repos/{owner}/{repo}/compose`、`GET /api/repos/{owner}/{repo}/env-presets`、`/api/system/*`（`docker`、`containers`、`github`、`prune`）、`/api/members*` |
-| `view` | アプリと、その下の参照系（`GET /api/apps/{slug}`、`services`、`memory`、`env`（キーだけ）、`env/requirements`、`registry-credential`（トークンは返さない）、`deployments`、`domains`、`logs`、`logs/history`、`logs/archives`、`logs/archives/url`、`backups`、`volumes`、`db-copies`、`tasks`、`task-runs`）、`GET /api/deployments/{id}`（と `logs`）、`GET /api/task-runs/{id}`（と `logs`）、`GET /api/db-copies/{id}`（と `logs`）。`GET /api/repos/{owner}/{repo}/branches` と `commits` は、そのリポジトリ（`repo_full_name`）から作ったアプリに `view` 以上があれば使える |
+| `view` | アプリと、その下の参照系（`GET /api/apps/{slug}`、`services`、`memory`、`activity`、`env`（キーだけ）、`env/requirements`、`registry-credential`（トークンは返さない）、`deployments`、`domains`、`logs`、`logs/history`、`logs/archives`、`logs/archives/url`、`backups`、`volumes`、`db-copies`、`tasks`、`task-runs`）、`GET /api/deployments/{id}`（と `logs`）、`GET /api/task-runs/{id}`（と `logs`）、`GET /api/db-copies/{id}`（と `logs`）。`GET /api/repos/{owner}/{repo}/branches` と `commits` は、そのリポジトリ（`repo_full_name`）から作ったアプリに `view` 以上があれば使える |
 | `deploy` | `POST /api/apps/{slug}/deployments`（ロールバックと昇格を含む）、`GET /api/apps/{slug}/promotion`、`POST /api/apps/{slug}/start`・`stop`・`restart`、`POST /api/deployments/{id}/cancel` |
 | `manage` | `PATCH /api/apps/{slug}`（オーナー専用の項目を除く）、環境変数の変更系、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、ドメインの変更系、`POST /api/apps/{slug}/backups/restore`、`GET /api/apps/{slug}/backups/{snapshot}/download`、`POST /api/apps/{slug}/db-copies`（送り側の `manage` も要る。送り側にロールがなければ `404 source_not_found`）、`PUT /api/apps/{slug}/tasks`、`POST /api/apps/{slug}/task-runs`、`POST /api/task-runs/{id}/cancel`。`POST /api/backups` は、どれかのアプリに `manage` があれば使える（実行はホスト全体の 1 回） |
 
@@ -349,6 +349,49 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   - `ready` は根拠が 24 時間分以上あるか。`false` の間、`limit_bytes` と `limit` は `null`。
   - `limit_bytes` は根拠のピーク × 1.5 を 64MiB 単位に切り上げた値（128MiB 以上）。`limit` は同じ値を設定に書ける形にしたもの（`m` 単位）。
   - `flag` は `near_limit`（根拠のピークが上限の 90% 以上。`ready` によらず出す）、`generous`（根拠が 7 日分以上あり、ピークが上限の 30% 未満）、どちらでもなければ `null`。上限がなければ常に `null`。
+
+### 操作の記録（2026-11-21）
+
+`GET /api/apps/{slug}/activity?limit=20&before=<id>`: アプリへの操作を誰がいつしたか（ARCHITECTURE 10.7）。新しい順。`view` 以上。`limit` は 1〜100（既定 20、外れたら `400 invalid_limit`）、`before` は前のページの `next_before`（正の整数でなければ `400 invalid_before`）。アプリごとに新しい 500 件だけが残る。
+
+```json
+{
+  "entries": [
+    {
+      "id": 812,
+      "at": "2026-11-21T03:00:00Z",
+      "actor": { "id": 583231, "login": "octocat" },
+      "action": "env.changed",
+      "details": { "added": ["API_KEY"], "changed": [], "removed": [], "renamed": [{ "from": "MAIL_FROM", "to": "SMTP_FROM" }], "replaced": false }
+    }
+  ],
+  "next_before": 812
+}
+```
+
+- `actor` は操作したユーザー。koroku 自身なら `null`。login は操作した時点のもの。
+- `next_before` は次のページがあるときだけ、このページの最後の `id`。なければ `null`。
+- `details` は `action` ごとに次の形。値（環境変数の値、秘密の設定）は含まない。
+
+| `action` | `details` |
+| --- | --- |
+| `app.created` | `{"environment", "env_added": [キー]}` |
+| `app.settings_changed` | `{"changes": [{"field", "from", "to"}]}`。`field` は `PATCH /api/apps/{slug}` の項目名（`promote_from` は slug）。秘密の項目は `{"field", "secret": true}` |
+| `app.started`、`app.stopped`、`app.restarted` | `{}` |
+| `env.changed` | `{"added", "changed", "removed": [キー], "renamed": [{"from", "to"}], "replaced"}`。`replaced` は一括置換（`PUT /api/apps/{slug}/env`） |
+| `domain.added`、`domain.verified` | `{"hostname", "status"}`（操作のあとの状態） |
+| `domain.primary` | `{"hostname", "is_primary"}` |
+| `domain.forced` | `{"hostname", "force_active"}` |
+| `domain.deleted` | `{"hostname"}` |
+| `backup.restored`、`backup.downloaded` | `{"snapshot_id"}` |
+| `db_copy.started` | `{"copy_id", "source", "source_kind"}`（受け側のアプリ） |
+| `db_copy.sent` | `{"source_kind"}`（送り側のアプリ。受け側は書かない） |
+| `task_run.started` | `{"run_id", "task_name", "service", "command"}` |
+| `tasks.changed` | `{"added", "changed", "removed": [タスク名], "reordered"}` |
+| `member.role_set` | `{"member": {"id", "login"}, "from", "to"}`（`from` はロールがなければ `""`） |
+| `member.role_removed` | `{"member": {"id", "login"}, "from", "to": ""}` |
+
+UI は知らない `action` をそのまま表示する。
 
 ## 環境変数（M1）
 
