@@ -120,7 +120,7 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 
 - [x] ホストポート割当（20000 番台、DB で一意）
 - [x] Caddy JSON 設定の生成と `POST /load`。`koroku` 起動時にも実行
-- [ ] 自動割当ドメインの TLS（開発中は Let's Encrypt staging）
+- [x] 自動割当ドメインの TLS（開発中は Let's Encrypt staging）
 - [x] `app_domains` テーブル、独自ドメインの追加・DNS 検証（`public_ip` と照合、5 分間隔で再試行）・強制有効化
 - [x] プライマリドメインへの 308 リダイレクト
 - [x] 停止中アプリは 503 の固定ページ
