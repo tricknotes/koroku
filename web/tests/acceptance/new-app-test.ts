@@ -653,15 +653,26 @@ module('Acceptance | create app', function (hooks) {
       );
 
     await visit('/apps/new');
+
+    // Asked before anything is typed, so logging in loses nothing.
+    assert
+      .dom('[data-test-new-app-login]')
+      .includesText('先に GitHub で再ログインしてください');
+    assert.dom('[data-test-new-app-form]').doesNotExist();
+    await click('[data-test-new-app-login-button]');
+    assert.deepEqual(fakes.browser.assigned, [
+      '/auth/github/login?return_to=%2Fapps%2Fnew',
+    ]);
+
+    // Going on without it still works, and the variables say what it takes.
+    await click('[data-test-new-app-login-skip]');
     await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
 
     assert
       .dom('[data-test-env-presets-reauth]')
       .includesText('再ログインが必要です');
     await click('[data-test-env-presets-reauth-button]');
-    assert.deepEqual(fakes.browser.assigned, [
-      '/auth/github/login?return_to=%2Fapps%2Fnew',
-    ]);
+    assert.strictEqual(fakes.browser.assigned.length, 2);
 
     // Without variables the app is created as before.
     await click('[data-test-env-draft-remove]');
@@ -670,6 +681,59 @@ module('Acceptance | create app', function (hooks) {
     assert.false(
       'env' in (fakes.api.callsTo('POST', '/api/apps')[0]?.body as object),
     );
+  });
+
+  test('a recent login shows the form at once', async function (assert) {
+    fakes.api.on('GET', '/api/session', {
+      authenticated: true,
+      user: { id: 1, login: 'octo', avatar_url: '' },
+      reauth_until: new Date(Date.now() + 5 * 60_000).toISOString(),
+    });
+    await visit('/apps/new');
+
+    assert.dom('[data-test-new-app-login]').doesNotExist();
+    assert.dom('[data-test-new-app-form]').exists();
+  });
+
+  test('a login that runs out while typing keeps the form', async function (assert) {
+    fakes.api
+      .on('GET', '/api/session', {
+        authenticated: true,
+        user: { id: 1, login: 'octo', avatar_url: '' },
+        reauth_until: new Date(Date.now() + 5 * 60_000).toISOString(),
+      })
+      .on('GET', '/api/repos/octo/blog/env-presets', {
+        status: 'ok',
+        reason: '',
+        compose_path: '',
+        frameworks: ['node'],
+        presets: [
+          {
+            key: 'NODE_ENV',
+            value: 'production',
+            generated: false,
+            framework: 'node',
+            file: 'package.json',
+            match: '',
+          },
+        ],
+        skipped: [],
+      });
+    await visit('/apps/new');
+    await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
+    assert.dom('[data-test-env-presets-reauth]').doesNotExist();
+
+    const session = this.owner.lookup('service:session');
+    session.reauthUntil = Date.now() - 1;
+    await click('[data-test-submit]');
+
+    assert.deepEqual(fakes.api.callsTo('POST', '/api/apps'), [], 'not sent');
+    assert
+      .dom('[data-test-env-presets]')
+      .includesText('再ログインの期限（10 分）が切れました');
+    assert.dom('[data-test-env-presets-reauth]').exists();
+    assert.dom('[data-test-reauth-dialog]').doesNotExist();
+    assert.dom('[data-test-field="repo_full_name"]').hasValue('octo/blog');
   });
 
   test('nothing can be submitted before a repository is chosen', async function (assert) {
