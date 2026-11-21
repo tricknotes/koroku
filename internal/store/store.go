@@ -73,6 +73,45 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	return s, nil
 }
 
+// OpenReadOnly opens the existing database at path without writing to it:
+// no migrations are applied. It is for commands run next to a running
+// koroku (`koroku run`). A database whose schema is not the one of this
+// binary is refused, since its queries would not match the tables.
+func OpenReadOnly(ctx context.Context, path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	query := url.Values{}
+	query.Add("mode", "ro")
+	query.Add("_pragma", "busy_timeout(5000)")
+	db, err := sql.Open("sqlite", "file:"+(&url.URL{Path: path}).EscapedPath()+"?"+query.Encode())
+	if err != nil {
+		return nil, fmt.Errorf("open database: %w", err)
+	}
+	db.SetMaxOpenConns(1)
+	s := &Store{db: db}
+	migrations, err := loadMigrations()
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	want := 0
+	if n := len(migrations); n > 0 {
+		want = migrations[n-1].version
+	}
+	got, err := s.SchemaVersion(ctx)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if got != want {
+		_ = db.Close()
+		return nil, fmt.Errorf("the database schema is version %d but this binary expects %d: "+
+			"restart koroku so that it runs the same version", got, want)
+	}
+	return s, nil
+}
+
 // Close releases the database.
 func (s *Store) Close() error { return s.db.Close() }
 

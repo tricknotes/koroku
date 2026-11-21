@@ -380,3 +380,68 @@ func TestInterruptedTaskRunsAreFailedOnStart(t *testing.T) {
 		time.Sleep(2 * time.Millisecond)
 	}
 }
+
+func TestConsoleCmd(t *testing.T) {
+	h, app := deployedApp(t)
+	release := h.engine.ReleaseDir("blog", *app.CurrentDeploymentID)
+	base := []string{"compose", "-p", "koroku-blog",
+		"-f", filepath.Join(release, "compose.yaml"), "-f", filepath.Join(release, compose.OverrideFileName),
+		"--env-file", h.engine.EnvFile("blog")}
+
+	cmd, err := h.engine.ConsoleCmd(context.Background(), app, "web", []string{"bin/rails", "console"}, true)
+	if err != nil {
+		t.Fatalf("ConsoleCmd: %v", err)
+	}
+	want := append(slices.Clone(base), "run", "--rm", "--no-deps", "web", "bin/rails", "console")
+	if cmd.Name != "docker" || !slices.Equal(cmd.Args, want) || cmd.Dir != release {
+		t.Errorf("cmd = %+v\nwant args %v", cmd, want)
+	}
+	// The release files are checked again; nothing runs yet.
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config"}) {
+		t.Errorf("docker calls = %v", got)
+	}
+
+	// Without a terminal no TTY is allocated; no command opens a shell.
+	cmd, err = h.engine.ConsoleCmd(context.Background(), app, "web", nil, false)
+	if err != nil {
+		t.Fatalf("ConsoleCmd: %v", err)
+	}
+	want = append(slices.Clone(base), "run", "--rm", "--no-deps", "-T", "web", "sh")
+	if !slices.Equal(cmd.Args, want) {
+		t.Errorf("args = %v\nwant %v", cmd.Args, want)
+	}
+	// Nothing is recorded.
+	runs, _ := h.store.ListTaskRuns(context.Background(), app.ID, 10)
+	if len(runs) != 0 {
+		t.Errorf("runs = %v", runs)
+	}
+}
+
+func TestConsoleCmdRefusals(t *testing.T) {
+	t.Run("not deployed", func(t *testing.T) {
+		h := newHarness(t, nil)
+		app := h.createApp("blog")
+		if _, err := h.engine.ConsoleCmd(context.Background(), app, "web", nil, true); !errors.Is(err, ErrNotDeployed) {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("unknown service", func(t *testing.T) {
+		h, app := deployedApp(t)
+		_, err := h.engine.ConsoleCmd(context.Background(), app, "worker", nil, true)
+		var unknown *UnknownServiceError
+		if !errors.As(err, &unknown) || unknown.Service != "worker" {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("policy", func(t *testing.T) {
+		h, app := deployedApp(t)
+		h.mu.Lock()
+		h.repoServices = `{"web": {"image": "x", "privileged": true}}`
+		h.mu.Unlock()
+		_, err := h.engine.ConsoleCmd(context.Background(), app, "web", nil, true)
+		var policyErr *compose.PolicyError
+		if !errors.As(err, &policyErr) {
+			t.Fatalf("err = %v", err)
+		}
+	})
+}

@@ -165,3 +165,57 @@ func TestDatabaseFileIsPrivate(t *testing.T) {
 		t.Errorf("database mode = %04o, want 0600", info.Mode().Perm())
 	}
 }
+
+func TestOpenReadOnly(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "koroku.db")
+	rw, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := rw.db.ExecContext(ctx,
+		`INSERT INTO apps (slug, web_port, host_port, created_at, updated_at) VALUES ('demo', 3000, 20000, 0, 0)`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	// The writer stays open, as `koroku serve` does next to `koroku run`.
+	defer func() { _ = rw.Close() }()
+
+	ro, err := OpenReadOnly(ctx, path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer func() { _ = ro.Close() }()
+	app, err := ro.GetApp(ctx, "demo")
+	if err != nil {
+		t.Fatalf("GetApp: %v", err)
+	}
+	if app.Slug != "demo" {
+		t.Errorf("slug = %q, want demo", app.Slug)
+	}
+	if _, err := ro.db.ExecContext(ctx, `DELETE FROM apps`); err == nil {
+		t.Error("a write through the read-only store succeeded")
+	}
+}
+
+func TestOpenReadOnlyRefusesOtherSchema(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "koroku.db")
+	rw, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := rw.db.ExecContext(ctx,
+		`DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)`); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	_ = rw.Close()
+	if _, err := OpenReadOnly(ctx, path); err == nil {
+		t.Fatal("OpenReadOnly accepted a database of another schema version")
+	}
+}
+
+func TestOpenReadOnlyMissingFile(t *testing.T) {
+	if _, err := OpenReadOnly(context.Background(), filepath.Join(t.TempDir(), "none.db")); err == nil {
+		t.Fatal("OpenReadOnly created or accepted a missing database")
+	}
+}
