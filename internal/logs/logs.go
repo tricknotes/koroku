@@ -87,6 +87,11 @@ type Options struct {
 	Location *time.Location
 	// Apps lists the apps to collect. Run calls it periodically.
 	Apps func(ctx context.Context) ([]App, error)
+	// ComposePlugin returns the Compose plugin binary to run the follow
+	// commands with, or "" to run them as `docker compose`. Run calls it
+	// before each follow command. FindComposePlugin is the real lookup; the
+	// default is `docker compose`.
+	ComposePlugin func() string
 	// Logger receives operational messages (never line content). The
 	// default discards them.
 	Logger *slog.Logger
@@ -123,6 +128,8 @@ type Collector struct {
 	loc  *time.Location
 	apps func(ctx context.Context) ([]App, error)
 	log  *slog.Logger
+
+	composePlugin func() string
 
 	retentionDays    int
 	maxLine          int
@@ -162,6 +169,7 @@ func New(opts Options) (*Collector, error) {
 		clk:              opts.Clock,
 		loc:              opts.Location,
 		apps:             opts.Apps,
+		composePlugin:    opts.ComposePlugin,
 		log:              opts.Logger,
 		retentionDays:    orDefault(opts.RetentionDays, 14),
 		maxLine:          orDefault(opts.MaxLineBytes, 16<<10),

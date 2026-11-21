@@ -64,6 +64,42 @@ func TestCollectWritesOneFilePerServiceAndDay(t *testing.T) {
 	wantStrings(t, "Services", services, []string{"db1", "job-worker-2", "web"})
 }
 
+func TestCollectRunsTheComposePluginDirectly(t *testing.T) {
+	s := &script{}
+	s.add(printsAndStays("web-1  | 2026-11-18T14:59:58Z hello", ""))
+	plugin := "/usr/libexec/docker/cli-plugins/docker-compose"
+	f := newFixture(t, func(o *Options) {
+		o.Runner = s.runner()
+		o.Apps = oneApp(blog)
+		o.ComposePlugin = func() string { return plugin }
+	})
+	f.startRun()
+	waitFor(t, "the line", func() bool { return len(serviceContent(t, f.dir, "blog", "web")) == 1 })
+
+	calls := s.seen()
+	wantArgs := []string{"-p", "koroku-blog", "logs", "--follow", "--timestamps", "--no-color"}
+	if len(calls) != 1 || calls[0].Name != plugin || !reflect.DeepEqual(calls[0].Args, wantArgs) {
+		t.Errorf("commands = %+v, want %s %q", calls, plugin, wantArgs)
+	}
+}
+
+func TestCollectFallsBackToDockerCompose(t *testing.T) {
+	s := &script{}
+	s.add(printsAndStays("web-1  | 2026-11-18T14:59:58Z hello", ""))
+	f := newFixture(t, func(o *Options) {
+		o.Runner = s.runner()
+		o.Apps = oneApp(blog)
+		o.ComposePlugin = func() string { return "" }
+	})
+	f.startRun()
+	waitFor(t, "the line", func() bool { return len(serviceContent(t, f.dir, "blog", "web")) == 1 })
+
+	calls := s.seen()
+	if len(calls) != 1 || calls[0].Name != "docker" || calls[0].Args[0] != "compose" {
+		t.Errorf("commands = %+v, want docker compose", calls)
+	}
+}
+
 // resumeLines is what a first run wrote before it ended. Two replicas
 // printed an identical line at the same instant, and a third line shares
 // their timestamp.

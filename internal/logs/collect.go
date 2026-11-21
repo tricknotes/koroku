@@ -345,14 +345,16 @@ func (f *composeFollow) once(ctx context.Context) (bool, error) {
 	w.since, w.all, w.seen = f.res.begin()
 	w.sp = splitter{max: f.c.maxLine + composePrefixRoom, emit: w.line}
 
-	args := []string{"compose", "-p", f.app.Project, "logs", "--follow", "--timestamps", "--no-color"}
+	args := []string{"-p", f.app.Project, "logs", "--follow", "--timestamps", "--no-color"}
 	if !w.all {
 		// Docker's --since is inclusive; what the files already hold is
 		// dropped in followWriter.
 		args = append(args, "--since", w.since.Format(time.RFC3339Nano))
 	}
+	cmd := f.c.composeCmd(args)
 	// Standard error is discarded: it is not known to be free of app output.
-	err := f.c.run.Run(ctx, runner.Cmd{Name: "docker", Args: args, Stdout: w})
+	cmd.Stdout = w
+	err := f.c.run.Run(ctx, cmd)
 	// A line without its newline is incomplete; it comes again in full.
 	if w.err == nil {
 		w.err = w.commit()
@@ -367,6 +369,17 @@ func (f *composeFollow) once(ctx context.Context) (bool, error) {
 		f.settle()
 	}
 	return w.wrote, err
+}
+
+// composeCmd runs `docker compose <args>`, through the plugin binary itself
+// when there is one (ARCHITECTURE 10.1).
+func (c *Collector) composeCmd(args []string) runner.Cmd {
+	if c.composePlugin != nil {
+		if plugin := c.composePlugin(); plugin != "" {
+			return runner.Cmd{Name: plugin, Args: args}
+		}
+	}
+	return runner.Cmd{Name: "docker", Args: append([]string{"compose"}, args...)}
 }
 
 func (f *composeFollow) markerPath() string {
