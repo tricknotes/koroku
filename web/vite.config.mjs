@@ -15,6 +15,12 @@ export default defineConfig({
       extensions,
     }),
   ],
+  build: {
+    // @embroider/vite picks terser with three passes when this is unset;
+    // Vite's own minifier (Oxc) takes a fraction of the time for a bundle
+    // within a few percent of the size.
+    minify: 'oxc',
+  },
   server: {
     // koroku compares the Origin of a request with its Host header, so the
     // proxy has to pass the Host the browser used (a bare target string
