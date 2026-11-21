@@ -220,6 +220,15 @@ module('Acceptance | overview', function (hooks) {
       .includesText('Fix login');
     assert.dom('[data-test-recent-deployment="42"] [data-test-live]').exists();
     assert
+      .dom(
+        '[data-test-recent-deployment="41"] [data-test-recent-deployment-link]',
+      )
+      .hasAttribute(
+        'href',
+        '/apps/blog/deploy?deployment=41',
+        'a deployment opens on the deploy tab',
+      );
+    assert
       .dom('[data-test-recent-deployment="41"]')
       .includesText('キャンセル')
       .includesText('Add search')
@@ -239,7 +248,10 @@ module('Acceptance | overview', function (hooks) {
     await visit('/apps/blog');
     await click('[data-test-recent-deployment="41"] a');
 
-    assert.strictEqual(currentURL(), '/apps/blog/deploy');
+    assert.strictEqual(currentURL(), '/apps/blog/deploy?deployment=41');
+    assert
+      .dom('[data-test-deployment="41"] [data-test-show-log]')
+      .hasAttribute('aria-expanded', 'true', 'that deployment is open');
   });
 
   test('domains: the primary one first, pending ones flagged, the assigned one last', async function (assert) {

@@ -2,6 +2,7 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
+import { hash } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import AsyncView from 'koroku-console/components/async-view';
@@ -680,7 +681,9 @@ export default class AppOverviewTemplate extends Component<Signature> {
                               <LinkTo
                                 @route="app.deploy"
                                 @model={{this.slug}}
+                                @query={{hash deployment=deployment.id}}
                                 class="row-link overview-deployment-message"
+                                data-test-recent-deployment-link
                               >{{firstLine deployment.commit_message}}</LinkTo>
                               {{#if (this.isLive deployment)}}
                                 <Badge
