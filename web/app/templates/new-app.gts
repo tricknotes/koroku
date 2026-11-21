@@ -2,7 +2,7 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
-import { eq } from '@ember/helper';
+import { concat, eq } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import type RouterService from '@ember/routing/router-service';
@@ -53,6 +53,9 @@ export function githubFullName(url: string): string {
   return match ? `${match[1]}/${match[2]}` : '';
 }
 
+/** The option of the candidates that switches to typing a path. */
+const OTHER_PATH = '\u0000other';
+
 /** The service most likely to be the public one. */
 function guessWebService(services: ComposeService[]): ComposeService | null {
   return (
@@ -96,6 +99,11 @@ export default class NewAppTemplate extends Component {
   /** The branch the shown Compose detection was made on. */
   @tracked detectedBranch = '';
   @tracked composePath = '';
+  /** Candidates found at the repository root by the last detection. */
+  @tracked knownFiles: string[] = [];
+  /** The Compose file is typed in instead of picked from the candidates. */
+  @tracked typingPath = false;
+  @tracked typedPath = '';
   @tracked webService = '';
   @tracked webPort = '';
   @tracked slug = '';
@@ -143,11 +151,18 @@ export default class NewAppTemplate extends Component {
   }
 
   get files(): string[] {
-    return this.compose.value?.files ?? [];
+    return this.knownFiles;
   }
 
-  get hasManyFiles(): boolean {
-    return this.files.length > 1;
+  /** The path is typed: chosen so, or there is no candidate to pick. */
+  get showsPathInput(): boolean {
+    return this.typingPath || this.knownFiles.length === 0;
+  }
+
+  /** Whether the create request names the file (else the server detects). */
+  get chosenComposePath(): string {
+    if (this.showsPathInput) return this.typedPath.trim();
+    return this.knownFiles.length > 1 ? this.composePath : '';
   }
 
   get services(): ComposeService[] {
@@ -182,7 +197,7 @@ export default class NewAppTemplate extends Component {
     );
     this.defaultBranch = repo?.default_branch ?? '';
     this.suggestSlugFrom(this.repoFullName);
-    this.requestedComposePath = '';
+    this.resetComposeChoice();
     this.resetPresets();
     if (repo) {
       void this.detect();
@@ -197,7 +212,7 @@ export default class NewAppTemplate extends Component {
 
   /** Detects once the URL field is left, for github.com URLs. */
   changeRepoUrl = () => {
-    this.requestedComposePath = '';
+    this.resetComposeChoice();
     this.compose.reset();
     this.resetPresets();
     if (this.detectRepo !== '') {
@@ -222,12 +237,20 @@ export default class NewAppTemplate extends Component {
   private resetDetection(): void {
     this.defaultBranch = '';
     this.detectedBranch = '';
-    this.requestedComposePath = '';
-    this.composePath = '';
+    this.resetComposeChoice();
     this.webService = '';
     this.webPort = '';
     this.compose.reset();
     this.resetPresets();
+  }
+
+  /** Another repository: candidates and a typed path start afresh. */
+  private resetComposeChoice(): void {
+    this.requestedComposePath = '';
+    this.composePath = '';
+    this.knownFiles = [];
+    this.typingPath = false;
+    this.typedPath = '';
   }
 
   /** Another repository: its suggestions and the rows start afresh. */
@@ -247,15 +270,45 @@ export default class NewAppTemplate extends Component {
   changeBranch = () => {
     if (this.detectRepo === '') return;
     if (this.defaultBranch.trim() === this.detectedBranch) return;
-    this.requestedComposePath = '';
+    // A typed path stays: it names a file the user knows about.
+    if (!this.showsPathInput) this.requestedComposePath = '';
     void this.detect();
     void this.loadPresets();
   };
 
   selectComposePath = (event: Event) => {
-    this.requestedComposePath = inputValue(event);
+    const value = inputValue(event);
+    if (value === OTHER_PATH) {
+      this.typingPath = true;
+      this.typedPath = this.composePath;
+      return;
+    }
+    this.requestedComposePath = value;
     void this.detect();
     // The Compose file decides which presets it already sets.
+    void this.loadPresets();
+  };
+
+  setTypedPath = (event: Event) => {
+    this.typedPath = inputValue(event);
+  };
+
+  /** Reads the typed file once the field is left, where it can be read. */
+  changeTypedPath = () => {
+    const path = this.typedPath.trim();
+    this.composePath = path;
+    if (this.detectRepo === '' || path === this.requestedComposePath) return;
+    this.requestedComposePath = path;
+    void this.detect();
+    void this.loadPresets();
+  };
+
+  /** Back to the detected candidates. */
+  useCandidates = () => {
+    this.typingPath = false;
+    this.typedPath = '';
+    this.requestedComposePath = '';
+    void this.detect();
     void this.loadPresets();
   };
 
@@ -285,8 +338,11 @@ export default class NewAppTemplate extends Component {
     await this.compose.load();
     if (repo !== this.detectRepo || branch !== this.detectedBranch) return;
 
-    const detection = this.compose.value;
-    this.composePath = detection?.path ?? '';
+    // A failed read (a typed path that is not there) keeps what was found.
+    const detection = this.compose.error ? null : this.compose.value;
+    if (!detection) return;
+    this.knownFiles = detection.files ?? [];
+    this.composePath = detection.path;
     const guess = guessWebService(detection?.services ?? []);
     this.webService = guess?.name ?? '';
     const port = guess?.ports?.[0];
@@ -364,9 +420,7 @@ export default class NewAppTemplate extends Component {
       body.default_branch = this.defaultBranch.trim();
     }
     // With a single candidate the server's auto-detection is kept.
-    if (this.files.length > 1 && this.composePath) {
-      body.compose_path = this.composePath;
-    }
+    if (this.chosenComposePath) body.compose_path = this.chosenComposePath;
     if (this.webService.trim()) body.web_service = this.webService.trim();
     if (this.healthcheckPath.trim()) {
       body.healthcheck_path = this.healthcheckPath.trim();
@@ -565,29 +619,14 @@ export default class NewAppTemplate extends Component {
                   {{this.composeError}}
                 </Banner>
               {{else if this.compose.loaded}}
-                {{#if this.files.length}}
-                  <dl class="readout">
-                    <dt>検出した Compose ファイル</dt>
-                    <dd>
-                      <span class="mono" data-test-compose-path>
-                        {{this.composePath}}
-                      </span>
-                      {{#if this.detectedBranch}}
-                        <span class="readout-note" data-test-compose-branch>
-                          （ブランチ
-                          <span class="mono">{{this.detectedBranch}}</span>）
-                        </span>
-                      {{/if}}
-                    </dd>
-                  </dl>
-                {{else}}
+                {{#unless this.files.length}}
                   <Banner @tone="warning" data-test-compose-missing>
                     {{#if this.detectedBranch}}ブランチ
                       <span class="mono">{{this.detectedBranch}}</span>
                       の{{/if}}リポジトリ直下に Compose
-                    ファイルが見つかりませんでした。パスは作成後に「設定」で指定できます。
+                    ファイルが見つかりませんでした。別の場所にあれば、下にパスを入力してください。
                   </Banner>
-                {{/if}}
+                {{/unless}}
                 {{#if this.manualService}}
                   <Banner data-test-compose-manual>
                     サービスを読み取れなかったため、公開するサービスとポートを入力してください。
@@ -596,10 +635,50 @@ export default class NewAppTemplate extends Component {
               {{/if}}
             </div>
 
-            {{#if this.hasManyFiles}}
+            {{#if this.showsPathInput}}
               <FormField
                 @label="Compose ファイル"
-                @hint="候補が複数あります。使うものを選んでください。"
+                @hint="リポジトリのルートからのパスです（例: deploy/compose.production.yml）。空なら、ルートの compose.yaml などを探します。"
+                @error={{this.errors.compose_path}}
+                data-test-field-group="compose_path"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="text"
+                  class="mono"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="deploy/compose.production.yml"
+                  value={{this.typedPath}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="compose_path_input"
+                  {{on "input" this.setTypedPath}}
+                  {{on "change" this.changeTypedPath}}
+                />
+              </FormField>
+              {{#if this.files.length}}
+                <p class="new-app-compose-switch">
+                  <Button
+                    @size="small"
+                    data-test-compose-use-candidates
+                    {{on "click" this.useCandidates}}
+                  >検出した候補から選ぶ</Button>
+                </p>
+              {{/if}}
+            {{else}}
+              <FormField
+                @label="Compose ファイル"
+                @hint={{if
+                  this.detectedBranch
+                  (concat
+                    "ブランチ "
+                    this.detectedBranch
+                    " のリポジトリ直下で見つかったファイルです。"
+                  )
+                  "リポジトリ直下で見つかったファイルです。"
+                }}
                 @error={{this.errors.compose_path}}
                 data-test-field-group="compose_path"
                 as |field|
@@ -618,6 +697,7 @@ export default class NewAppTemplate extends Component {
                       selected={{eq file this.composePath}}
                     >{{file}}</option>
                   {{/each}}
+                  <option value={{OTHER_PATH}}>その他のパスを入力…</option>
                 </select>
               </FormField>
             {{/if}}

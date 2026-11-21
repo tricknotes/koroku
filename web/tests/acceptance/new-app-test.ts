@@ -71,7 +71,7 @@ module('Acceptance | create app', function (hooks) {
       { ref: 'main' },
       'compose files are detected on the default branch',
     );
-    assert.dom('[data-test-compose-path]').includesText('compose.yaml');
+    assert.dom('[data-test-field="compose_path"]').hasValue('compose.yaml');
     assert.dom('[data-test-field="default_branch"]').hasValue('main');
     assert
       .dom('[data-test-field="web_service"]')
@@ -123,7 +123,9 @@ module('Acceptance | create app', function (hooks) {
 
     await visit('/apps/new');
     await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
-    assert.dom('[data-test-compose-branch]').includesText('main');
+    assert
+      .dom('[data-test-field-group="compose_path"]')
+      .includesText('ブランチ main');
     assert.dom('[data-test-field="web_service"]').hasValue('web');
 
     await fillIn('[data-test-field="default_branch"]', 'feature/redis');
@@ -135,7 +137,9 @@ module('Acceptance | create app', function (hooks) {
       'detected once more, not per keystroke',
     );
     assert.deepEqual(calls[1]?.query, { ref: 'feature/redis' });
-    assert.dom('[data-test-compose-branch]').includesText('feature/redis');
+    assert
+      .dom('[data-test-field-group="compose_path"]')
+      .includesText('ブランチ feature/redis');
     assert
       .dom('[data-test-field="web_service"]')
       .hasValue('app', 'the services of that branch are offered');
@@ -248,6 +252,115 @@ module('Acceptance | create app', function (hooks) {
     await click('[data-test-repo-use-list]');
     assert.dom('[data-test-field="repo_full_name"]').exists();
     assert.dom('[data-test-field="repo_url"]').doesNotExist();
+  });
+
+  test('a Compose file elsewhere in the repository is typed in', async function (assert) {
+    fakes.api
+      .on('GET', '/api/repos/octo/blog/compose', (call: FakeCall) =>
+        call.query['path'] === 'deploy/compose.production.yml'
+          ? {
+              files: ['compose.yaml'],
+              path: 'deploy/compose.production.yml',
+              services: [{ name: 'proxy', ports: [8080] }],
+            }
+          : {
+              files: ['compose.yaml'],
+              path: 'compose.yaml',
+              services: [{ name: 'web', ports: [3000] }],
+            },
+      )
+      .on('POST', '/api/apps', (call: FakeCall) =>
+        makeApp(call.body as { slug: string }),
+      );
+
+    await visit('/apps/new');
+    await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
+    assert.dom('[data-test-field="compose_path"]').hasValue('compose.yaml');
+
+    await fillIn('[data-test-field="compose_path"]', '\u0000other');
+    assert
+      .dom('[data-test-field="compose_path_input"]')
+      .hasValue('compose.yaml', 'starts from the detected file');
+    await fillIn(
+      '[data-test-field="compose_path_input"]',
+      'deploy/compose.production.yml',
+    );
+
+    const calls = fakes.api.callsTo('GET', '/api/repos/octo/blog/compose');
+    assert.strictEqual(
+      calls[calls.length - 1]?.query['path'],
+      'deploy/compose.production.yml',
+      'the typed file is read',
+    );
+    assert.dom('[data-test-field="web_service"]').hasValue('proxy');
+    assert.dom('[data-test-field="web_port"]').hasValue('8080');
+
+    await click('[data-test-submit]');
+    const body = fakes.api.callsTo('POST', '/api/apps')[0]?.body as Record<
+      string,
+      unknown
+    >;
+    assert.strictEqual(body['compose_path'], 'deploy/compose.production.yml');
+  });
+
+  test('the detected candidates can be picked again', async function (assert) {
+    await visit('/apps/new');
+    await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
+    await fillIn('[data-test-field="compose_path"]', '\u0000other');
+    await click('[data-test-compose-use-candidates]');
+
+    assert.dom('[data-test-field="compose_path_input"]').doesNotExist();
+    assert.dom('[data-test-field="compose_path"]').hasValue('compose.yaml');
+  });
+
+  test('without a candidate the path is typed in at once', async function (assert) {
+    fakes.api
+      .on('GET', '/api/repos/octo/blog/compose', (call: FakeCall) =>
+        call.query['path']
+          ? {
+              files: [],
+              path: call.query['path'],
+              services: [{ name: 'app', ports: [4000] }],
+            }
+          : { files: [], path: '', services: [] },
+      )
+      .on('POST', '/api/apps', (call: FakeCall) =>
+        makeApp(call.body as { slug: string }),
+      );
+
+    await visit('/apps/new');
+    await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
+    assert.dom('[data-test-compose-missing]').includesText('パスを入力');
+    assert.dom('[data-test-field="compose_path"]').doesNotExist();
+
+    await fillIn(
+      '[data-test-field="compose_path_input"]',
+      'docker/compose.yml',
+    );
+    assert.dom('[data-test-field="web_service"]').hasValue('app');
+    assert.dom('[data-test-field="web_port"]').hasValue('4000');
+  });
+
+  test('a URL outside github.com takes a typed path as it is', async function (assert) {
+    fakes.api.on('POST', '/api/apps', (call: FakeCall) =>
+      makeApp(call.body as { slug: string }),
+    );
+    await visit('/apps/new');
+    await click('[data-test-repo-use-url]');
+    await fillIn(
+      '[data-test-field="repo_url"]',
+      'https://git.example.com/octo/site.git',
+    );
+    await fillIn('[data-test-field="compose_path_input"]', 'ops/compose.yml');
+    await fillIn('[data-test-field="web_service"]', 'web');
+    await fillIn('[data-test-field="web_port"]', '3000');
+    await click('[data-test-submit]');
+
+    const body = fakes.api.callsTo('POST', '/api/apps')[0]?.body as Record<
+      string,
+      unknown
+    >;
+    assert.strictEqual(body['compose_path'], 'ops/compose.yml');
   });
 
   test('field errors of a 422 are shown next to the fields', async function (assert) {

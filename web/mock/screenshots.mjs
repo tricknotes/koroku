@@ -1585,6 +1585,51 @@ SHOTS.push(
     themes: ['light'],
   },
   {
+    name: 'new-app-compose-path',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      ${CHOOSE_REPOSITORY};
+      setTimeout(() => {
+        const select = document.querySelector('[data-test-field="compose_path"]');
+        select.value = select.options[select.options.length - 1].value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        setTimeout(() => {
+          const input = document.querySelector('[data-test-field="compose_path_input"]');
+          input.value = 'deploy/compose.production.yml';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }, 200);
+      }, 400);
+    })()`,
+    then: '[data-test-compose-use-candidates]',
+    settle: 800,
+    fullPage: true,
+  },
+  {
+    name: 'new-app-compose-path-phone',
+    path: '/apps/new?scenario=healthy',
+    wait: REPOSITORY,
+    script: `(() => {
+      ${CHOOSE_REPOSITORY};
+      setTimeout(() => {
+        const select = document.querySelector('[data-test-field="compose_path"]');
+        select.value = select.options[select.options.length - 1].value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        setTimeout(() => {
+          const input = document.querySelector('[data-test-field="compose_path_input"]');
+          input.value = 'deploy/compose.production.yml';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        }, 200);
+      }, 400);
+    })()`,
+    then: '[data-test-compose-use-candidates]',
+    settle: 800,
+    ...PHONE,
+    themes: ['light'],
+  },
+  {
     name: 'new-app-invalid',
     path: '/apps/new?scenario=healthy',
     wait: REPOSITORY,
