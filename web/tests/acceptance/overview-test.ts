@@ -6,6 +6,7 @@ import {
   SHA_B,
   installFakes,
   makeApp,
+  makeAppBackupStatus,
   makeBackups,
   makeDeployment,
   type Fakes,
@@ -324,22 +325,33 @@ module('Acceptance | overview', function (hooks) {
     assert.dom('[data-test-backup-warning]').doesNotExist();
   });
 
-  test('backup: a stale host backup is flagged, a missing setup is said', async function (assert) {
+  test("backup: this app's failure is flagged, a missing setup is said", async function (assert) {
     fakes.api
       .on('GET', '/api/backups', makeBackups({ warning: true }))
-      .on('GET', '/api/apps/blog/backups', { snapshots: [] });
+      .on('GET', '/api/apps/blog/backups', { snapshots: [] })
+      .on(
+        'GET',
+        '/api/apps/blog/backups/status',
+        makeAppBackupStatus({}, { status: 'failed' }),
+      );
 
     await visit('/apps/blog');
 
     assert.dom('[data-test-backup-state]').includesText('まだありません');
     assert
       .dom('[data-test-backup-warning]')
-      .includesText('このホストのバックアップ')
-      .includesText('24 時間以上成功なし');
+      .includesText('このアプリのバックアップ')
+      .includesText('直近の取得が失敗')
+      .hasClass('is-failed');
     assert.dom('[data-test-backup-warning] svg').exists('not colour alone');
 
     fakes.api
       .on('GET', '/api/backups', makeBackups({ configured: false }))
+      .on(
+        'GET',
+        '/api/apps/blog/backups/status',
+        makeAppBackupStatus({ configured: false }),
+      )
       .fail('GET', '/api/apps/blog/backups', 503, 'not_configured');
     await fakes.poller.tick();
 

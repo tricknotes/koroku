@@ -287,6 +287,7 @@ func (s *Server) apiRoutes() []route {
 		// may start the full run that includes it.
 		{"POST /api/backups", onAnyApp(levelManage), s.handleStartBackup},
 		{"GET /api/apps/{slug}/backups", onApp(levelView), s.handleListSnapshots},
+		{"GET /api/apps/{slug}/backups/status", onApp(levelView), s.handleAppBackupStatus},
 		{"POST /api/apps/{slug}/backups/restore", onApp(levelManage), s.handleRestoreVolume},
 		{"GET /api/apps/{slug}/backups/{snapshot}/download", onApp(levelManage), s.handleDownloadDump},
 		{"GET /api/apps/{slug}/volumes", onApp(levelView), s.handleListVolumes},

@@ -8,6 +8,7 @@ import type {
   App,
   AppPatch,
   AppVolume,
+  AppBackupStatus,
   BackupOverview,
   BackupRun,
   Branch,
@@ -688,6 +689,11 @@ export default class ApiService extends Service {
 
   getBackups(): Promise<BackupOverview> {
     return this.request('GET', '/api/backups');
+  }
+
+  /** How the backups of one app are doing, without other apps' errors. */
+  getAppBackupStatus(slug: string): Promise<AppBackupStatus> {
+    return this.request('GET', `/api/apps/${seg(slug)}/backups/status`);
   }
 
   runBackup(): Promise<BackupRun> {

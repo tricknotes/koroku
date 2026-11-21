@@ -59,8 +59,14 @@ func (r backupRecorder) StartRun(ctx context.Context, trigger backup.Trigger, st
 	return run.ID, err
 }
 
-func (r backupRecorder) FinishRun(ctx context.Context, id int64, status backup.RunStatus, errMsg string, finishedAt time.Time) error {
-	return r.store.FinishBackupRun(ctx, id, status == backup.StatusSucceeded, errMsg, finishedAt)
+func (r backupRecorder) FinishRun(ctx context.Context, id int64, status backup.RunStatus, errMsg string, finishedAt time.Time, targets []backup.TargetRecord) error {
+	out := make([]store.BackupTarget, 0, len(targets))
+	for _, t := range targets {
+		out = append(out, store.BackupTarget{
+			App: t.App, Kind: string(t.Kind), Target: t.Target, Status: string(t.Status), Error: t.Error,
+		})
+	}
+	return r.store.FinishBackupRunWithTargets(ctx, id, status == backup.StatusSucceeded, errMsg, finishedAt, out)
 }
 
 func toBackupApp(app store.App) backup.App {

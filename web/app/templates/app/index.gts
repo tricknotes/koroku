@@ -23,7 +23,7 @@ import TimeUntil from 'koroku-console/components/time-until';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
-import { backupHealth } from 'koroku-console/utils/backup-status';
+import { appBackupHealth } from 'koroku-console/utils/backup-status';
 import {
   firstLine,
   formatDuration,
@@ -47,6 +47,7 @@ import {
 } from 'koroku-console/utils/status';
 import type {
   App,
+  AppBackupStatus,
   BackupOverview,
   Deployment,
   Domain,
@@ -136,6 +137,9 @@ export default class AppOverviewTemplate extends Component<Signature> {
   );
   domains = new Loadable<DomainList>(() => this.api.listDomains(this.slug));
   backups = new Loadable<BackupOverview>(() => this.api.getBackups());
+  backupStatus = new Loadable<AppBackupStatus>(() =>
+    this.api.getAppBackupStatus(this.slug),
+  );
   snapshots = new Loadable<Snapshot[]>(() => this.api.listSnapshots(this.slug));
 
   @tracked starting = false;
@@ -153,6 +157,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
     }
     void this.domains.load();
     void this.backups.load();
+    void this.backupStatus.load();
     void this.snapshots.load();
     // A deployment finishing, a container turning unhealthy, a domain
     // getting verified: none of it needs a reload of the page.
@@ -289,16 +294,22 @@ export default class AppOverviewTemplate extends Component<Signature> {
   }
 
   /**
-   * What is wrong with the backups of the whole host, in the words the
-   * backups tab uses; empty while they are fine (or just running).
+   * What is wrong with this app's backups, in the words the backups tab
+   * uses; empty while they are fine (or just running). Other apps'
+   * failures do not show here.
    */
   get backupTrouble(): string {
-    const overview = this.backups.value;
-    if (!overview) return '';
-    const health = backupHealth(overview);
+    const status = this.backupStatus.value;
+    if (!status) return '';
+    const health = appBackupHealth(this.backups.value, status);
     return health.kind === 'failed' || health.kind === 'pending'
       ? health.label
       : '';
+  }
+
+  get backupFailed(): boolean {
+    const status = this.backupStatus.value;
+    return status?.last_run?.status === 'failed';
   }
 
   /** The release that answers requests right now (as on the deploy tab). */
@@ -327,6 +338,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
       this.refreshRelease(),
       this.domains.load({ quiet: true }),
       this.backups.load({ quiet: true }),
+      this.backupStatus.load({ quiet: true }),
       this.snapshots.load({ quiet: true }),
     ]);
   }
@@ -849,9 +861,13 @@ export default class AppOverviewTemplate extends Component<Signature> {
                   {{/if}}
                 </dl>
                 {{#if this.backupTrouble}}
-                  <p class="overview-warning" data-test-backup-warning>
+                  <p
+                    class="overview-warning
+                      {{if this.backupFailed 'is-failed'}}"
+                    data-test-backup-warning
+                  >
                     <Icon @name="warning" />
-                    <span>このホストのバックアップ:
+                    <span>このアプリのバックアップ:
                       {{this.backupTrouble}}</span>
                   </p>
                 {{/if}}

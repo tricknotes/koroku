@@ -223,6 +223,8 @@ type recorder struct {
 	started  []Trigger
 	finished []string // "<id> <status> <error>"
 	startErr error
+	// targets holds what each finished run recorded per target.
+	targets [][]TargetRecord
 }
 
 func (r *recorder) StartRun(_ context.Context, trigger Trigger, _ time.Time) (int64, error) {
@@ -235,10 +237,11 @@ func (r *recorder) StartRun(_ context.Context, trigger Trigger, _ time.Time) (in
 	return int64(len(r.started)), nil
 }
 
-func (r *recorder) FinishRun(_ context.Context, id int64, status RunStatus, errMsg string, _ time.Time) error {
+func (r *recorder) FinishRun(_ context.Context, id int64, status RunStatus, errMsg string, _ time.Time, targets []TargetRecord) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.finished = append(r.finished, strings.TrimSpace(fmt.Sprintf("%d %s %s", id, status, errMsg)))
+	r.targets = append(r.targets, targets)
 	return nil
 }
 

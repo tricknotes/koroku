@@ -99,8 +99,31 @@ type App struct {
 type Recorder interface {
 	StartRun(ctx context.Context, trigger Trigger, startedAt time.Time) (id int64, err error)
 	// FinishRun stores the outcome. errMsg is a short, already masked
-	// summary; it is empty when status is StatusSucceeded.
-	FinishRun(ctx context.Context, id int64, status RunStatus, errMsg string, finishedAt time.Time) error
+	// summary; it is empty when status is StatusSucceeded. targets says
+	// what happened to each target; it is empty when the run failed before
+	// backing anything up.
+	FinishRun(ctx context.Context, id int64, status RunStatus, errMsg string, finishedAt time.Time, targets []TargetRecord) error
+}
+
+// TargetStatus is the outcome of one target of a run.
+type TargetStatus string
+
+const (
+	TargetSucceeded TargetStatus = "succeeded"
+	// TargetWarning: stored, but some files could not be read.
+	TargetWarning TargetStatus = "warning"
+	TargetFailed  TargetStatus = "failed"
+)
+
+// TargetRecord is what a Recorder keeps of one target: its outcome and,
+// when it did not simply succeed, a short, already masked message.
+type TargetRecord struct {
+	// App is the slug; empty for the system.
+	App    string
+	Kind   Kind
+	Target string
+	Status TargetStatus
+	Error  string
 }
 
 // AppController stops and starts an app around a volume restore.

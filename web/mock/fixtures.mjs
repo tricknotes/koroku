@@ -278,6 +278,37 @@ function system(overrides = {}) {
   };
 }
 
+const SHOP_DUMP_ERROR =
+  'shop dump db: pg_dump: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: No such file or directory';
+
+/**
+ * `GET /api/apps/{slug}/backups/status`: the app's part of its latest run
+ * (ARCHITECTURE 10.2). By default it was stored when the host's last run
+ * succeeded.
+ */
+export function appBackupStatus(overrides = {}, run = {}, last = 9 * HOUR) {
+  return {
+    configured: true,
+    last_success_at: ago(last),
+    warning: false,
+    last_run: {
+      id: 40,
+      trigger: 'scheduled',
+      started_at: ago(last + 40 * 1000),
+      finished_at: ago(last),
+      status: 'succeeded',
+      whole_run: false,
+      error: '',
+      targets: [
+        { kind: 'volume', target: 'uploads', status: 'succeeded', error: '' },
+        { kind: 'dump', target: 'db', status: 'succeeded', error: '' },
+      ],
+      ...run,
+    },
+    ...overrides,
+  };
+}
+
 function backups(overrides = {}, last = 9 * HOUR) {
   return {
     configured: true,
@@ -503,13 +534,45 @@ export function buildScenario(name) {
                 status: 'failed',
                 started_at: ago(9 * HOUR + 30 * 1000),
                 finished_at: ago(9 * HOUR),
-                error: 'restic backup: no space left on device',
+                error: SHOP_DUMP_ERROR,
               },
               ...backups({}, STALE_BACKUP).runs,
             ],
+            // Only shop's dump failed; the other apps were stored.
+            problems: [{ app: 'shop', status: 'failed', whole_run: false }],
+            system_failed: false,
           },
           STALE_BACKUP,
         ),
+        appBackupStatus: new Map([
+          [
+            'shop',
+            appBackupStatus(
+              { warning: true, last_success_at: ago(STALE_BACKUP) },
+              {
+                id: 41,
+                status: 'failed',
+                started_at: ago(9 * HOUR + 30 * 1000),
+                finished_at: ago(9 * HOUR),
+                targets: [
+                  {
+                    kind: 'volume',
+                    target: 'uploads',
+                    status: 'succeeded',
+                    error: '',
+                  },
+                  {
+                    kind: 'dump',
+                    target: 'db',
+                    status: 'failed',
+                    error:
+                      'pg_dump: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: No such file or directory',
+                  },
+                ],
+              },
+            ),
+          ],
+        ]),
       });
     case 'empty':
       return scenario([], { noContainers: true });

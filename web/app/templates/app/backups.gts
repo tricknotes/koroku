@@ -30,7 +30,10 @@ import BackupForm, {
   volumeChoices,
   type VolumeChoice,
 } from 'koroku-console/utils/backup-form';
-import { backupHealth } from 'koroku-console/utils/backup-status';
+import {
+  appBackupHealth,
+  targetLabel,
+} from 'koroku-console/utils/backup-status';
 import { findPreset, HOOK_PRESETS } from 'koroku-console/utils/db-copy';
 import {
   inputChecked,
@@ -47,6 +50,7 @@ import { BACKUP_TRIGGER_LABELS } from 'koroku-console/utils/status';
 import type {
   App,
   AppVolume,
+  AppBackupStatus,
   BackupOverview,
   BackupRun,
   Snapshot,
@@ -83,7 +87,7 @@ function downloadLabel(snapshot: Snapshot): string {
   return `${snapshot.target} のダンプをダウンロード`;
 }
 
-function triggerLabel(run: BackupRun): string {
+function triggerLabel(run: Pick<BackupRun, 'trigger'>): string {
   return BACKUP_TRIGGER_LABELS[run.trigger] ?? run.trigger;
 }
 
@@ -97,6 +101,10 @@ export default class AppBackupsTemplate extends Component<Signature> {
   @service declare session: SessionService;
 
   overview = new Loadable<BackupOverview>(() => this.api.getBackups());
+  /** This app's outcome only: other apps' failures stay out of this tab. */
+  status = new Loadable<AppBackupStatus>(() =>
+    this.api.getAppBackupStatus(this.slug),
+  );
   snapshots = new Loadable<Snapshot[]>(() => this.api.listSnapshots(this.slug));
   /** The app's named volumes; the settings offer them as checkboxes. */
   volumeList = new Loadable<AppVolume[]>(() => this.api.listVolumes(this.slug));
@@ -149,7 +157,14 @@ export default class AppBackupsTemplate extends Component<Signature> {
   }
 
   get health() {
-    return this.overview.value ? backupHealth(this.overview.value) : null;
+    const status = this.status.value;
+    return status ? appBackupHealth(this.overview.value, status) : null;
+  }
+
+  /** When all of this app's targets were last stored. */
+  get lastSuccessAt(): string | null {
+    const status = this.status.value;
+    return status ? status.last_success_at : null;
   }
 
   get running(): boolean {
@@ -216,12 +231,17 @@ export default class AppBackupsTemplate extends Component<Signature> {
   private async load(): Promise<void> {
     await this.overview.load();
     if (!this.overview.value?.configured) return;
-    await Promise.all([this.snapshots.load(), this.volumeList.load()]);
+    await Promise.all([
+      this.status.load(),
+      this.snapshots.load(),
+      this.volumeList.load(),
+    ]);
   }
 
   /** What a finished run may have changed: snapshots, and volumes it saw. */
   private async refreshResults(): Promise<void> {
     await Promise.all([
+      this.status.load({ quiet: true }),
       this.snapshots.load({ quiet: true }),
       this.volumeList.load({ quiet: true }),
     ]);
@@ -387,27 +407,63 @@ export default class AppBackupsTemplate extends Component<Signature> {
           {{#if this.health.failedRun}}
             <Banner
               @tone="error"
-              @title="直近のバックアップが失敗しました"
+              @title={{if
+                this.health.failedRun.whole_run
+                "直近のバックアップの実行が、取得の前に失敗しました"
+                "直近のバックアップで、このアプリの取得に失敗しました"
+              }}
               data-test-backup-failed
             >
-              <span>{{this.health.failedRun.error}}</span>
+              {{#if this.health.failedRun.whole_run}}
+                <span>
+                  {{#if this.health.failedRun.error}}
+                    {{this.health.failedRun.error}}
+                  {{else}}
+                    このアプリを含め、どのアプリも取得できていません。
+                  {{/if}}
+                </span>
+              {{else}}
+                <ul class="banner-list" data-test-backup-failures>
+                  {{#each this.health.failures as |failure|}}
+                    <li><strong>{{targetLabel failure}}</strong>:
+                      {{failure.error}}</li>
+                  {{/each}}
+                </ul>
+              {{/if}}
               <span class="banner-detail">
                 {{triggerLabel this.health.failedRun}}実行、開始は
                 <RelativeTime @time={{this.health.failedRun.started_at}} />
               </span>
               {{#if this.health.stale}}
                 <span class="banner-detail">
-                  24 時間以上、成功したバックアップがありません。
+                  24 時間以上、このアプリのバックアップが成功していません。
                 </span>
               {{/if}}
             </Banner>
           {{else if this.health.stale}}
             <Banner @tone="warning" data-test-backup-warning>
-              {{#if overview.last_success_at}}
-                24 時間以上、バックアップが成功していません。
+              {{#if this.status.value.last_success_at}}
+                24 時間以上、このアプリのバックアップが成功していません。
               {{else}}
-                まだ一度もバックアップに成功していません。
+                このアプリはまだ一度もバックアップに成功していません。
               {{/if}}
+            </Banner>
+          {{/if}}
+          {{#if this.health.warnings.length}}
+            <Banner
+              @tone="warning"
+              @title="一部のファイルを読めずに保存しました"
+              data-test-backup-target-warnings
+            >
+              <ul class="banner-list">
+                {{#each this.health.warnings as |warning|}}
+                  <li><strong>{{targetLabel warning}}</strong>:
+                    {{warning.error}}</li>
+                {{/each}}
+              </ul>
+              <span
+                class="banner-detail"
+              >稼働中に変わったか消えたファイルです。スナップショットは保存されています。</span>
             </Banner>
           {{/if}}
           {{#if this.restored}}
@@ -442,8 +498,8 @@ export default class AppBackupsTemplate extends Component<Signature> {
               <div class="fact">
                 <dt>最終成功</dt>
                 <dd data-test-backup-last-success>
-                  {{#if overview.last_success_at}}
-                    <RelativeTime @time={{overview.last_success_at}} />
+                  {{#if this.lastSuccessAt}}
+                    <RelativeTime @time={{this.lastSuccessAt}} />
                   {{else}}
                     <span class="fact-none">まだありません</span>
                   {{/if}}

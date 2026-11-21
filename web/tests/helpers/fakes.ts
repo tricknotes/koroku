@@ -11,6 +11,8 @@ import StorageService from 'koroku-console/services/storage';
 import { ApiError } from 'koroku-console/utils/errors';
 import type {
   App,
+  AppBackupRun,
+  AppBackupStatus,
   AppVolume,
   BackupOverview,
   Deployment,
@@ -400,6 +402,33 @@ export function makeBackups(
     warning: false,
     next_run_at: '2026-11-18T18:00:00Z',
     runs: [],
+    ...overrides,
+  };
+}
+
+/** `GET /api/apps/{slug}/backups/status`: the app's last run succeeded. */
+export function makeAppBackupStatus(
+  overrides: Partial<AppBackupStatus> = {},
+  run: Partial<AppBackupRun> = {},
+): AppBackupStatus {
+  return {
+    configured: true,
+    last_success_at: '2026-11-17T18:00:40Z',
+    warning: false,
+    last_run: {
+      id: 12,
+      trigger: 'scheduled',
+      started_at: '2026-11-17T18:00:00Z',
+      finished_at: '2026-11-17T18:00:40Z',
+      status: 'succeeded',
+      whole_run: false,
+      error: '',
+      targets: [
+        { kind: 'volume', target: 'uploads', status: 'succeeded', error: '' },
+        { kind: 'dump', target: 'db', status: 'succeeded', error: '' },
+      ],
+      ...run,
+    },
     ...overrides,
   };
 }

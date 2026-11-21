@@ -629,6 +629,53 @@ export interface BackupOverview {
   /** Next scheduled run; `null` when backups are not configured. */
   next_run_at?: string | null;
   runs: BackupRun[] | null;
+  /**
+   * Apps whose latest backup did not fully succeed (only those the user
+   * has a role on). Older backends send none.
+   */
+  problems?: BackupProblem[];
+  /** The system's latest backup failed (owner only). */
+  system_failed?: boolean;
+}
+
+export type BackupTargetStatus = 'succeeded' | 'warning' | 'failed';
+
+/** An app whose latest backup did not fully succeed (ARCHITECTURE 10.2). */
+export interface BackupProblem {
+  app: string;
+  status: Exclude<BackupTargetStatus, 'succeeded'>;
+  /** The run failed before backing anything up: every app is concerned. */
+  whole_run: boolean;
+}
+
+/** What a run did to one volume or dump of an app. */
+export interface BackupTargetOutcome {
+  kind: 'system' | 'volume' | 'dump';
+  target: string;
+  status: BackupTargetStatus;
+  /** The (masked) reason when it did not simply succeed. */
+  error: string;
+}
+
+/** The latest run that concerns one app, reduced to that app's targets. */
+export interface AppBackupRun {
+  id: number;
+  trigger: BackupRun['trigger'];
+  started_at: string;
+  finished_at: string | null;
+  status: BackupTargetStatus;
+  whole_run: boolean;
+  /** The run's message when `whole_run`; empty for members. */
+  error: string;
+  targets: BackupTargetOutcome[];
+}
+
+/** `GET /api/apps/{slug}/backups/status`. */
+export interface AppBackupStatus {
+  configured: boolean;
+  last_success_at: string | null;
+  warning: boolean;
+  last_run: AppBackupRun | null;
 }
 
 export type CopySourceKind = 'live' | 'snapshot';
