@@ -145,3 +145,9 @@ func LoadOrCreateKey(path string) (key []byte, created bool, err error) {
 func EnvVarContext(appID int64, key string) string {
 	return fmt.Sprintf("env:%d:%s", appID, key)
 }
+
+// RegistryTokenContext is the associated data that binds an app's encrypted
+// container registry token to its row (ARCHITECTURE 6.1).
+func RegistryTokenContext(appID int64) string {
+	return fmt.Sprintf("registry:%d", appID)
+}

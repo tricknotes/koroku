@@ -119,6 +119,13 @@ func (f *fakeDeployer) Delete(ctx context.Context, app store.App, removeVolumes 
 	return f.store.DeleteApp(ctx, app.ID)
 }
 
+func (f *fakeDeployer) ForgetRegistryCredential(app store.App) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ops = append(f.ops, "forget-registry:"+app.Slug)
+	return nil
+}
+
 func (f *fakeDeployer) Services(_ context.Context, app store.App) ([]deploy.ServiceStatus, error) {
 	if err := f.record("services", app); err != nil {
 		return nil, err

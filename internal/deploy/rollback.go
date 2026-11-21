@@ -140,10 +140,17 @@ func (e *Engine) executeRollback(ctx context.Context, d store.Deployment, app st
 	}
 
 	log.Step(StepStart, "Starting containers")
+	// The kept images are normally all there; a missing one is pulled.
+	dockerConfig, err := e.registryConfig(ctx, app, log.masker)
+	if err != nil {
+		return false, err
+	}
 	if err := writeFileAtomic(e.EnvFile(app.Slug), env, 0o600); err != nil {
 		return false, fmt.Errorf("write env file: %w", err)
 	}
-	if err := e.up(ctx, e.invocation(app, src, meta.ComposeFile, true), e.ReleaseDir(app.Slug, src), log); err != nil {
+	inv := e.invocation(app, src, meta.ComposeFile, true)
+	inv.DockerConfig = dockerConfig
+	if err := e.up(ctx, inv, e.ReleaseDir(app.Slug, src), log); err != nil {
 		e.logContainerOutput(ctx, app, log)
 		return true, fmt.Errorf("start containers: %w", err)
 	}

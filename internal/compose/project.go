@@ -252,6 +252,20 @@ type Invocation struct {
 	// EnvFile is passed with --env-file for ${VAR} interpolation. With this
 	// flag Compose does not read the repository's own .env for interpolation.
 	EnvFile string
+	// DockerConfig is the Docker client config directory holding the
+	// app's registry credential (ARCHITECTURE 6.1). Empty means the
+	// default config of the user koroku runs as.
+	DockerConfig string
+}
+
+// Env returns the environment entries the call needs on top of koroku's
+// own: DOCKER_CONFIG when the app has a registry credential. The
+// credential is in the file the variable points to, never in arguments.
+func (i Invocation) Env() []string {
+	if i.DockerConfig == "" {
+		return nil
+	}
+	return []string{"DOCKER_CONFIG=" + i.DockerConfig}
 }
 
 // Args returns the full argument list for `docker`, ending with sub.

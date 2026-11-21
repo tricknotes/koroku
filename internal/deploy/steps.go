@@ -74,10 +74,20 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, fmt.Errorf("write release metadata: %w", err)
 	}
 
+	// The app's own registry login, for the build, pull and start below.
+	dockerConfig, err := e.registryConfig(ctx, app, log.masker)
+	if err != nil {
+		return false, err
+	}
+	if dockerConfig != "" {
+		log.Printf("Container registry credential: set for this app")
+	}
+
 	// Validation and build read the candidate env from the snapshot so that
 	// the running release's env file stays untouched until step 6.
 	base := e.invocation(app, d.ID, composeFile, false)
 	base.EnvFile = snapshot
+	base.DockerConfig = dockerConfig
 	repoProject, err := e.composeConfig(ctx, base, releaseDir, log)
 	if err != nil {
 		return false, err
@@ -123,6 +133,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	}
 	merged := e.invocation(app, d.ID, composeFile, true)
 	merged.EnvFile = snapshot
+	merged.DockerConfig = dockerConfig
 	project, err := e.composeConfig(ctx, merged, releaseDir, log)
 	if err != nil {
 		return false, err
@@ -157,14 +168,14 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		}
 		if d.PromotedFromID == nil || len(build) > 1 {
 			log.Step(StepBuild, "Building images")
-			if err := e.compose(ctx, merged, releaseDir, log, build...); err != nil {
+			if err := e.composePulling(ctx, merged, releaseDir, log, build...); err != nil {
 				return false, fmt.Errorf("build: %w", err)
 			}
 		}
 	}
 	if project.NeedsPull() {
 		log.Step(StepPull, "Pulling images")
-		if err := e.compose(ctx, merged, releaseDir, log, "pull", "--ignore-buildable"); err != nil {
+		if err := e.composePulling(ctx, merged, releaseDir, log, "pull", "--ignore-buildable"); err != nil {
 			return false, fmt.Errorf("pull: %w", err)
 		}
 	}
@@ -189,6 +200,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, fmt.Errorf("write env file: %w", err)
 	}
 	live := e.invocation(app, d.ID, composeFile, true)
+	live.DockerConfig = dockerConfig
 	if err := e.up(ctx, live, releaseDir, log); err != nil {
 		e.logContainerOutput(ctx, app, log)
 		return true, fmt.Errorf("start containers: %w", err)
@@ -281,6 +293,7 @@ func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, di
 	err := e.opts.Runner.Run(ctx, runner.Cmd{
 		Name:   "docker",
 		Args:   inv.Args("config", "--format", "json", "--no-env-resolution"),
+		Env:    inv.Env(),
 		Dir:    dir,
 		Stdout: &stdout,
 		Stderr: stderr,
@@ -324,18 +337,38 @@ func (e *Engine) revalidatedProject(ctx context.Context, app store.App, id int64
 }
 
 func (e *Engine) compose(ctx context.Context, inv compose.Invocation, dir string, log *deployLog, sub ...string) error {
+	return e.composeTo(ctx, inv, dir, log.Writer(), sub...)
+}
+
+func (e *Engine) composeTo(ctx context.Context, inv compose.Invocation, dir string, out io.Writer, sub ...string) error {
 	return e.opts.Runner.Run(ctx, runner.Cmd{
 		Name:   "docker",
 		Args:   inv.Args(sub...),
+		Env:    inv.Env(),
 		Dir:    dir,
-		Stdout: log.Writer(),
-		Stderr: log.Writer(),
+		Stdout: out,
+		Stderr: out,
 	})
+}
+
+// composePulling runs a compose command that may pull images (build, pull,
+// up). When it fails and the output says the registry refused access, the
+// log gets a hint about the app's registry credential and the error is a
+// *RegistryAuthError.
+func (e *Engine) composePulling(ctx context.Context, inv compose.Invocation, dir string, log *deployLog, sub ...string) error {
+	watcher := &registryAuthWatcher{dst: log.Writer()}
+	err := e.composeTo(ctx, inv, dir, watcher, sub...)
+	if err != nil && ctx.Err() == nil && watcher.Seen() {
+		configured := inv.DockerConfig != ""
+		logRegistryHint(log, configured)
+		return &RegistryAuthError{Configured: configured, Err: err}
+	}
+	return err
 }
 
 func (e *Engine) up(ctx context.Context, inv compose.Invocation, dir string, log *deployLog) error {
 	wait := strconv.Itoa(int(e.opts.WaitTimeout / time.Second))
-	return e.compose(ctx, inv, dir, log, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)
+	return e.composePulling(ctx, inv, dir, log, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)
 }
 
 // containerOutputLines is how many lines of each container are copied into
@@ -401,11 +434,18 @@ func (e *Engine) rollback(app store.App, log *deployLog) (restored bool) {
 		log.Printf("Rollback is not possible: the previous release no longer passes validation (%v).", err)
 		return false
 	}
+	dockerConfig, err := e.registryConfig(ctx, app, log.masker)
+	if err != nil {
+		log.Printf("Rollback failed: %v", err)
+		return false
+	}
 	if err := writeFileAtomic(e.EnvFile(app.Slug), env, 0o600); err != nil {
 		log.Printf("Rollback failed: the env file could not be restored: %v", err)
 		return false
 	}
-	if err := e.up(ctx, e.invocation(app, prev, meta.ComposeFile, true), prevDir, log); err != nil {
+	prevInv := e.invocation(app, prev, meta.ComposeFile, true)
+	prevInv.DockerConfig = dockerConfig
+	if err := e.up(ctx, prevInv, prevDir, log); err != nil {
 		log.Printf("Rollback failed: %v", err)
 		return false
 	}
