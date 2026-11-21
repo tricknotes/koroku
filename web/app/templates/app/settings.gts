@@ -16,6 +16,7 @@ import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
 import RoleNote from 'koroku-console/components/role-note';
 import MemoryHistory from 'koroku-console/components/memory-history';
+import RegistryCredential from 'koroku-console/components/registry-credential';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import type ApiService from 'koroku-console/services/api';
 import type AppContext from 'koroku-console/utils/app-context';
@@ -296,6 +297,10 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   get isOwner(): boolean {
     return can(this.app, 'owner');
+  }
+
+  get canManage(): boolean {
+    return !this.readOnly;
   }
 
   /** Start, stop and restart need deploy. */
@@ -1385,6 +1390,8 @@ export default class AppSettingsTemplate extends Component<Signature> {
         </div>
       </fieldset>
     </form>
+
+    <RegistryCredential @slug={{this.app.slug}} @canEdit={{this.canManage}} />
 
     {{#if this.canDeploy}}
       <section

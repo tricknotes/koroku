@@ -22,6 +22,8 @@ import type {
   Domain,
   DomainList,
   EnvList,
+  RegistryCredential,
+  RegistryCredentialInput,
   EnvPresets,
   EnvRequirements,
   EnvPending,
@@ -387,6 +389,33 @@ export default class ApiService extends Service {
         'DELETE',
         `/api/apps/${seg(slug)}/env/${seg(key)}`,
       ),
+    );
+  }
+
+  // Container registry credential
+
+  getRegistryCredential(slug: string): Promise<RegistryCredential> {
+    return this.request<RegistryCredential>(
+      'GET',
+      `/api/apps/${seg(slug)}/registry-credential`,
+    );
+  }
+
+  putRegistryCredential(
+    slug: string,
+    input: RegistryCredentialInput,
+  ): Promise<RegistryCredential> {
+    return this.request<RegistryCredential>(
+      'PUT',
+      `/api/apps/${seg(slug)}/registry-credential`,
+      { body: input },
+    );
+  }
+
+  deleteRegistryCredential(slug: string): Promise<RegistryCredential> {
+    return this.request<RegistryCredential>(
+      'DELETE',
+      `/api/apps/${seg(slug)}/registry-credential`,
     );
   }
 
