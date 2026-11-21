@@ -20,6 +20,7 @@ import RelativeTime from 'koroku-console/components/relative-time';
 import RoleNote from 'koroku-console/components/role-note';
 import RowList from 'koroku-console/components/row-list';
 import StatusIndicator from 'koroku-console/components/status-indicator';
+import scrollIntoViewWhen from 'koroku-console/modifiers/scroll-into-view-when';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
@@ -149,6 +150,11 @@ export default class AppDeployTemplate extends Component<Signature> {
 
   /** The deployment whose steps are open below its row. */
   @tracked selectedId: number | null = null;
+  /** The deployment opened from a link, scrolled into view once. */
+  @tracked scrollTargetId: number | null = null;
+
+  isScrollTarget = (deployment: Deployment): boolean =>
+    this.scrollTargetId === deployment.id;
 
   /** The deployment whose release waits in the rollback dialog. */
   @tracked rollbackTarget: Deployment | null = null;
@@ -277,6 +283,7 @@ export default class AppDeployTemplate extends Component<Signature> {
       this.deployments.some((d) => d.id === linked)
     ) {
       this.selectedId = linked;
+      this.scrollTargetId = linked;
     }
     // Otherwise open what most likely brought the reader here: a deployment
     // that is in progress, or the latest one when it failed.
@@ -726,6 +733,7 @@ export default class AppDeployTemplate extends Component<Signature> {
                     class="deploy-item
                       {{if (this.isSelected deployment) 'is-open'}}"
                     data-test-deployment={{deployment.id}}
+                    {{scrollIntoViewWhen (this.isScrollTarget deployment)}}
                   >
                     <div class="row deploy-row">
                       <div class="deploy-cell-state">

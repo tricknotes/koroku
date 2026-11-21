@@ -288,6 +288,23 @@ const SHOTS = [
     wait: DEPLOYMENT,
   },
   {
+    // From the overview's recent deployments (or GitHub): the deployment
+    // opens and the page scrolls to it. Viewport only, to show the position.
+    name: 'deploy-linked',
+    path: '/apps/blog/deploy?scenario=healthy&deployment=105',
+    wait: '[data-test-deployment="105"] [aria-expanded="true"]',
+    settle: 800,
+  },
+  {
+    name: 'deploy-linked-phone',
+    path: '/apps/blog/deploy?scenario=healthy&deployment=105',
+    wait: '[data-test-deployment="105"] [aria-expanded="true"]',
+    settle: 800,
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
     name: 'deploy-history-open',
     path: '/apps/blog/deploy?scenario=healthy',
     wait: DEPLOYMENT,

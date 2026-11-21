@@ -669,9 +669,24 @@ module('Acceptance | deploy', function (hooks) {
         makeDeployment({ id: 42 }),
       ];
       serveApp();
+      const scrolled: (string | null)[] = [];
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (this: Element) {
+        scrolled.push(this.getAttribute('data-test-deployment'));
+      };
 
-      await visit('/apps/blog/deploy?deployment=42');
+      try {
+        await visit('/apps/blog/deploy?deployment=42');
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
 
+      assert.deepEqual(
+        scrolled,
+        ['42'],
+        'the linked deployment is scrolled to',
+      );
       assert.strictEqual(
         fakes.eventSource.last.url,
         '/api/deployments/42/logs',
