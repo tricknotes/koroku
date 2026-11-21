@@ -1124,6 +1124,103 @@ SHOTS.push(
   },
 );
 
+// The container registry credential on the settings tab (ARCHITECTURE
+// 6.1): set (blog), not set (blog-staging), the form, a refused value, the
+// removal, and a member who may only look.
+const REGISTRY = '[data-test-registry]';
+const BAD_REGISTRY = `(() => {
+  const input = document.querySelector('[data-test-registry-field="registry"]');
+  input.value = 'https://ghcr.io/octo';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  const user = document.querySelector('[data-test-registry-field="username"]');
+  user.value = 'octo-bot';
+  user.dispatchEvent(new Event('input', { bubbles: true }));
+  document.querySelector('[data-test-registry-save]').click();
+  setTimeout(() => document.querySelector('${REGISTRY}').scrollIntoView(), 200);
+})()`;
+SHOTS.push(
+  {
+    name: 'registry-set',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-registry-readout]',
+    script: scrollTo(REGISTRY),
+  },
+  {
+    name: 'registry-set-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-registry-readout]',
+    script: scrollTo(REGISTRY),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'registry-empty',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: '[data-test-registry-empty]',
+    script: scrollTo(REGISTRY),
+  },
+  {
+    name: 'registry-form',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: '[data-test-registry-empty]',
+    click: '[data-test-registry-edit]',
+    script: scrollTo(REGISTRY),
+    then: '[data-test-registry-form]',
+  },
+  {
+    name: 'registry-form-phone',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: '[data-test-registry-empty]',
+    click: '[data-test-registry-edit]',
+    script: scrollTo(REGISTRY),
+    then: '[data-test-registry-form]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'registry-change',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-registry-readout]',
+    click: '[data-test-registry-edit]',
+    script: scrollTo(REGISTRY),
+    then: '[data-test-registry-form]',
+    themes: ['light'],
+  },
+  {
+    name: 'registry-error',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: '[data-test-registry-empty]',
+    click: '[data-test-registry-edit]',
+    script: BAD_REGISTRY,
+    then: `${REGISTRY} [data-test-field-error]`,
+  },
+  {
+    name: 'registry-error-phone',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: '[data-test-registry-empty]',
+    click: '[data-test-registry-edit]',
+    script: BAD_REGISTRY,
+    then: `${REGISTRY} [data-test-field-error]`,
+    ...PHONE,
+    fullPage: false,
+    themes: ['dark'],
+  },
+  {
+    name: 'registry-remove-confirm',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-registry-readout]',
+    click: '[data-test-registry-remove]',
+    then: '[data-test-dialog]',
+  },
+  {
+    name: 'registry-member-view',
+    path: '/apps/shop/settings?scenario=member',
+    wait: '[data-test-registry-empty]',
+    script: scrollTo(REGISTRY),
+    themes: ['light'],
+  },
+);
+
 // Settings tab.
 const SETTINGS = '[data-test-settings-form]';
 SHOTS.push(

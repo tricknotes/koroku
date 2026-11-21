@@ -387,6 +387,83 @@ route('DELETE', '/api/apps/:slug/env/:key', (context) => {
   return envList(context);
 });
 
+// The container registry credential (ARCHITECTURE 6.1). The production
+// blog pulls its images from GHCR with one; the other apps have none. The
+// token is kept only to tell whether one is set, and never sent back.
+function registryOf(context) {
+  const app = appOf(context);
+  context.state.registry ??= new Map([
+    [
+      'blog',
+      {
+        registry: 'ghcr.io',
+        username: 'octo-bot',
+        token: 'set',
+        updated_at: new Date(Date.now() - 2 * 86400000).toISOString(),
+      },
+    ],
+  ]);
+  return { app, saved: context.state.registry.get(app.slug) };
+}
+
+function registryJSON(saved) {
+  return saved
+    ? {
+        configured: true,
+        registry: saved.registry,
+        username: saved.username,
+        updated_at: saved.updated_at,
+      }
+    : {
+        configured: false,
+        registry: 'ghcr.io',
+        username: '',
+        updated_at: null,
+      };
+}
+
+route('GET', '/api/apps/:slug/registry-credential', (context) =>
+  registryJSON(registryOf(context).saved),
+);
+route('PUT', '/api/apps/:slug/registry-credential', (context) => {
+  const { app, saved } = registryOf(context);
+  if (context.scenario === 'stale-login') {
+    throw new HttpError(403, 'reauth_required');
+  }
+  const registry = String(context.body.registry ?? '')
+    .trim()
+    .toLowerCase();
+  const username = String(context.body.username ?? '').trim();
+  const token = String(context.body.token ?? '').trim();
+  const errors = {};
+  if (!/^[a-z0-9.-]+\.[a-z0-9-]+(:\d+)?$|^localhost(:\d+)?$/.test(registry)) {
+    errors.registry = 'enter the registry host';
+  }
+  if (!username || /[:\s]/.test(username))
+    errors.username = 'enter the username';
+  if (/\s/.test(token) || (!token && !saved)) errors.token = 'enter the token';
+  if (Object.keys(errors).length) {
+    throw new HttpError(422, 'validation_failed', errors);
+  }
+  const next = {
+    registry,
+    username,
+    token: token || saved.token,
+    updated_at: new Date().toISOString(),
+  };
+  context.state.registry.set(app.slug, next);
+  return registryJSON(next);
+});
+route('DELETE', '/api/apps/:slug/registry-credential', (context) => {
+  const { app, saved } = registryOf(context);
+  if (context.scenario === 'stale-login') {
+    throw new HttpError(403, 'reauth_required');
+  }
+  if (!saved) throw notFound('registry_credential_not_found');
+  context.state.registry.delete(app.slug);
+  return registryJSON(null);
+});
+
 /**
  * What the repository needs at a commit, compared with the saved keys. The
  * body carries a `status` field of its own, so it is sent as `json`.
@@ -949,6 +1026,8 @@ const ACCESS = [
   ['manage', 'PATCH', /^\/api\/apps\/([^/]+)$/],
   ['manage', 'PUT', /^\/api\/apps\/([^/]+)\/(env|tasks)(\/.*)?$/],
   ['manage', 'DELETE', /^\/api\/apps\/([^/]+)\/env\//],
+  ['manage', 'PUT', /^\/api\/apps\/([^/]+)\/registry-credential$/],
+  ['manage', 'DELETE', /^\/api\/apps\/([^/]+)\/registry-credential$/],
   [
     'manage',
     'POST',

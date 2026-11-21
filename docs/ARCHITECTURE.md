@@ -12,6 +12,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 - `compose.yaml` のデプロイ。`build:` があればホストでビルド、`image:` のみなら pull
 - アプリごとの `<slug>.dev.example.com` 自動割当と TLS、アプリごとの独自ドメイン追加（本番用）
 - 環境変数の管理、デプロイログと実行ログの閲覧
+- private なレジストリのイメージの取得（アプリごとのコンテナレジストリの認証。6.1）
 - 起動・停止・再起動・削除、過去コミットへの再デプロイ（ロールバック）
 - ブランチへの push での自動デプロイ（アプリごとに選ぶ。5.2）
 - バックアップとリストア、実行ログの保管
@@ -80,6 +81,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 | `/var/lib/koroku/koroku.db` | SQLite |
 | `/var/lib/koroku/apps/<slug>/releases/<deploy_id>/` | チェックアウトしたソースと生成した override |
 | `/var/lib/koroku/apps/<slug>/env` | 展開済み環境変数ファイル（0600） |
+| `/var/lib/koroku/apps/<slug>/docker/config.json` | アプリのコンテナレジストリの認証を書いた Docker の設定（ディレクトリ 0700、ファイル 0600。設定したアプリだけ。6.1） |
 | `/var/lib/koroku/apps/<slug>/release-state/<deploy_id>/` | そのリリースの環境変数スナップショット（0600）と、使った Compose ファイル名・ビルドしたイメージ名。ロールバック用（7 章） |
 | `/var/lib/koroku/apps/<slug>/deploys/<deploy_id>.log` | デプロイログ |
 | `/var/lib/koroku/logs/<slug>/<service>/` | 収集した実行ログ（10.1） |
@@ -265,7 +267,7 @@ services:
 
 1. `docker compose -p koroku-<slug> -f compose.yaml -f koroku.override.yaml config --format json` で正規化する。
 2. `build` を持つサービスがあれば `docker compose build`、`image` のみのサービスは `docker compose pull`。
-3. private レジストリ（GHCR など）は、ホストで `docker login` しておく（`/root/.docker/config.json`）。
+3. private レジストリ（GHCR など）のイメージは、アプリのコンテナレジストリの認証で取得する（6.1）。設定していないアプリは、ホストの root の Docker の設定（`sudo docker login` したもの）を使う。
 
 **ポリシー検査（正規化した JSON に対して実施、違反はデプロイ拒否）**
 
@@ -303,6 +305,25 @@ Compose には上と同じ結果になる書き方がほかにもあるので、
 - override ファイルは一時ファイルに書いてから rename で置く。チェックアウトの中身はリポジトリ由来で、同名のシンボリックリンクが置かれていると、リンク先（ホスト上の任意のファイル）を root 権限で上書きしてしまうため。Compose ファイルのパスも、途中のディレクトリがシンボリックリンクでリリース外へ出ていないことを確かめる。
 
 ただし「公開サービス以外のポート公開」と「公開サービスの `127.0.0.1:<割当ポート>` 以外への公開」は、フラグを立てても許可しない。Docker が publish したポートは ufw を通らずに外へ届くので（10 章）、override が効いていることの最終確認として常に検査する。bind mount のパスはシンボリックリンクを解決してから判定する（リポジトリ内のリンクでホストのディレクトリを持ち込めないようにするため）。
+
+### 6.1 コンテナレジストリの認証
+
+private なイメージ（CI がビルドして `ghcr.io/<owner>/<repo>:sha-...` に置いたイメージや、Dockerfile の `FROM` に書いたベースイメージ）は、アプリごとに持つ「コンテナレジストリの認証」で取得する。ホストの root で `docker login` すると、ログインは `/root/.docker/config.json` 1 つに入り、全アプリで共有される。メンバーにアプリを任せる構成（10.7）では、あるアプリのためのトークンでほかのアプリのイメージも取れてしまい、同じレジストリに別のアカウントで入りたいアプリ同士は上書きし合うため。
+
+- **持つもの**: アプリごとに 1 つ、レジストリのホスト（既定 `ghcr.io`、ポート付きも可）、ユーザー名、トークン。`registry_credentials` テーブルに置き、トークンは環境変数の値と同じくマスターキーで AES-256-GCM で暗号化する。関連データにアプリの ID を入れて、暗号文をほかのアプリの行へ写しても開けないようにする。アプリの削除で消える。
+- **API**: `GET` / `PUT` / `DELETE /api/apps/{slug}/registry-credential`（形は [API.md](API.md)）。トークンはどの応答にも入れず、設定済みかどうか、レジストリ、ユーザー名、更新時刻だけを返す。`PUT` でトークンを空にすると保存済みのトークンを残す（レジストリやユーザー名だけを直せるように）。
+- **誰が**: 見るのは閲覧以上（トークンを返さないので）、設定・変更・削除は管理以上（10.7）。保存と削除は再ログインから 10 分以内に限る（10.3）。
+- **使い方**: koroku が取得を伴いうる `docker compose` を走らせる直前に、DB から `/var/lib/koroku/apps/<slug>/docker/config.json`（ディレクトリ 0700、ファイル 0600）を書き直し、そのコマンドだけに環境変数 `DOCKER_CONFIG=/var/lib/koroku/apps/<slug>/docker` を渡す。ファイルにはそのレジストリの `auths` の 1 件（`ユーザー名:トークン` の base64）だけを書く。Docker Hub（`docker.io`）は Docker CLI と同じく `https://index.docker.io/v1/` の名前で書く。トークンはコマンドの引数に入れない。
+  - 対象: デプロイの `config`・`build`・`pull`・`up`（昇格もこの流れ）、失敗時の自動ロールバックと手動のロールバックの `up`、起動の `up`。`config` は取得しないが、同じ呼び出しの組み立てで渡しても害がない
+  - 対象外: 停止、再起動（`restart`）、`logs`、`ps`、コマンドの実行（`run`。稼働中のリリースのイメージを使う）、バックアップのダンプ（`exec`）、DB のコピー。どれもイメージを取得しない
+- **設定していないアプリ**は、`DOCKER_CONFIG` を渡さず、ディレクトリも消す。koroku の既定の設定（root の `/root/.docker/config.json`）で動くので、ホストで `sudo docker login` したレジストリはこれまでどおり使える。設定したアプリは root のログインを見ない（1 アプリで 2 つの private レジストリは使えない）。
+- **削除**: DB から消したら、その場でディレクトリも消す。消し損ねても、次の操作の直前の書き直しで消える。DB が唯一の正で、ファイルは毎回 DB から作る。
+- **ビルド**: `docker compose build` が BuildKit に渡す認証は、Compose（クライアント側）が読む Docker の設定から来る。`DOCKER_CONFIG` を渡すと、`FROM` のベースイメージの解決にもその認証が使われる。結合テストで、ログインを求める偽のレジストリを立て、`docker compose pull` と BuildKit の `FROM` の解決の両方が、アプリの認証を送ってくることを確かめている。
+- **Docker CLI のプラグイン**: `DOCKER_CONFIG` を変えると、Docker CLI はプラグインを `$DOCKER_CONFIG/cli-plugins` とシステムのディレクトリ（`/usr/libexec/docker/cli-plugins` など）から探す。プロビジョニングは Compose と Buildx を apt のパッケージで入れるので、システムのディレクトリにあり、見つかる。root のホームの `~/.docker/cli-plugins` にだけ置いたプラグインは、認証を設定したアプリでは見つからない。
+- **エラー**: `build`・`pull`・`up` が失敗し、出力にレジストリの拒否（`unauthorized`、`no basic auth credentials`、`authentication required`、`denied`、`401 Unauthorized` など。`permission denied` は除く）があれば、その手順のログに「アプリのコンテナレジストリの認証（レジストリ、ユーザー名、トークンの期限と権限）を確かめる」案内を 1 行書き、デプロイのエラーも同じ趣旨にする。認証を設定していないアプリでは、設定を促す案内にする。起動の `up` での拒否は 502 `registry_denied`。
+- **マスク**: トークンと、`auths` に書く base64 の値をデプロイログのマスクに加える。
+- **トークンの勧め**: 読み取りだけができるもの。GHCR なら `read:packages` だけを付けた classic な Personal access token か、読み取り専用のボットアカウントのトークン（画面のヒントでも勧める）。
+- 限界: 認証を設定している間、トークンは平文でアプリのディレクトリのファイルにある（root だけが読める。env ファイルと同じ扱い）。Docker の credential helper は使わない（デーモンとして常駐するものが増え、アプリごとに分けにくいため）。
 
 ## 7. デプロイフロー
 
@@ -559,6 +580,7 @@ GET /page   ───────▶ forward_auth ──────────
 | --- | --- |
 | `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、DB のコピーの設定（ロードフック、コピー後のコマンド。10.6）、必要な変数の読み方（`env_source`、`env_example_path`、9.4）、アクセスの保護（`access_protection`、`protection_exempt_paths`、8.3）、昇格元のアプリ（`promote_from_app_id`、9.7）、自動デプロイ（`auto_deploy`、`auto_deploy_branch`、5.2） |
 | `env_vars` | 環境変数。値は暗号化して保存（`app_id` + `key` で一意） |
+| `registry_credentials` | アプリのコンテナレジストリの認証（`app_id` で一意。レジストリ、ユーザー名、暗号化したトークン、更新時刻。6.1） |
 | `deployments` | ref、コミット、状態、エラー、時刻、環境変数の指紋（9.2）、ロールバックの戻す先（`source_deployment_id`、7.1）、昇格元のデプロイ（`promoted_from_deployment_id`、9.7）、始めたユーザー（`actor_user_id`、`actor_login`。10.7）、何が始めたか（`trigger_kind`、`pusher`、5.2） |
 | `github_deployments` | デプロイに対応する GitHub のデプロイ ID と、GitHub が最後に受け付けた状態（5.1） |
 | `app_domains` | 独自ドメイン（8.1） |
@@ -900,7 +922,7 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
 - **待受**: `koroku` と Caddy admin API は 127.0.0.1 のみ。外部公開は 22、80、443。
 - **前提と限界**: ポリシー検査は「自分のリポジトリを誤って危険な構成でデプロイしない」ための検査で、悪意あるリポジトリを安全に動かす隔離ではない。「検査を緩める」フラグを立てたアプリには、上の保護の多くが効かない（フラグは 1 つで、項目ごとには選べない）。Caddy の admin API は認証なしの TCP（ループバック）なので、ホストのネットワークに入れたコンテナからは設定を書き換えられる。ログのマスクは環境変数の値そのものとの一致だけで、3 文字未満の値や、base64 などに変換された値は隠せない。
 - **ポート公開の抑止**: Docker が publish したポートの通信は ufw の設定を通らずに届く（[Packet filtering and firewalls](https://docs.docker.com/network/packet-filtering-firewalls/)）。ufw に頼らず、6 章の override で全サービスの `ports` を消すか 127.0.0.1 に限定する。
-- **シークレット**: 環境変数の値は AES-256-GCM で暗号化して SQLite に保存する。マスターキーは `/etc/koroku/master.key`。UI は既定でマスク表示。
+- **シークレット**: 環境変数の値とコンテナレジストリのトークン（6.1）は AES-256-GCM で暗号化して SQLite に保存する。マスターキーは `/etc/koroku/master.key`。UI は環境変数を既定でマスク表示し、レジストリのトークンは表示しない。
 
 **管理 UI の保護の細則**
 
@@ -1028,6 +1050,7 @@ docker compose -p koroku-<slug> -f <リリースの Compose ファイル> -f <�
   - 環境変数の保存（一括置換も 1 件ずつの追加・変更・削除も、作成時に `env` で一緒に保存するのも。9.8）と、値の表示（下記）
   - volume のリストアと、DB ダンプのダウンロード
   - DB のコピー（10.6）
+  - コンテナレジストリの認証の保存と削除（6.1）
   - アプリ設定のうち、`environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）の変更。本番の確認ダイアログを外す、ポリシー検査を外す、別のコードを動かす、のいずれかにつながるため
   - 本番アプリで自動デプロイ（5.2）を有効にすることと、自動デプロイを有効にしたまま追うブランチ（`auto_deploy_branch`、空なら既定のブランチ）を変えること。push だけで本番が変わるようになるため。無効にするのは求めない
   - アクセスの保護（8.3）を外す変更と、保護を外すパスの一覧の変更。アプリを外へ開くことにつながるため
@@ -1194,7 +1217,7 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 | --- | --- |
 | 閲覧（`view`） | アプリを見る: 概要、デプロイの履歴とログ、実行ログ（退避済みログのダウンロードを含む）、タスクの登録と実行の履歴、ドメイン、バックアップの一覧と volume の一覧、DB のコピーの履歴、設定（読み取り）、メモリの履歴、必要な環境変数の照合。環境変数はキーだけ（値は返さない）。アプリのリポジトリのブランチとコミットの一覧 |
 | デプロイ（`deploy`） | 閲覧 + デプロイ（ブランチかコミット）、ロールバック、取り消し、そのアプリへの昇格（9.7）と昇格の確認画面、起動・停止・再起動 |
-| 管理（`manage`） | デプロイ + 環境変数（値の表示と編集）、アプリ設定（下のオーナー専用を除く）、ドメイン（追加・再検証・プライマリ・強制有効化・削除）、バックアップ（実行、volume のリストア、ダンプのダウンロード、DB のコピー）、タスク（コマンドと登録タスクの実行、登録タスクの編集、実行の取り消し） |
+| 管理（`manage`） | デプロイ + 環境変数（値の表示と編集）、コンテナレジストリの認証の設定・変更・削除（6.1）、アプリ設定（下のオーナー専用を除く）、ドメイン（追加・再検証・プライマリ・強制有効化・削除）、バックアップ（実行、volume のリストア、ダンプのダウンロード、DB のコピー）、タスク（コマンドと登録タスクの実行、登録タスクの編集、実行の取り消し） |
 
 **オーナーだけの操作**
 

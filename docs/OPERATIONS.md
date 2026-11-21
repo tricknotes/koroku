@@ -114,12 +114,13 @@ sudo ./deploy/provision.sh ./koroku
 
 | 秘密 | 場所 | 作り方 |
 | --- | --- | --- |
-| マスターキー（環境変数の暗号化） | `/etc/koroku/master.key`（0600） | `koroku` が初回起動時に生成する。失うと保存済みの環境変数を復号できない |
+| マスターキー（環境変数とレジストリのトークンの暗号化） | `/etc/koroku/master.key`（0600） | `koroku` が初回起動時に生成する。失うと保存済みの環境変数とレジストリのトークンを復号できない |
 | GitHub App の秘密鍵 | `/etc/koroku/github-app.pem`（0600） | GitHub App の設定画面で発行して置く |
 | GitHub App の client secret | `/etc/koroku/config.toml`（0600） | 同上 |
 | オブジェクトストレージの Access Key ID / Secret Access Key | `/etc/koroku/config.toml`（0600） | バケット限定のアクセスキーを発行して書く |
 | restic のリポジトリパスワード | `/etc/koroku/restic.key`（0600） | 自分で決めて置く。失うとバックアップを復元できない |
-| private なイメージのレジストリ認証 | `/root/.docker/config.json` | VPS 上で `sudo docker login ghcr.io` |
+| private なイメージのレジストリ認証（アプリごと。推奨） | `koroku.db` に暗号化して保存。使うときに `/var/lib/koroku/apps/<slug>/docker/config.json`（0600）へ書き出す | 管理 UI のアプリの設定タブ「コンテナレジストリの認証」で入れる（管理以上のロールと再ログインが要る）。そのアプリのビルド・pull・起動にだけ使われ、ほかのアプリには見えない（ARCHITECTURE 6.1） |
+| private なイメージのレジストリ認証（ホスト全体） | `/root/.docker/config.json` | VPS 上で `sudo docker login ghcr.io`。`koroku` は root で動くので、`sudo` を付けずに自分のユーザーでログインしても使われない。アプリごとの認証を設定していない全アプリが共有するので、メンバーにアプリを任せるときはアプリごとの認証を使う |
 | TLS 証明書と ACME アカウント | `/var/lib/caddy`（Caddy が管理） | 自動。バックアップ対象外で、失っても再発行される |
 
 `/etc/koroku` は 0700、`/var/lib/koroku` も 0700 で、どちらも root 専用。

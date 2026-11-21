@@ -17,6 +17,7 @@ import (
 
 	"github.com/tricknotes/koroku/internal/compose"
 	"github.com/tricknotes/koroku/internal/runner"
+	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
 )
 
@@ -99,10 +100,14 @@ func (e *Engine) projectOnly(app store.App) compose.Invocation {
 func (e *Engine) runCompose(ctx context.Context, inv compose.Invocation, dir string, sub ...string) error {
 	var output bytes.Buffer
 	err := e.opts.Runner.Run(ctx, runner.Cmd{
-		Name: "docker", Args: inv.Args(sub...), Dir: dir, Stdout: &output, Stderr: &output,
+		Name: "docker", Args: inv.Args(sub...), Env: inv.Env(), Dir: dir, Stdout: &output, Stderr: &output,
 	})
 	if err != nil {
-		return fmt.Errorf("docker compose %s: %w: %s", sub[0], err, lastOutputLine(output.String()))
+		err = fmt.Errorf("docker compose %s: %w: %s", sub[0], err, lastOutputLine(output.String()))
+		if sub[0] == "up" && ctx.Err() == nil && outputHasRegistryAuthFailure(output.String()) {
+			return &RegistryAuthError{Configured: inv.DockerConfig != "", Err: err}
+		}
+		return err
 	}
 	return nil
 }
@@ -165,6 +170,10 @@ func (e *Engine) Start(ctx context.Context, app store.App) error {
 		}
 		if err := e.revalidate(ctx, app, *app.CurrentDeploymentID, meta.ComposeFile); err != nil {
 			return fmt.Errorf("the release cannot be started as it is (deploy the app again): %w", err)
+		}
+		// A missing image is pulled with the app's own registry login.
+		if inv.DockerConfig, err = e.registryConfig(ctx, app, secrets.NewMasker()); err != nil {
+			return err
 		}
 		wait := strconv.Itoa(int(e.opts.WaitTimeout / time.Second))
 		err = e.runCompose(ctx, inv, dir, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)

@@ -426,6 +426,26 @@ export interface EnvVar {
   pending?: EnvPending | null;
 }
 
+/**
+ * `GET /api/apps/{slug}/registry-credential`: the app's container registry
+ * login (ARCHITECTURE 6.1). The token is never sent back.
+ */
+export interface RegistryCredential {
+  configured: boolean;
+  /** The saved registry, or the suggested default when none is set. */
+  registry: string;
+  username: string;
+  updated_at: string | null;
+}
+
+/** The body of `PUT /api/apps/{slug}/registry-credential`. */
+export interface RegistryCredentialInput {
+  registry: string;
+  username: string;
+  /** Empty keeps the saved token. */
+  token: string;
+}
+
 /** `GET /api/apps/{slug}/env`, with hidden values turned into ''. */
 export interface EnvList {
   vars: EnvVar[];

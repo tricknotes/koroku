@@ -291,6 +291,12 @@ export function serveConsole(
       deployments: state.deployments,
     }))
     .on('GET', `${app}/env`, () => ({ vars: state.env }))
+    .on('GET', `${app}/registry-credential`, {
+      configured: true,
+      registry: 'ghcr.io',
+      username: 'octo-bot',
+      updated_at: '2026-11-16T03:00:00Z',
+    })
     .on('GET', `${app}/tasks`, {
       tasks: [
         {

@@ -20,14 +20,22 @@ type AppOperator interface {
 	Prune(ctx context.Context, images, builder bool) (deploy.PruneResult, error)
 	DockerDiskUsage(ctx context.Context) ([]deploy.DiskUsageItem, error)
 	ContainerResources(ctx context.Context) (deploy.ContainerResources, error)
+	// ForgetRegistryCredential removes the Docker config written from the
+	// app's registry credential once the credential is deleted.
+	ForgetRegistryCredential(app store.App) error
 }
 
 // writeOpError maps operation errors; it reports whether one was written.
 func (s *Server) writeOpError(w http.ResponseWriter, r *http.Request, err error) bool {
 	var policyErr *compose.PolicyError
+	var registryErr *deploy.RegistryAuthError
 	switch {
 	case err == nil:
 		return false
+	case errors.As(err, &registryErr):
+		s.log.Warn("the registry refused a pull", "method", r.Method, "path", r.URL.Path, "error", err)
+		writeError(w, http.StatusBadGateway, "registry_denied",
+			"the registry refused access to an image; check the container registry credential in the app's settings")
 	case errors.Is(err, deploy.ErrBusy):
 		writeError(w, http.StatusConflict, "busy", "the app is being deployed or another operation is in progress")
 	case errors.Is(err, deploy.ErrNotDeployed):

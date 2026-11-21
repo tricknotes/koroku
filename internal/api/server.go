@@ -259,6 +259,10 @@ func (s *Server) apiRoutes() []route {
 		{"GET /api/apps/{slug}/env/requirements", onApp(levelView), s.handleEnvRequirements},
 		{"PUT /api/apps/{slug}/env/{key}", onApp(levelManage), s.handlePutEnvVar},
 		{"DELETE /api/apps/{slug}/env/{key}", onApp(levelManage), s.handleDeleteEnvVar},
+		// The token is never returned, so viewing needs no more than view.
+		{"GET /api/apps/{slug}/registry-credential", onApp(levelView), s.handleGetRegistryCredential},
+		{"PUT /api/apps/{slug}/registry-credential", onApp(levelManage), s.handlePutRegistryCredential},
+		{"DELETE /api/apps/{slug}/registry-credential", onApp(levelManage), s.handleDeleteRegistryCredential},
 		{"GET /api/apps/{slug}/deployments", onApp(levelView), s.handleListDeployments},
 		// Deploying, rolling back and promoting into the app.
 		{"POST /api/apps/{slug}/deployments", onApp(levelDeploy), s.handleCreateDeployment},

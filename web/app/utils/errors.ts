@@ -51,6 +51,10 @@ const MESSAGES: Record<string, string> = {
   app_not_found: 'アプリが見つかりません。',
   deployment_not_found: 'デプロイが見つかりません。',
   domain_not_found: 'ドメインが見つかりません。',
+  registry_credential_not_found:
+    'コンテナレジストリの認証は設定されていません。ほかの画面で削除されたかもしれません。',
+  registry_denied:
+    'レジストリがイメージの取得を拒否しました。設定タブのコンテナレジストリの認証（レジストリ、ユーザー名、トークンの期限と権限）を確かめてください。',
   task_not_found:
     'このタスクは見つかりません。ほかの画面で変更されたかもしれません。再読み込みしてください。',
   task_run_not_found: '実行の記録が見つかりません。',
@@ -168,6 +172,7 @@ const SPECIFIC_NOT_FOUND = new Set([
   'app_not_found',
   'deployment_not_found',
   'domain_not_found',
+  'registry_credential_not_found',
   'repo_not_found',
   'snapshot_not_found',
   'task_not_found',
