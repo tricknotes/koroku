@@ -1,7 +1,7 @@
 {
   "name": "koroku",
-  "version": "0.10.1",
-  "description": "Prepare a repository's Docker Compose app so koroku can deploy it, and read why a deployment failed",
+  "version": "0.11.0",
+  "description": "Prepare a repository's Docker Compose app so koroku can deploy it, read why a deployment failed, and make it use less memory",
   "author": {
     "name": "tricknotes"
   },
