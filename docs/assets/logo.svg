@@ -1,8 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="koroku">
-  <rect width="120" height="120" rx="26" fill="#5B3CC4"/>
-  <g fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M42 28V92"/>
-    <path d="M42 74Q58 48 80 46"/>
-    <path d="M54 67L82 92"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="1.5 1.5 13 13" width="120" height="120" role="img" aria-label="koroku">
+  <style>
+    .mark { fill: #171717; }
+    .lines { stroke: #fff; }
+    @media (prefers-color-scheme: dark) {
+      .mark { fill: #ededed; }
+      .lines { stroke: #0a0a0a; }
+    }
+  </style>
+  <path class="mark" d="M3.5 1.5h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z"/>
+  <path class="lines" d="M5 5.25h6M5 8h6M5 10.75h3.25" fill="none" stroke-width="1.75" stroke-linecap="round"/>
 </svg>
