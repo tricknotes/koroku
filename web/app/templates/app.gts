@@ -11,6 +11,7 @@ import Banner from 'koroku-console/components/banner';
 import { buttonClass } from 'koroku-console/components/button';
 import EnvironmentBadge from 'koroku-console/components/environment-badge';
 import ProtectionBadge from 'koroku-console/components/protection-badge';
+import RoleBadge from 'koroku-console/components/role-badge';
 import Icon from 'koroku-console/components/icon';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import Tabs from 'koroku-console/components/tabs';
@@ -20,6 +21,7 @@ import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
 import { errorMessage } from 'koroku-console/utils/errors';
 import { hostOf } from 'koroku-console/utils/format';
+import { can } from 'koroku-console/utils/roles';
 import {
   APP_STATE_HINTS,
   APP_STATE_KINDS,
@@ -81,6 +83,11 @@ export default class AppTemplate extends Component<Signature> {
 
   get onDeployTab(): boolean {
     return this.router.currentRouteName === DEPLOY_ROUTE;
+  }
+
+  /** Members below the deploy role only look (ARCHITECTURE 10.7). */
+  get canDeploy(): boolean {
+    return can(this.args.model.app, 'deploy');
   }
 
   get deployUrl(): string {
@@ -163,6 +170,7 @@ export default class AppTemplate extends Component<Signature> {
               {{#if @model.app.access_protection}}
                 <ProtectionBadge data-test-app-protected />
               {{/if}}
+              <RoleBadge @role={{@model.app.role}} />
             </div>
             <div class="app-header-meta">
               <StatusIndicator
@@ -187,12 +195,14 @@ export default class AppTemplate extends Component<Signature> {
               {{/if}}
             </div>
           </div>
-          <a
-            class={{this.deployButtonClass}}
-            href={{this.deployUrl}}
-            data-test-header-deploy
-            {{on "click" this.openDeploy}}
-          >デプロイ</a>
+          {{#if this.canDeploy}}
+            <a
+              class={{this.deployButtonClass}}
+              href={{this.deployUrl}}
+              data-test-header-deploy
+              {{on "click" this.openDeploy}}
+            >デプロイ</a>
+          {{/if}}
         </header>
 
         <Tabs

@@ -37,6 +37,15 @@ export default class ApplicationTemplate extends Component {
     return this.section === 'apps' ? 'page' : undefined;
   }
 
+  /** The system and members screens are the owner's (ARCHITECTURE 10.7). */
+  get isOwner(): boolean {
+    return this.session.isOwner;
+  }
+
+  get currentRoute(): string | undefined {
+    return this.router.currentRouteName ?? undefined;
+  }
+
   get systemCurrent(): 'page' | undefined {
     return this.section === 'system' ? 'page' : undefined;
   }
@@ -77,12 +86,14 @@ export default class ApplicationTemplate extends Component {
               aria-current={{this.appsCurrent}}
               data-test-nav="apps"
             >アプリ</LinkTo>
-            <LinkTo
-              @route="system"
-              class="nav-link"
-              aria-current={{this.systemCurrent}}
-              data-test-nav="system"
-            >システム</LinkTo>
+            {{#if this.isOwner}}
+              <LinkTo
+                @route="system"
+                class="nav-link"
+                aria-current={{this.systemCurrent}}
+                data-test-nav="system"
+              >システム</LinkTo>
+            {{/if}}
           </nav>
         {{/if}}
 
@@ -92,6 +103,8 @@ export default class ApplicationTemplate extends Component {
             {{#if this.session.user}}
               <UserMenu
                 @user={{this.session.user}}
+                @owner={{this.isOwner}}
+                @currentRoute={{this.currentRoute}}
                 @current={{this.securityCurrent}}
                 @busy={{this.loggingOut}}
                 @onLogout={{this.logout}}

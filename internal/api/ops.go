@@ -85,6 +85,9 @@ func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 	if s.writeOpError(w, r, s.ops.Delete(r.Context(), app, removeVolumes)) {
 		return
 	}
+	// The app's roles went with it; members left without any role can no
+	// longer log in.
+	s.revokeCredentialsWithoutAccess(r)
 	w.WriteHeader(http.StatusNoContent)
 }
 

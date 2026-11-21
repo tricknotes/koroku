@@ -28,6 +28,7 @@ import {
   shortSha,
 } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import { can } from 'koroku-console/utils/roles';
 import { isRollback, rollbackSummary } from 'koroku-console/utils/rollback';
 import {
   healthLabel,
@@ -162,6 +163,15 @@ export default class AppOverviewTemplate extends Component<Signature> {
 
   get slug(): string {
     return this.args.model.slug;
+  }
+
+  /** Starting the app and deploying need deploy (ARCHITECTURE 10.7). */
+  get canDeploy(): boolean {
+    return can(this.app, 'deploy');
+  }
+
+  get canManage(): boolean {
+    return can(this.app, 'manage');
   }
 
   get app(): App {
@@ -476,12 +486,14 @@ export default class AppOverviewTemplate extends Component<Signature> {
                     <p class="overview-stopped-hint" data-test-stopped-hint>
                       {{this.stoppedHint}}
                     </p>
-                    <Button
-                      @busy={{this.starting}}
-                      @busyLabel="起動中…"
-                      data-test-control="start"
-                      {{on "click" this.start}}
-                    >起動</Button>
+                    {{#if this.canDeploy}}
+                      <Button
+                        @busy={{this.starting}}
+                        @busyLabel="起動中…"
+                        data-test-control="start"
+                        {{on "click" this.start}}
+                      >起動</Button>
+                    {{/if}}
                   </div>
                 {{/if}}
               </div>
@@ -712,12 +724,14 @@ export default class AppOverviewTemplate extends Component<Signature> {
               @description={{this.emptyState.description}}
             >
               <:action>
-                <LinkTo
-                  @route="app.deploy"
-                  @model={{this.slug}}
-                  class={{buttonClass "default"}}
-                  data-test-overview-deploy
-                >{{this.emptyState.action}}</LinkTo>
+                {{#if this.canDeploy}}
+                  <LinkTo
+                    @route="app.deploy"
+                    @model={{this.slug}}
+                    class={{buttonClass "default"}}
+                    data-test-overview-deploy
+                  >{{this.emptyState.action}}</LinkTo>
+                {{/if}}
               </:action>
             </EmptyState>
           </div>
@@ -731,7 +745,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
               @route="app.domains"
               @model={{this.slug}}
               class="overview-more"
-            >管理</LinkTo>
+            >{{if this.canManage "管理" "開く"}}</LinkTo>
           </:actions>
           <:default>
             {{#if this.domains.loaded}}

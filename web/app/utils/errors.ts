@@ -30,6 +30,12 @@ const MESSAGES: Record<string, string> = {
   unauthenticated: 'ログインが必要です。',
   reauth_required:
     'この操作には再ログインが必要です（直近 10 分以内のログインが条件です）。',
+  forbidden_role:
+    'このアプリでのあなたのロールでは、この操作はできません。オーナーにロールの変更を頼んでください。',
+  member_exists: 'このユーザーはすでにメンバーです。',
+  member_not_found: 'メンバーが見つかりません。すでに外されています。',
+  user_not_found: 'この名前の GitHub ユーザーは見つかりません。',
+  is_owner: 'このユーザーはオーナーです。オーナーはメンバーに加えられません。',
   session_not_found: 'セッションが見つかりません。すでに終了しています。',
   token_not_found: 'トークンが見つかりません。すでに失効しています。',
   too_many_tokens:
@@ -190,7 +196,8 @@ export const UNAVAILABLE_MESSAGES: Record<Unavailability, string> = {
 };
 
 const LOGIN_ERRORS: Record<string, string> = {
-  not_allowed: 'このアカウントはログインを許可されていません。',
+  not_allowed:
+    'このアカウントはログインを許可されていません。メンバーなら、オーナーにアプリのロールを与えてもらってください。',
   state_mismatch:
     'ログインの途中で状態が一致しなくなりました。もう一度やり直してください。',
   github_error:

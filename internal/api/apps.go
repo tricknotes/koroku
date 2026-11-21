@@ -72,6 +72,9 @@ type appJSON struct {
 	LatestDeployment     *deploymentJSON   `json:"latest_deployment"`
 	CreatedAt            time.Time         `json:"created_at"`
 	UpdatedAt            time.Time         `json:"updated_at"`
+	// Role is what the requesting user may do on the app: "owner" for the
+	// owner, otherwise the member's role (ARCHITECTURE 10.7).
+	Role string `json:"role"`
 }
 
 func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
@@ -108,6 +111,11 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		CreatedAt:            app.CreatedAt,
 		UpdatedAt:            app.UpdatedAt,
 	}
+	lvl, err := s.appLevel(r, app)
+	if err != nil {
+		return appJSON{}, err
+	}
+	out.Role = lvl.String()
 	// The primary URL and the number of domains waiting for DNS let the app
 	// list render without one domain request per app.
 	out.PrimaryURL = out.URL
@@ -459,14 +467,26 @@ func (s *Server) loadApp(w http.ResponseWriter, r *http.Request) (store.App, boo
 	return app, true
 }
 
+// handleListApps lists every app for the owner, and the apps a member has
+// a role on for a member.
 func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
 	apps, err := s.store.ListApps(r.Context())
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
+	var roles map[int64]string
+	if a, _ := actorFrom(r); !a.Owner {
+		if roles, err = s.store.RolesOf(r.Context(), a.UserID); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+	}
 	out := make([]appJSON, 0, len(apps))
 	for _, app := range apps {
+		if roles != nil && roles[app.ID] == "" {
+			continue
+		}
 		j, err := s.appToJSON(r, app)
 		if err != nil {
 			s.internalError(w, r, err)
@@ -577,6 +597,23 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		// The slug names the Compose project, its volumes and the hostname.
 		errs.add("slug", "cannot be changed")
 	}
+	if !isOwner(r) {
+		// Refused before the pairing is validated, so that a member cannot
+		// learn from the error which other apps exist.
+		fields, err := s.ownerOnlyChanges(r, before, app, in)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		if len(fields) > 0 {
+			writeJSON(w, http.StatusForbidden, errorBody{Error: errorDetail{
+				Code:    "forbidden_role",
+				Message: "only the owner can change these settings",
+				Details: map[string]any{"required": levelOwner.String(), "fields": fields},
+			}})
+			return
+		}
+	}
 	if err := s.applyPromoteFrom(r.Context(), in, &app, errs); err != nil {
 		s.internalError(w, r, err)
 		return
@@ -606,6 +643,44 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, j)
+}
+
+// ownerOnlyChanges lists the settings an update changes that only the owner
+// may change (ARCHITECTURE 10.7): the environment (production asks for a
+// confirmation before each deploy), turning the policy check off, where the
+// code comes from, links to other apps, and making a production app deploy
+// pushes by itself.
+// after has the input applied except promote_from, which is compared by
+// name.
+func (s *Server) ownerOnlyChanges(r *http.Request, before, after store.App, in appInput) ([]string, error) {
+	var fields []string
+	if before.Environment != after.Environment {
+		fields = append(fields, "environment")
+	}
+	if enablesProductionAutoDeploy(before, after) {
+		fields = append(fields, "auto_deploy")
+	}
+	if before.RelaxPolicy != after.RelaxPolicy {
+		fields = append(fields, "relax_policy")
+	}
+	if before.RepoFullName != after.RepoFullName || before.RepoURL != after.RepoURL ||
+		!sameID(before.RepoID, after.RepoID) {
+		fields = append(fields, "repository")
+	}
+	if in.PromoteFrom != nil {
+		current, err := s.promoteFromSlug(r.Context(), before)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(*in.PromoteFrom) != current {
+			fields = append(fields, "promote_from")
+		}
+	}
+	return fields, nil
+}
+
+func sameID(a, b *int64) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }
 
 // touchesSafeguards reports whether an update touches a setting that guards

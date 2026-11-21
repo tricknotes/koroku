@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -91,6 +92,41 @@ func TestUserByID(t *testing.T) {
 	}
 	if _, err := c.UserByID(context.Background(), 1); !errors.Is(err, ErrNotFound) {
 		t.Errorf("missing user: err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestUserByLogin(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.mux.HandleFunc("GET /users/{login}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Error("the user lookup sent credentials")
+		}
+		switch r.PathValue("login") {
+		case "octocat":
+			writeJSON(w, http.StatusOK, map[string]any{"id": 583231, "login": "octocat", "type": "User"})
+		case "octo-org":
+			writeJSON(w, http.StatusOK, map[string]any{"id": 9919, "login": "octo-org", "type": "Organization"})
+		default:
+			writeError(w, http.StatusNotFound, "Not Found")
+		}
+	})
+	c := f.client()
+	user, err := c.UserByLogin(context.Background(), "octocat")
+	if err != nil {
+		t.Fatalf("UserByLogin: %v", err)
+	}
+	if user.ID != 583231 || user.Login != "octocat" {
+		t.Errorf("user = %+v", user)
+	}
+	for _, login := range []string{"nobody", "octo-org"} {
+		if _, err := c.UserByLogin(context.Background(), login); !errors.Is(err, ErrNotFound) {
+			t.Errorf("%s: err = %v, want ErrNotFound", login, err)
+		}
+	}
+	for _, login := range []string{"", "-octo", "octo-", "oc--to", "../user", strings.Repeat("a", 40)} {
+		if _, err := c.UserByLogin(context.Background(), login); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("%q: err = %v, want ErrInvalidArgument", login, err)
+		}
 	}
 }
 

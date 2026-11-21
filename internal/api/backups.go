@@ -82,7 +82,12 @@ func (s *Server) handleBackupStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := make([]backupRunJSON, 0, len(runs))
+	// The run history is the host's, and its errors may name other apps;
+	// members see only the overall state.
 	for _, run := range runs {
+		if !isOwner(r) {
+			break
+		}
 		out = append(out, backupRunToJSON(run))
 	}
 	configured := s.backups != nil

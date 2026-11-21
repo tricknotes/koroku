@@ -74,12 +74,17 @@ func (s *Store) GetSession(ctx context.Context, tokenHash string, now time.Time)
 	return sess, nil
 }
 
-// ListSessions returns the unexpired sessions of a user, newest first.
+// AllUsers makes ListSessions, ListLoginEvents and ListAPITokens return the
+// records of every user (what the owner sees).
+const AllUsers int64 = -1
+
+// ListSessions returns the unexpired sessions of a user (or of everyone,
+// with AllUsers), newest first.
 func (s *Store) ListSessions(ctx context.Context, githubUserID int64, now time.Time) ([]Session, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+sessionColumns+` FROM sessions
-		 WHERE github_user_id = ? AND expires_at > ? ORDER BY created_at DESC, id`,
-		githubUserID, toMillis(now))
+		 WHERE (? = -1 OR github_user_id = ?) AND expires_at > ? ORDER BY created_at DESC, id`,
+		githubUserID, githubUserID, toMillis(now))
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
 	}
@@ -118,11 +123,12 @@ func (s *Store) DeleteSession(ctx context.Context, tokenHash string) error {
 	return nil
 }
 
-// DeleteSessionByID removes a session of a user by its public ID. It returns
-// ErrNotFound when the user has no such session.
+// DeleteSessionByID removes a session of a user (or of anyone, with
+// AllUsers) by its public ID. It returns ErrNotFound when there is no such
+// session.
 func (s *Store) DeleteSessionByID(ctx context.Context, githubUserID int64, id string) error {
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM sessions WHERE id = ? AND github_user_id = ?`, id, githubUserID)
+		`DELETE FROM sessions WHERE id = ? AND (? = -1 OR github_user_id = ?)`, id, githubUserID, githubUserID)
 	if err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
@@ -213,11 +219,13 @@ func (s *Store) AddLoginEvent(ctx context.Context, ev LoginEvent) error {
 	return nil
 }
 
-// ListLoginEvents returns the newest login attempts first.
-func (s *Store) ListLoginEvents(ctx context.Context, limit int) ([]LoginEvent, error) {
+// ListLoginEvents returns the newest login attempts of a user (or of
+// everyone, with AllUsers) first.
+func (s *Store) ListLoginEvents(ctx context.Context, githubUserID int64, limit int) ([]LoginEvent, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT at, outcome, github_user_id, login, ip, user_agent
-		 FROM login_events ORDER BY id DESC LIMIT ?`, limit)
+		 FROM login_events WHERE (? = -1 OR github_user_id = ?) ORDER BY id DESC LIMIT ?`,
+		githubUserID, githubUserID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list login events: %w", err)
 	}

@@ -147,6 +147,11 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		return err
 	}
 	defer func() { _ = st.Close() }()
+	// API tokens issued before tokens had a user belong to the owner
+	// (ARCHITECTURE 10.7).
+	if err := st.AssignUnownedAPITokens(ctx, cfg.GitHub.AllowedUserID); err != nil {
+		return err
+	}
 
 	key, created, err := secrets.LoadOrCreateKey(cfg.MasterKeyFile)
 	if err != nil {
@@ -314,6 +319,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		return fmt.Errorf("github: %w", err)
 	}
 	apiOpts.PublicFiles = publicGitHub
+	// Adding a member resolves its login with the public users API.
+	apiOpts.Users = publicGitHub
 	if gh != nil {
 		tokens := deploy.GitHubTokens{Client: gh}
 		deployOpts.Tokens = tokens

@@ -32,6 +32,8 @@ type TaskRun struct {
 	Error        string
 	StartedAt    time.Time
 	FinishedAt   *time.Time
+	// Actor is who started the run; nil for older records.
+	Actor *Actor
 }
 
 // ListTasks returns the registered tasks of an app in display order.
@@ -99,7 +101,7 @@ func (s *Store) ReplaceTasks(ctx context.Context, appID int64, tasks []Task) err
 }
 
 const taskRunColumns = `id, app_id, task_name, service, command, deployment_id, status,
-	exit_code, error, started_at, finished_at`
+	exit_code, error, started_at, finished_at, actor_user_id, actor_login`
 
 func scanTaskRun(row rowScanner) (TaskRun, error) {
 	var (
@@ -108,9 +110,11 @@ func scanTaskRun(row rowScanner) (TaskRun, error) {
 		exitCode   sql.NullInt64
 		started    int64
 		finished   sql.NullInt64
+		actorID    sql.NullInt64
+		actor      string
 	)
 	err := row.Scan(&r.ID, &r.AppID, &r.TaskName, &r.Service, &r.Command, &deployment, &r.Status,
-		&exitCode, &r.Error, &started, &finished)
+		&exitCode, &r.Error, &started, &finished, &actorID, &actor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return TaskRun{}, ErrNotFound
 	}
@@ -126,15 +130,19 @@ func scanTaskRun(row rowScanner) (TaskRun, error) {
 	}
 	r.StartedAt = fromMillis(started)
 	r.FinishedAt = fromNullMillis(finished)
+	r.Actor = actorFromColumns(actorID, actor)
 	return r, nil
 }
 
 // StartTaskRun records a run that starts now.
 func (s *Store) StartTaskRun(ctx context.Context, run TaskRun, now time.Time) (TaskRun, error) {
+	actorID, actorLogin := actorColumns(ctx)
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO task_runs (app_id, task_name, service, command, deployment_id, status, started_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		run.AppID, run.TaskName, run.Service, run.Command, nullInt(run.DeploymentID), StatusRunning, toMillis(now))
+		`INSERT INTO task_runs (app_id, task_name, service, command, deployment_id, status, started_at,
+			actor_user_id, actor_login)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.AppID, run.TaskName, run.Service, run.Command, nullInt(run.DeploymentID), StatusRunning, toMillis(now),
+		actorID, actorLogin)
 	if err != nil {
 		return TaskRun{}, fmt.Errorf("start task run: %w", err)
 	}

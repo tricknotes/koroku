@@ -14,6 +14,7 @@ import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
 import RelativeTime from 'koroku-console/components/relative-time';
+import RoleNote from 'koroku-console/components/role-note';
 import RowList from 'koroku-console/components/row-list';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import TabSection from 'koroku-console/components/tab-section';
@@ -25,6 +26,7 @@ import { inputValue, preventDefault, setValue } from 'koroku-console/utils/dom';
 import { ApiError, fieldErrors } from 'koroku-console/utils/errors';
 import { formatDuration } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import { can } from 'koroku-console/utils/roles';
 import {
   TASK_RUN_STATUS_KINDS,
   TASK_RUN_STATUS_LABELS,
@@ -140,6 +142,17 @@ export default class AppTasksTemplate extends Component<Signature> {
     void this.loadRuns();
     this.poller.every(this, POLL_INTERVAL, () => this.poll());
   }
+
+  /** Running, editing and canceling need manage (ARCHITECTURE 10.7). */
+  get canManage(): boolean {
+    return can(this.args.model.app, 'manage');
+  }
+
+  get canEditTasks(): boolean {
+    return this.canManage && Boolean(this.tasks.value?.length);
+  }
+
+  canCancel = (run: TaskRun): boolean => this.canManage && isActive(run);
 
   get app(): App {
     return this.args.model.app;
@@ -375,7 +388,7 @@ export default class AppTasksTemplate extends Component<Signature> {
 
     <TabSection @title="タスク" data-test-tasks-section>
       <:actions>
-        {{#if this.tasks.value.length}}
+        {{#if this.canEditTasks}}
           {{#unless this.editing}}
             <Button
               @size="small"
@@ -539,14 +552,16 @@ export default class AppTasksTemplate extends Component<Signature> {
                           >{{task.command}}</code>
                         </div>
                         <div class="task-action">
-                          <Button
-                            @size="small"
-                            @disabled={{this.runDisabled}}
-                            class="row-action"
-                            aria-label="「{{task.name}}」を実行"
-                            data-test-run-task
-                            {{on "click" (fn this.runTask task)}}
-                          >実行</Button>
+                          {{#if this.canManage}}
+                            <Button
+                              @size="small"
+                              @disabled={{this.runDisabled}}
+                              class="row-action"
+                              aria-label="「{{task.name}}」を実行"
+                              data-test-run-task
+                              {{on "click" (fn this.runTask task)}}
+                            >実行</Button>
+                          {{/if}}
                         </div>
                       </Row>
                     {{/each}}
@@ -559,10 +574,12 @@ export default class AppTasksTemplate extends Component<Signature> {
                     @description="よく使うコマンド（マイグレーションの状態の確認など）に名前を付けておくと、ここからボタン 1 つで実行できます。"
                   >
                     <:action>
-                      <Button
-                        data-test-add-first-task
-                        {{on "click" this.startEditing}}
-                      >タスクを追加</Button>
+                      {{#if this.canManage}}
+                        <Button
+                          data-test-add-first-task
+                          {{on "click" this.startEditing}}
+                        >タスクを追加</Button>
+                      {{/if}}
                     </:action>
                   </EmptyState>
                 </div>
@@ -573,62 +590,67 @@ export default class AppTasksTemplate extends Component<Signature> {
       </:default>
     </TabSection>
 
-    <TabSection @title="コマンドを実行" data-test-command-section>
-      <p class="pane-description">
-        稼働中のリリースと同じイメージ・環境変数・メモリ上限の新しいコンテナで 1
-        回だけ実行します。端末と入力はありません。出力の環境変数の値は伏せて記録しますが、コマンドの文字列はそのまま残るので、秘密はコマンドに書かず環境変数で渡してください。
-      </p>
-      <form
-        class="task-form"
-        data-test-command-form
-        {{on "submit" (preventDefault this.submitCommand)}}
-      >
-        <FormField class="task-form-service" @label="サービス" as |field|>
-          <select
-            id={{field.id}}
-            data-test-command-service
-            {{on "change" this.selectService}}
-          >
-            {{#each this.serviceNames as |name|}}
-              <option value={{name}} selected={{eq name this.service}}>
-                {{name}}
-              </option>
-            {{/each}}
-          </select>
-        </FormField>
-        <FormField class="task-form-command" @label="コマンド" as |field|>
-          <input
-            id={{field.id}}
-            type="text"
-            class="mono"
-            spellcheck="false"
-            autocomplete="off"
-            placeholder="bin/rails runner 'puts User.count'"
-            value={{this.command}}
-            data-test-command-input
-            {{on "input" (setValue this "command")}}
-          />
-        </FormField>
-        <Button
-          @type="submit"
-          @variant="primary"
-          @busy={{this.starting}}
-          @busyLabel="開始中…"
-          @disabled={{this.runDisabled}}
-          class="task-form-submit"
-          data-test-command-submit
-        >実行</Button>
-        {{#if this.hasActive}}
-          <p class="task-form-note" data-test-run-active>
-            実行中のコマンドが終わるまで、次のコマンドは実行できません。
-          </p>
-        {{else if @model.isProduction}}
-          <p class="task-form-note" data-test-production-hint>
-            本番アプリのため、実行前に確認します。
-          </p>
-        {{/if}}
-      </form>
-    </TabSection>
+    {{#if this.canManage}}
+      <TabSection @title="コマンドを実行" data-test-command-section>
+        <p class="pane-description">
+          稼働中のリリースと同じイメージ・環境変数・メモリ上限の新しいコンテナで
+          1
+          回だけ実行します。端末と入力はありません。出力の環境変数の値は伏せて記録しますが、コマンドの文字列はそのまま残るので、秘密はコマンドに書かず環境変数で渡してください。
+        </p>
+        <form
+          class="task-form"
+          data-test-command-form
+          {{on "submit" (preventDefault this.submitCommand)}}
+        >
+          <FormField class="task-form-service" @label="サービス" as |field|>
+            <select
+              id={{field.id}}
+              data-test-command-service
+              {{on "change" this.selectService}}
+            >
+              {{#each this.serviceNames as |name|}}
+                <option value={{name}} selected={{eq name this.service}}>
+                  {{name}}
+                </option>
+              {{/each}}
+            </select>
+          </FormField>
+          <FormField class="task-form-command" @label="コマンド" as |field|>
+            <input
+              id={{field.id}}
+              type="text"
+              class="mono"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="bin/rails runner 'puts User.count'"
+              value={{this.command}}
+              data-test-command-input
+              {{on "input" (setValue this "command")}}
+            />
+          </FormField>
+          <Button
+            @type="submit"
+            @variant="primary"
+            @busy={{this.starting}}
+            @busyLabel="開始中…"
+            @disabled={{this.runDisabled}}
+            class="task-form-submit"
+            data-test-command-submit
+          >実行</Button>
+          {{#if this.hasActive}}
+            <p class="task-form-note" data-test-run-active>
+              実行中のコマンドが終わるまで、次のコマンドは実行できません。
+            </p>
+          {{else if @model.isProduction}}
+            <p class="task-form-note" data-test-production-hint>
+              本番アプリのため、実行前に確認します。
+            </p>
+          {{/if}}
+        </form>
+      </TabSection>
+    {{else}}
+      <RoleNote @needed="manage" @what="コマンドとタスクの実行" />
+    {{/if}}
 
     <TabSection @title="実行履歴" data-test-runs-section>
       {{#if this.runs.stale}}
@@ -722,7 +744,7 @@ export default class AppTasksTemplate extends Component<Signature> {
                       </div>
 
                       <div class="deploy-cell-actions">
-                        {{#if (isActive run)}}
+                        {{#if (this.canCancel run)}}
                           <Button
                             @size="small"
                             @disabled={{eq this.canceling run.id}}

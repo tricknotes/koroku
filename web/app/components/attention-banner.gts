@@ -65,8 +65,15 @@ function line(item: AttentionItem): Line {
   }
 }
 
-function lines(items: AttentionItem[]): Line[] {
-  return items.map(line);
+/**
+ * The host's lines point to the system screen, which only the owner has
+ * (ARCHITECTURE 10.7); members get the text without the link.
+ */
+function lines(items: AttentionItem[], owner: boolean | undefined): Line[] {
+  return items.map((item) => {
+    const l = line(item);
+    return owner === false && l.route === 'system' ? { ...l, route: '' } : l;
+  });
 }
 
 /**
@@ -75,7 +82,11 @@ function lines(items: AttentionItem[]): Line[] {
  * Render it only when there are items: a healthy host shows no banner.
  */
 const AttentionBanner: TOC<{
-  Args: { items: AttentionItem[] };
+  Args: {
+    items: AttentionItem[];
+    /** `false` for a member: no links to the owner's system screen. */
+    owner?: boolean;
+  };
 }> = <template>
   <Banner
     @tone="warning"
@@ -83,7 +94,7 @@ const AttentionBanner: TOC<{
     data-test-attention
   >
     <ul class="banner-list">
-      {{#each (lines @items) key="key" as |item|}}
+      {{#each (lines @items @owner) key="key" as |item|}}
         <li data-test-attention-item={{item.key}}>
           {{#if item.subject}}<strong>{{item.subject}}</strong>
           {{/if}}{{item.text}}
@@ -91,9 +102,11 @@ const AttentionBanner: TOC<{
             <span>最終成功:
               <RelativeTime @time={{item.time}} /></span>
           {{/if}}
-          <LinkTo @route={{item.route}} @models={{item.models}}>
-            {{item.link}}
-          </LinkTo>
+          {{#if item.route}}
+            <LinkTo @route={{item.route}} @models={{item.models}}>
+              {{item.link}}
+            </LinkTo>
+          {{/if}}
         </li>
       {{/each}}
     </ul>

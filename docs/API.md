@@ -27,7 +27,8 @@
 | 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない（M3） |
 | 403 | `token_not_allowed` | API トークンでは使えない API（API トークンの節） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
-| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found` | 対象がない |
+| 403 | `forbidden_role` | ユーザーのロールではできない操作（ARCHITECTURE 10.7）。`details.required` は要るもの（`view` / `deploy` / `manage` / `owner`）。設定の `PATCH` でオーナー専用の項目を変えようとしたときは `details.fields` に項目名（`relax_policy`、`repository`、`promote_from`） |
+| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found`、`db_copy_not_found` | 対象がない。メンバーがロールを持たないアプリ（とそのデプロイ・実行・コピー）も、存在しないものとして同じ 404 になる |
 | 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens`、`not_deployed`、`promotion_unavailable`、`promotion_stale` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
 | 429 | `rate_limited` | API トークンの利用回数の上限（1 分あたり 120 回）を超えた。`Retry-After` あり |
@@ -35,18 +36,58 @@
 | 500 | `internal` | サーバー側の失敗（詳細はサーバーログ） |
 | 503 | `not_configured` | その機能に必要な設定（GitHub App、オブジェクトストレージなど）がない |
 
+## 権限（2026-11-21）
+
+ログインできるのは、オーナー（`config.toml` の `[github] allowed_user_id`）と、アプリのロールを 1 つ以上持つメンバー（ARCHITECTURE 10.7）。各エンドポイントの要件は次のとおりで、ロールは `view` < `deploy` < `manage` の順に上のものが下のものを含む。オーナーはすべてを使える。
+
+| 要件 | エンドポイント |
+| --- | --- |
+| 全ユーザー | `GET /api/session`、`GET /api/apps`（メンバーにはロールのあるアプリだけ）、`GET /api/system`（メンバーには `log_archive.last_error` と `caddy.last_error` を空にして返す）、`GET /api/backups`（メンバーには `runs` を空にして返す）、セッション・ログイン履歴・API トークン（メンバーは自分のものだけ） |
+| オーナーだけ | `POST /api/apps`、`DELETE /api/apps/{slug}`、`GET /api/repos`、`GET /api/repos/{owner}/{repo}/compose`、`GET /api/repos/{owner}/{repo}/env-presets`、`/api/system/*`（`docker`、`containers`、`github`、`prune`）、`/api/members*` |
+| `view` | アプリと、その下の参照系（`GET /api/apps/{slug}`、`services`、`memory`、`env`（キーだけ）、`env/requirements`、`deployments`、`domains`、`logs`、`logs/history`、`logs/archives`、`logs/archives/url`、`backups`、`volumes`、`db-copies`、`tasks`、`task-runs`）、`GET /api/deployments/{id}`（と `logs`）、`GET /api/task-runs/{id}`（と `logs`）、`GET /api/db-copies/{id}`（と `logs`）。`GET /api/repos/{owner}/{repo}/branches` と `commits` は、そのリポジトリ（`repo_full_name`）から作ったアプリに `view` 以上があれば使える |
+| `deploy` | `POST /api/apps/{slug}/deployments`（ロールバックと昇格を含む）、`GET /api/apps/{slug}/promotion`、`POST /api/apps/{slug}/start`・`stop`・`restart`、`POST /api/deployments/{id}/cancel` |
+| `manage` | `PATCH /api/apps/{slug}`（オーナー専用の項目を除く）、環境変数の変更系、ドメインの変更系、`POST /api/apps/{slug}/backups/restore`、`GET /api/apps/{slug}/backups/{snapshot}/download`、`POST /api/apps/{slug}/db-copies`（送り側の `manage` も要る。送り側にロールがなければ `404 source_not_found`）、`PUT /api/apps/{slug}/tasks`、`POST /api/apps/{slug}/task-runs`、`POST /api/task-runs/{id}/cancel`。`POST /api/backups` は、どれかのアプリに `manage` があれば使える（実行はホスト全体の 1 回） |
+
+- 要件を満たさなければ `403 forbidden_role`。ロールのないアプリに関わるものは `404`（共通の表）。判定は再ログイン（`reauth_required`）より先に行う。
+- `PATCH /api/apps/{slug}` で `environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。本番アプリの `auto_deploy` を有効にすること（と、有効なまま追うブランチを変えること）もオーナーだけ（`details.fields` に `auto_deploy`）。今と同じ値を送るのはかまわない。
+- API トークンも、トークンのユーザーとして同じ要件で判定する。
+
+## メンバー（2026-11-21）
+
+オーナーだけが使える。メンバーの形:
+
+```json
+{
+  "github_user_id": 583231,
+  "login": "octocat",
+  "avatar_url": "https://avatars.githubusercontent.com/u/583231",
+  "added_at": "2026-11-21T03:00:00Z",
+  "roles": [{"app": "blog", "role": "deploy"}, {"app": "blog-staging", "role": "manage"}]
+}
+```
+
+| メソッドとパス | 内容 |
+| --- | --- |
+| `GET /api/members` | `{"owner": {"github_user_id": 1}, "members": [メンバー, ...]}`（加えた順）。`roles` は slug 順 |
+| `POST /api/members` | 追加。ボディ `{"login": "octocat"}`（先頭の `@` は無視）。GitHub の公開 API で数値の ID を引き、ロールなしで加える。201 でメンバー。直近 10 分以内のログインでなければ `403 reauth_required`。login の形でなければ `422 validation_failed`（`details.login`）、GitHub にいない（organization を含む）なら `404 user_not_found`、オーナーなら `422 is_owner`、すでにメンバーなら `409 member_exists`。GitHub が答えなければ `502 github_error` か `503 github_rate_limited` |
+| `DELETE /api/members/{id}` | 204。外す。ロール、セッション、API トークンも消える。なければ `404 member_not_found` |
+| `PUT /api/members/{id}/roles/{slug}` | ボディ `{"role": "view"}`（`view` / `deploy` / `manage`）。そのアプリのロールを決める（置き換え）。200 でメンバー。ロールを与えるか上げるときは直近 10 分以内のログインが要る（下げるときは要らない）。不正な `role` は `422 validation_failed`。メンバーでなければ `404 member_not_found`、アプリがなければ `404 app_not_found` |
+| `DELETE /api/members/{id}/roles/{slug}` | そのアプリのロールを外す。200 でメンバー。ロールが 1 つもなくなったメンバーのセッションと API トークンは消える |
+
+`{id}` は GitHub のユーザー ID（数値）。
+
 ## セッション（M3、強化は 2026-11-19）
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/session` | 常に 200。`{"authenticated": true, "user": {"id": 1, "login": "octo", "avatar_url": "https://..."}, "reauth_until": "2026-11-19T03:10:00Z"}` か `{"authenticated": false}`。`reauth_until` は再ログインなしで危険な操作ができる期限（ログインから 10 分。`--insecure-no-auth` では `null`） |
+| `GET /api/session` | 常に 200。`{"authenticated": true, "user": {"id": 1, "login": "octo", "avatar_url": "https://...", "owner": true}, "reauth_until": "2026-11-19T03:10:00Z"}` か `{"authenticated": false}`。`reauth_until` は再ログインなしで危険な操作ができる期限（ログインから 10 分。`--insecure-no-auth` では `null`）。`owner` はオーナーなら `true`、メンバーなら `false`（`--insecure-no-auth` では `true`） |
 | `GET /auth/github/login?return_to=/apps/blog/env` | GitHub の認可画面へリダイレクト（ページ遷移で開く）。`return_to` はログイン後に戻るパス（省略時は `/`）。`/` で始まらないもの、`//` や `\` を含むものは無視して `/` に戻す |
-| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（許可ユーザーではない）、`state_mismatch`、`github_error`、`not_configured`（GitHub App が未設定） |
+| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（オーナーでも、ロールを持つメンバーでもない）、`state_mismatch`、`github_error`、`not_configured`（GitHub App が未設定） |
 | `POST /auth/logout` | 204。セッションを破棄 |
-| `GET /api/sessions` | 有効なセッションの一覧（新しい順）。`{"sessions": [{"id": "9f2c41d07a1b3e55", "created_at": "...", "last_seen_at": "...", "expires_at": "...", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ...", "current": true}]}`。`last_seen_at` は 1 分単位の目安 |
-| `DELETE /api/sessions/{id}` | 204。そのセッションを終了する（自分のセッションを指定するとログアウトと同じ）。なければ `404 session_not_found` |
-| `POST /api/sessions/revoke-others` | 自分以外のセッションをすべて終了する。200 で `{"revoked": 2}` |
-| `GET /api/login-events` | ログイン履歴（新しい順、最大 50 件）。`{"events": [{"at": "...", "outcome": "succeeded", "github_user_id": 1, "login": "octo", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ..."}]}`。`outcome` は `succeeded` / `not_allowed`（古い版が残した `two_factor_required` / `two_factor_unknown` もありうる） |
+| `GET /api/sessions` | 有効なセッションの一覧（新しい順）。メンバーには自分のもの、オーナーには全員のもの。`{"sessions": [{"id": "9f2c41d07a1b3e55", "created_at": "...", "last_seen_at": "...", "expires_at": "...", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ...", "current": true, "user": {"id": 1, "login": "octo"}}]}`。`last_seen_at` は 1 分単位の目安 |
+| `DELETE /api/sessions/{id}` | 204。そのセッションを終了する（自分のセッションを指定するとログアウトと同じ）。メンバーは自分のものだけ、オーナーは誰のものでも終了できる。なければ `404 session_not_found` |
+| `POST /api/sessions/revoke-others` | このセッション以外の、自分のセッションをすべて終了する（オーナーでもメンバーのものは終了しない）。200 で `{"revoked": 2}` |
+| `GET /api/login-events` | ログイン履歴（新しい順、最大 50 件）。メンバーには自分のもの、オーナーには全員のもの（拒否した試みを含む）。`{"events": [{"at": "...", "outcome": "succeeded", "github_user_id": 1, "login": "octo", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ..."}]}`。`outcome` は `succeeded` / `not_allowed`（古い版が残した `two_factor_required` / `two_factor_unknown` もありうる） |
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
@@ -58,12 +99,14 @@
 
 **管理（セッション Cookie でだけ使える）**
 
-トークンの形: `{"id": "3fa9c2d17b40e815", "name": "ノート PC の Claude Code", "created_at": "...", "expires_at": "...", "last_used_at": null, "last_used_ip": ""}`。`last_used_at` は 1 分単位の目安で、まだ使われていなければ `null`。
+トークンの形: `{"id": "3fa9c2d17b40e815", "user": {"id": 1, "login": "octo"}, "name": "ノート PC の Claude Code", "created_at": "...", "expires_at": "...", "last_used_at": null, "last_used_ip": ""}`。`last_used_at` は 1 分単位の目安で、まだ使われていなければ `null`。`user` は発行したユーザーで、トークンはそのユーザーの権限で動く（メンバーのトークンは、そのメンバーがロールを持つアプリしか読めない）。メンバーを外すか、メンバーがロールをすべて失うとトークンは消える。
+
+一覧と失効は、メンバーには自分のトークン、オーナーには全員のトークンが対象。発行は自分のトークンだけ。
 
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/tokens` | 期限内のトークンの一覧（新しい順）。`{"tokens": [トークン, ...]}` |
-| `POST /api/tokens` | 発行。ボディ `{"name": "...", "expires_in_days": 30}`。`name` は 1〜100 文字、`expires_in_days` は `7` / `30` / `90` のいずれか（それ以外は 422）。直近 10 分以内のログインでなければ `403 reauth_required`。有効なトークンが 20 個あれば `409 too_many_tokens`。201 で `{"token": トークン, "value": "koroku_ro_..."}`。**`value` はこの応答でしか返らない** |
+| `POST /api/tokens` | 発行。ボディ `{"name": "...", "expires_in_days": 30}`。`name` は 1〜100 文字、`expires_in_days` は `7` / `30` / `90` のいずれか（それ以外は 422）。直近 10 分以内のログインでなければ `403 reauth_required`。自分の有効なトークンが 20 個あれば `409 too_many_tokens`。201 で `{"token": トークン, "value": "koroku_ro_..."}`。**`value` はこの応答でしか返らない** |
 | `DELETE /api/tokens/{id}` | 204。失効させる（再ログインは要らない）。なければ `404 token_not_found` |
 
 **使い方**: `Authorization: Bearer koroku_ro_...` を付けて `GET` する。クエリパラメーターや Cookie では受けない。
@@ -234,9 +277,12 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "current_deployment": null,
   "latest_deployment": null,
   "created_at": "2026-11-18T03:00:00Z",
-  "updated_at": "2026-11-18T03:00:00Z"
+  "updated_at": "2026-11-18T03:00:00Z",
+  "role": "owner"
 }
 ```
+
+`role` は、リクエストしたユーザーがこのアプリでできること（オーナーなら `owner`、メンバーならそのロール `view` / `deploy` / `manage`。ARCHITECTURE 10.7）。
 
 - `primary_url` はプライマリドメインがあればその URL、なければ `url` と同じ。`pending_domains` は検証待ちの独自ドメインの数（どちらも UI 再設計で追加）。
 - `desired_state` は `running` / `stopped`、`environment` は `production` / `staging`。
@@ -308,7 +354,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/apps/{slug}/env` | 下の形（`vars` は key 順。値は平文で返るので、UI は既定でマスク表示する）。直近 10 分以内のログインでなければ、値をすべて `null` にして `values_hidden: true` を返す |
+| `GET /api/apps/{slug}/env` | 下の形（`vars` は key 順。値は平文で返るので、UI は既定でマスク表示する）。直近 10 分以内のログインでなければ、値をすべて `null` にして `values_hidden: true` を返す。`manage` 未満のメンバーには常に値を `null` にし、`values_hidden: true` と `values_forbidden: true` を返す（ARCHITECTURE 10.7） |
 | `PUT /api/apps/{slug}/env` | `{"vars": [{"key": "...", "value": "..."}]}` で全件を置き換える。200 で保存後の一覧（`GET` と同じ形） |
 | `PUT /api/apps/{slug}/env/{key}` | 1 件を追加または変更する。名前が `KOROKU_` で始まる変数は koroku が書くので保存できない（422、`KOROKU_COMMIT_SHA` と `KOROKU_COMMIT_SHORT` を koroku が env ファイルに足す。ARCHITECTURE 6 章）。本文は `{"value": "..."}`。名前を変えるときは `{"key": "NEW_KEY"}` を足す（`value` を省くと値はそのまま）。名前の変更は 1 つのトランザクションで行う。200 で保存後の一覧。名前を変える元がなければ `404 env_var_not_found`、変えた先がすでにあれば `409 env_var_exists`。追加・変更で `value` がなければ 422 |
 | `DELETE /api/apps/{slug}/env/{key}` | 1 件を削除する。200 で保存後の一覧。なければ `404 env_var_not_found` |
@@ -322,7 +368,8 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   ],
   "removed": ["OLD_FLAG"],
   "compared": true,
-  "values_hidden": false
+  "values_hidden": false,
+  "values_forbidden": false
 }
 ```
 
@@ -379,10 +426,13 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
   "source_deployment_id": null,
   "rollback_available": true,
   "promoted_from": null,
+  "actor": {"id": 1, "login": "octo"},
   "trigger": "manual",
   "pusher": ""
 }
 ```
+
+`actor` はデプロイを始めたユーザー（ロールバックと昇格も同じ）。koroku 自身が始めたものと、記録する前の古いデプロイは `null`。`login` は始めた時点のもの。
 
 `status` は `queued` / `running` / `succeeded` / `failed` / `canceled`。`source_deployment_id` は、ロールバック（ARCHITECTURE 7.1）の記録なら戻す先のデプロイの ID（`ref` は `rollback`）、通常のデプロイなら `null`。`rollback_available` は、そのデプロイのリリースへ再ビルドなしで戻せるか（成功していて、ファイルが残っている。ロールバックの記録なら戻す先について）。
 
@@ -485,7 +535,8 @@ ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose ru
   "exit_code": 0,
   "error": "",
   "started_at": "2026-11-21T03:00:00Z",
-  "finished_at": "2026-11-21T03:00:04Z"
+  "finished_at": "2026-11-21T03:00:04Z",
+  "actor": {"id": 1, "login": "octo"}
 }
 ```
 
@@ -672,7 +723,8 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
   "bytes": 18350080,
   "backup_snapshot_id": "4bba301e5d2c7a90",
   "started_at": "2026-11-21T03:00:00Z",
-  "finished_at": "2026-11-21T03:01:12Z"
+  "finished_at": "2026-11-21T03:01:12Z",
+  "actor": {"id": 1, "login": "octo"}
 }
 ```
 

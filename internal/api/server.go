@@ -68,6 +68,8 @@ type Options struct {
 	Copier DBCopier
 	// RouteStatus reports the last proxy configuration load. Optional.
 	RouteStatus func() RouteStatus
+	// Users resolves GitHub logins when the owner adds a member. Optional.
+	Users UserLookup
 }
 
 // Server routes HTTP requests.
@@ -98,6 +100,7 @@ type Server struct {
 	backups        Backups
 	volumes        AppVolumes
 	copier         DBCopier
+	users          UserLookup
 	envReqs        *envreq.Reader
 	// envPresets reads repositories for the create screen (ARCHITECTURE 9.8).
 	envPresets *envpresets.Reader
@@ -152,6 +155,7 @@ func New(opts Options) *Server {
 		backups:     opts.Backups,
 		volumes:     opts.Volumes,
 		copier:      opts.Copier,
+		users:       opts.Users,
 
 		routeStatus: opts.RouteStatus,
 
@@ -185,89 +189,120 @@ func (s *Server) routes() *http.ServeMux {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 	})
 
+	// The webhook authenticates by its signature, not by a session or a
+	// role (ARCHITECTURE 5.2).
 	mux.HandleFunc("POST "+WebhookPath, s.handleGitHubWebhook)
 	mux.HandleFunc("/webhooks/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")
 	})
 
-	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
-	mux.HandleFunc("DELETE /api/sessions/{id}", s.handleDeleteSession)
-	mux.HandleFunc("POST /api/sessions/revoke-others", s.handleRevokeOtherSessions)
-	mux.HandleFunc("GET /api/login-events", s.handleLoginEvents)
-	mux.HandleFunc("GET /api/tokens", s.handleListTokens)
-	mux.HandleFunc("POST /api/tokens", s.handleCreateToken)
-	mux.HandleFunc("DELETE /api/tokens/{id}", s.handleDeleteToken)
-
-	mux.HandleFunc("GET /api/system", s.handleSystem)
-	mux.HandleFunc("GET /api/system/docker", s.handleDockerUsage)
-	mux.HandleFunc("GET /api/system/containers", s.handleContainerResources)
-	mux.HandleFunc("GET /api/system/github", s.handleGitHubApp)
-	mux.HandleFunc("POST /api/system/prune", s.handlePrune)
-
-	mux.HandleFunc("GET /api/repos", s.handleListRepos)
-	mux.HandleFunc("GET /api/repos/{owner}/{repo}/branches", s.handleListBranches)
-	mux.HandleFunc("GET /api/repos/{owner}/{repo}/commits", s.handleListCommits)
-	mux.HandleFunc("GET /api/repos/{owner}/{repo}/compose", s.handleDetectCompose)
-	mux.HandleFunc("GET /api/repos/{owner}/{repo}/env-presets", s.handleEnvPresets)
-
-	mux.HandleFunc("GET /api/apps", s.handleListApps)
-	mux.HandleFunc("POST /api/apps", s.handleCreateApp)
-	mux.HandleFunc("GET /api/apps/{slug}", s.handleGetApp)
-	mux.HandleFunc("PATCH /api/apps/{slug}", s.handleUpdateApp)
-	mux.HandleFunc("DELETE /api/apps/{slug}", s.handleDeleteApp)
-	mux.HandleFunc("POST /api/apps/{slug}/start", s.handleAppOperation(AppOperator.Start))
-	mux.HandleFunc("POST /api/apps/{slug}/stop", s.handleAppOperation(AppOperator.Stop))
-	mux.HandleFunc("POST /api/apps/{slug}/restart", s.handleAppOperation(AppOperator.Restart))
-	mux.HandleFunc("GET /api/apps/{slug}/services", s.handleListServices)
-	mux.HandleFunc("GET /api/apps/{slug}/memory", s.handleMemoryHistory)
-	mux.HandleFunc("GET /api/apps/{slug}/env", s.handleGetEnv)
-	mux.HandleFunc("PUT /api/apps/{slug}/env", s.handlePutEnv)
-	mux.HandleFunc("GET /api/apps/{slug}/env/requirements", s.handleEnvRequirements)
-	mux.HandleFunc("PUT /api/apps/{slug}/env/{key}", s.handlePutEnvVar)
-	mux.HandleFunc("DELETE /api/apps/{slug}/env/{key}", s.handleDeleteEnvVar)
-	mux.HandleFunc("GET /api/apps/{slug}/deployments", s.handleListDeployments)
-	mux.HandleFunc("POST /api/apps/{slug}/deployments", s.handleCreateDeployment)
-	mux.HandleFunc("GET /api/apps/{slug}/promotion", s.handlePromotionPreview)
-
-	mux.HandleFunc("GET /api/apps/{slug}/domains", s.handleListDomains)
-	mux.HandleFunc("POST /api/apps/{slug}/domains", s.handleAddDomain)
-	mux.HandleFunc("POST /api/apps/{slug}/domains/{id}/verify", s.handleVerifyDomain)
-	mux.HandleFunc("PATCH /api/apps/{slug}/domains/{id}", s.handleUpdateDomain)
-	mux.HandleFunc("DELETE /api/apps/{slug}/domains/{id}", s.handleDeleteDomain)
-
-	mux.HandleFunc("GET /api/apps/{slug}/logs", s.handleLiveLogs)
-	mux.HandleFunc("GET /api/apps/{slug}/logs/history", s.handleLogHistory)
-	mux.HandleFunc("GET /api/apps/{slug}/logs/archives", s.handleLogArchives)
-	mux.HandleFunc("GET /api/apps/{slug}/logs/archives/url", s.handleLogArchiveURL)
-
-	mux.HandleFunc("GET /api/backups", s.handleBackupStatus)
-	mux.HandleFunc("POST /api/backups", s.handleStartBackup)
-	mux.HandleFunc("GET /api/apps/{slug}/backups", s.handleListSnapshots)
-	mux.HandleFunc("POST /api/apps/{slug}/backups/restore", s.handleRestoreVolume)
-	mux.HandleFunc("GET /api/apps/{slug}/backups/{snapshot}/download", s.handleDownloadDump)
-	mux.HandleFunc("GET /api/apps/{slug}/volumes", s.handleListVolumes)
-
-	mux.HandleFunc("GET /api/apps/{slug}/db-copies", s.handleListDBCopies)
-	mux.HandleFunc("POST /api/apps/{slug}/db-copies", s.handleStartDBCopy)
-	mux.HandleFunc("GET /api/db-copies/{id}", s.handleGetDBCopy)
-	mux.HandleFunc("GET /api/db-copies/{id}/logs", s.handleDBCopyLogs)
-	mux.HandleFunc("GET /api/apps/{slug}/tasks", s.handleListTasks)
-	mux.HandleFunc("PUT /api/apps/{slug}/tasks", s.handlePutTasks)
-	mux.HandleFunc("GET /api/apps/{slug}/task-runs", s.handleListTaskRuns)
-	mux.HandleFunc("POST /api/apps/{slug}/task-runs", s.handleCreateTaskRun)
-	mux.HandleFunc("GET /api/task-runs/{id}", s.handleGetTaskRun)
-	mux.HandleFunc("GET /api/task-runs/{id}/logs", s.handleTaskRunLogs)
-	mux.HandleFunc("POST /api/task-runs/{id}/cancel", s.handleCancelTaskRun)
-
-	mux.HandleFunc("GET /api/deployments/{id}", s.handleGetDeployment)
-	mux.HandleFunc("GET /api/deployments/{id}/logs", s.handleDeploymentLogs)
-	mux.HandleFunc("POST /api/deployments/{id}/cancel", s.handleCancelDeployment)
+	for _, rt := range s.apiRoutes() {
+		mux.Handle(rt.pattern, s.authorize(rt.access, rt.handler))
+	}
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such API endpoint")
 	})
 	mux.Handle("/", s.spaHandler())
 	return mux
+}
+
+// apiRoutes lists every API endpoint with what it requires (ARCHITECTURE
+// 10.7). A route is reachable only through this table, so none can be
+// added without saying who may use it.
+func (s *Server) apiRoutes() []route {
+	return []route{
+		// Each user's own sessions, login history and API tokens; the owner
+		// sees everyone's.
+		{"GET /api/sessions", anyUser, s.handleListSessions},
+		{"DELETE /api/sessions/{id}", anyUser, s.handleDeleteSession},
+		{"POST /api/sessions/revoke-others", anyUser, s.handleRevokeOtherSessions},
+		{"GET /api/login-events", anyUser, s.handleLoginEvents},
+		{"GET /api/tokens", anyUser, s.handleListTokens},
+		{"POST /api/tokens", anyUser, s.handleCreateToken},
+		{"DELETE /api/tokens/{id}", anyUser, s.handleDeleteToken},
+
+		{"GET /api/members", ownerOnly, s.handleListMembers},
+		{"POST /api/members", ownerOnly, s.handleAddMember},
+		{"DELETE /api/members/{id}", ownerOnly, s.handleDeleteMember},
+		{"PUT /api/members/{id}/roles/{slug}", ownerOnly, s.handlePutMemberRole},
+		{"DELETE /api/members/{id}/roles/{slug}", ownerOnly, s.handleDeleteMemberRole},
+
+		// The host summary of the app list; members get it without the
+		// error texts, which may name other apps.
+		{"GET /api/system", anyUser, s.handleSystem},
+		{"GET /api/system/docker", ownerOnly, s.handleDockerUsage},
+		{"GET /api/system/containers", ownerOnly, s.handleContainerResources},
+		{"GET /api/system/github", ownerOnly, s.handleGitHubApp},
+		{"POST /api/system/prune", ownerOnly, s.handlePrune},
+
+		{"GET /api/repos", ownerOnly, s.handleListRepos},
+		{"GET /api/repos/{owner}/{repo}/branches", onRepo(levelView), s.handleListBranches},
+		{"GET /api/repos/{owner}/{repo}/commits", onRepo(levelView), s.handleListCommits},
+		{"GET /api/repos/{owner}/{repo}/compose", ownerOnly, s.handleDetectCompose},
+		{"GET /api/repos/{owner}/{repo}/env-presets", ownerOnly, s.handleEnvPresets},
+
+		{"GET /api/apps", anyUser, s.handleListApps},
+		{"POST /api/apps", ownerOnly, s.handleCreateApp},
+		{"GET /api/apps/{slug}", onApp(levelView), s.handleGetApp},
+		// Owner-only settings are refused inside the handler.
+		{"PATCH /api/apps/{slug}", onApp(levelManage), s.handleUpdateApp},
+		{"DELETE /api/apps/{slug}", ownerOnly, s.handleDeleteApp},
+		{"POST /api/apps/{slug}/start", onApp(levelDeploy), s.handleAppOperation(AppOperator.Start)},
+		{"POST /api/apps/{slug}/stop", onApp(levelDeploy), s.handleAppOperation(AppOperator.Stop)},
+		{"POST /api/apps/{slug}/restart", onApp(levelDeploy), s.handleAppOperation(AppOperator.Restart)},
+		{"GET /api/apps/{slug}/services", onApp(levelView), s.handleListServices},
+		{"GET /api/apps/{slug}/memory", onApp(levelView), s.handleMemoryHistory},
+		// Below manage, only the keys are returned.
+		{"GET /api/apps/{slug}/env", onApp(levelView), s.handleGetEnv},
+		{"PUT /api/apps/{slug}/env", onApp(levelManage), s.handlePutEnv},
+		{"GET /api/apps/{slug}/env/requirements", onApp(levelView), s.handleEnvRequirements},
+		{"PUT /api/apps/{slug}/env/{key}", onApp(levelManage), s.handlePutEnvVar},
+		{"DELETE /api/apps/{slug}/env/{key}", onApp(levelManage), s.handleDeleteEnvVar},
+		{"GET /api/apps/{slug}/deployments", onApp(levelView), s.handleListDeployments},
+		// Deploying, rolling back and promoting into the app.
+		{"POST /api/apps/{slug}/deployments", onApp(levelDeploy), s.handleCreateDeployment},
+		{"GET /api/apps/{slug}/promotion", onApp(levelDeploy), s.handlePromotionPreview},
+
+		{"GET /api/apps/{slug}/domains", onApp(levelView), s.handleListDomains},
+		{"POST /api/apps/{slug}/domains", onApp(levelManage), s.handleAddDomain},
+		{"POST /api/apps/{slug}/domains/{id}/verify", onApp(levelManage), s.handleVerifyDomain},
+		{"PATCH /api/apps/{slug}/domains/{id}", onApp(levelManage), s.handleUpdateDomain},
+		{"DELETE /api/apps/{slug}/domains/{id}", onApp(levelManage), s.handleDeleteDomain},
+
+		{"GET /api/apps/{slug}/logs", onApp(levelView), s.handleLiveLogs},
+		{"GET /api/apps/{slug}/logs/history", onApp(levelView), s.handleLogHistory},
+		{"GET /api/apps/{slug}/logs/archives", onApp(levelView), s.handleLogArchives},
+		{"GET /api/apps/{slug}/logs/archives/url", onApp(levelView), s.handleLogArchiveURL},
+
+		// The overall backup state; members get it without the host's run
+		// history.
+		{"GET /api/backups", anyUser, s.handleBackupStatus},
+		// There is no backup of a single app: a member who manages an app
+		// may start the full run that includes it.
+		{"POST /api/backups", onAnyApp(levelManage), s.handleStartBackup},
+		{"GET /api/apps/{slug}/backups", onApp(levelView), s.handleListSnapshots},
+		{"POST /api/apps/{slug}/backups/restore", onApp(levelManage), s.handleRestoreVolume},
+		{"GET /api/apps/{slug}/backups/{snapshot}/download", onApp(levelManage), s.handleDownloadDump},
+		{"GET /api/apps/{slug}/volumes", onApp(levelView), s.handleListVolumes},
+
+		{"GET /api/apps/{slug}/db-copies", onApp(levelView), s.handleListDBCopies},
+		// The source app needs manage as well; checked in the handler.
+		{"POST /api/apps/{slug}/db-copies", onApp(levelManage), s.handleStartDBCopy},
+		{"GET /api/db-copies/{id}", onDBCopy(levelView), s.handleGetDBCopy},
+		{"GET /api/db-copies/{id}/logs", onDBCopy(levelView), s.handleDBCopyLogs},
+		{"GET /api/apps/{slug}/tasks", onApp(levelView), s.handleListTasks},
+		{"PUT /api/apps/{slug}/tasks", onApp(levelManage), s.handlePutTasks},
+		{"GET /api/apps/{slug}/task-runs", onApp(levelView), s.handleListTaskRuns},
+		{"POST /api/apps/{slug}/task-runs", onApp(levelManage), s.handleCreateTaskRun},
+		{"GET /api/task-runs/{id}", onTaskRun(levelView), s.handleGetTaskRun},
+		{"GET /api/task-runs/{id}/logs", onTaskRun(levelView), s.handleTaskRunLogs},
+		{"POST /api/task-runs/{id}/cancel", onTaskRun(levelManage), s.handleCancelTaskRun},
+
+		{"GET /api/deployments/{id}", onDeployment(levelView), s.handleGetDeployment},
+		{"GET /api/deployments/{id}/logs", onDeployment(levelView), s.handleDeploymentLogs},
+		{"POST /api/deployments/{id}/cancel", onDeployment(levelDeploy), s.handleCancelDeployment},
+	}
 }
 
 type errorBody struct {
@@ -311,6 +346,8 @@ type requestInfo struct {
 	// tokenID names the API token the request used; the value never
 	// reaches the log.
 	tokenID string
+	// login is the GitHub login of the user the request acts as.
+	login string
 }
 
 type requestInfoKey struct{}
@@ -333,6 +370,9 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 			"path", r.URL.Path,
 			"status", rec.status,
 			"duration_ms", time.Since(start).Milliseconds(),
+		}
+		if info.login != "" {
+			attrs = append(attrs, "user", info.login)
 		}
 		if info.tokenID != "" {
 			attrs = append(attrs, "token_id", info.tokenID)

@@ -52,6 +52,7 @@ export const SCREENS: Screen[] = [
   { name: 'backups', url: '/apps/blog/backups', tab: 'backups' },
   { name: 'settings', url: '/apps/blog/settings', tab: 'settings' },
   { name: 'system', url: '/system' },
+  { name: 'members', url: '/members' },
 ];
 
 /**
@@ -154,6 +155,17 @@ export function serveConsole(
 
   fakes.api
     .on('GET', '/api/apps', () => ({ apps: [state.app] }))
+    .on('GET', '/api/members', {
+      members: [
+        {
+          github_user_id: 2,
+          login: 'mia',
+          avatar_url: '',
+          added_at: '2026-11-10T03:00:00Z',
+          roles: [{ app: slug, role: 'deploy' }],
+        },
+      ],
+    })
     .on('GET', '/api/system', () =>
       makeSystem({
         swap: { total_bytes: 2 * GB, used_bytes: 0.5 * GB },

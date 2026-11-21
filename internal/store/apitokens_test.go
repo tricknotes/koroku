@@ -42,7 +42,7 @@ func TestAPITokens(t *testing.T) {
 	if err := s.CreateAPIToken(ctx, second, 5); err != nil {
 		t.Fatal(err)
 	}
-	list, err := s.ListAPITokens(ctx, testNow.Add(3*time.Minute))
+	list, err := s.ListAPITokens(ctx, AllUsers, testNow.Add(3*time.Minute))
 	if err != nil {
 		t.Fatalf("ListAPITokens: %v", err)
 	}
@@ -60,10 +60,10 @@ func TestAPITokens(t *testing.T) {
 		t.Errorf("over the limit err = %v", err)
 	}
 
-	if err := s.DeleteAPIToken(ctx, "id-2"); err != nil {
+	if err := s.DeleteAPIToken(ctx, AllUsers, "id-2"); err != nil {
 		t.Fatalf("DeleteAPIToken: %v", err)
 	}
-	if err := s.DeleteAPIToken(ctx, "id-2"); !errors.Is(err, ErrNotFound) {
+	if err := s.DeleteAPIToken(ctx, AllUsers, "id-2"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("second delete err = %v", err)
 	}
 	if _, err := s.GetAPIToken(ctx, "hash-2", testNow); !errors.Is(err, ErrNotFound) {

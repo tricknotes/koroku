@@ -16,7 +16,11 @@ var ErrTooManyTokens = errors.New("too many api tokens")
 // value is stored, so a leaked database does not yield usable tokens.
 type APIToken struct {
 	// ID names the token in the console; unlike the hash it may be shown.
-	ID         string
+	ID string
+	// GitHubUserID and Login are the user the token acts as.
+	GitHubUserID int64
+	Login        string
+
 	TokenHash  string
 	Name       string
 	CreatedAt  time.Time
@@ -25,7 +29,8 @@ type APIToken struct {
 	LastUsedIP string
 }
 
-const apiTokenColumns = `id, token_hash, name, created_at, expires_at, last_used_at, last_used_ip`
+const apiTokenColumns = `id, token_hash, name, created_at, expires_at, last_used_at, last_used_ip,
+	github_user_id, login`
 
 func scanAPIToken(row interface{ Scan(...any) error }) (APIToken, error) {
 	var (
@@ -33,7 +38,8 @@ func scanAPIToken(row interface{ Scan(...any) error }) (APIToken, error) {
 		created, expires int64
 		lastUsed         sql.NullInt64
 	)
-	if err := row.Scan(&tok.ID, &tok.TokenHash, &tok.Name, &created, &expires, &lastUsed, &tok.LastUsedIP); err != nil {
+	if err := row.Scan(&tok.ID, &tok.TokenHash, &tok.Name, &created, &expires, &lastUsed, &tok.LastUsedIP,
+		&tok.GitHubUserID, &tok.Login); err != nil {
 		return APIToken{}, err
 	}
 	tok.CreatedAt, tok.ExpiresAt, tok.LastUsedAt = fromMillis(created), fromMillis(expires), fromNullMillis(lastUsed)
@@ -41,7 +47,7 @@ func scanAPIToken(row interface{ Scan(...any) error }) (APIToken, error) {
 }
 
 // CreateAPIToken stores a new token after removing expired ones. It returns
-// ErrTooManyTokens when max unexpired tokens exist already.
+// ErrTooManyTokens when the token's user has max unexpired tokens already.
 func (s *Store) CreateAPIToken(ctx context.Context, tok APIToken, max int) error {
 	if tok.ID == "" || tok.TokenHash == "" {
 		return errors.New("create api token: empty id or hash")
@@ -55,15 +61,18 @@ func (s *Store) CreateAPIToken(ctx context.Context, tok APIToken, max int) error
 		return fmt.Errorf("create api token: %w", err)
 	}
 	var live int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM api_tokens`).Scan(&live); err != nil {
+	if err := tx.QueryRowContext(ctx,
+		`SELECT count(*) FROM api_tokens WHERE github_user_id = ?`, tok.GitHubUserID).Scan(&live); err != nil {
 		return fmt.Errorf("create api token: %w", err)
 	}
 	if live >= max {
 		return ErrTooManyTokens
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO api_tokens (id, token_hash, name, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		tok.ID, tok.TokenHash, tok.Name, toMillis(tok.CreatedAt), toMillis(tok.ExpiresAt)); err != nil {
+		`INSERT INTO api_tokens (id, token_hash, name, created_at, expires_at, github_user_id, login)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		tok.ID, tok.TokenHash, tok.Name, toMillis(tok.CreatedAt), toMillis(tok.ExpiresAt),
+		tok.GitHubUserID, tok.Login); err != nil {
 		return fmt.Errorf("create api token: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -86,11 +95,13 @@ func (s *Store) GetAPIToken(ctx context.Context, tokenHash string, now time.Time
 	return tok, nil
 }
 
-// ListAPITokens returns the unexpired tokens, newest first.
-func (s *Store) ListAPITokens(ctx context.Context, now time.Time) ([]APIToken, error) {
+// ListAPITokens returns the unexpired tokens of a user (or of everyone, with
+// AllUsers), newest first.
+func (s *Store) ListAPITokens(ctx context.Context, githubUserID int64, now time.Time) ([]APIToken, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+apiTokenColumns+` FROM api_tokens WHERE expires_at > ? ORDER BY created_at DESC, id`,
-		toMillis(now))
+		`SELECT `+apiTokenColumns+` FROM api_tokens
+		 WHERE (? = -1 OR github_user_id = ?) AND expires_at > ? ORDER BY created_at DESC, id`,
+		githubUserID, githubUserID, toMillis(now))
 	if err != nil {
 		return nil, fmt.Errorf("list api tokens: %w", err)
 	}
@@ -118,9 +129,11 @@ func (s *Store) TouchAPIToken(ctx context.Context, id string, at time.Time, ip s
 	return nil
 }
 
-// DeleteAPIToken revokes a token. It returns ErrNotFound when there is none.
-func (s *Store) DeleteAPIToken(ctx context.Context, id string) error {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM api_tokens WHERE id = ?`, id)
+// DeleteAPIToken revokes a token of a user (or of anyone, with AllUsers).
+// It returns ErrNotFound when there is none.
+func (s *Store) DeleteAPIToken(ctx context.Context, githubUserID int64, id string) error {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM api_tokens WHERE id = ? AND (? = -1 OR github_user_id = ?)`, id, githubUserID, githubUserID)
 	if err != nil {
 		return fmt.Errorf("delete api token: %w", err)
 	}
@@ -128,6 +141,19 @@ func (s *Store) DeleteAPIToken(ctx context.Context, id string) error {
 		return fmt.Errorf("delete api token: %w", err)
 	} else if n == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+// AssignUnownedAPITokens gives the tokens issued before tokens had a user
+// (github_user_id 0) to the owner. koroku serve runs it at startup.
+func (s *Store) AssignUnownedAPITokens(ctx context.Context, ownerID int64) error {
+	if ownerID == 0 {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE api_tokens SET github_user_id = ? WHERE github_user_id = 0`, ownerID); err != nil {
+		return fmt.Errorf("assign api tokens: %w", err)
 	}
 	return nil
 }

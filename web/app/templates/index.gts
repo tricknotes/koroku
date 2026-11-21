@@ -10,6 +10,7 @@ import { buttonClass } from 'koroku-console/components/button';
 import EmptyState from 'koroku-console/components/empty-state';
 import EnvironmentBadge from 'koroku-console/components/environment-badge';
 import ProtectionBadge from 'koroku-console/components/protection-badge';
+import RoleBadge from 'koroku-console/components/role-badge';
 import HostStatus from 'koroku-console/components/host-status';
 import Icon from 'koroku-console/components/icon';
 import RelativeTime from 'koroku-console/components/relative-time';
@@ -17,6 +18,7 @@ import RowList from 'koroku-console/components/row-list';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
+import type SessionService from 'koroku-console/services/session';
 import {
   attentionItems,
   type AttentionItem,
@@ -95,6 +97,7 @@ function when(deployment: Deployment): string | null {
 export default class IndexTemplate extends Component {
   @service declare api: ApiService;
   @service declare poller: PollerService;
+  @service declare session: SessionService;
 
   apps = new Loadable<App[]>(() => this.api.listApps());
   system = new Loadable<SystemInfo>(() => this.api.getSystem());
@@ -127,6 +130,11 @@ export default class IndexTemplate extends Component {
     );
   }
 
+  /** Only the owner creates apps (ARCHITECTURE 10.7). */
+  get isOwner(): boolean {
+    return this.session.isOwner;
+  }
+
   /** Loaded and nothing there: the empty state then holds the one action. */
   get isEmpty(): boolean {
     return this.apps.loaded && this.apps.value?.length === 0;
@@ -139,7 +147,7 @@ export default class IndexTemplate extends Component {
       <HostStatus @system={{this.system}} @backups={{this.backups}} />
 
       {{#if this.attention.length}}
-        <AttentionBanner @items={{this.attention}} />
+        <AttentionBanner @items={{this.attention}} @owner={{this.isOwner}} />
       {{/if}}
 
       {{#if this.apps.stale}}
@@ -151,13 +159,15 @@ export default class IndexTemplate extends Component {
 
     <div class="page-header">
       <h1>アプリ</h1>
-      {{#unless this.isEmpty}}
-        <LinkTo
-          @route="new-app"
-          class={{buttonClass "primary"}}
-          data-test-new-app
-        >アプリを作成</LinkTo>
-      {{/unless}}
+      {{#if this.isOwner}}
+        {{#unless this.isEmpty}}
+          <LinkTo
+            @route="new-app"
+            class={{buttonClass "primary"}}
+            data-test-new-app
+          >アプリを作成</LinkTo>
+        {{/unless}}
+      {{/if}}
     </div>
 
     <AsyncView
@@ -226,6 +236,7 @@ export default class IndexTemplate extends Component {
                       {{#if app.access_protection}}
                         <ProtectionBadge data-test-protected />
                       {{/if}}
+                      <RoleBadge @role={{app.role}} />
                     </span>
                     {{#if (openUrl app)}}
                       <span class="app-url" data-test-url>
@@ -302,18 +313,25 @@ export default class IndexTemplate extends Component {
           </RowList>
         {{else}}
           <div class="row-list" data-test-empty>
-            <EmptyState
-              @title="アプリはまだありません"
-              @description="GitHub のリポジトリを選んで、Docker Compose のアプリをデプロイします。"
-            >
-              <:action>
-                <LinkTo
-                  @route="new-app"
-                  class={{buttonClass "primary"}}
-                  data-test-new-app
-                >アプリを作成</LinkTo>
-              </:action>
-            </EmptyState>
+            {{#if this.isOwner}}
+              <EmptyState
+                @title="アプリはまだありません"
+                @description="GitHub のリポジトリを選んで、Docker Compose のアプリをデプロイします。"
+              >
+                <:action>
+                  <LinkTo
+                    @route="new-app"
+                    class={{buttonClass "primary"}}
+                    data-test-new-app
+                  >アプリを作成</LinkTo>
+                </:action>
+              </EmptyState>
+            {{else}}
+              <EmptyState
+                @title="扱えるアプリはありません"
+                @description="オーナーがアプリのロールを与えると、ここに表示されます。"
+              />
+            {{/if}}
           </div>
         {{/if}}
       </:default>

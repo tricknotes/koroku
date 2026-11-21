@@ -29,13 +29,14 @@ type dbCopyJSON struct {
 	BackupSnapshotID string     `json:"backup_snapshot_id"`
 	StartedAt        time.Time  `json:"started_at"`
 	FinishedAt       *time.Time `json:"finished_at"`
+	Actor            *actorJSON `json:"actor"`
 }
 
 func dbCopyToJSON(c store.DBCopy, target string) dbCopyJSON {
 	return dbCopyJSON{
 		ID: c.ID, TargetApp: target, SourceApp: c.SourceSlug, SourceKind: c.SourceKind,
 		Status: c.Status, Error: c.Error, Bytes: c.Bytes, BackupSnapshotID: c.BackupSnapshotID,
-		StartedAt: c.StartedAt, FinishedAt: c.FinishedAt,
+		StartedAt: c.StartedAt, FinishedAt: c.FinishedAt, Actor: actorToJSON(c.Actor),
 	}
 }
 
@@ -114,6 +115,21 @@ func (s *Server) handleStartDBCopy(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.internalError(w, r, err)
+		return
+	}
+	// Copying reads the source's data out, which is what downloading its
+	// dump needs: manage on the source too (ARCHITECTURE 10.7).
+	lvl, err := s.appLevel(r, source)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if lvl == levelNone {
+		writeError(w, http.StatusNotFound, "source_not_found", "no such source app")
+		return
+	}
+	if lvl < levelManage {
+		writeForbiddenRole(w, levelManage)
 		return
 	}
 	if s.copier == nil {

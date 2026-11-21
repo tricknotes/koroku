@@ -36,8 +36,10 @@ type envListJSON struct {
 	// or it predates the fingerprints (ARCHITECTURE 9.2).
 	Compared bool `json:"compared"`
 	// ValuesHidden is true when the session is too old to see secrets
-	// (ARCHITECTURE 10.3); the keys are still listed.
-	ValuesHidden bool `json:"values_hidden"`
+	// (ARCHITECTURE 10.3), or the user's role does not allow seeing them
+	// (ValuesForbidden, ARCHITECTURE 10.7); the keys are still listed.
+	ValuesHidden    bool `json:"values_hidden"`
+	ValuesForbidden bool `json:"values_forbidden"`
 }
 
 type envVarOutJSON struct {
@@ -86,11 +88,13 @@ func (s *Server) writeEnv(w http.ResponseWriter, r *http.Request, app store.App)
 			return
 		}
 	}
+	forbidden := requestLevel(r) < levelManage
 	out := envListJSON{
-		Vars:         make([]envVarOutJSON, 0, len(rows)),
-		Removed:      []string{},
-		Compared:     deployed != nil,
-		ValuesHidden: !s.recentlyAuthenticated(r),
+		Vars:            make([]envVarOutJSON, 0, len(rows)),
+		Removed:         []string{},
+		Compared:        deployed != nil,
+		ValuesHidden:    forbidden || !s.recentlyAuthenticated(r),
+		ValuesForbidden: forbidden,
 	}
 	saved := make(map[string]bool, len(rows))
 	for _, row := range rows {

@@ -74,6 +74,10 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 		status := s.routeStatus()
 		resp.Caddy.LastLoadedAt, resp.Caddy.LastError = status.LastLoadedAt, status.LastError
 	}
+	if !isOwner(r) {
+		// The error texts may name other apps' hosts and objects.
+		resp.LogArchive.LastError, resp.Caddy.LastError = "", ""
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

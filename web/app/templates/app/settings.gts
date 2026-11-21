@@ -14,6 +14,7 @@ import CopyButton from 'koroku-console/components/copy-button';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
+import RoleNote from 'koroku-console/components/role-note';
 import MemoryHistory from 'koroku-console/components/memory-history';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import type ApiService from 'koroku-console/services/api';
@@ -27,6 +28,7 @@ import {
 import { missingVariables } from 'koroku-console/utils/env-requirements';
 import { fieldErrors, policyViolations } from 'koroku-console/utils/errors';
 import Loadable from 'koroku-console/utils/loadable';
+import { can } from 'koroku-console/utils/roles';
 import SettingsForm, {
   ExemptRow,
   LimitRow,
@@ -287,6 +289,20 @@ export default class AppSettingsTemplate extends Component<Signature> {
     return this.args.model.app;
   }
 
+  /** The settings need manage; some of them the owner (ARCHITECTURE 10.7). */
+  get readOnly(): boolean {
+    return !can(this.app, 'manage');
+  }
+
+  get isOwner(): boolean {
+    return can(this.app, 'owner');
+  }
+
+  /** Start, stop and restart need deploy. */
+  get canDeploy(): boolean {
+    return can(this.app, 'deploy');
+  }
+
   get state() {
     const state = deriveAppState(this.app);
     return {
@@ -479,6 +495,9 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   /** Off and impossible: nothing to switch on. */
   get autoDeployDisabled(): boolean {
+    // Making a production app deploy pushes by itself is the owner's call
+    // (ARCHITECTURE 10.7).
+    if (this.app.environment === 'production' && !this.isOwner) return true;
     return !this.canAutoDeploy && !this.form.autoDeploy;
   }
 
@@ -557,398 +576,695 @@ export default class AppSettingsTemplate extends Component<Signature> {
   };
 
   <template>
+    {{#if this.readOnly}}
+      <RoleNote @needed="manage" @what="設定の変更" />
+    {{/if}}
     <form
       novalidate
       data-test-settings-form
       {{on "submit" (preventDefault this.save)}}
       {{on "input" this.touch}}
     >
-      <div class="form-group">
-        <div>
-          <h2 class="form-group-title">ソース</h2>
-          <p class="form-group-description">
-            デプロイするコードと、その中の Compose ファイルです。
-          </p>
-        </div>
-        <div class="form-group-body">
-          <dl class="readout">
-            <dt>リポジトリ</dt>
-            <dd data-test-repository>
-              {{#if (repositoryUrl this.app)}}
-                <a
-                  href={{repositoryUrl this.app}}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >{{repositoryName this.app}}</a>
-              {{else}}
-                {{repositoryName this.app}}
-              {{/if}}
-            </dd>
-            <dt>アプリ名</dt>
-            <dd>
-              <span class="mono">{{this.app.slug}}</span>
-              <span class="readout-note">（変更できません）</span>
-            </dd>
-          </dl>
-
-          <div class="form-grid">
-            <FormField
-              @label="既定のブランチ"
-              @error={{this.errors.default_branch}}
-              data-test-field-group="default_branch"
-              as |field|
-            >
-              <input
-                id={{field.id}}
-                type="text"
-                spellcheck="false"
-                autocomplete="off"
-                value={{this.form.defaultBranch}}
-                aria-describedby={{field.describedBy}}
-                aria-invalid={{field.invalid}}
-                data-test-field="default_branch"
-                {{on "input" (setValue this.form "defaultBranch")}}
-              />
-            </FormField>
-
-            <FormField
-              class="field-wide"
-              @label="Compose ファイルのパス"
-              @hint="空なら compose.yaml などをリポジトリ直下から自動で探します。"
-              @error={{this.errors.compose_path}}
-              data-test-field-group="compose_path"
-              as |field|
-            >
-              <input
-                id={{field.id}}
-                type="text"
-                class="mono"
-                spellcheck="false"
-                autocomplete="off"
-                placeholder="自動検出"
-                value={{this.form.composePath}}
-                aria-describedby={{field.describedBy}}
-                aria-invalid={{field.invalid}}
-                data-test-field="compose_path"
-                {{on "input" (setValue this.form "composePath")}}
-              />
-            </FormField>
-          </div>
-        </div>
-      </div>
-
-      <div class="form-group auto-deploy-group" data-test-auto-deploy-group>
-        <div>
-          <h2 class="form-group-title">自動デプロイ</h2>
-          <p class="form-group-description">
-            GitHub にブランチが push
-            されたら、そのコミットを自動でデプロイします。結果は手動のデプロイと同じく履歴に残ります。
-          </p>
-        </div>
-        <div class="form-group-body">
-          <label class="option">
-            <input
-              type="checkbox"
-              checked={{this.form.autoDeploy}}
-              disabled={{this.autoDeployDisabled}}
-              aria-describedby="settings-auto-deploy-hint"
-              data-test-field="auto_deploy"
-              {{on "change" (setChecked this.form "autoDeploy")}}
-            />
-            <span class="option-body">
-              <span class="option-label">push されたら自動でデプロイする</span>
-              <span class="option-hint" id="settings-auto-deploy-hint">
-                {{#if this.canAutoDeploy}}
-                  続けて push
-                  したときは、待っているデプロイを新しいコミットに置き換えます。停止中のアプリはデプロイしません。
-                {{else}}
-                  GitHub App
-                  で取得するリポジトリ（作成画面の一覧から選んだもの）だけで使えます。URL
-                  で指定したリポジトリには push が届きません。
-                {{/if}}
-              </span>
-            </span>
-          </label>
-
-          {{#if this.form.autoDeploy}}
-            <FormField
-              class="field-narrow"
-              @label="デプロイするブランチ"
-              @hint="空なら既定のブランチ（{{this.form.defaultBranch}}）に従います。"
-              @error={{this.errors.auto_deploy_branch}}
-              data-test-field-group="auto_deploy_branch"
-              as |field|
-            >
-              <input
-                id={{field.id}}
-                type="text"
-                spellcheck="false"
-                autocomplete="off"
-                placeholder={{this.form.defaultBranch}}
-                value={{this.form.autoDeployBranch}}
-                aria-describedby={{field.describedBy}}
-                aria-invalid={{field.invalid}}
-                data-test-field="auto_deploy_branch"
-                {{on "input" (setValue this.form "autoDeployBranch")}}
-              />
-            </FormField>
-
-            {{#if this.webhookSecretMissing}}
-              <Banner
-                @tone="warning"
-                @title="Webhook の secret が設定されていません"
-                data-test-webhook-secret-missing
-              >
-                <code>config.toml</code>
-                の
-                <code>[github] webhook_secret</code>
-                を設定して koroku を再起動するまで、push
-                は届いても受け付けません。
-              </Banner>
-            {{/if}}
-
-            <div class="auto-deploy-setup" data-test-webhook-setup>
-              <p class="field-hint">
-                GitHub App の設定で、次の 3 つが必要です（App ごとに一度だけ）。
-              </p>
-              <ol class="auto-deploy-steps">
-                <li>
-                  Webhook を
-                  <strong>Active</strong>
-                  にし、Webhook URL に次のアドレスを入れる。
-                  {{#if this.system.value.webhook}}
-                    <span class="auto-deploy-url">
-                      <code
-                        data-test-webhook-url
-                      >{{this.system.value.webhook.url}}</code>
-                      <CopyButton
-                        @text={{this.system.value.webhook.url}}
-                        @label="Webhook URL"
-                      />
-                    </span>
-                  {{/if}}
-                </li>
-                <li>
-                  Webhook secret に、<code>config.toml</code>
-                  の
-                  <code>[github] webhook_secret</code>
-                  と同じ値を入れる。
-                </li>
-                <li>
-                  Permissions &amp; events の Subscribe to events で
-                  <strong>Push</strong>
-                  を選ぶ。
-                </li>
-              </ol>
-            </div>
-          {{/if}}
-          {{#if this.errors.auto_deploy}}
-            <p class="field-error" data-test-field-error>
-              {{this.errors.auto_deploy}}
+      <fieldset class="role-fieldset" disabled={{this.readOnly}}>
+        <div class="form-group">
+          <div>
+            <h2 class="form-group-title">ソース</h2>
+            <p class="form-group-description">
+              デプロイするコードと、その中の Compose ファイルです。
             </p>
-          {{/if}}
-        </div>
-      </div>
-
-      <div class="form-group">
-        <div>
-          <h2 class="form-group-title">公開</h2>
-          <p class="form-group-description">
-            外からのリクエストを受けるサービスと、デプロイ後に応答を確かめるパスです。
-          </p>
-        </div>
-        <div class="form-group-body">
-          <div class="form-grid">
-            <FormField
-              @label="公開するサービス"
-              @error={{this.errors.web_service}}
-              data-test-field-group="web_service"
-              as |field|
-            >
-              <input
-                id={{field.id}}
-                type="text"
-                spellcheck="false"
-                autocomplete="off"
-                value={{this.form.webService}}
-                aria-describedby={{field.describedBy}}
-                aria-invalid={{field.invalid}}
-                data-test-field="web_service"
-                {{on "input" (setValue this.form "webService")}}
-              />
-            </FormField>
-
-            <FormField
-              @label="コンテナ側のポート"
-              @error={{this.errors.web_port}}
-              data-test-field-group="web_port"
-              as |field|
-            >
-              <input
-                id={{field.id}}
-                type="number"
-                class="mono"
-                inputmode="numeric"
-                min="1"
-                max="65535"
-                value={{this.form.webPort}}
-                aria-describedby={{field.describedBy}}
-                aria-invalid={{field.invalid}}
-                data-test-field="web_port"
-                {{on "input" (setValue this.form "webPort")}}
-              />
-            </FormField>
-
-            <FormField
-              @label="ヘルスチェックのパス"
-              @error={{this.errors.healthcheck_path}}
-              data-test-field-group="healthcheck_path"
-              as |field|
-            >
-              <input
-                id={{field.id}}
-                type="text"
-                class="mono"
-                spellcheck="false"
-                autocomplete="off"
-                value={{this.form.healthcheckPath}}
-                aria-describedby={{field.describedBy}}
-                aria-invalid={{field.invalid}}
-                data-test-field="healthcheck_path"
-                {{on "input" (setValue this.form "healthcheckPath")}}
-              />
-            </FormField>
           </div>
+          <div class="form-group-body">
+            <dl class="readout">
+              <dt>リポジトリ</dt>
+              <dd data-test-repository>
+                {{#if (repositoryUrl this.app)}}
+                  <a
+                    href={{repositoryUrl this.app}}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >{{repositoryName this.app}}</a>
+                {{else}}
+                  {{repositoryName this.app}}
+                {{/if}}
+              </dd>
+              <dt>アプリ名</dt>
+              <dd>
+                <span class="mono">{{this.app.slug}}</span>
+                <span class="readout-note">（変更できません）</span>
+              </dd>
+            </dl>
 
-          <dl class="readout">
-            <dt>ホスト側のポート</dt>
-            <dd>
-              <span
-                class="mono"
-                data-test-host-port
-              >127.0.0.1:{{this.app.host_port}}</span>
-              <span class="readout-note">（自動で割り当て済み）</span>
-            </dd>
-          </dl>
-        </div>
-      </div>
+            <div class="form-grid">
+              <FormField
+                @label="既定のブランチ"
+                @error={{this.errors.default_branch}}
+                data-test-field-group="default_branch"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="text"
+                  spellcheck="false"
+                  autocomplete="off"
+                  value={{this.form.defaultBranch}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="default_branch"
+                  {{on "input" (setValue this.form "defaultBranch")}}
+                />
+              </FormField>
 
-      <div class="form-group">
-        <div>
-          <h2 class="form-group-title">環境</h2>
-          <p class="form-group-description">
-            本番とステージングを取り違えないための目印です。アプリの動作は変わりません。
-          </p>
+              <FormField
+                class="field-wide"
+                @label="Compose ファイルのパス"
+                @hint="空なら compose.yaml などをリポジトリ直下から自動で探します。"
+                @error={{this.errors.compose_path}}
+                data-test-field-group="compose_path"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="text"
+                  class="mono"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="自動検出"
+                  value={{this.form.composePath}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="compose_path"
+                  {{on "input" (setValue this.form "composePath")}}
+                />
+              </FormField>
+            </div>
+          </div>
         </div>
-        <div class="form-group-body">
-          <fieldset class="option-group">
-            <legend class="visually-hidden">環境</legend>
+
+        <div class="form-group auto-deploy-group" data-test-auto-deploy-group>
+          <div>
+            <h2 class="form-group-title">自動デプロイ</h2>
+            <p class="form-group-description">
+              GitHub にブランチが push
+              されたら、そのコミットを自動でデプロイします。結果は手動のデプロイと同じく履歴に残ります。
+            </p>
+          </div>
+          <div class="form-group-body">
             <label class="option">
               <input
-                type="radio"
-                name="environment"
-                value="staging"
-                checked={{isChecked this.form.environment "staging"}}
-                data-test-environment-option="staging"
-                {{on "change" this.setEnvironment}}
+                type="checkbox"
+                checked={{this.form.autoDeploy}}
+                disabled={{this.autoDeployDisabled}}
+                aria-describedby="settings-auto-deploy-hint"
+                data-test-field="auto_deploy"
+                {{on "change" (setChecked this.form "autoDeploy")}}
               />
               <span class="option-body">
-                <span class="option-label">ステージング</span>
-                <span
-                  class="option-hint"
-                >デプロイは確認なしで始まります。</span>
-              </span>
-            </label>
-            <label class="option">
-              <input
-                type="radio"
-                name="environment"
-                value="production"
-                checked={{isChecked this.form.environment "production"}}
-                data-test-environment-option="production"
-                {{on "change" this.setEnvironment}}
-              />
-              <span class="option-body">
-                <span class="option-label">本番</span>
-                <span class="option-hint">
-                  バッジで目立たせ、デプロイの前に確認します。
+                <span class="option-label">push されたら自動でデプロイする</span>
+                <span class="option-hint" id="settings-auto-deploy-hint">
+                  {{#if this.canAutoDeploy}}
+                    続けて push
+                    したときは、待っているデプロイを新しいコミットに置き換えます。停止中のアプリはデプロイしません。
+                  {{else}}
+                    GitHub App
+                    で取得するリポジトリ（作成画面の一覧から選んだもの）だけで使えます。URL
+                    で指定したリポジトリには push が届きません。
+                  {{/if}}
                 </span>
               </span>
             </label>
-          </fieldset>
-        </div>
-      </div>
 
-      <div class="form-group" data-test-protection-group>
-        <div>
-          <h2 class="form-group-title">アクセスの保護</h2>
-          <p class="form-group-description">
-            このアプリのアドレス（独自ドメインを含む）を開けるのを、この管理画面にログインしている人だけにします。アプリには手を入れず、保存するとすぐに反映されます。
-          </p>
-        </div>
-        <div class="form-group-body">
-          <label class="option">
-            <input
-              type="checkbox"
-              checked={{this.form.accessProtection}}
-              aria-describedby="settings-protection-hint"
-              data-test-field="access_protection"
-              {{on "change" (setChecked this.form "accessProtection")}}
-            />
-            <span class="option-body">
-              <span
-                class="option-label"
-              >管理画面にログインしている人だけに公開する</span>
-              <span class="option-hint" id="settings-protection-hint">
-                ログインしていない人が開くと、管理画面のログインを経て元のページに戻ります。ステージングのアプリは最初から有効です。ブラウザー以外（API
-                の呼び出しや監視サービス）は通れません。
-              </span>
-            </span>
-          </label>
+            {{#if this.form.autoDeploy}}
+              <FormField
+                class="field-narrow"
+                @label="デプロイするブランチ"
+                @hint="空なら既定のブランチ（{{this.form.defaultBranch}}）に従います。"
+                @error={{this.errors.auto_deploy_branch}}
+                data-test-field-group="auto_deploy_branch"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="text"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder={{this.form.defaultBranch}}
+                  value={{this.form.autoDeployBranch}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="auto_deploy_branch"
+                  {{on "input" (setValue this.form "autoDeployBranch")}}
+                />
+              </FormField>
 
-          {{#if this.form.accessProtection}}
-            <div
-              class="field protection-exempt"
-              role="group"
-              aria-labelledby="settings-exempt-label"
-              aria-describedby="settings-exempt-hint"
-              data-test-field-group="protection_exempt_paths"
-            >
-              <span class="field-label" id="settings-exempt-label">
-                保護を外すパス
-              </span>
-              <p class="field-hint" id="settings-exempt-hint">
-                Webhook
-                など、ログインできない呼び出し元のためのパスです。前方一致で、大文字と小文字は区別しません。ディレクトリは末尾を
-                / にします（例
-                <code
-                >/webhooks/</code>）。外したパスは、アプリ自身で認証してください。
+              {{#if this.webhookSecretMissing}}
+                <Banner
+                  @tone="warning"
+                  @title="Webhook の secret が設定されていません"
+                  data-test-webhook-secret-missing
+                >
+                  <code>config.toml</code>
+                  の
+                  <code>[github] webhook_secret</code>
+                  を設定して koroku を再起動するまで、push
+                  は届いても受け付けません。
+                </Banner>
+              {{/if}}
+
+              <div class="auto-deploy-setup" data-test-webhook-setup>
+                <p class="field-hint">
+                  GitHub App の設定で、次の 3 つが必要です（App
+                  ごとに一度だけ）。
+                </p>
+                <ol class="auto-deploy-steps">
+                  <li>
+                    Webhook を
+                    <strong>Active</strong>
+                    にし、Webhook URL に次のアドレスを入れる。
+                    {{#if this.system.value.webhook}}
+                      <span class="auto-deploy-url">
+                        <code
+                          data-test-webhook-url
+                        >{{this.system.value.webhook.url}}</code>
+                        <CopyButton
+                          @text={{this.system.value.webhook.url}}
+                          @label="Webhook URL"
+                        />
+                      </span>
+                    {{/if}}
+                  </li>
+                  <li>
+                    Webhook secret に、<code>config.toml</code>
+                    の
+                    <code>[github] webhook_secret</code>
+                    と同じ値を入れる。
+                  </li>
+                  <li>
+                    Permissions &amp; events の Subscribe to events で
+                    <strong>Push</strong>
+                    を選ぶ。
+                  </li>
+                </ol>
+              </div>
+            {{/if}}
+            {{#if this.errors.auto_deploy}}
+              <p class="field-error" data-test-field-error>
+                {{this.errors.auto_deploy}}
               </p>
-              {{#if this.form.exemptPaths.length}}
-                <ul class="exempt-rows">
-                  {{#each this.form.exemptPaths key="id" as |row|}}
-                    <li class="exempt-row" data-test-exempt-row>
+            {{/if}}
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div>
+            <h2 class="form-group-title">公開</h2>
+            <p class="form-group-description">
+              外からのリクエストを受けるサービスと、デプロイ後に応答を確かめるパスです。
+            </p>
+          </div>
+          <div class="form-group-body">
+            <div class="form-grid">
+              <FormField
+                @label="公開するサービス"
+                @error={{this.errors.web_service}}
+                data-test-field-group="web_service"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="text"
+                  spellcheck="false"
+                  autocomplete="off"
+                  value={{this.form.webService}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="web_service"
+                  {{on "input" (setValue this.form "webService")}}
+                />
+              </FormField>
+
+              <FormField
+                @label="コンテナ側のポート"
+                @error={{this.errors.web_port}}
+                data-test-field-group="web_port"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="number"
+                  class="mono"
+                  inputmode="numeric"
+                  min="1"
+                  max="65535"
+                  value={{this.form.webPort}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="web_port"
+                  {{on "input" (setValue this.form "webPort")}}
+                />
+              </FormField>
+
+              <FormField
+                @label="ヘルスチェックのパス"
+                @error={{this.errors.healthcheck_path}}
+                data-test-field-group="healthcheck_path"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="text"
+                  class="mono"
+                  spellcheck="false"
+                  autocomplete="off"
+                  value={{this.form.healthcheckPath}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="healthcheck_path"
+                  {{on "input" (setValue this.form "healthcheckPath")}}
+                />
+              </FormField>
+            </div>
+
+            <dl class="readout">
+              <dt>ホスト側のポート</dt>
+              <dd>
+                <span
+                  class="mono"
+                  data-test-host-port
+                >127.0.0.1:{{this.app.host_port}}</span>
+                <span class="readout-note">（自動で割り当て済み）</span>
+              </dd>
+            </dl>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div>
+            <h2 class="form-group-title">環境</h2>
+            <p class="form-group-description">
+              本番とステージングを取り違えないための目印です。アプリの動作は変わりません。
+            </p>
+          </div>
+          <div class="form-group-body">
+            {{#unless this.isOwner}}
+              {{#unless this.readOnly}}
+                <RoleNote
+                  @needed="owner"
+                  @what="環境"
+                  data-test-environment-owner-note
+                />
+              {{/unless}}
+            {{/unless}}
+            <fieldset class="option-group">
+              <legend class="visually-hidden">環境</legend>
+              <label class="option">
+                <input
+                  type="radio"
+                  name="environment"
+                  value="staging"
+                  checked={{isChecked this.form.environment "staging"}}
+                  disabled={{if this.isOwner false true}}
+                  data-test-environment-option="staging"
+                  {{on "change" this.setEnvironment}}
+                />
+                <span class="option-body">
+                  <span class="option-label">ステージング</span>
+                  <span
+                    class="option-hint"
+                  >デプロイは確認なしで始まります。</span>
+                </span>
+              </label>
+              <label class="option">
+                <input
+                  type="radio"
+                  name="environment"
+                  value="production"
+                  checked={{isChecked this.form.environment "production"}}
+                  disabled={{if this.isOwner false true}}
+                  data-test-environment-option="production"
+                  {{on "change" this.setEnvironment}}
+                />
+                <span class="option-body">
+                  <span class="option-label">本番</span>
+                  <span class="option-hint">
+                    バッジで目立たせ、デプロイの前に確認します。
+                  </span>
+                </span>
+              </label>
+            </fieldset>
+          </div>
+        </div>
+
+        <div class="form-group" data-test-protection-group>
+          <div>
+            <h2 class="form-group-title">アクセスの保護</h2>
+            <p class="form-group-description">
+              このアプリのアドレス（独自ドメインを含む）を開けるのを、この管理画面にログインしている人だけにします。アプリには手を入れず、保存するとすぐに反映されます。
+            </p>
+          </div>
+          <div class="form-group-body">
+            <label class="option">
+              <input
+                type="checkbox"
+                checked={{this.form.accessProtection}}
+                aria-describedby="settings-protection-hint"
+                data-test-field="access_protection"
+                {{on "change" (setChecked this.form "accessProtection")}}
+              />
+              <span class="option-body">
+                <span
+                  class="option-label"
+                >管理画面にログインしている人だけに公開する</span>
+                <span class="option-hint" id="settings-protection-hint">
+                  ログインしていない人が開くと、管理画面のログインを経て元のページに戻ります。ステージングのアプリは最初から有効です。ブラウザー以外（API
+                  の呼び出しや監視サービス）は通れません。
+                </span>
+              </span>
+            </label>
+
+            {{#if this.form.accessProtection}}
+              <div
+                class="field protection-exempt"
+                role="group"
+                aria-labelledby="settings-exempt-label"
+                aria-describedby="settings-exempt-hint"
+                data-test-field-group="protection_exempt_paths"
+              >
+                <span class="field-label" id="settings-exempt-label">
+                  保護を外すパス
+                </span>
+                <p class="field-hint" id="settings-exempt-hint">
+                  Webhook
+                  など、ログインできない呼び出し元のためのパスです。前方一致で、大文字と小文字は区別しません。ディレクトリは末尾を
+                  / にします（例
+                  <code
+                  >/webhooks/</code>）。外したパスは、アプリ自身で認証してください。
+                </p>
+                {{#if this.form.exemptPaths.length}}
+                  <ul class="exempt-rows">
+                    {{#each this.form.exemptPaths key="id" as |row|}}
+                      <li class="exempt-row" data-test-exempt-row>
+                        <input
+                          type="text"
+                          class="mono"
+                          placeholder="/webhooks/"
+                          spellcheck="false"
+                          autocomplete="off"
+                          aria-label="保護を外すパス"
+                          aria-invalid={{if (this.exemptRowInvalid row) "true"}}
+                          value={{row.path}}
+                          data-test-exempt-path
+                          {{on "input" (setValue row "path")}}
+                        />
+                        <Button
+                          @size="small"
+                          aria-label="{{if
+                            row.path
+                            row.path
+                            'この行'
+                          }} を一覧から外す"
+                          data-test-exempt-remove
+                          {{on "click" (fn this.removeExemptPath row)}}
+                        >外す</Button>
+                      </li>
+                    {{/each}}
+                  </ul>
+                {{/if}}
+                <div>
+                  <Button
+                    @size="small"
+                    data-test-exempt-add
+                    {{on "click" this.addExemptPath}}
+                  >パスを追加</Button>
+                </div>
+                {{#if this.errors.protection_exempt_paths}}
+                  <p class="field-error" data-test-field-error>
+                    {{this.errors.protection_exempt_paths}}
+                  </p>
+                {{/if}}
+              </div>
+            {{else if this.publicStaging}}
+              <Banner class="protection-public" data-test-protection-public>
+                このステージングのアプリは誰でも開けます。検索エンジンに載らないよう、応答には
+                <code>X-Robots-Tag: noindex</code>
+                を付けます。
+              </Banner>
+            {{/if}}
+          </div>
+        </div>
+
+        {{#if this.isProductionForm}}
+          <div class="form-group" data-test-promotion-group>
+            <div>
+              <h2 class="form-group-title">昇格元</h2>
+              <p class="form-group-description">
+                同じリポジトリのステージングアプリを選ぶと、デプロイの画面から、そのアプリで稼働中のリリースを本番へ昇格できます。ビルド引数が同じなら、ビルドしたイメージも再利用します。
+              </p>
+            </div>
+            <div class="form-group-body">
+              <FormField
+                class="field-wide"
+                @label="昇格元のステージングアプリ"
+                @hint={{if
+                  this.apps.error
+                  "アプリの一覧を取得できませんでした。"
+                  ""
+                }}
+                @error={{this.errors.promote_from}}
+                data-test-field-group="promote_from"
+                as |field|
+              >
+                <select
+                  id={{field.id}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  disabled={{if this.isOwner false true}}
+                  data-test-field="promote_from"
+                  {{on "change" this.setPromoteFrom}}
+                >
+                  <option value="" selected={{eq this.form.promoteFrom ""}}>
+                    なし
+                  </option>
+                  {{#if this.savedSourceMissing}}
+                    <option
+                      value={{this.app.promote_from}}
+                      selected={{eq
+                        this.form.promoteFrom
+                        this.app.promote_from
+                      }}
+                    >{{this.app.promote_from}}（条件に合いません）</option>
+                  {{/if}}
+                  {{#each this.promotionSources key="slug" as |other|}}
+                    <option
+                      value={{other.slug}}
+                      selected={{eq this.form.promoteFrom other.slug}}
+                    >{{other.slug}}</option>
+                  {{/each}}
+                </select>
+              </FormField>
+              {{#if this.apps.loaded}}
+                {{#unless this.promotionSources.length}}
+                  <p class="readout-note" data-test-no-promotion-sources>
+                    同じリポジトリのステージングアプリがありません。
+                  </p>
+                {{/unless}}
+              {{/if}}
+            </div>
+          </div>
+        {{/if}}
+
+        <div class="form-group" data-test-env-source-group>
+          <div>
+            <h2 class="form-group-title">必要な環境変数の照合</h2>
+            <p class="form-group-description">
+              リポジトリが必要とする環境変数を読み、環境変数の画面とデプロイの前に、未設定のものを知らせます。デプロイは止めません。
+            </p>
+          </div>
+          <div class="form-group-body">
+            <fieldset class="option-group">
+              <legend class="visually-hidden">照合元</legend>
+              <label class="option">
+                <input
+                  type="radio"
+                  name="env_source"
+                  value="compose"
+                  checked={{isSource this.form.envSource "compose"}}
+                  data-test-env-source-option="compose"
+                  {{on "change" this.setEnvSource}}
+                />
+                <span class="option-body">
+                  <span class="option-label">Compose ファイルの
+                    <code>{{VAR_PLAIN}}</code>（推奨）</span>
+                  <span class="option-hint">
+                    <code>{{VAR_REQUIRED}}</code>
+                    と既定値のない参照は必須、<code>{{VAR_OPTIONAL}}</code>
+                    は任意として扱います。アプリのコードだけが読む変数は対象外です。
+                  </span>
+                </span>
+              </label>
+              <label class="option">
+                <input
+                  type="radio"
+                  name="env_source"
+                  value="dotenv"
+                  checked={{isSource this.form.envSource "dotenv"}}
+                  data-test-env-source-option="dotenv"
+                  {{on "change" this.setEnvSource}}
+                />
+                <span class="option-body">
+                  <span class="option-label">.env.example</span>
+                  <span class="option-hint">
+                    書かれたキーをすべて必須として扱い、直前のコメントを説明として表示します。
+                  </span>
+                </span>
+              </label>
+              <label class="option">
+                <input
+                  type="radio"
+                  name="env_source"
+                  value="off"
+                  checked={{isSource this.form.envSource "off"}}
+                  data-test-env-source-option="off"
+                  {{on "change" this.setEnvSource}}
+                />
+                <span class="option-body">
+                  <span class="option-label">照合しない</span>
+                </span>
+              </label>
+            </fieldset>
+            {{#if (isSource this.form.envSource "dotenv")}}
+              <FormField
+                class="field-wide"
+                @label=".env.example のパス"
+                @hint="空ならリポジトリ直下の .env.example を読みます。"
+                @error={{this.errors.env_example_path}}
+                data-test-field-group="env_example_path"
+                as |field|
+              >
+                <input
+                  id={{field.id}}
+                  type="text"
+                  class="mono"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder=".env.example"
+                  value={{this.form.envExamplePath}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="env_example_path"
+                  {{on "input" (setValue this.form "envExamplePath")}}
+                />
+              </FormField>
+            {{/if}}
+            {{#if this.errors.env_source}}
+              <p class="field-error">{{this.errors.env_source}}</p>
+            {{/if}}
+            <p class="settings-requirements" aria-live="polite">
+              {{#if this.requirements.loading}}
+                <span data-test-settings-requirements-loading>
+                  <Icon @name="spinner" />
+                  必要な環境変数を確かめています…
+                </span>
+              {{else if this.requirementsSummary}}
+                <span
+                  class="settings-requirements-{{this.requirementsSummary.tone}}"
+                  data-test-settings-requirements={{this.requirementsSummary.tone}}
+                >
+                  {{#if (eq this.requirementsSummary.tone "warning")}}
+                    <Icon @name="warning" />
+                  {{/if}}
+                  {{this.requirementsSummary.text}}
+                </span>
+                <LinkTo
+                  @route="app.env"
+                  @model={{this.app.slug}}
+                  data-test-settings-requirements-link
+                >環境変数を開く</LinkTo>
+              {{/if}}
+            </p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div>
+            <h2 class="form-group-title">メモリ上限</h2>
+            <p class="form-group-description">
+              サービスごとの上限です。数字に単位 b・k・m・g
+              のどれかを付けて書きます（例: 512m、1g）。
+            </p>
+          </div>
+          <div class="form-group-body">
+            <FormField
+              class="field-narrow"
+              @label="既定（全サービス共通）"
+              @hint="空なら基盤の既定値を使います。"
+              @error={{this.errors.memory_limit}}
+              data-test-field-group="memory_limit"
+              as |field|
+            >
+              <input
+                id={{field.id}}
+                type="text"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="基盤の既定値"
+                value={{this.form.memoryLimit}}
+                aria-describedby={{field.describedBy}}
+                aria-invalid={{field.invalid}}
+                data-test-field="memory_limit"
+                {{on "input" (setValue this.form "memoryLimit")}}
+              />
+            </FormField>
+
+            <div
+              class="field"
+              role="group"
+              aria-labelledby="settings-limits-label"
+              data-test-field-group="service_memory_limits"
+            >
+              <span class="field-label" id="settings-limits-label">
+                サービス別
+              </span>
+              {{#if this.form.limits.length}}
+                <ul class="limit-rows">
+                  {{#each this.form.limits key="id" as |row|}}
+                    <li class="limit-row" data-test-limit-row>
                       <input
                         type="text"
-                        class="mono"
-                        placeholder="/webhooks/"
+                        placeholder="サービス名"
                         spellcheck="false"
                         autocomplete="off"
-                        aria-label="保護を外すパス"
-                        aria-invalid={{if (this.exemptRowInvalid row) "true"}}
-                        value={{row.path}}
-                        data-test-exempt-path
-                        {{on "input" (setValue row "path")}}
+                        aria-label="サービス名"
+                        value={{row.service}}
+                        data-test-limit-service
+                        {{on "input" (setValue row "service")}}
+                      />
+                      <input
+                        type="text"
+                        placeholder="1g"
+                        spellcheck="false"
+                        autocomplete="off"
+                        aria-label="{{if
+                          row.service
+                          row.service
+                          'サービス'
+                        }} の上限"
+                        aria-invalid={{if
+                          this.errors.service_memory_limits
+                          "true"
+                        }}
+                        value={{row.limit}}
+                        data-test-limit-value
+                        {{on "input" (setValue row "limit")}}
                       />
                       <Button
                         @size="small"
                         aria-label="{{if
-                          row.path
-                          row.path
+                          row.service
+                          row.service
                           'この行'
-                        }} を一覧から外す"
-                        data-test-exempt-remove
-                        {{on "click" (fn this.removeExemptPath row)}}
+                        }} の上限を外す"
+                        data-test-limit-remove
+                        {{on "click" (fn this.removeLimit row)}}
                       >外す</Button>
                     </li>
                   {{/each}}
@@ -957,505 +1273,245 @@ export default class AppSettingsTemplate extends Component<Signature> {
               <div>
                 <Button
                   @size="small"
-                  data-test-exempt-add
-                  {{on "click" this.addExemptPath}}
-                >パスを追加</Button>
+                  data-test-limit-add
+                  {{on "click" this.addLimit}}
+                >サービス別の上限を追加</Button>
               </div>
-              {{#if this.errors.protection_exempt_paths}}
+              {{#if this.errors.service_memory_limits}}
                 <p class="field-error" data-test-field-error>
-                  {{this.errors.protection_exempt_paths}}
+                  {{this.errors.service_memory_limits}}
                 </p>
               {{/if}}
             </div>
-          {{else if this.publicStaging}}
-            <Banner class="protection-public" data-test-protection-public>
-              このステージングのアプリは誰でも開けます。検索エンジンに載らないよう、応答には
-              <code>X-Robots-Tag: noindex</code>
-              を付けます。
-            </Banner>
-          {{/if}}
-        </div>
-      </div>
 
-      {{#if this.isProductionForm}}
-        <div class="form-group" data-test-promotion-group>
+            <MemoryHistory
+              @slug={{this.app.slug}}
+              @limits={{this.form.serviceLimits}}
+              @onApply={{this.applySuggestion}}
+            />
+          </div>
+        </div>
+
+        <div class="form-group">
           <div>
-            <h2 class="form-group-title">昇格元</h2>
+            <h2 class="form-group-title">デプロイの安全装置</h2>
             <p class="form-group-description">
-              同じリポジトリのステージングアプリを選ぶと、デプロイの画面から、そのアプリで稼働中のリリースを本番へ昇格できます。ビルド引数が同じなら、ビルドしたイメージも再利用します。
+              危険な構成や、起動しないリリースからアプリを守るしくみです。
             </p>
           </div>
           <div class="form-group-body">
-            <FormField
-              class="field-wide"
-              @label="昇格元のステージングアプリ"
-              @hint={{if
-                this.apps.error
-                "アプリの一覧を取得できませんでした。"
-                ""
-              }}
-              @error={{this.errors.promote_from}}
-              data-test-field-group="promote_from"
-              as |field|
-            >
-              <select
-                id={{field.id}}
-                aria-describedby={{field.describedBy}}
-                aria-invalid={{field.invalid}}
-                data-test-field="promote_from"
-                {{on "change" this.setPromoteFrom}}
-              >
-                <option value="" selected={{eq this.form.promoteFrom ""}}>
-                  なし
-                </option>
-                {{#if this.savedSourceMissing}}
-                  <option
-                    value={{this.app.promote_from}}
-                    selected={{eq this.form.promoteFrom this.app.promote_from}}
-                  >{{this.app.promote_from}}（条件に合いません）</option>
-                {{/if}}
-                {{#each this.promotionSources key="slug" as |other|}}
-                  <option
-                    value={{other.slug}}
-                    selected={{eq this.form.promoteFrom other.slug}}
-                  >{{other.slug}}</option>
-                {{/each}}
-              </select>
-            </FormField>
-            {{#if this.apps.loaded}}
-              {{#unless this.promotionSources.length}}
-                <p class="readout-note" data-test-no-promotion-sources>
-                  同じリポジトリのステージングアプリがありません。
-                </p>
+            <dl class="readout">
+              <dt>自動ロールバック</dt>
+              <dd data-test-auto-rollback>
+                有効
+                <span class="readout-note">
+                  （起動やヘルスチェックに失敗したら、直前に成功したリリースへ自動で戻します。常に有効です）
+                </span>
+              </dd>
+            </dl>
+
+            {{#unless this.isOwner}}
+              {{#unless this.readOnly}}
+                <RoleNote
+                  @needed="owner"
+                  @what="ポリシー検査と昇格元"
+                  data-test-owner-only-note
+                />
               {{/unless}}
-            {{/if}}
-          </div>
-        </div>
-      {{/if}}
-
-      <div class="form-group" data-test-env-source-group>
-        <div>
-          <h2 class="form-group-title">必要な環境変数の照合</h2>
-          <p class="form-group-description">
-            リポジトリが必要とする環境変数を読み、環境変数の画面とデプロイの前に、未設定のものを知らせます。デプロイは止めません。
-          </p>
-        </div>
-        <div class="form-group-body">
-          <fieldset class="option-group">
-            <legend class="visually-hidden">照合元</legend>
+            {{/unless}}
             <label class="option">
               <input
-                type="radio"
-                name="env_source"
-                value="compose"
-                checked={{isSource this.form.envSource "compose"}}
-                data-test-env-source-option="compose"
-                {{on "change" this.setEnvSource}}
+                type="checkbox"
+                checked={{this.form.relaxPolicy}}
+                aria-describedby="settings-relax-hint"
+                disabled={{if this.isOwner false true}}
+                data-test-field="relax_policy"
+                {{on "change" (setChecked this.form "relaxPolicy")}}
               />
               <span class="option-body">
-                <span class="option-label">Compose ファイルの
-                  <code>{{VAR_PLAIN}}</code>（推奨）</span>
-                <span class="option-hint">
-                  <code>{{VAR_REQUIRED}}</code>
-                  と既定値のない参照は必須、<code>{{VAR_OPTIONAL}}</code>
-                  は任意として扱います。アプリのコードだけが読む変数は対象外です。
+                <span class="option-label">Compose のポリシー検査を緩める</span>
+                <span class="option-hint" id="settings-relax-hint">
+                  特権コンテナ、ホストのネットワーク、Docker
+                  ソケットやリリース外の bind mount
+                  など、通常は拒否する指定を通します。項目ごとには選べません。
                 </span>
               </span>
             </label>
-            <label class="option">
-              <input
-                type="radio"
-                name="env_source"
-                value="dotenv"
-                checked={{isSource this.form.envSource "dotenv"}}
-                data-test-env-source-option="dotenv"
-                {{on "change" this.setEnvSource}}
-              />
-              <span class="option-body">
-                <span class="option-label">.env.example</span>
-                <span class="option-hint">
-                  書かれたキーをすべて必須として扱い、直前のコメントを説明として表示します。
-                </span>
-              </span>
-            </label>
-            <label class="option">
-              <input
-                type="radio"
-                name="env_source"
-                value="off"
-                checked={{isSource this.form.envSource "off"}}
-                data-test-env-source-option="off"
-                {{on "change" this.setEnvSource}}
-              />
-              <span class="option-body">
-                <span class="option-label">照合しない</span>
-              </span>
-            </label>
-          </fieldset>
-          {{#if (isSource this.form.envSource "dotenv")}}
-            <FormField
-              class="field-wide"
-              @label=".env.example のパス"
-              @hint="空ならリポジトリ直下の .env.example を読みます。"
-              @error={{this.errors.env_example_path}}
-              data-test-field-group="env_example_path"
-              as |field|
-            >
-              <input
-                id={{field.id}}
-                type="text"
-                class="mono"
-                spellcheck="false"
-                autocomplete="off"
-                placeholder=".env.example"
-                value={{this.form.envExamplePath}}
-                aria-describedby={{field.describedBy}}
-                aria-invalid={{field.invalid}}
-                data-test-field="env_example_path"
-                {{on "input" (setValue this.form "envExamplePath")}}
-              />
-            </FormField>
-          {{/if}}
-          {{#if this.errors.env_source}}
-            <p class="field-error">{{this.errors.env_source}}</p>
-          {{/if}}
-          <p class="settings-requirements" aria-live="polite">
-            {{#if this.requirements.loading}}
-              <span data-test-settings-requirements-loading>
-                <Icon @name="spinner" />
-                必要な環境変数を確かめています…
-              </span>
-            {{else if this.requirementsSummary}}
-              <span
-                class="settings-requirements-{{this.requirementsSummary.tone}}"
-                data-test-settings-requirements={{this.requirementsSummary.tone}}
+            {{#if this.form.relaxPolicy}}
+              <Banner
+                @tone="warning"
+                @title="このアプリには保護の多くが効きません"
+                data-test-relax-warning
               >
-                {{#if (eq this.requirementsSummary.tone "warning")}}
-                  <Icon @name="warning" />
-                {{/if}}
-                {{this.requirementsSummary.text}}
-              </span>
-              <LinkTo
-                @route="app.env"
-                @model={{this.app.slug}}
-                data-test-settings-requirements-link
-              >環境変数を開く</LinkTo>
-            {{/if}}
-          </p>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <div>
-          <h2 class="form-group-title">メモリ上限</h2>
-          <p class="form-group-description">
-            サービスごとの上限です。数字に単位 b・k・m・g
-            のどれかを付けて書きます（例: 512m、1g）。
-          </p>
-        </div>
-        <div class="form-group-body">
-          <FormField
-            class="field-narrow"
-            @label="既定（全サービス共通）"
-            @hint="空なら基盤の既定値を使います。"
-            @error={{this.errors.memory_limit}}
-            data-test-field-group="memory_limit"
-            as |field|
-          >
-            <input
-              id={{field.id}}
-              type="text"
-              spellcheck="false"
-              autocomplete="off"
-              placeholder="基盤の既定値"
-              value={{this.form.memoryLimit}}
-              aria-describedby={{field.describedBy}}
-              aria-invalid={{field.invalid}}
-              data-test-field="memory_limit"
-              {{on "input" (setValue this.form "memoryLimit")}}
-            />
-          </FormField>
-
-          <div
-            class="field"
-            role="group"
-            aria-labelledby="settings-limits-label"
-            data-test-field-group="service_memory_limits"
-          >
-            <span class="field-label" id="settings-limits-label">
-              サービス別
-            </span>
-            {{#if this.form.limits.length}}
-              <ul class="limit-rows">
-                {{#each this.form.limits key="id" as |row|}}
-                  <li class="limit-row" data-test-limit-row>
-                    <input
-                      type="text"
-                      placeholder="サービス名"
-                      spellcheck="false"
-                      autocomplete="off"
-                      aria-label="サービス名"
-                      value={{row.service}}
-                      data-test-limit-service
-                      {{on "input" (setValue row "service")}}
-                    />
-                    <input
-                      type="text"
-                      placeholder="1g"
-                      spellcheck="false"
-                      autocomplete="off"
-                      aria-label="{{if
-                        row.service
-                        row.service
-                        'サービス'
-                      }} の上限"
-                      aria-invalid={{if
-                        this.errors.service_memory_limits
-                        "true"
-                      }}
-                      value={{row.limit}}
-                      data-test-limit-value
-                      {{on "input" (setValue row "limit")}}
-                    />
-                    <Button
-                      @size="small"
-                      aria-label="{{if
-                        row.service
-                        row.service
-                        'この行'
-                      }} の上限を外す"
-                      data-test-limit-remove
-                      {{on "click" (fn this.removeLimit row)}}
-                    >外す</Button>
-                  </li>
-                {{/each}}
-              </ul>
-            {{/if}}
-            <div>
-              <Button
-                @size="small"
-                data-test-limit-add
-                {{on "click" this.addLimit}}
-              >サービス別の上限を追加</Button>
-            </div>
-            {{#if this.errors.service_memory_limits}}
-              <p class="field-error" data-test-field-error>
-                {{this.errors.service_memory_limits}}
-              </p>
+                緩めたアプリのコンテナは、ホストを root
+                相当で操作できる構成でも起動します。中身を自分で確かめたリポジトリにだけ使ってください。ポートの公開に関する検査は緩みません。
+              </Banner>
             {{/if}}
           </div>
-
-          <MemoryHistory
-            @slug={{this.app.slug}}
-            @limits={{this.form.serviceLimits}}
-            @onApply={{this.applySuggestion}}
-          />
         </div>
-      </div>
 
-      <div class="form-group">
-        <div>
-          <h2 class="form-group-title">デプロイの安全装置</h2>
-          <p class="form-group-description">
-            危険な構成や、起動しないリリースからアプリを守るしくみです。
-          </p>
-        </div>
-        <div class="form-group-body">
-          <dl class="readout">
-            <dt>自動ロールバック</dt>
-            <dd data-test-auto-rollback>
-              有効
-              <span class="readout-note">
-                （起動やヘルスチェックに失敗したら、直前に成功したリリースへ自動で戻します。常に有効です）
-              </span>
-            </dd>
-          </dl>
-
-          <label class="option">
-            <input
-              type="checkbox"
-              checked={{this.form.relaxPolicy}}
-              aria-describedby="settings-relax-hint"
-              data-test-field="relax_policy"
-              {{on "change" (setChecked this.form "relaxPolicy")}}
-            />
-            <span class="option-body">
-              <span class="option-label">Compose のポリシー検査を緩める</span>
-              <span class="option-hint" id="settings-relax-hint">
-                特権コンテナ、ホストのネットワーク、Docker
-                ソケットやリリース外の bind mount
-                など、通常は拒否する指定を通します。項目ごとには選べません。
-              </span>
-            </span>
-          </label>
-          {{#if this.form.relaxPolicy}}
-            <Banner
-              @tone="warning"
-              @title="このアプリには保護の多くが効きません"
-              data-test-relax-warning
-            >
-              緩めたアプリのコンテナは、ホストを root
-              相当で操作できる構成でも起動します。中身を自分で確かめたリポジトリにだけ使ってください。ポートの公開に関する検査は緩みません。
-            </Banner>
-          {{/if}}
-        </div>
-      </div>
-
-      <div aria-live="polite">
-        <ErrorMessage @error={{this.error}} />
-        {{#if this.otherErrors.length}}
-          <ul class="form-problems" data-test-other-errors>
-            {{#each this.otherErrors as |line|}}
-              <li>{{line}}</li>
-            {{/each}}
-          </ul>
-        {{/if}}
-      </div>
-
-      <div class="form-footer">
-        <Button
-          @type="submit"
-          @variant="primary"
-          @busy={{this.saving}}
-          @busyLabel="保存中…"
-          data-test-settings-save
-        >保存</Button>
-        <p class="form-status" aria-live="polite">
-          {{#if this.saved}}
-            <span class="form-saved" data-test-settings-saved>
-              <Icon @name="check" />
-              保存しました。Compose
-              やメモリ上限の変更は、次のデプロイから反映されます。
-            </span>
-          {{else if this.nothingToSave}}
-            <span data-test-settings-unchanged>変更はありません。</span>
-          {{else}}
-            Compose やメモリ上限の変更は、次のデプロイから反映されます。
-          {{/if}}
-        </p>
-      </div>
-    </form>
-
-    <section
-      class="pane settings-operations"
-      aria-labelledby="operations-title"
-    >
-      <div class="pane-header">
-        <h2 class="pane-title" id="operations-title">起動と再起動</h2>
-        <StatusIndicator
-          @kind={{this.state.kind}}
-          @label={{this.state.label}}
-          title={{this.state.hint}}
-          data-test-settings-state
-        />
-      </div>
-
-      <div class="pane-notices" aria-live="polite">
-        {{#if this.controlNotice}}
-          <Banner data-test-notice>{{this.controlNotice}}</Banner>
-        {{/if}}
-        {{#if this.controlError}}
-          <ErrorMessage @error={{this.controlError}} />
-          {{#if this.violations.length}}
-            <ul class="form-problems" data-test-violations>
-              {{#each this.violations as |line|}}
+        <div aria-live="polite">
+          <ErrorMessage @error={{this.error}} />
+          {{#if this.otherErrors.length}}
+            <ul class="form-problems" data-test-other-errors>
+              {{#each this.otherErrors as |line|}}
                 <li>{{line}}</li>
               {{/each}}
             </ul>
           {{/if}}
-        {{/if}}
-      </div>
+        </div>
 
-      <ul class="action-rows">
-        {{#if this.stopped}}
+        <div class="form-footer">
+          <Button
+            @type="submit"
+            @variant="primary"
+            @busy={{this.saving}}
+            @busyLabel="保存中…"
+            data-test-settings-save
+          >保存</Button>
+          <p class="form-status" aria-live="polite">
+            {{#if this.saved}}
+              <span class="form-saved" data-test-settings-saved>
+                <Icon @name="check" />
+                保存しました。Compose
+                やメモリ上限の変更は、次のデプロイから反映されます。
+              </span>
+            {{else if this.nothingToSave}}
+              <span data-test-settings-unchanged>変更はありません。</span>
+            {{else}}
+              Compose やメモリ上限の変更は、次のデプロイから反映されます。
+            {{/if}}
+          </p>
+        </div>
+      </fieldset>
+    </form>
+
+    {{#if this.canDeploy}}
+      <section
+        class="pane settings-operations"
+        aria-labelledby="operations-title"
+      >
+        <div class="pane-header">
+          <h2 class="pane-title" id="operations-title">起動と再起動</h2>
+          <StatusIndicator
+            @kind={{this.state.kind}}
+            @label={{this.state.label}}
+            title={{this.state.hint}}
+            data-test-settings-state
+          />
+        </div>
+
+        <div class="pane-notices" aria-live="polite">
+          {{#if this.controlNotice}}
+            <Banner data-test-notice>{{this.controlNotice}}</Banner>
+          {{/if}}
+          {{#if this.controlError}}
+            <ErrorMessage @error={{this.controlError}} />
+            {{#if this.violations.length}}
+              <ul class="form-problems" data-test-violations>
+                {{#each this.violations as |line|}}
+                  <li>{{line}}</li>
+                {{/each}}
+              </ul>
+            {{/if}}
+          {{/if}}
+        </div>
+
+        <ul class="action-rows">
+          {{#if this.stopped}}
+            <li class="action-row">
+              <div class="action-row-text">
+                <p class="action-row-title">起動</p>
+                <p class="action-row-description">
+                  稼働中だったリリースでコンテナを起動します。
+                </p>
+              </div>
+              <Button
+                @disabled={{this.controlsDisabled}}
+                @busy={{isBusy this.controlling "start"}}
+                @busyLabel="起動中…"
+                data-test-control="start"
+                {{on "click" (fn this.control "start")}}
+              >起動</Button>
+            </li>
+          {{else}}
+            <li class="action-row">
+              <div class="action-row-text">
+                <p class="action-row-title">再起動</p>
+                <p class="action-row-description">
+                  {{#if this.neverDeployed}}
+                    まだデプロイされていないため、起動や停止はできません。
+                  {{else}}
+                    いまのリリースのままコンテナを再起動します。数秒のあいだ応答が止まります。
+                  {{/if}}
+                </p>
+              </div>
+              <Button
+                @disabled={{this.controlsDisabled}}
+                @busy={{isBusy this.controlling "restart"}}
+                @busyLabel="再起動中…"
+                data-test-control="restart"
+                {{on "click" (fn this.control "restart")}}
+              >再起動</Button>
+            </li>
+          {{/if}}
+        </ul>
+      </section>
+    {{/if}}
+
+    {{#if this.canDeploy}}
+      <section
+        class="danger-zone"
+        aria-labelledby="danger-title"
+        data-test-danger-zone
+      >
+        <h2 class="danger-zone-title" id="danger-title">
+          <Icon @name="warning" />
+          危険な操作
+        </h2>
+
+        <div class="pane-notices" aria-live="polite">
+          <ErrorMessage @error={{this.deleteError}} />
+        </div>
+
+        <ul class="action-rows">
           <li class="action-row">
             <div class="action-row-text">
-              <p class="action-row-title">起動</p>
+              <p class="action-row-title">アプリを停止</p>
               <p class="action-row-description">
-                稼働中だったリリースでコンテナを起動します。
-              </p>
-            </div>
-            <Button
-              @disabled={{this.controlsDisabled}}
-              @busy={{isBusy this.controlling "start"}}
-              @busyLabel="起動中…"
-              data-test-control="start"
-              {{on "click" (fn this.control "start")}}
-            >起動</Button>
-          </li>
-        {{else}}
-          <li class="action-row">
-            <div class="action-row-text">
-              <p class="action-row-title">再起動</p>
-              <p class="action-row-description">
-                {{#if this.neverDeployed}}
-                  まだデプロイされていないため、起動や停止はできません。
+                {{#if this.stopped}}
+                  すでに停止しています。
                 {{else}}
-                  いまのリリースのままコンテナを再起動します。数秒のあいだ応答が止まります。
+                  コンテナを止めます。起動するまで、アクセスには 503
+                  のページが返ります。データは消えません。
                 {{/if}}
               </p>
             </div>
             <Button
-              @disabled={{this.controlsDisabled}}
-              @busy={{isBusy this.controlling "restart"}}
-              @busyLabel="再起動中…"
-              data-test-control="restart"
-              {{on "click" (fn this.control "restart")}}
-            >再起動</Button>
+              class="button-danger-outline"
+              @disabled={{this.cannotStop}}
+              data-test-control="stop"
+              {{on "click" this.requestStop}}
+            >停止…</Button>
           </li>
-        {{/if}}
-      </ul>
-    </section>
-
-    <section
-      class="danger-zone"
-      aria-labelledby="danger-title"
-      data-test-danger-zone
-    >
-      <h2 class="danger-zone-title" id="danger-title">
-        <Icon @name="warning" />
-        危険な操作
-      </h2>
-
-      <div class="pane-notices" aria-live="polite">
-        <ErrorMessage @error={{this.deleteError}} />
-      </div>
-
-      <ul class="action-rows">
-        <li class="action-row">
-          <div class="action-row-text">
-            <p class="action-row-title">アプリを停止</p>
-            <p class="action-row-description">
-              {{#if this.stopped}}
-                すでに停止しています。
-              {{else}}
-                コンテナを止めます。起動するまで、アクセスには 503
-                のページが返ります。データは消えません。
-              {{/if}}
-            </p>
-          </div>
-          <Button
-            class="button-danger-outline"
-            @disabled={{this.cannotStop}}
-            data-test-control="stop"
-            {{on "click" this.requestStop}}
-          >停止…</Button>
-        </li>
-        <li class="action-row">
-          <div class="action-row-text">
-            <p class="action-row-title">アプリを削除</p>
-            <p class="action-row-description">
-              コンテナを止め、アプリとその設定、デプロイの履歴を削除します。元に戻せません。
-            </p>
-          </div>
-          <Button
-            @variant="danger"
-            data-test-delete
-            {{on "click" this.requestDelete}}
-          >削除…</Button>
-        </li>
-      </ul>
-    </section>
+          {{#if this.isOwner}}
+            <li class="action-row">
+              <div class="action-row-text">
+                <p class="action-row-title">アプリを削除</p>
+                <p class="action-row-description">
+                  コンテナを止め、アプリとその設定、デプロイの履歴を削除します。元に戻せません。
+                </p>
+              </div>
+              <Button
+                @variant="danger"
+                data-test-delete
+                {{on "click" this.requestDelete}}
+              >削除…</Button>
+            </li>
+          {{/if}}
+        </ul>
+      </section>
+    {{/if}}
 
     {{#if this.pendingLeave}}
       <ConfirmDialog

@@ -124,7 +124,7 @@ App の設定画面の左の **Install App** → 自分のアカウントの **I
 
 App をインストールしていない public リポジトリ（OSS など）は、作成画面の「一覧にない公開リポジトリを URL で指定」から URL で指定できる。
 
-### 4.3 ログインを許可するユーザー ID
+### 4.3 オーナーのユーザー ID
 
 数値の ID を調べる（login 名ではない）。
 
@@ -132,7 +132,9 @@ App をインストールしていない public リポジトリ（OSS など）�
 curl -s https://api.github.com/users/<自分の login> | grep '"id"'
 ```
 
-このアカウントの 2 段階認証を、GitHub の Settings → Password and authentication で有効にしておく。管理画面へのログインは GitHub へのサインインを経るので、2 段階認証は GitHub がそこで求める。koroku 自身はアカウントの 2 段階認証の状態を確かめられない（GitHub は GitHub App にそれを知らせない。ARCHITECTURE 10.3）。
+この ID のユーザーが koroku のオーナーになる（`allowed_user_id`）。オーナーはすべての操作ができ、ほかの GitHub ユーザーを管理画面の「メンバー」から加えてアプリごとにロールを与えられる（ARCHITECTURE 10.7）。メンバーは `config.toml` には書かない。
+
+このアカウントの 2 段階認証を、GitHub の Settings → Password and authentication で有効にしておく（メンバーにも同じことを頼む）。管理画面へのログインは GitHub へのサインインを経るので、2 段階認証は GitHub がそこで求める。koroku 自身はアカウントの 2 段階認証の状態を確かめられない（GitHub は GitHub App にそれを知らせない。ARCHITECTURE 10.3）。
 
 ### 4.4 サーバーに置く
 

@@ -22,6 +22,8 @@ import type AppContext from 'koroku-console/utils/app-context';
 import { preventDefault, setValue } from 'koroku-console/utils/dom';
 import { fieldErrors } from 'koroku-console/utils/errors';
 import Loadable from 'koroku-console/utils/loadable';
+import { can } from 'koroku-console/utils/roles';
+import RoleNote from 'koroku-console/components/role-note';
 import {
   DOMAIN_STATUS_KINDS,
   DOMAIN_STATUS_LABELS,
@@ -57,6 +59,11 @@ function isActive(domain: Domain): boolean {
 /** Skipping the DNS check is offered while pending, and can be undone. */
 function showsForce(domain: Domain): boolean {
   return isPending(domain) || domain.force_active;
+}
+
+/** The force switch is an action: only for those who may manage. */
+function forceShown(domain: Domain, canManage: boolean): boolean {
+  return canManage && showsForce(domain);
 }
 
 function records(domain: Domain): DnsRecord[] {
@@ -97,6 +104,15 @@ export default class AppDomainsTemplate extends Component<Signature> {
     super(owner, args);
     void this.list.load();
     this.poller.every(this, PENDING_INTERVAL, () => this.refreshPending());
+  }
+
+  /** Changing domains needs manage (ARCHITECTURE 10.7). */
+  get canManage(): boolean {
+    return can(this.args.model.app, 'manage');
+  }
+
+  get readOnly(): boolean {
+    return !this.canManage;
   }
 
   get slug(): string {
@@ -325,7 +341,9 @@ export default class AppDomainsTemplate extends Component<Signature> {
                     />
                   </div>
                   <div class="domain-item-actions">
-                    {{#if (isActive domain)}}
+                    {{#if this.readOnly}}
+                      {{! Read-only: nothing to do here. }}
+                    {{else if (isActive domain)}}
                       <Button
                         @size="small"
                         @variant={{if domain.is_primary "ghost" "default"}}
@@ -339,25 +357,27 @@ export default class AppDomainsTemplate extends Component<Signature> {
                           "プライマリにする"
                         }}</Button>
                     {{/if}}
-                    <Button
-                      @size="small"
-                      @variant={{if (isActive domain) "ghost" "default"}}
-                      @busy={{this.isRunning domain "verify"}}
-                      @busyLabel="確認中…"
-                      @disabled={{this.busy}}
-                      aria-label="{{domain.hostname}} の DNS を再確認"
-                      data-test-domain-verify
-                      {{on "click" (fn this.verify domain)}}
-                    >再確認</Button>
-                    <button
-                      type="button"
-                      class="{{buttonClass 'default' 'small'}}
-                        button-danger-outline domain-delete"
-                      disabled={{this.busy}}
-                      aria-label="{{domain.hostname}} を削除"
-                      data-test-domain-delete
-                      {{on "click" (fn this.requestDelete domain)}}
-                    >削除</button>
+                    {{#if this.canManage}}
+                      <Button
+                        @size="small"
+                        @variant={{if (isActive domain) "ghost" "default"}}
+                        @busy={{this.isRunning domain "verify"}}
+                        @busyLabel="確認中…"
+                        @disabled={{this.busy}}
+                        aria-label="{{domain.hostname}} の DNS を再確認"
+                        data-test-domain-verify
+                        {{on "click" (fn this.verify domain)}}
+                      >再確認</Button>
+                      <button
+                        type="button"
+                        class="{{buttonClass 'default' 'small'}}
+                          button-danger-outline domain-delete"
+                        disabled={{this.busy}}
+                        aria-label="{{domain.hostname}} を削除"
+                        data-test-domain-delete
+                        {{on "click" (fn this.requestDelete domain)}}
+                      >削除</button>
+                    {{/if}}
                   </div>
                 </div>
 
@@ -455,7 +475,7 @@ export default class AppDomainsTemplate extends Component<Signature> {
                   </div>
                 {{/if}}
 
-                {{#if (showsForce domain)}}
+                {{#if (forceShown domain this.canManage)}}
                   <div class="domain-detail domain-force">
                     <p class="domain-detail-note">
                       {{#if domain.force_active}}
@@ -481,7 +501,9 @@ export default class AppDomainsTemplate extends Component<Signature> {
               </li>
             {{else}}
               <li class="domain-item domain-none" data-test-no-domains>
-                独自ドメインはまだありません。下のフォームから追加できます。
+                独自ドメインはまだありません。{{#if
+                  this.canManage
+                }}下のフォームから追加できます。{{/if}}
               </li>
             {{/each}}
           </ul>
@@ -489,7 +511,9 @@ export default class AppDomainsTemplate extends Component<Signature> {
       </AsyncView>
     </TabSection>
 
-    {{#if this.list.loaded}}
+    {{#if this.readOnly}}
+      <RoleNote @needed="manage" @what="ドメインの追加と変更" />
+    {{else if this.list.loaded}}
       <TabSection @title="独自ドメインを追加" data-test-domain-add-section>
         <form
           class="domain-form"

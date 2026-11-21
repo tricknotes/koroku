@@ -6,9 +6,42 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// loginPattern is what GitHub accepts as a user name: alphanumerics and
+// single hyphens, not at either end, at most 39 characters.
+var loginPattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9]|-[A-Za-z0-9]){0,38}$`)
+
+// ValidLogin reports whether login has the form of a GitHub user name.
+func ValidLogin(login string) bool { return len(login) <= 39 && loginPattern.MatchString(login) }
+
+// UserByLogin looks up a public account by its login, to learn its numeric
+// ID. Like UserByID it needs no credentials. Organizations are reported as
+// not found: they cannot log in.
+func (c *Client) UserByLogin(ctx context.Context, login string) (User, error) {
+	if !ValidLogin(login) {
+		return User{}, fmt.Errorf("%w: login %q", ErrInvalidArgument, login)
+	}
+	var resp struct {
+		ID        int64  `json:"id"`
+		Login     string `json:"login"`
+		AvatarURL string `json:"avatar_url"`
+		Type      string `json:"type"`
+	}
+	if _, err := c.do(ctx, call{method: http.MethodGet, path: "/users/" + url.PathEscape(login)}, &resp); err != nil {
+		return User{}, fmt.Errorf("github: user %s: %w", login, err)
+	}
+	if resp.ID <= 0 {
+		return User{}, fmt.Errorf("github: user %s: response has no user id", login)
+	}
+	if resp.Type != "" && resp.Type != "User" {
+		return User{}, fmt.Errorf("github: %s is a %s, not a user: %w", login, resp.Type, ErrNotFound)
+	}
+	return User{ID: resp.ID, Login: resp.Login, AvatarURL: resp.AvatarURL}, nil
+}
 
 // App describes the GitHub App the client authenticates as. `koroku check`
 // compares it with the configuration.

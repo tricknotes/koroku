@@ -23,7 +23,8 @@ const (
 	// APITokenPrefix starts every token value so that secret scanners can
 	// recognise a leaked token: koroku_ro_[A-Za-z0-9_-]{43}.
 	APITokenPrefix = "koroku_ro_"
-	// maxAPITokens bounds the live tokens; one per machine is plenty.
+	// maxAPITokens bounds the live tokens of each user; one per machine is
+	// plenty.
 	maxAPITokens = 20
 	// maxTokenName bounds the label of a token, in characters.
 	maxTokenName = 100
@@ -133,6 +134,21 @@ func (s *Server) serveWithToken(w http.ResponseWriter, r *http.Request, mux *htt
 	if info := requestInfoFrom(r); info != nil {
 		info.tokenID = tok.ID
 	}
+	// A token acts as its user, who must still be allowed in: removing a
+	// member deletes its tokens, and this also covers a changed owner.
+	owner := s.auth.InsecureNoAuth || (s.auth.AllowedUserID != 0 && tok.GitHubUserID == s.auth.AllowedUserID)
+	if !owner {
+		allowed, err := s.store.HasAnyRole(r.Context(), tok.GitHubUserID)
+		if err != nil {
+			s.log.Error("checking the api token's user failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal", "internal server error")
+			return
+		}
+		if !allowed {
+			s.invalidToken(w)
+			return
+		}
+	}
 	if !s.tokenLimiter.allow(tok.ID, now) {
 		w.Header().Set("Retry-After", strconv.Itoa(60))
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "too many requests with this API token")
@@ -153,6 +169,7 @@ func (s *Server) serveWithToken(w http.ResponseWriter, r *http.Request, mux *htt
 		}
 	}
 	r = r.Clone(context.WithValue(r.Context(), tokenKey{}, tok))
+	r = withActor(r, actor{UserID: tok.GitHubUserID, Login: tok.Login, Owner: owner})
 	r.Header.Del("Cookie")
 	mux.ServeHTTP(w, r)
 }
@@ -163,23 +180,41 @@ func (s *Server) invalidToken(w http.ResponseWriter) {
 }
 
 type apiTokenJSON struct {
-	ID         string     `json:"id"`
-	Name       string     `json:"name"`
-	CreatedAt  time.Time  `json:"created_at"`
-	ExpiresAt  time.Time  `json:"expires_at"`
-	LastUsedAt *time.Time `json:"last_used_at"`
-	LastUsedIP string     `json:"last_used_ip"`
+	ID string `json:"id"`
+	// User is who the token acts as; the owner sees everyone's tokens.
+	User       userRefJSON `json:"user"`
+	Name       string      `json:"name"`
+	CreatedAt  time.Time   `json:"created_at"`
+	ExpiresAt  time.Time   `json:"expires_at"`
+	LastUsedAt *time.Time  `json:"last_used_at"`
+	LastUsedIP string      `json:"last_used_ip"`
+}
+
+type userRefJSON struct {
+	ID    int64  `json:"id"`
+	Login string `json:"login"`
 }
 
 func apiTokenView(tok store.APIToken) apiTokenJSON {
 	return apiTokenJSON{
 		ID: tok.ID, Name: tok.Name, CreatedAt: tok.CreatedAt, ExpiresAt: tok.ExpiresAt,
+		User:       userRefJSON{ID: tok.GitHubUserID, Login: tok.Login},
 		LastUsedAt: tok.LastUsedAt, LastUsedIP: tok.LastUsedIP,
 	}
 }
 
+// recordsOf is whose tokens, sessions and login history a request may
+// see and revoke: everyone's for the owner, its own for a member.
+func recordsOf(r *http.Request) int64 {
+	a, _ := actorFrom(r)
+	if a.Owner {
+		return store.AllUsers
+	}
+	return a.UserID
+}
+
 func (s *Server) handleListTokens(w http.ResponseWriter, r *http.Request) {
-	list, err := s.store.ListAPITokens(r.Context(), s.clock.Now())
+	list, err := s.store.ListAPITokens(r.Context(), recordsOf(r), s.clock.Now())
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -241,8 +276,10 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	}
 	value := APITokenPrefix + secret
 	now := s.clock.Now()
+	who, _ := actorFrom(r)
 	tok := store.APIToken{
 		ID: id, TokenHash: hashToken(value), Name: body.Name,
+		GitHubUserID: who.UserID, Login: who.Login,
 		CreatedAt: now, ExpiresAt: now.Add(time.Duration(body.ExpiresInDays) * 24 * time.Hour),
 	}
 	err = s.store.CreateAPIToken(r.Context(), tok, maxAPITokens)
@@ -262,7 +299,7 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 // recent login.
 func (s *Server) handleDeleteToken(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	err := s.store.DeleteAPIToken(r.Context(), id)
+	err := s.store.DeleteAPIToken(r.Context(), recordsOf(r), id)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "token_not_found", "no such token")
 		return

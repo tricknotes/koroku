@@ -4,6 +4,39 @@ export interface SessionUser {
   id: number;
   login: string;
   avatar_url: string;
+  /**
+   * The owner (`allowed_user_id`) may do everything; members only what
+   * their per-app roles allow (ARCHITECTURE 10.7). Absent on older
+   * backends, which only let the owner in.
+   */
+  owner?: boolean;
+}
+
+/** A member's role on one app, from the least to the most powerful. */
+export type MemberRole = 'view' | 'deploy' | 'manage';
+
+/** What the requesting user may do on an app (`App.role`). */
+export type AppRole = MemberRole | 'owner';
+
+/** Who started an operation; `null` when nobody did (or older records). */
+export interface Actor {
+  id: number;
+  login: string;
+}
+
+/** A user named next to a session or token the owner sees. */
+export interface UserRef {
+  id: number;
+  login: string;
+}
+
+/** `GET /api/members`: someone the owner let in, with roles per app. */
+export interface Member {
+  github_user_id: number;
+  login: string;
+  avatar_url: string;
+  added_at: string;
+  roles: { app: string; role: MemberRole }[];
 }
 
 export interface SessionResponse {
@@ -25,6 +58,8 @@ export interface ApiToken {
   /** Rounded to the minute; `null` until first used. */
   last_used_at: string | null;
   last_used_ip: string;
+  /** Whose token it is; the owner sees everyone's. */
+  user?: UserRef;
 }
 
 /** Answer to `POST /api/tokens`: the only time `value` is ever sent. */
@@ -46,6 +81,8 @@ export interface LoginSession {
   user_agent: string;
   /** The session of the browser that asked. */
   current: boolean;
+  /** Whose session it is; the owner sees everyone's. */
+  user?: UserRef;
 }
 
 /**
@@ -180,6 +217,8 @@ export interface Deployment {
   rollback_available?: boolean;
   /** The staging release a promotion deployed (ARCHITECTURE 9.7). */
   promoted_from?: { deployment_id: number; app_slug: string } | null;
+  /** Who asked for it (ARCHITECTURE 10.7). */
+  actor?: Actor | null;
   /** What started it (ARCHITECTURE 5.2); absent on older backends. */
   trigger?: DeploymentTrigger;
   /** The GitHub login that pushed, for a push-triggered deployment. */
@@ -215,6 +254,8 @@ export interface TaskRun {
   error: string;
   started_at: string;
   finished_at: string | null;
+  /** Who started it. */
+  actor?: Actor | null;
 }
 
 export type Environment = 'production' | 'staging';
@@ -243,6 +284,11 @@ export interface App {
   latest_deployment: Deployment | null;
   created_at: string;
   updated_at: string;
+  /**
+   * What the user may do on this app (ARCHITECTURE 10.7). Absent on older
+   * backends, where the only user is the owner.
+   */
+  role?: AppRole;
   // Added by the backend in M5; absent before that.
   backup_exclude_volumes?: string[] | null;
   dump_hook_service?: string;
@@ -389,6 +435,8 @@ export interface EnvList {
   compared: boolean;
   /** The session is too old to see values: only the keys are real. */
   valuesHidden: boolean;
+  /** The user's role never shows values (below manage). */
+  valuesForbidden: boolean;
 }
 
 /**
@@ -572,6 +620,8 @@ export interface DbCopy {
   backup_snapshot_id: string;
   started_at: string;
   finished_at: string | null;
+  /** Who started it. */
+  actor?: Actor | null;
 }
 
 export interface Snapshot {

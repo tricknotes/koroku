@@ -31,6 +31,7 @@ import { unlistedKeys } from 'koroku-console/utils/env-requirements';
 import { errorMessage, fieldErrors } from 'koroku-console/utils/errors';
 import { isValidEnvKey, shortSha } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import { can } from 'koroku-console/utils/roles';
 import type {
   Deployment,
   EnvList,
@@ -179,6 +180,11 @@ export default class AppEnvTemplate extends Component<Signature> {
    * are listed, and nothing can be edited until the user logs in again.
    */
   @tracked hidden = false;
+  /**
+   * The values stay hidden because of the user's role (below manage), not
+   * because of an old login (ARCHITECTURE 10.7).
+   */
+  @tracked forbidden = false;
   /** Keys deleted since the running release was deployed. */
   @tracked removed: string[] = [];
   /** The saved variables could be compared with the running release. */
@@ -220,6 +226,7 @@ export default class AppEnvTemplate extends Component<Signature> {
    */
   private apply(list: EnvList, reset = false): void {
     this.hidden = list.valuesHidden;
+    this.forbidden = list.valuesForbidden;
     this.removed = list.removed;
     this.compared = list.compared;
     if (reset) {
@@ -318,7 +325,10 @@ export default class AppEnvTemplate extends Component<Signature> {
 
   /** There is a running release to deploy again. */
   get canRedeploy(): boolean {
-    return this.args.model.app.current_deployment !== null;
+    return (
+      this.args.model.app.current_deployment !== null &&
+      can(this.args.model.app, 'deploy')
+    );
   }
 
   get runningSha(): string {
@@ -598,7 +608,13 @@ export default class AppEnvTemplate extends Component<Signature> {
           >次のデプロイで反映されます</strong>。
         </p>
 
-        {{#if this.hidden}}
+        {{#if this.forbidden}}
+          <div class="pane-notices">
+            <Banner @title="キーだけを表示しています" data-test-env-forbidden>
+              値の表示と編集には、このアプリの「管理」のロールが必要です。オーナーにロールの変更を頼んでください。
+            </Banner>
+          </div>
+        {{else if this.hidden}}
           <div class="pane-notices">
             <Banner
               @tone="warning"
@@ -989,6 +1005,10 @@ export default class AppEnvTemplate extends Component<Signature> {
                 </Button>
               </div>
             {{/unless}}
+          {{else if this.forbidden}}
+            <div class="row-list" data-test-env-empty>
+              <EmptyState @title="環境変数はまだありません" />
+            </div>
           {{else}}
             <div class="row-list" data-test-env-empty>
               <EmptyState

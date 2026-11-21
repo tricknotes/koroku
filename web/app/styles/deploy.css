@@ -92,6 +92,12 @@
   font-size: var(--text-xs);
 }
 
+/* Who asked for the deployment (ARCHITECTURE 10.7). */
+.deploy-actor {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
 .deploy-form-error > .banner,
 .deploy-env-warning > .banner {
   margin-bottom: 0;
@@ -790,4 +796,9 @@ div.step-header {
 /* The rollback dialog: a few separate consequences, one per point. */
 .dialog-points > li + li {
   margin-top: var(--space-1);
+}
+
+/* A member below the deploy role sees why there is no form. */
+.deploy-readonly {
+  margin-bottom: var(--space-8);
 }

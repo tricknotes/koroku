@@ -17,6 +17,7 @@ import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
 import RelativeTime from 'koroku-console/components/relative-time';
+import RoleNote from 'koroku-console/components/role-note';
 import RowList from 'koroku-console/components/row-list';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import TimeUntil from 'koroku-console/components/time-until';
@@ -41,6 +42,7 @@ import {
 import { fieldErrors } from 'koroku-console/utils/errors';
 import { formatBytes, formatDateTimeJst } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import { can } from 'koroku-console/utils/roles';
 import { BACKUP_TRIGGER_LABELS } from 'koroku-console/utils/status';
 import type {
   App,
@@ -131,6 +133,19 @@ export default class AppBackupsTemplate extends Component<Signature> {
 
   get app(): App {
     return this.args.model.app;
+  }
+
+  /** Running, restoring, downloading and the settings need manage. */
+  get canManage(): boolean {
+    return can(this.app, 'manage');
+  }
+
+  get readOnly(): boolean {
+    return !this.canManage;
+  }
+
+  get isOwner(): boolean {
+    return this.session.isOwner;
   }
 
   get health() {
@@ -445,21 +460,23 @@ export default class AppBackupsTemplate extends Component<Signature> {
                 </dd>
               </div>
             </dl>
-            {{#unless this.noSnapshots}}
-              <Button
-                @busy={{overview.running}}
-                @busyLabel="実行中…"
-                @disabled={{this.starting}}
-                data-test-backup-run
-                {{on "click" this.runNow}}
-              >今すぐ実行</Button>
-            {{/unless}}
+            {{#if this.canManage}}
+              {{#unless this.noSnapshots}}
+                <Button
+                  @busy={{overview.running}}
+                  @busyLabel="実行中…"
+                  @disabled={{this.starting}}
+                  data-test-backup-run
+                  {{on "click" this.runNow}}
+                >今すぐ実行</Button>
+              {{/unless}}
+            {{/if}}
           </div>
           <p class="backup-note">
             バックアップは、すべてのアプリと基盤の設定をまとめて 1
-            回の実行で取ります。実行の履歴は<LinkTo
-              @route="system"
-            >システム</LinkTo>にあります。
+            回の実行で取ります。{{#if this.isOwner}}実行の履歴は<LinkTo
+                @route="system"
+              >システム</LinkTo>にあります。{{/if}}
           </p>
         </section>
 
@@ -523,7 +540,9 @@ export default class AppBackupsTemplate extends Component<Signature> {
                           <span class="mono">{{snapshot.id}}</span>
                         </div>
                         <div class="snapshot-action">
-                          {{#if (isVolume snapshot)}}
+                          {{#if this.readOnly}}
+                            {{! Restoring and downloading need manage. }}
+                          {{else if (isVolume snapshot)}}
                             <Button
                               @size="small"
                               @disabled={{this.restoreBusy}}
@@ -572,13 +591,15 @@ export default class AppBackupsTemplate extends Component<Signature> {
                     @description="定期実行を待つか、いま 1 回実行すると、このアプリの volume とダンプがここに並びます。"
                   >
                     <:action>
-                      <Button
-                        @busy={{overview.running}}
-                        @busyLabel="実行中…"
-                        @disabled={{this.starting}}
-                        data-test-backup-run
-                        {{on "click" this.runNow}}
-                      >今すぐ実行</Button>
+                      {{#if this.canManage}}
+                        <Button
+                          @busy={{overview.running}}
+                          @busyLabel="実行中…"
+                          @disabled={{this.starting}}
+                          data-test-backup-run
+                          {{on "click" this.runNow}}
+                        >今すぐ実行</Button>
+                      {{/if}}
                     </:action>
                   </EmptyState>
                 </div>
@@ -595,270 +616,280 @@ export default class AppBackupsTemplate extends Component<Signature> {
           </div>
 
           {{#if this.form.available}}
+            {{#if this.readOnly}}
+              <RoleNote @needed="manage" @what="バックアップの設定の変更" />
+            {{/if}}
             <form
               novalidate
               data-test-backup-form
               {{on "submit" (preventDefault this.save)}}
               {{on "input" this.touch}}
             >
-              <div class="form-group">
-                <div>
-                  <h3 class="form-group-title">対象の volume</h3>
-                  <p class="form-group-description">
-                    named volume は、外したもの以外すべて取ります。稼働中の DB
-                    のデータディレクトリはコピーしても整合しないので、対象から外してダンプフックで取ります。
-                  </p>
-                </div>
-                <div class="form-group-body">
-                  {{#if this.volumesLoading}}
-                    <div
-                      class="volume-loading"
-                      role="status"
-                      aria-label="volume の一覧を読み込み中"
-                      data-test-volumes-loading
-                    >
-                      {{#each SKELETON_ROWS as |n|}}
-                        <span
-                          class="skeleton"
-                          aria-hidden="true"
-                          data-skeleton={{n}}
-                        ></span>
-                      {{/each}}
-                    </div>
-                  {{else}}
-                    {{#if this.volumesFailed}}
-                      <Banner
-                        class="volume-list-error"
-                        @tone="warning"
-                        @title="volume の一覧を取得できませんでした"
-                        data-test-volumes-error
+              <fieldset class="role-fieldset" disabled={{this.readOnly}}>
+                <div class="form-group">
+                  <div>
+                    <h3 class="form-group-title">対象の volume</h3>
+                    <p class="form-group-description">
+                      named volume は、外したもの以外すべて取ります。稼働中の DB
+                      のデータディレクトリはコピーしても整合しないので、対象から外してダンプフックで取ります。
+                    </p>
+                  </div>
+                  <div class="form-group-body">
+                    {{#if this.volumesLoading}}
+                      <div
+                        class="volume-loading"
+                        role="status"
+                        aria-label="volume の一覧を読み込み中"
+                        data-test-volumes-loading
                       >
-                        <:default>
-                          <span>{{this.volumeList.errorMessage}}</span>
-                          <span class="banner-detail">
-                            スナップショットのある volume と、対象から外した
-                            volume だけを表示しています。
-                          </span>
-                        </:default>
-                        <:actions>
-                          <Button
-                            @size="small"
-                            @busy={{this.volumeList.loading}}
-                            data-test-volumes-retry
-                            {{on "click" this.volumeList.reload}}
-                          >再読み込み</Button>
-                        </:actions>
-                      </Banner>
-                    {{/if}}
-                    {{#if this.volumes.length}}
-                      <fieldset class="option-group" data-test-volumes>
-                        <legend>バックアップする volume</legend>
-                        {{#each this.volumes key="name" as |volume|}}
-                          <label
-                            class="option"
-                            data-test-volume={{volume.name}}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={{volume.included}}
-                              data-test-volume-include
-                              {{on "change" (fn this.toggleVolume volume.name)}}
-                            />
-                            <span class="option-body">
-                              <span class="option-label">{{volume.name}}</span>
-                              <span class="option-hint" data-test-volume-hint>
-                                {{#if volume.missing}}
-                                  {{#if volume.included}}
-                                    この名前の volume
-                                    は、いまはありません。作られたらバックアップします
-                                  {{else}}
-                                    バックアップしません（この名前の volume
-                                    は、いまはありません）
-                                  {{/if}}
-                                {{else if volume.included}}
-                                  {{#if volume.latest}}
-                                    最終取得
-                                    <RelativeTime @time={{volume.latest}} />
-                                  {{else}}
-                                    次回のバックアップから取ります
-                                  {{/if}}
-                                {{else}}
-                                  バックアップしません
-                                {{/if}}
-                              </span>
-                            </span>
-                          </label>
+                        {{#each SKELETON_ROWS as |n|}}
+                          <span
+                            class="skeleton"
+                            aria-hidden="true"
+                            data-skeleton={{n}}
+                          ></span>
                         {{/each}}
-                      </fieldset>
-                    {{else if this.volumesListed}}
-                      <p class="muted" data-test-no-volumes>
-                        このアプリには named volume がありません。Compose
-                        ファイルに named volume
-                        があれば、デプロイのあと、ここに並びます。
-                      </p>
+                      </div>
                     {{else}}
-                      <p class="muted" data-test-no-volumes>
-                        表示できる volume がありません。
-                      </p>
+                      {{#if this.volumesFailed}}
+                        <Banner
+                          class="volume-list-error"
+                          @tone="warning"
+                          @title="volume の一覧を取得できませんでした"
+                          data-test-volumes-error
+                        >
+                          <:default>
+                            <span>{{this.volumeList.errorMessage}}</span>
+                            <span class="banner-detail">
+                              スナップショットのある volume と、対象から外した
+                              volume だけを表示しています。
+                            </span>
+                          </:default>
+                          <:actions>
+                            <Button
+                              @size="small"
+                              @busy={{this.volumeList.loading}}
+                              data-test-volumes-retry
+                              {{on "click" this.volumeList.reload}}
+                            >再読み込み</Button>
+                          </:actions>
+                        </Banner>
+                      {{/if}}
+                      {{#if this.volumes.length}}
+                        <fieldset class="option-group" data-test-volumes>
+                          <legend>バックアップする volume</legend>
+                          {{#each this.volumes key="name" as |volume|}}
+                            <label
+                              class="option"
+                              data-test-volume={{volume.name}}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={{volume.included}}
+                                data-test-volume-include
+                                {{on
+                                  "change"
+                                  (fn this.toggleVolume volume.name)
+                                }}
+                              />
+                              <span class="option-body">
+                                <span
+                                  class="option-label"
+                                >{{volume.name}}</span>
+                                <span class="option-hint" data-test-volume-hint>
+                                  {{#if volume.missing}}
+                                    {{#if volume.included}}
+                                      この名前の volume
+                                      は、いまはありません。作られたらバックアップします
+                                    {{else}}
+                                      バックアップしません（この名前の volume
+                                      は、いまはありません）
+                                    {{/if}}
+                                  {{else if volume.included}}
+                                    {{#if volume.latest}}
+                                      最終取得
+                                      <RelativeTime @time={{volume.latest}} />
+                                    {{else}}
+                                      次回のバックアップから取ります
+                                    {{/if}}
+                                  {{else}}
+                                    バックアップしません
+                                  {{/if}}
+                                </span>
+                              </span>
+                            </label>
+                          {{/each}}
+                        </fieldset>
+                      {{else if this.volumesListed}}
+                        <p class="muted" data-test-no-volumes>
+                          このアプリには named volume がありません。Compose
+                          ファイルに named volume
+                          があれば、デプロイのあと、ここに並びます。
+                        </p>
+                      {{else}}
+                        <p class="muted" data-test-no-volumes>
+                          表示できる volume がありません。
+                        </p>
+                      {{/if}}
                     {{/if}}
-                  {{/if}}
 
-                  <FormField
-                    @label="一覧にない volume を名前で外す"
-                    @hint="まだ作られていない volume を、先に対象から外しておけます。Compose ファイルに書いた volume 名を入力します。"
-                    @error={{this.errors.backup_exclude_volumes}}
-                    data-test-field-group="backup_exclude_volumes"
-                    as |field|
-                  >
-                    <div class="inline-add">
-                      <input
-                        id={{field.id}}
-                        type="text"
-                        spellcheck="false"
-                        autocomplete="off"
-                        placeholder="pgdata"
-                        value={{this.volumeName}}
-                        aria-describedby={{field.describedBy}}
-                        aria-invalid={{field.invalid}}
-                        data-test-exclude-name
-                        {{on "input" this.setVolumeName}}
-                        {{on "keydown" this.excludeOnEnter}}
-                      />
-                      <Button
-                        data-test-exclude-add
-                        {{on "click" this.excludeTyped}}
-                      >対象から外す</Button>
-                    </div>
-                  </FormField>
-                </div>
-              </div>
-
-              <div class="form-group">
-                <div>
-                  <h3 class="form-group-title">ダンプフック</h3>
-                  <p class="form-group-description">
-                    バックアップのたびに、指定したサービスのコンテナでコマンドを実行し、標準出力をダンプとして保存します。staging
-                    アプリへの DB
-                    のコピーでも、コピー元としてこのコマンドを使います。使わないときは両方を空にします。
-                  </p>
-                </div>
-                <div class="form-group-body">
-                  <FormField @label="種類から入力" as |field|>
-                    <select
-                      id={{field.id}}
-                      data-test-dump-preset
-                      {{on "change" this.applyDumpPreset}}
-                    >
-                      <option value="">選択すると下の欄を埋めます</option>
-                      {{#each HOOK_PRESETS key="id" as |preset|}}
-                        <option value={{preset.id}}>{{preset.label}}</option>
-                      {{/each}}
-                    </select>
-                  </FormField>
-                  <div class="form-grid">
                     <FormField
-                      @label="サービス"
-                      @error={{this.errors.dump_hook_service}}
-                      data-test-field-group="dump_hook_service"
+                      @label="一覧にない volume を名前で外す"
+                      @hint="まだ作られていない volume を、先に対象から外しておけます。Compose ファイルに書いた volume 名を入力します。"
+                      @error={{this.errors.backup_exclude_volumes}}
+                      data-test-field-group="backup_exclude_volumes"
                       as |field|
                     >
-                      <input
-                        id={{field.id}}
-                        type="text"
-                        spellcheck="false"
-                        autocomplete="off"
-                        placeholder="db"
-                        value={{this.form.dumpHookService}}
-                        aria-describedby={{field.describedBy}}
-                        aria-invalid={{field.invalid}}
-                        data-test-field="dump_hook_service"
-                        {{on "input" (setValue this.form "dumpHookService")}}
-                      />
-                    </FormField>
-                    <FormField
-                      class="field-wide"
-                      @label="コマンド"
-                      @error={{this.errors.dump_hook_command}}
-                      data-test-field-group="dump_hook_command"
-                      as |field|
-                    >
-                      <input
-                        id={{field.id}}
-                        type="text"
-                        class="mono"
-                        spellcheck="false"
-                        autocomplete="off"
-                        placeholder="pg_dump -U postgres app"
-                        value={{this.form.dumpHookCommand}}
-                        aria-describedby={{field.describedBy}}
-                        aria-invalid={{field.invalid}}
-                        data-test-field="dump_hook_command"
-                        {{on "input" (setValue this.form "dumpHookCommand")}}
-                      />
+                      <div class="inline-add">
+                        <input
+                          id={{field.id}}
+                          type="text"
+                          spellcheck="false"
+                          autocomplete="off"
+                          placeholder="pgdata"
+                          value={{this.volumeName}}
+                          aria-describedby={{field.describedBy}}
+                          aria-invalid={{field.invalid}}
+                          data-test-exclude-name
+                          {{on "input" this.setVolumeName}}
+                          {{on "keydown" this.excludeOnEnter}}
+                        />
+                        <Button
+                          data-test-exclude-add
+                          {{on "click" this.excludeTyped}}
+                        >対象から外す</Button>
+                      </div>
                     </FormField>
                   </div>
                 </div>
-              </div>
 
-              <div class="form-group">
-                <div>
-                  <h3 class="form-group-title">デプロイの前</h3>
-                  <p class="form-group-description">
-                    コンテナを入れ替える直前に、このアプリだけのバックアップを取ります。失敗したらデプロイを中止します。
+                <div class="form-group">
+                  <div>
+                    <h3 class="form-group-title">ダンプフック</h3>
+                    <p class="form-group-description">
+                      バックアップのたびに、指定したサービスのコンテナでコマンドを実行し、標準出力をダンプとして保存します。staging
+                      アプリへの DB
+                      のコピーでも、コピー元としてこのコマンドを使います。使わないときは両方を空にします。
+                    </p>
+                  </div>
+                  <div class="form-group-body">
+                    <FormField @label="種類から入力" as |field|>
+                      <select
+                        id={{field.id}}
+                        data-test-dump-preset
+                        {{on "change" this.applyDumpPreset}}
+                      >
+                        <option value="">選択すると下の欄を埋めます</option>
+                        {{#each HOOK_PRESETS key="id" as |preset|}}
+                          <option value={{preset.id}}>{{preset.label}}</option>
+                        {{/each}}
+                      </select>
+                    </FormField>
+                    <div class="form-grid">
+                      <FormField
+                        @label="サービス"
+                        @error={{this.errors.dump_hook_service}}
+                        data-test-field-group="dump_hook_service"
+                        as |field|
+                      >
+                        <input
+                          id={{field.id}}
+                          type="text"
+                          spellcheck="false"
+                          autocomplete="off"
+                          placeholder="db"
+                          value={{this.form.dumpHookService}}
+                          aria-describedby={{field.describedBy}}
+                          aria-invalid={{field.invalid}}
+                          data-test-field="dump_hook_service"
+                          {{on "input" (setValue this.form "dumpHookService")}}
+                        />
+                      </FormField>
+                      <FormField
+                        class="field-wide"
+                        @label="コマンド"
+                        @error={{this.errors.dump_hook_command}}
+                        data-test-field-group="dump_hook_command"
+                        as |field|
+                      >
+                        <input
+                          id={{field.id}}
+                          type="text"
+                          class="mono"
+                          spellcheck="false"
+                          autocomplete="off"
+                          placeholder="pg_dump -U postgres app"
+                          value={{this.form.dumpHookCommand}}
+                          aria-describedby={{field.describedBy}}
+                          aria-invalid={{field.invalid}}
+                          data-test-field="dump_hook_command"
+                          {{on "input" (setValue this.form "dumpHookCommand")}}
+                        />
+                      </FormField>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <div>
+                    <h3 class="form-group-title">デプロイの前</h3>
+                    <p class="form-group-description">
+                      コンテナを入れ替える直前に、このアプリだけのバックアップを取ります。失敗したらデプロイを中止します。
+                    </p>
+                  </div>
+                  <div class="form-group-body">
+                    <label class="option">
+                      <input
+                        type="checkbox"
+                        checked={{this.form.backupBeforeDeploy}}
+                        data-test-field="backup_before_deploy"
+                        {{on
+                          "change"
+                          (setChecked this.form "backupBeforeDeploy")
+                        }}
+                      />
+                      <span class="option-body">
+                        <span class="option-label">
+                          デプロイの前にバックアップを取る
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div aria-live="polite">
+                  <ErrorMessage @error={{this.saveError}} />
+                  {{#if this.otherErrors.length}}
+                    <ul class="form-problems" data-test-other-errors>
+                      {{#each this.otherErrors as |line|}}
+                        <li>{{line}}</li>
+                      {{/each}}
+                    </ul>
+                  {{/if}}
+                </div>
+
+                <div class="form-footer">
+                  <Button
+                    @type="submit"
+                    @variant="primary"
+                    @busy={{this.saving}}
+                    @busyLabel="保存中…"
+                    data-test-backup-save
+                  >保存</Button>
+                  <p class="form-status" aria-live="polite">
+                    {{#if this.saved}}
+                      <span class="form-saved" data-test-backup-saved>
+                        <Icon @name="check" />
+                        保存しました。次回のバックアップから反映されます。
+                      </span>
+                    {{else if this.nothingToSave}}
+                      <span data-test-backup-unchanged>変更はありません。</span>
+                    {{else}}
+                      次回のバックアップから反映されます。
+                    {{/if}}
                   </p>
                 </div>
-                <div class="form-group-body">
-                  <label class="option">
-                    <input
-                      type="checkbox"
-                      checked={{this.form.backupBeforeDeploy}}
-                      data-test-field="backup_before_deploy"
-                      {{on
-                        "change"
-                        (setChecked this.form "backupBeforeDeploy")
-                      }}
-                    />
-                    <span class="option-body">
-                      <span class="option-label">
-                        デプロイの前にバックアップを取る
-                      </span>
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              <div aria-live="polite">
-                <ErrorMessage @error={{this.saveError}} />
-                {{#if this.otherErrors.length}}
-                  <ul class="form-problems" data-test-other-errors>
-                    {{#each this.otherErrors as |line|}}
-                      <li>{{line}}</li>
-                    {{/each}}
-                  </ul>
-                {{/if}}
-              </div>
-
-              <div class="form-footer">
-                <Button
-                  @type="submit"
-                  @variant="primary"
-                  @busy={{this.saving}}
-                  @busyLabel="保存中…"
-                  data-test-backup-save
-                >保存</Button>
-                <p class="form-status" aria-live="polite">
-                  {{#if this.saved}}
-                    <span class="form-saved" data-test-backup-saved>
-                      <Icon @name="check" />
-                      保存しました。次回のバックアップから反映されます。
-                    </span>
-                  {{else if this.nothingToSave}}
-                    <span data-test-backup-unchanged>変更はありません。</span>
-                  {{else}}
-                    次回のバックアップから反映されます。
-                  {{/if}}
-                </p>
-              </div>
+              </fieldset>
             </form>
           {{else}}
             <p class="muted" data-test-backup-settings-unavailable>

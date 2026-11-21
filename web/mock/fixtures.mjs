@@ -54,9 +54,52 @@ export const SCENARIOS = {
     'everything fine, but the last copy into blog-staging failed while loading and left its services stopped',
   'promote-unpaired':
     'everything fine, but blog has no promotion source (shop still promotes from shop-staging)',
+  member:
+    'logged in as the member mia, not the owner: deploy on blog, manage on blog-staging, view on shop, no role on shop-staging',
   'webhook-unset':
     'everything fine, but blog-staging deploys on push while the webhook secret is not set in config.toml',
 };
+
+/** The owner of every scenario, and the members it let in (ARCHITECTURE 10.7). */
+export const OWNER = { id: 1, login: 'octo' };
+export const MEMBER = { id: 2, login: 'mia' };
+
+/** The roles of `MEMBER` in the `member` scenario. */
+export const MEMBER_ROLES = {
+  blog: 'deploy',
+  'blog-staging': 'manage',
+  shop: 'view',
+};
+
+/** The members the owner sees on the members screen. */
+export function members(scenarioName) {
+  if (scenarioName === 'empty') return [];
+  return [
+    {
+      github_user_id: MEMBER.id,
+      login: MEMBER.login,
+      avatar_url: '',
+      added_at: ago(12 * DAY),
+      roles: Object.entries(MEMBER_ROLES)
+        .map(([app, role]) => ({ app, role }))
+        .sort((a, b) => a.app.localeCompare(b.app)),
+    },
+    {
+      github_user_id: 3,
+      login: 'kenta',
+      avatar_url: '',
+      added_at: ago(3 * DAY),
+      roles: [{ app: 'shop-staging', role: 'view' }],
+    },
+    {
+      github_user_id: 4,
+      login: 'newcomer',
+      avatar_url: '',
+      added_at: ago(10 * MINUTE),
+      roles: [],
+    },
+  ];
+}
 
 function ago(ms) {
   return new Date(Date.now() - ms).toISOString();
@@ -91,6 +134,7 @@ function deployment(slug, message, finishedAgo, overrides = {}) {
     finished_at: ago(finishedAgo),
     source_deployment_id: null,
     rollback_available: false,
+    actor: OWNER,
     trigger: 'manual',
     pusher: '',
     ...overrides,
@@ -248,9 +292,15 @@ function backups(overrides = {}, last = 9 * HOUR) {
 }
 
 /** Older deployments of an app, newest first, behind its current ones. */
+/** Older deployments; the member deployed one of them (ARCHITECTURE 10.7). */
 function history(slug, messages, startAgo) {
   return messages.map((message, index) =>
-    deployment(slug, message, startAgo + (index + 1) * 2 * DAY),
+    deployment(
+      slug,
+      message,
+      startAgo + (index + 1) * 2 * DAY,
+      index === 0 ? { actor: MEMBER } : {},
+    ),
   );
 }
 
