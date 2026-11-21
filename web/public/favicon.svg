@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="1 1 14 14">
+  <style>
+    .mark { fill: #171717; }
+    .lines { stroke: #fff; }
+    @media (prefers-color-scheme: dark) {
+      .mark { fill: #ededed; }
+      .lines { stroke: #0a0a0a; }
+    }
+  </style>
+  <path class="mark" d="M3.5 1.5h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z"/>
+  <path class="lines" d="M5 5.25h6M5 8h6M5 10.75h3.25" fill="none" stroke-width="1.75" stroke-linecap="round"/>
+</svg>
