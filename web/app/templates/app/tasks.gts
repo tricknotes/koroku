@@ -48,6 +48,8 @@ interface RunTarget {
   task: string;
   service: string;
   command: string;
+  /** Typed in the form, which is cleared once it runs. */
+  fromForm?: boolean;
 }
 
 let draftIds = 0;
@@ -154,6 +156,8 @@ export default class AppTasksTemplate extends Component<Signature> {
 
   canCancel = (run: TaskRun): boolean => this.canManage && isActive(run);
 
+  canRerun = (run: TaskRun): boolean => this.canManage && !isActive(run);
+
   get app(): App {
     return this.args.model.app;
   }
@@ -243,7 +247,12 @@ export default class AppTasksTemplate extends Component<Signature> {
   submitCommand = () => {
     const command = this.command.trim();
     if (!command) return;
-    this.requestRun({ task: '', service: this.service, command });
+    this.requestRun({
+      task: '',
+      service: this.service,
+      command,
+      fromForm: true,
+    });
   };
 
   runTask = (task: Task) => {
@@ -251,6 +260,24 @@ export default class AppTasksTemplate extends Component<Signature> {
       task: task.name,
       service: task.service,
       command: task.command,
+    });
+  };
+
+  /**
+   * Runs what a past run ran. A registered task that is still defined the
+   * same way runs by its name (so the history keeps the name); otherwise the
+   * recorded service and command run as they were.
+   */
+  rerun = (run: TaskRun) => {
+    const task = this.registered.find((t) => t.name === run.task_name);
+    const same =
+      task !== undefined &&
+      task.service === run.service &&
+      task.command === run.command;
+    this.requestRun({
+      task: same ? run.task_name : '',
+      service: run.service,
+      command: run.command,
     });
   };
 
@@ -283,7 +310,7 @@ export default class AppTasksTemplate extends Component<Signature> {
           ? { task: target.task }
           : { service: target.service, command: target.command },
       );
-      if (!target.task) this.command = '';
+      if (target.fromForm) this.command = '';
       await this.runs.load({ quiet: true });
       this.selectedId = run.id;
     } catch (error) {
@@ -751,6 +778,17 @@ export default class AppTasksTemplate extends Component<Signature> {
                       </div>
 
                       <div class="deploy-cell-actions">
+                        {{#if (this.canRerun run)}}
+                          <Button
+                            @size="small"
+                            @variant="ghost"
+                            @disabled={{this.runDisabled}}
+                            class="row-action"
+                            title="同じサービスで同じコマンドをもう一度実行します"
+                            data-test-rerun
+                            {{on "click" (fn this.rerun run)}}
+                          >再実行</Button>
+                        {{/if}}
                         {{#if (this.canCancel run)}}
                           <Button
                             @size="small"
