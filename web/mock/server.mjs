@@ -270,6 +270,17 @@ route('PATCH', '/api/apps/:slug', (context) => {
         'needs a repository fetched through the GitHub App (repo_full_name without repo_url)',
     });
   }
+  if (
+    body.auto_deploy_workflow &&
+    !/^\.github\/workflows\/[A-Za-z0-9_.-]+\.ya?ml$/.test(
+      body.auto_deploy_workflow,
+    )
+  ) {
+    throw new HttpError(422, 'validation_failed', {
+      auto_deploy_workflow:
+        'must be a .yml or .yaml file directly in .github/workflows/',
+    });
+  }
   const changes = Object.entries(body)
     .filter(
       ([field, value]) =>

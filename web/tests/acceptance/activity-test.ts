@@ -132,6 +132,51 @@ module('Acceptance | activity', function (hooks) {
       .doesNotExist('nothing older is left');
   });
 
+  test('a workflow that did not succeed is noted by koroku', async function (assert) {
+    fakes.api.on('GET', '/api/apps/blog/activity', () => ({
+      entries: [
+        entry(
+          3,
+          'auto_deploy.skipped',
+          {
+            workflow: '.github/workflows/image.yml',
+            conclusion: 'failure',
+            commit_sha: 'c0ffee1234567890c0ffee1234567890c0ffee12',
+            branch: 'main',
+            run_url: 'https://github.com/octo/blog/actions/runs/1234',
+          },
+          null,
+        ),
+        entry(2, 'app.settings_changed', {
+          changes: [
+            {
+              field: 'auto_deploy_workflow',
+              from: '',
+              to: '.github/workflows/image.yml',
+            },
+          ],
+        }),
+      ],
+      next_before: null,
+    }));
+    await visit('/apps/blog');
+
+    const items = findAll('[data-test-activity]');
+    assert
+      .dom(items[0])
+      .includesText('ワークフローが失敗したため自動デプロイせず')
+      .includesText('ワークフロー: .github/workflows/image.yml')
+      .includesText('コミット: c0ffee1（main）');
+    assert
+      .dom(items[0]!.querySelector('[data-test-activity-actor]'))
+      .hasText('koroku');
+    assert
+      .dom(items[1])
+      .includesText(
+        '先に待つワークフロー: （なし） → .github/workflows/image.yml',
+      );
+  });
+
   test('registry credentials are worded without the token', async function (assert) {
     fakes.api.on('GET', '/api/apps/blog/activity', () => ({
       entries: [

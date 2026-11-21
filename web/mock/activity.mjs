@@ -116,6 +116,40 @@ function stagingActivity() {
   ];
 }
 
+/**
+ * blog-staging when it waits for its image workflow (ARCHITECTURE 5.2):
+ * koroku itself noted a run that failed, after the owner set the workflow.
+ */
+function workflowGatedStagingActivity() {
+  return [
+    entry(40 * MINUTE, null, 'auto_deploy.skipped', {
+      workflow: '.github/workflows/image.yml',
+      conclusion: 'failure',
+      commit_sha: 'c0ffee1234567890c0ffee1234567890c0ffee12',
+      branch: 'main',
+      run_url: 'https://github.com/octo/blog/actions/runs/1234',
+    }),
+    entry(2 * HOUR, OCTO, 'app.settings_changed', {
+      changes: [
+        {
+          field: 'auto_deploy_workflow',
+          from: '',
+          to: '.github/workflows/image.yml',
+        },
+      ],
+    }),
+    ...stagingActivity(),
+  ];
+}
+
+/** Starts blog-staging's activity as an app waiting for a workflow. */
+export function useWorkflowGatedActivity(state) {
+  state.activity ??= new Map();
+  const initial = workflowGatedStagingActivity();
+  for (const item of [...initial].reverse()) item.id = nextId++;
+  state.activity.set('blog-staging', initial);
+}
+
 /** The activity of every app of a state, created on first use. */
 export function activityOf(state, slug) {
   state.activity ??= new Map();

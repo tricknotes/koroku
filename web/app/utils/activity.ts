@@ -39,6 +39,7 @@ const SETTING_LABELS: Record<string, string> = {
   protection_exempt_paths: '保護を外すパス',
   auto_deploy: 'push での自動デプロイ',
   auto_deploy_branch: '自動デプロイするブランチ',
+  auto_deploy_workflow: '先に待つワークフロー',
   promote_from: '昇格元のステージングアプリ',
 };
 
@@ -154,6 +155,22 @@ function registryDetails(details: Record<string, unknown>): string[] {
     lines.push('トークンを入れ替え');
   }
   return lines;
+}
+
+/** A workflow run's conclusion, as the reason a push was not deployed. */
+const CONCLUSION_LABELS: Record<string, string> = {
+  failure: '失敗した',
+  cancelled: '取り消された',
+  timed_out: 'タイムアウトした',
+  action_required: '承認を待っている',
+  startup_failure: '起動できなかった',
+  skipped: 'スキップされた',
+  stale: '古くなった',
+  neutral: '成功しなかった',
+};
+
+function conclusionLabel(value: unknown): string {
+  return CONCLUSION_LABELS[str(value)] ?? '成功しなかった';
 }
 
 function role(value: unknown): string {
@@ -278,6 +295,14 @@ export function describeActivity(entry: ActivityEntry): ActivityText {
       return {
         summary: `${memberName(d)} のロール（${role(d['from'])}）を外す`,
         details: [],
+      };
+    case 'auto_deploy.skipped':
+      return {
+        summary: `ワークフローが${conclusionLabel(d['conclusion'])}ため自動デプロイせず`,
+        details: [
+          `ワークフロー: ${str(d['workflow'])}`,
+          `コミット: ${str(d['commit_sha']).slice(0, 7)}（${str(d['branch'])}）`,
+        ],
       };
     default:
       return { summary: entry.action, details: [] };

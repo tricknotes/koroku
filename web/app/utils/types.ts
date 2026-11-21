@@ -316,6 +316,11 @@ export interface App {
   auto_deploy?: boolean;
   /** The branch whose pushes deploy; '' follows `default_branch`. */
   auto_deploy_branch?: string;
+  /**
+   * The workflow file whose successful run deploys instead of the push,
+   * e.g. `.github/workflows/image.yml`; '' deploys on push.
+   */
+  auto_deploy_workflow?: string;
 }
 
 export interface AppPatch {
@@ -343,6 +348,7 @@ export interface AppPatch {
   promote_from?: string;
   auto_deploy?: boolean;
   auto_deploy_branch?: string;
+  auto_deploy_workflow?: string;
 }
 
 export interface NewApp {
