@@ -1979,11 +1979,26 @@ SHOTS.push(
     fullPage: true,
     themes: ['light'],
   },
+  // Without a recent login the form waits behind a request to log in
+  // first (ARCHITECTURE 9.8); skipping it shows what saving variables needs.
+  {
+    name: 'new-app-login',
+    path: '/apps/new?scenario=stale-login',
+    wait: '[data-test-new-app-login]',
+  },
+  {
+    name: 'new-app-login-phone',
+    path: '/apps/new?scenario=stale-login',
+    wait: '[data-test-new-app-login]',
+    ...PHONE,
+    fullPage: false,
+  },
   {
     name: 'new-app-env-reauth',
     path: '/apps/new?scenario=stale-login',
-    wait: REPOSITORY,
-    script: CHOOSE_REPOSITORY,
+    wait: '[data-test-new-app-login]',
+    click: '[data-test-new-app-login-skip]',
+    script: `setTimeout(() => ${CHOOSE_REPOSITORY}, 500)`,
     then: '[data-test-env-presets-reauth]',
     fullPage: true,
   },

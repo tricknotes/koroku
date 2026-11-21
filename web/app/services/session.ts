@@ -85,6 +85,14 @@ export default class SessionService extends Service {
     this.reauthPrompt = true;
   }
 
+  /**
+   * Marks the recent login as over without opening the dialog: the screen
+   * says so in place and keeps what was typed.
+   */
+  expireReauth(): void {
+    this.reauthUntil = 0;
+  }
+
   dismissReauth(): void {
     this.reauthPrompt = false;
   }
