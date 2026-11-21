@@ -27,6 +27,8 @@ var (
 	memoryPattern   = regexp.MustCompile(`^[1-9][0-9]*[bkmg]?$`)
 	servicePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	branchPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/@+-]*$`)
+	// workflowPathPattern is a workflow file (ARCHITECTURE 5.2).
+	workflowPathPattern = regexp.MustCompile(`^\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml$`)
 )
 
 // maxExemptPaths bounds the paths an app can exempt from access protection.
@@ -65,6 +67,7 @@ type appJSON struct {
 	PromoteFrom          string            `json:"promote_from"`
 	AutoDeploy           bool              `json:"auto_deploy"`
 	AutoDeployBranch     string            `json:"auto_deploy_branch"`
+	AutoDeployWorkflow   string            `json:"auto_deploy_workflow"`
 	URL                  string            `json:"url"`
 	PrimaryURL           string            `json:"primary_url"`
 	PendingDomains       int               `json:"pending_domains"`
@@ -107,6 +110,7 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		ProtectionExempt:     app.ProtectionExemptPaths,
 		AutoDeploy:           app.AutoDeploy,
 		AutoDeployBranch:     app.AutoDeployBranch,
+		AutoDeployWorkflow:   app.AutoDeployWorkflow,
 		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
 		CreatedAt:            app.CreatedAt,
 		UpdatedAt:            app.UpdatedAt,
@@ -188,6 +192,7 @@ type appInput struct {
 	PromoteFrom          *string            `json:"promote_from"`
 	AutoDeploy           *bool              `json:"auto_deploy"`
 	AutoDeployBranch     *string            `json:"auto_deploy_branch"`
+	AutoDeployWorkflow   *string            `json:"auto_deploy_workflow"`
 }
 
 // fieldErrors collects validation problems keyed by JSON field name.
@@ -296,6 +301,9 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	if in.AutoDeployBranch != nil {
 		app.AutoDeployBranch = strings.TrimSpace(*in.AutoDeployBranch)
 	}
+	if in.AutoDeployWorkflow != nil {
+		app.AutoDeployWorkflow = strings.TrimSpace(*in.AutoDeployWorkflow)
+	}
 
 	if app.RepoFullName == "" && app.RepoURL == "" {
 		errs.add("repo_full_name", "a repository is required (repo_full_name or repo_url)")
@@ -313,6 +321,10 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	}
 	if b := app.AutoDeployBranch; b != "" && (!branchPattern.MatchString(b) || strings.Contains(b, "..") || len(b) > 255) {
 		errs.add("auto_deploy_branch", "is not a valid branch name")
+	}
+	if w := app.AutoDeployWorkflow; w != "" && (!workflowPathPattern.MatchString(w) || len(w) > 255) {
+		// GitHub runs only the files directly in .github/workflows.
+		errs.add("auto_deploy_workflow", "must be a .yml or .yaml file directly in .github/workflows/")
 	}
 	if app.AutoDeploy && !app.UsesGitHubApp() {
 		// Pushes arrive through the GitHub App's webhook (ARCHITECTURE 5.2).
@@ -719,14 +731,15 @@ func touchesSafeguards(before, after store.App) bool {
 }
 
 // enablesProductionAutoDeploy reports whether an update makes a production
-// app deploy pushes, or pushes of another branch, without anyone pressing
-// a button. Like deploying it by hand, that needs a recent login
+// app deploy pushes, or pushes of another branch, or after another
+// workflow (or none), without anyone pressing a button. Like deploying it by hand, that needs a recent login
 // (ARCHITECTURE 10.3).
 func enablesProductionAutoDeploy(before, after store.App) bool {
 	if after.Environment != store.EnvironmentProduction || !after.AutoDeploy {
 		return false
 	}
-	return !before.AutoDeploy || before.EffectiveAutoDeployBranch() != after.EffectiveAutoDeployBranch()
+	return !before.AutoDeploy || before.EffectiveAutoDeployBranch() != after.EffectiveAutoDeployBranch() ||
+		before.AutoDeployWorkflow != after.AutoDeployWorkflow
 }
 
 // syncRoutes reloads the reverse proxy after a routing-relevant change. A

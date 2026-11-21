@@ -31,6 +31,13 @@ func TestAutoDeploySettingsRoundTrip(t *testing.T) {
 	if !got.AutoDeploy || got.EffectiveAutoDeployBranch() != "main" {
 		t.Errorf("updated = %+v", got)
 	}
+	got.AutoDeployWorkflow = ".github/workflows/image.yml"
+	if err := s.UpdateApp(ctx, got, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := s.GetApp(ctx, "blog"); err != nil || again.AutoDeployWorkflow != ".github/workflows/image.yml" {
+		t.Errorf("workflow = %q, %v", again.AutoDeployWorkflow, err)
+	}
 }
 
 func TestDeploymentTrigger(t *testing.T) {
@@ -75,6 +82,9 @@ func TestAutoDeployAppsReadsWithoutChanging(t *testing.T) {
 	for _, slug := range []string{"shop", "blog", "wiki"} {
 		in := newApp(slug)
 		in.AutoDeploy = slug != "wiki"
+		if slug != "blog" {
+			in.AutoDeployWorkflow = ".github/workflows/image.yml"
+		}
 		if _, err := s.CreateApp(ctx, in, 20000, 20999, testNow); err != nil {
 			t.Fatal(err)
 		}
@@ -82,6 +92,11 @@ func TestAutoDeployAppsReadsWithoutChanging(t *testing.T) {
 	apps, err := AutoDeployApps(ctx, path)
 	if err != nil || !slices.Equal(apps, []string{"blog", "shop"}) {
 		t.Errorf("apps = %v, %v", apps, err)
+	}
+	// wiki names a workflow but does not deploy on push.
+	gated, err := WorkflowGatedApps(ctx, path)
+	if err != nil || !slices.Equal(gated, []string{"shop"}) {
+		t.Errorf("gated = %v, %v", gated, err)
 	}
 	_ = s.Close()
 
@@ -97,5 +112,8 @@ func TestAutoDeployAppsReadsWithoutChanging(t *testing.T) {
 	_ = old.Close()
 	if apps, err := AutoDeployApps(ctx, oldPath); err != nil || apps != nil {
 		t.Errorf("old database: %v %v", apps, err)
+	}
+	if apps, err := WorkflowGatedApps(ctx, oldPath); err != nil || apps != nil {
+		t.Errorf("old database, gated: %v %v", apps, err)
 	}
 }

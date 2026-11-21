@@ -41,6 +41,18 @@ func (f *fakePushDeployer) EnqueuePush(ctx context.Context, app store.App, branc
 	return d, err
 }
 
+func (f *fakePushDeployer) EnqueueWorkflowRun(ctx context.Context, app store.App, branch, sha, message, pusher, workflow string) (store.Deployment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fmt.Sprintf("%s %s %s %s %q after %s", app.Slug, branch, sha, pusher, message, workflow))
+	if f.err != nil {
+		return store.Deployment{}, f.err
+	}
+	d, _, err := f.store.EnqueueTriggered(ctx, app.ID, branch, sha, message, nil,
+		store.Origin{Trigger: store.TriggerPush, Pusher: pusher, Workflow: workflow}, time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC))
+	return d, err
+}
+
 func (f *fakePushDeployer) setErr(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -60,6 +72,8 @@ type webhookFixture struct {
 	srv    *Server
 	h      http.Handler
 	pushes *fakePushDeployer
+	// heads are the branch heads GitHub reports (ARCHITECTURE 5.2).
+	heads fakeRefs
 }
 
 // newWebhookFixture starts a server with login configured (not the
@@ -71,7 +85,9 @@ func newWebhookFixture(t *testing.T, secret string) *webhookFixture {
 	srv.cfg.GitHub.WebhookSecret = secret
 	pushes.store = srv.store
 	srv.pushDeployer = pushes
-	return &webhookFixture{t: t, srv: srv, h: srv.Handler(), pushes: pushes}
+	heads := fakeRefs{"main": pushSHA}
+	srv.refs = heads
+	return &webhookFixture{t: t, srv: srv, h: srv.Handler(), pushes: pushes, heads: heads}
 }
 
 // app stores an app directly; the console API is covered elsewhere.
@@ -435,6 +451,10 @@ func TestProductionAutoDeployNeedsRecentLogin(t *testing.T) {
 	// Another branch is another code path to production; turning it off is not.
 	if rec := b.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy_branch": "hotfix"}`, origin); rec.Code != http.StatusForbidden {
 		t.Errorf("production branch change: %d %s", rec.Code, rec.Body)
+	}
+	// So is waiting for another workflow, or for none.
+	if rec := b.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy_workflow": ".github/workflows/image.yml"}`, origin); rec.Code != http.StatusForbidden {
+		t.Errorf("production workflow change: %d %s", rec.Code, rec.Body)
 	}
 	if rec := b.do(http.MethodPatch, "/api/apps/blog", `{"auto_deploy": false}`, origin); rec.Code != http.StatusOK {
 		t.Errorf("production off: %d %s", rec.Code, rec.Body)

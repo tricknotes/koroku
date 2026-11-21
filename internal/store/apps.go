@@ -80,8 +80,12 @@ type App struct {
 	PromoteFromAppID *int64
 	// AutoDeploy deploys the head of AutoDeployBranch when it is pushed
 	// (ARCHITECTURE 5.2). AutoDeployBranch "" follows DefaultBranch.
-	AutoDeploy          bool
-	AutoDeployBranch    string
+	AutoDeploy       bool
+	AutoDeployBranch string
+	// AutoDeployWorkflow is the workflow file (.github/workflows/<name>.yml)
+	// whose successful run on the branch deploys the app instead of the
+	// push itself (ARCHITECTURE 5.2). "" deploys on push.
+	AutoDeployWorkflow  string
 	CurrentDeploymentID *int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -123,7 +127,7 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	env_source, env_example_path,
 	load_hook_service, load_hook_command, post_load_service, post_load_command,
 	access_protection, protection_exempt_paths, promote_from_app_id,
-	auto_deploy, auto_deploy_branch`
+	auto_deploy, auto_deploy_branch, auto_deploy_workflow`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -148,7 +152,7 @@ func scanApp(row rowScanner) (App, error) {
 		&a.EnvSource, &a.EnvExamplePath,
 		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand,
 		&a.AccessProtection, &exemptJSON, &promoteFrom,
-		&a.AutoDeploy, &a.AutoDeployBranch)
+		&a.AutoDeploy, &a.AutoDeployBranch, &a.AutoDeployWorkflow)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -275,8 +279,8 @@ func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEn
 			env_source, env_example_path,
 			load_hook_service, load_hook_command, post_load_service, post_load_command,
 			access_protection, protection_exempt_paths, promote_from_app_id,
-			auto_deploy, auto_deploy_branch)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			auto_deploy, auto_deploy_branch, auto_deploy_workflow)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now),
@@ -284,7 +288,7 @@ func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEn
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
-		app.AutoDeploy, app.AutoDeployBranch)
+		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -402,7 +406,7 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			env_source = ?, env_example_path = ?,
 			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?,
 			access_protection = ?, protection_exempt_paths = ?, promote_from_app_id = ?,
-			auto_deploy = ?, auto_deploy_branch = ?
+			auto_deploy = ?, auto_deploy_branch = ?, auto_deploy_workflow = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
@@ -411,7 +415,7 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
-		app.AutoDeploy, app.AutoDeployBranch, app.ID)
+		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}
@@ -443,35 +447,51 @@ func (s *Store) DeleteApp(ctx context.Context, appID int64) error {
 // uses it next to a running koroku. A missing database, or one from before
 // the feature, has no such apps.
 func AutoDeployApps(ctx context.Context, path string) ([]string, error) {
+	return readOnlySlugs(ctx, path, `SELECT slug FROM apps WHERE auto_deploy = 1 ORDER BY slug`,
+		"list apps that deploy on push")
+}
+
+// WorkflowGatedApps returns, like AutoDeployApps, the slugs of the apps
+// that deploy on push only after a GitHub Actions workflow succeeded
+// (ARCHITECTURE 5.2).
+func WorkflowGatedApps(ctx context.Context, path string) ([]string, error) {
+	return readOnlySlugs(ctx, path,
+		`SELECT slug FROM apps WHERE auto_deploy = 1 AND auto_deploy_workflow != '' ORDER BY slug`,
+		"list apps that wait for a workflow")
+}
+
+// readOnlySlugs runs a query of slugs on the database at path opened
+// read-only. A missing file, table or column yields no slugs.
+func readOnlySlugs(ctx context.Context, path, query, what string) ([]string, error) {
 	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
-	query := url.Values{}
-	query.Add("mode", "ro")
-	query.Add("_pragma", "busy_timeout(5000)")
-	db, err := sql.Open("sqlite", "file:"+(&url.URL{Path: path}).EscapedPath()+"?"+query.Encode())
+	params := url.Values{}
+	params.Add("mode", "ro")
+	params.Add("_pragma", "busy_timeout(5000)")
+	db, err := sql.Open("sqlite", "file:"+(&url.URL{Path: path}).EscapedPath()+"?"+params.Encode())
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 	defer func() { _ = db.Close() }()
-	rows, err := db.QueryContext(ctx, `SELECT slug FROM apps WHERE auto_deploy = 1 ORDER BY slug`)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		if msg := err.Error(); strings.Contains(msg, "no such column") || strings.Contains(msg, "no such table") {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("list apps that deploy on push: %w", err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var slug string
 		if err := rows.Scan(&slug); err != nil {
-			return nil, fmt.Errorf("list apps that deploy on push: %w", err)
+			return nil, fmt.Errorf("%s: %w", what, err)
 		}
 		out = append(out, slug)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list apps that deploy on push: %w", err)
+		return nil, fmt.Errorf("%s: %w", what, err)
 	}
 	return out, nil
 }
