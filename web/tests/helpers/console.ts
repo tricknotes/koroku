@@ -46,6 +46,7 @@ export const SCREENS: Screen[] = [
   { name: 'logs', url: '/apps/blog/logs', tab: 'logs' },
   { name: 'log search', url: '/apps/blog/logs?period=1h', tab: 'logs' },
   { name: 'log archives', url: '/apps/blog/logs?period=archive', tab: 'logs' },
+  { name: 'resources', url: '/apps/blog/resources', tab: 'resources' },
   { name: 'tasks', url: '/apps/blog/tasks', tab: 'tasks' },
   { name: 'environment variables', url: '/apps/blog/env', tab: 'env' },
   { name: 'domains', url: '/apps/blog/domains', tab: 'domains' },
@@ -238,6 +239,7 @@ export function serveConsole(
           health: 'healthy',
           memory_bytes: 180 * 1024 ** 2,
           memory_limit_bytes: GB,
+          cpu_percent: 0.26,
         },
         {
           name: 'web',
@@ -246,6 +248,7 @@ export function serveConsole(
           health: '',
           memory_bytes: 300 * 1024 ** 2,
           memory_limit_bytes: 512 * 1024 ** 2,
+          cpu_percent: 6.04,
         },
       ],
     })

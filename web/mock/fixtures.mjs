@@ -875,6 +875,7 @@ export function services(target) {
       health: 'healthy',
       memory_bytes: 0.31 * GB * scale,
       memory_limit_bytes: 0.5 * GB,
+      cpu_percent: 4.2,
     },
     {
       name: 'db',
@@ -883,6 +884,7 @@ export function services(target) {
       health: 'healthy',
       memory_bytes: 0.42 * GB * scale,
       memory_limit_bytes: 1 * GB,
+      cpu_percent: 0.8,
     },
     {
       name: 'worker',
@@ -891,6 +893,7 @@ export function services(target) {
       health: '',
       memory_bytes: 0.18 * GB * scale,
       memory_limit_bytes: 0.5 * GB,
+      cpu_percent: 1.6,
     },
   ];
 }
@@ -908,6 +911,7 @@ function troubledServices() {
       health: 'unhealthy',
       memory_bytes: 0.47 * GB,
       memory_limit_bytes: 0.5 * GB,
+      cpu_percent: 87.5,
     },
     {
       name: 'db',
@@ -916,6 +920,7 @@ function troubledServices() {
       health: 'healthy',
       memory_bytes: 0.42 * GB,
       memory_limit_bytes: 1 * GB,
+      cpu_percent: 0.9,
     },
     {
       name: 'worker',
@@ -924,6 +929,7 @@ function troubledServices() {
       health: '',
       memory_bytes: null,
       memory_limit_bytes: null,
+      cpu_percent: null,
     },
     {
       name: 'migrate',
@@ -932,6 +938,7 @@ function troubledServices() {
       health: '',
       memory_bytes: null,
       memory_limit_bytes: null,
+      cpu_percent: null,
     },
   ];
 }

@@ -24,6 +24,7 @@ import './styles/domains.css';
 import './styles/backups.css';
 import './styles/db-copy.css';
 import './styles/settings.css';
+import './styles/resources.css';
 import './styles/system.css';
 import './styles/security.css';
 import './styles/members.css';

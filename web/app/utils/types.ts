@@ -373,6 +373,8 @@ export interface ServiceStatus {
   /** Memory in use and its limit (0: unlimited); `null` when unknown. */
   memory_bytes?: number | null;
   memory_limit_bytes?: number | null;
+  /** CPU as Docker shows it (one core is 100%); `null` when unknown. */
+  cpu_percent?: number | null;
 }
 
 export type MemoryRange = '24h' | '7d' | '14d';

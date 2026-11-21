@@ -1,7 +1,7 @@
 import type { TOC } from '@ember/component/template-only';
 
 /** As many tab placeholders as the app detail has tabs. */
-const TABS = [1, 2, 3, 4, 5, 6, 7, 8];
+const TABS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 const LINES = [1, 2, 3];
 
 /**

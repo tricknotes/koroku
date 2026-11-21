@@ -88,7 +88,7 @@ module('Acceptance | memory history', function (hooks) {
       });
   });
 
-  test('it flags services and fills the form with a suggestion', async function (assert) {
+  test('it flags services and saves a suggestion as the limit', async function (assert) {
     fakes.api.on(
       'GET',
       '/api/apps/blog/memory',
@@ -112,7 +112,7 @@ module('Acceptance | memory history', function (hooks) {
         }),
       ]),
     );
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/resources');
 
     assert.deepEqual(
       fakes.api.callsTo('GET', '/api/apps/blog/memory')[0]?.query,
@@ -139,33 +139,68 @@ module('Acceptance | memory history', function (hooks) {
       .dom(`${SERVICE('web')} [data-test-memory-suggested]`)
       .hasText('768m');
 
-    // Applying updates the existing rows or adds one; nothing is sent yet.
+    // Saving asks first, then keeps the other services' limits.
     await click('[data-test-memory-apply="web"]');
-    await click('[data-test-memory-apply="worker"]');
-    const rows = [...document.querySelectorAll('[data-test-limit-row]')].map(
-      (row) => [
-        (row.querySelector('[data-test-limit-service]') as HTMLInputElement)
-          .value,
-        (row.querySelector('[data-test-limit-value]') as HTMLInputElement)
-          .value,
-      ],
-    );
-    assert.deepEqual(rows, [
-      ['db', '1g'],
-      ['web', '768m'],
-      ['worker', '192m'],
-    ]);
-    assert.dom(`${SERVICE('web')} [data-test-memory-applied]`).exists();
-    assert.dom('[data-test-memory-apply="web"]').doesNotExist();
-    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
-
-    await click('[data-test-settings-save]');
-    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
-      service_memory_limits: { db: '1g', web: '768m', worker: '192m' },
-    });
     assert
-      .dom('[data-test-settings-saved]')
+      .dom('[data-test-dialog]')
+      .includesText('web の上限を 768m にしますか？');
+    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
+    await click('[data-test-dialog-confirm]');
+    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+      service_memory_limits: { db: '1g', web: '768m' },
+    });
+    assert.dom('[data-test-dialog]').doesNotExist();
+    assert
+      .dom(`${SERVICE('web')} [data-test-memory-saved]`)
       .includesText('次のデプロイから反映されます');
+    assert.dom('[data-test-memory-apply="web"]').doesNotExist();
+
+    // Cancelling sends nothing.
+    await click('[data-test-memory-apply="worker"]');
+    await click('[data-test-dialog-cancel]');
+    assert.strictEqual(fakes.api.callsTo('PATCH', '/api/apps/blog').length, 1);
+    assert.dom('[data-test-memory-apply="worker"]').exists();
+  });
+
+  test('a failed save stays in the dialog', async function (assert) {
+    fakes.api
+      .on(
+        'GET',
+        '/api/apps/blog/memory',
+        history([
+          memoryService('web', 480, 512, {
+            limit_bytes: 768 * MIB,
+            limit: '768m',
+          }),
+        ]),
+      )
+      .fail('PATCH', '/api/apps/blog', 500, 'internal');
+    await visit('/apps/blog/resources');
+    await click('[data-test-memory-apply="web"]');
+    await click('[data-test-dialog-confirm]');
+
+    assert.dom('[data-test-dialog] [data-test-error]').exists();
+    assert.dom('[data-test-memory-saved]').doesNotExist();
+  });
+
+  test('a viewer sees the suggestion but cannot save it', async function (assert) {
+    app = { ...app, role: 'view' };
+    fakes.api.on(
+      'GET',
+      '/api/apps/blog/memory',
+      history([
+        memoryService('web', 480, 512, {
+          limit_bytes: 768 * MIB,
+          limit: '768m',
+        }),
+      ]),
+    );
+    await visit('/apps/blog/resources');
+
+    assert
+      .dom(`${SERVICE('web')} [data-test-memory-suggested]`)
+      .hasText('768m');
+    assert.dom('[data-test-memory-apply]').doesNotExist();
   });
 
   test('the chart reads out a point from the keyboard', async function (assert) {
@@ -174,7 +209,7 @@ module('Acceptance | memory history', function (hooks) {
       '/api/apps/blog/memory',
       history([memoryService('web', 300, 512)]),
     );
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/resources');
 
     const plot = `${SERVICE('web')} [data-test-memory-chart-plot]`;
     assert
@@ -200,7 +235,7 @@ module('Acceptance | memory history', function (hooks) {
     fakes.api.on('GET', '/api/apps/blog/memory', (call: FakeCall) =>
       history([memoryService('web', 300, 512)], call.query['range']),
     );
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/resources');
     await click('[data-test-memory-range-option="7d"]');
 
     assert.deepEqual(
@@ -220,7 +255,7 @@ module('Acceptance | memory history', function (hooks) {
         memoryService('web', 140, 512, { ready: false, basis_hours: 3 }),
       ]),
     );
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/resources');
 
     assert
       .dom(`${SERVICE('web')} [data-test-memory-collecting]`)
@@ -231,19 +266,80 @@ module('Acceptance | memory history', function (hooks) {
 
   test('without data, one next step', async function (assert) {
     fakes.api.on('GET', '/api/apps/blog/memory', history([]));
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/resources');
 
     assert.dom('[data-test-memory-empty]').includesText('まだ記録がありません');
     assert.dom('[data-test-memory-empty] a').hasText('デプロイを開く');
   });
 
-  test('a failure keeps the rest of the settings usable', async function (assert) {
-    fakes.api.fail('GET', '/api/apps/blog/memory', 500, 'internal');
-    await visit('/apps/blog/settings');
+  test('a failure keeps the current usage on screen', async function (assert) {
+    fakes.api
+      .fail('GET', '/api/apps/blog/memory', 500, 'internal')
+      .on('GET', '/api/apps/blog/services', {
+        services: [
+          {
+            name: 'web',
+            state: 'running',
+            status: 'Up 2 hours',
+            health: '',
+            memory_bytes: 300 * MIB,
+            memory_limit_bytes: 512 * MIB,
+            cpu_percent: 6.04,
+          },
+        ],
+      });
+    await visit('/apps/blog/resources');
 
     assert
       .dom('[data-test-memory-history] [data-test-error]')
       .includesText('メモリの履歴を読み込めませんでした');
-    assert.dom('[data-test-settings-save]').isEnabled();
+    assert.dom('[data-test-resource-service="web"]').exists();
+  });
+
+  test('the current usage shows CPU and memory per service', async function (assert) {
+    fakes.api
+      .on('GET', '/api/apps/blog/memory', history([]))
+      .on('GET', '/api/apps/blog/services', {
+        services: [
+          {
+            name: 'web',
+            state: 'running',
+            status: 'Up 2 hours',
+            health: '',
+            memory_bytes: 480 * MIB,
+            memory_limit_bytes: 512 * MIB,
+            cpu_percent: 6.04,
+          },
+          {
+            name: 'job',
+            state: 'exited',
+            status: 'Exited (0)',
+            health: '',
+            memory_bytes: null,
+            memory_limit_bytes: null,
+            cpu_percent: null,
+          },
+        ],
+      });
+    await visit('/apps/blog/resources');
+
+    const web = '[data-test-resource-service="web"]';
+    assert.dom(`${web} [data-test-resource-cpu]`).includesText('6%');
+    assert
+      .dom(`${web} [data-test-resource-memory]`)
+      .includesText('480.0 MB / 512.0 MB');
+    assert.dom(`${web} [data-test-resource-memory]`).hasClass('is-high');
+    assert
+      .dom('[data-test-resource-service="job"] [data-test-resource-cpu]')
+      .includesText('—');
+  });
+
+  test('the settings point to the resources tab', async function (assert) {
+    fakes.api.on('GET', '/api/apps/blog/memory', history([]));
+    await visit('/apps/blog/settings');
+
+    assert.dom('[data-test-memory-history]').doesNotExist();
+    await click('[data-test-settings-resources-link]');
+    assert.dom('[data-test-memory-history]').exists();
   });
 });

@@ -15,7 +15,6 @@ import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
 import RoleNote from 'koroku-console/components/role-note';
-import MemoryHistory from 'koroku-console/components/memory-history';
 import RegistryCredential from 'koroku-console/components/registry-credential';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import type ApiService from 'koroku-console/services/api';
@@ -365,20 +364,6 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   removeLimit = (row: LimitRow) => {
     this.form.limits = this.form.limits.filter((r) => r !== row);
-    this.touch();
-  };
-
-  /**
-   * Puts a suggested limit into the service's row (adding the row when the
-   * service has none). Like any edit, it is sent with 「保存」.
-   */
-  applySuggestion = (service: string, limit: string) => {
-    const row = this.form.limits.find((r) => r.service.trim() === service);
-    if (row) {
-      row.limit = limit;
-    } else {
-      this.form.limits = [...this.form.limits, new LimitRow(service, limit)];
-    }
     this.touch();
   };
 
@@ -1234,7 +1219,12 @@ export default class AppSettingsTemplate extends Component<Signature> {
             <h2 class="form-group-title">メモリ上限</h2>
             <p class="form-group-description">
               サービスごとの上限です。数字に単位 b・k・m・g
-              のどれかを付けて書きます（例: 512m、1g）。
+              のどれかを付けて書きます（例:
+              512m、1g）。使用量の履歴と上限の目安は<LinkTo
+                @route="app.resources"
+                @model={{this.app.slug}}
+                data-test-settings-resources-link
+              >リソース</LinkTo>タブで確かめられます。
             </p>
           </div>
           <div class="form-group-body">
@@ -1329,11 +1319,6 @@ export default class AppSettingsTemplate extends Component<Signature> {
               {{/if}}
             </div>
 
-            <MemoryHistory
-              @slug={{this.app.slug}}
-              @limits={{this.form.serviceLimits}}
-              @onApply={{this.applySuggestion}}
-            />
           </div>
         </div>
 
