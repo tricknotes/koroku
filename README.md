@@ -104,6 +104,8 @@ CI がビルドして private なレジストリに置いたイメージ（`ghcr
 
 設定タブで「push されたら自動でデプロイする」を有効にすると、決めたブランチ（既定はアプリの既定のブランチ）に push されたコミットを自動でデプロイします。GitHub App の Webhook で push を受けるので、App の Webhook と secret の設定が要ります（[SETUP 4.6](docs/SETUP.md)）。続けて push すると、待っているデプロイは新しいコミットに置き換わります。本番のアプリで有効にするときは確認と再ログインが入ります。履歴には「push で自動デプロイ」と出ます。
 
+イメージを GitHub Actions でビルドして `image:` で pull するアプリは、「先に待つワークフロー」にそのワークフローのファイル（`.github/workflows/image.yml` など）を入れます。push ではなく、そのワークフローがブランチの最新のコミットで成功したときにデプロイするので、イメージができる前に pull して失敗することがありません。GitHub App に Actions の Read-only と Workflow run のイベントが要ります（[SETUP 4.6](docs/SETUP.md)）。
+
 ### staging と本番
 
 同じリポジトリを、複数のアプリに紐づけられます。`myapp-staging` と `myapp` のように別のアプリとして作り、設定で本番にしたアプリでは、デプロイと削除の前に確認が入ります。環境変数と volume はアプリごとに独立しています。
