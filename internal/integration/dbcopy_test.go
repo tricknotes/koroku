@@ -28,8 +28,11 @@ const postgresApp = `services:
     image: postgres:17.10-alpine
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Over TCP: on first start the image initialises the database with a
+    # temporary server that listens on the socket only, then restarts it.
+    # A socket check passes during that window and psql then fails.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U app -d app"]
       interval: 1s
       timeout: 5s
       retries: 60
