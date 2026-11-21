@@ -77,6 +77,8 @@ bin/dev sh -c 'cd web && pnpm build && node mock/screenshots.mjs <名前の接�
 bin/dev make build    # フロントエンド込みの bin/koroku（linux/amd64）
 ```
 
+- フロントエンドのソース（`web/app`、`web/public`、`web/config`、設定ファイル、lockfile）が前回の `make build` から変わっていなければ、`web/dist` をそのまま使い、Vite のビルドを省く。`pnpm test` など別のものが `web/dist` を書いたあとは、ビルドし直す（テスト用の開発ビルドを埋め込まないため）。必ずビルドし直すには `make clean` してから実行する。
+
 ## ディレクトリ構成
 
 | パス | 内容 |
