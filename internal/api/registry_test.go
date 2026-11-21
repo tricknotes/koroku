@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +78,11 @@ func TestRegistryCredential(t *testing.T) {
 		t.Errorf("after put without token: %+v %q", cred, plain)
 	}
 
+	// Saving the same registry and username without a token changes nothing.
+	if rec := f.owner.do(http.MethodPut, path, `{"registry":"registry.example.com:5000","username":"bot"}`, originHeader); rec.Code != http.StatusOK {
+		t.Fatalf("put unchanged: %d %s", rec.Code, rec.Body)
+	}
+
 	// Validation; messages never echo the token.
 	for _, body := range []string{
 		`{"registry":"https://ghcr.io","username":"bot","token":"t"}`,
@@ -111,5 +118,29 @@ func TestRegistryCredential(t *testing.T) {
 	}
 	if rec := f.owner.do(http.MethodDelete, path, "", originHeader); rec.Code != http.StatusNotFound {
 		t.Errorf("delete again: %d %s", rec.Code, rec.Body)
+	}
+
+	// The activity names who saved and removed it, never the token.
+	rec = f.as[viewerID].do(http.MethodGet, "/api/apps/blog/activity?limit=100", "", nil)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), token) {
+		t.Fatalf("activity: %d %s", rec.Code, rec.Body)
+	}
+	list := decode[activityList](t, rec)
+	var entries []string
+	for i := len(list.Entries) - 1; i >= 0; i-- {
+		e := list.Entries[i]
+		if !strings.HasPrefix(e.Action, "registry.") {
+			continue
+		}
+		details, _ := json.Marshal(e.Detail)
+		entries = append(entries, e.Actor.Login+" "+e.Action+" "+string(details))
+	}
+	want := []string{
+		`max registry.set {"created":true,"registry":"ghcr.io","token_replaced":true,"username":"octo-bot"}`,
+		`octo registry.set {"created":false,"from":{"registry":"ghcr.io","username":"octo-bot"},"registry":"registry.example.com:5000","token_replaced":false,"username":"bot"}`,
+		`octo registry.removed {"registry":"registry.example.com:5000","username":"bot"}`,
+	}
+	if !slices.Equal(entries, want) {
+		t.Errorf("activity =\n%s\nwant\n%s", strings.Join(entries, "\n"), strings.Join(want, "\n"))
 	}
 }

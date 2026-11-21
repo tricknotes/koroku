@@ -1261,6 +1261,7 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 | `app.started`、`app.stopped`、`app.restarted` | 起動・停止・再起動 | なし |
 | `env.changed` | 環境変数の追加・変更・名前の変更・削除・一括置換 | キーの一覧だけ（`added`、`changed`、`removed`、`renamed`、`replaced`） |
 | `domain.added`、`domain.verified`、`domain.primary`、`domain.forced`、`domain.deleted` | ドメインの追加・再検証（ボタン）・プライマリ指定・強制有効化・削除 | ホスト名と結果の状態や指定の有無 |
+| `registry.set`、`registry.removed` | コンテナレジストリの認証の保存・削除 | レジストリとユーザー名（変えたときは前の値）、新しいトークンを保存したか。トークンは残さない |
 | `backup.restored`、`backup.downloaded` | volume のリストア、DB ダンプのダウンロード | スナップショットの ID |
 | `db_copy.started`、`db_copy.sent` | DB のコピーの開始（受け側と送り側の両方に残す） | 受け側には送り側の slug と取り元、送り側には取り元だけ |
 | `task_run.started`、`tasks.changed` | コマンドとタスクの実行、登録タスクの変更 | 実行の ID・タスク名・サービス・コマンド、変わったタスクの名前 |

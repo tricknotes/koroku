@@ -102,16 +102,17 @@ func (s *Server) handlePutRegistryCredential(w http.ResponseWriter, r *http.Requ
 	}
 
 	var sealed []byte
+	existing, err := s.store.GetRegistryCredential(r.Context(), app.ID)
+	found := err == nil
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.internalError(w, r, err)
+		return
+	}
 	if token == "" {
-		existing, err := s.store.GetRegistryCredential(r.Context(), app.ID)
-		switch {
-		case errors.Is(err, store.ErrNotFound):
-			errs.add("token", "enter the token")
-		case err != nil:
-			s.internalError(w, r, err)
-			return
-		default:
+		if found {
 			sealed = existing.TokenEncrypted
+		} else {
+			errs.add("token", "enter the token")
 		}
 	}
 	if len(errs) > 0 {
@@ -131,7 +132,30 @@ func (s *Server) handlePutRegistryCredential(w http.ResponseWriter, r *http.Requ
 		s.internalError(w, r, err)
 		return
 	}
+	// The token itself is never recorded, only that a new one was saved.
+	if change := registryChange(existing, found, registry, username, token != ""); change != nil {
+		s.recordActivity(r, app.ID, actRegistrySet, change)
+	}
 	s.writeRegistryCredential(w, r, app)
+}
+
+// registryChange describes a saved credential for the activity record, or
+// nil when nothing changed (the same registry and username without a new
+// token).
+func registryChange(before store.RegistryCredential, found bool, registry, username string, tokenReplaced bool) map[string]any {
+	change := map[string]any{
+		"registry": registry, "username": username, "created": !found, "token_replaced": tokenReplaced,
+	}
+	if !found {
+		return change
+	}
+	if before.Registry == registry && before.Username == username && !tokenReplaced {
+		return nil
+	}
+	if before.Registry != registry || before.Username != username {
+		change["from"] = map[string]string{"registry": before.Registry, "username": before.Username}
+	}
+	return change
 }
 
 // handleDeleteRegistryCredential removes the credential and the file koroku
@@ -141,7 +165,10 @@ func (s *Server) handleDeleteRegistryCredential(w http.ResponseWriter, r *http.R
 	if !ok || !s.requireRecentAuth(w, r) {
 		return
 	}
-	err := s.store.DeleteRegistryCredential(r.Context(), app.ID)
+	before, err := s.store.GetRegistryCredential(r.Context(), app.ID)
+	if err == nil {
+		err = s.store.DeleteRegistryCredential(r.Context(), app.ID)
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "registry_credential_not_found", "the app has no container registry credential")
 		return
@@ -155,5 +182,6 @@ func (s *Server) handleDeleteRegistryCredential(w http.ResponseWriter, r *http.R
 		// removes the file again.
 		s.log.Warn("removing the registry credential file failed", "app", app.Slug, "error", err)
 	}
+	s.recordActivity(r, app.ID, actRegistryRemoved, map[string]any{"registry": before.Registry, "username": before.Username})
 	s.writeRegistryCredential(w, r, app)
 }
