@@ -3,6 +3,7 @@ import { waitForPromise } from '@ember/test-waiters';
 import { ApiError } from 'koroku-console/utils/errors';
 import type SessionService from './session';
 import type {
+  ActivityPage,
   ApiToken,
   App,
   AppPatch,
@@ -721,6 +722,24 @@ export default class ApiService extends Service {
 
   snapshotDownloadUrl(slug: string, snapshotId: string): string {
     return `/api/apps/${seg(slug)}/backups/${seg(snapshotId)}/download`;
+  }
+
+  // Activity
+
+  /** What was done to the app, newest first (ARCHITECTURE 10.7). */
+  async listActivity(
+    slug: string,
+    options: { limit?: number; before?: number | null } = {},
+  ): Promise<ActivityPage> {
+    const page = await this.request<Partial<ActivityPage>>(
+      'GET',
+      `/api/apps/${seg(slug)}/activity`,
+      { query: { limit: options.limit, before: options.before } },
+    );
+    return {
+      entries: page.entries ?? [],
+      next_before: page.next_before ?? null,
+    };
   }
 
   // Database copies

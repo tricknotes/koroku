@@ -33,6 +33,7 @@ function copy(target, source, finishedAgo, overrides = {}) {
     backup_snapshot_id: '7c1e09ab52f4d613',
     started_at: ago(startedAgo),
     finished_at: finishedAgo === null ? null : ago(finishedAgo),
+    actor: { id: 1, login: 'octo' },
     ...overrides,
   };
 }

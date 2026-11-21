@@ -721,6 +721,13 @@ export default class AppTasksTemplate extends Component<Signature> {
                           {{#if (exitLabel run)}}
                             <span data-test-exit-code>{{exitLabel run}}</span>
                           {{/if}}
+                          {{#if run.actor}}
+                            <span
+                              class="deploy-actor"
+                              title="実行した人"
+                              data-test-run-actor
+                            >実行: {{run.actor.login}}</span>
+                          {{/if}}
                         </span>
                         {{#if run.error}}
                           {{#if (eq run.exit_code null)}}

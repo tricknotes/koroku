@@ -560,6 +560,11 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	envKeys := make([]string, 0, len(body.Env))
+	for _, v := range body.Env {
+		envKeys = append(envKeys, v.Key)
+	}
+	s.recordActivity(r, created.ID, actAppCreated, map[string]any{"environment": created.Environment, "env_added": envKeys})
 	s.syncRoutes(r, "app created")
 	j, err := s.appToJSON(r, created)
 	if err != nil {
@@ -625,6 +630,11 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	if (touchesSafeguards(before, app) || enablesProductionAutoDeploy(before, app)) && !s.requireRecentAuth(w, r) {
 		return
 	}
+	promoteBefore, err := s.promoteFromSlug(r.Context(), before)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if err := s.store.UpdateApp(r.Context(), app, s.clock.Now()); err != nil {
 		s.internalError(w, r, err)
 		return
@@ -636,6 +646,14 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	promoteAfter, err := s.promoteFromSlug(r.Context(), updated)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if changes := settingChanges(before, updated, promoteBefore, promoteAfter); len(changes) > 0 {
+		s.recordActivity(r, app.ID, actSettingsChanged, map[string]any{"changes": changes})
 	}
 	j, err := s.appToJSON(r, updated)
 	if err != nil {

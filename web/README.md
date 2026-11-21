@@ -125,3 +125,8 @@ themselves after a few seconds. Its scenarios: `tasks-running` (blog runs a
 registered task whose output keeps arriving) and `tasks-failed` (the latest
 run on blog exited with code 1; shop-staging has no tasks and no runs).
 Example: `/apps/blog/tasks?scenario=tasks-running`.
+
+`mock/activity.mjs` serves the activity of the overview's 「操作の記録」: blog
+has more than one page, blog-staging a few entries, the other apps none. What
+the UI does in the mock (settings, variables, domains, start and stop, task
+runs, copies) adds an entry by the scenario's user.

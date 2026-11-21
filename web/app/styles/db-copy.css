@@ -77,6 +77,10 @@
   white-space: nowrap;
 }
 
+.copy-actor {
+  margin-left: var(--space-2);
+}
+
 .copy-size,
 .copy-duration {
   color: var(--color-text-secondary);

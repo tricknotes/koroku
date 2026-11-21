@@ -253,6 +253,7 @@ func (s *Server) apiRoutes() []route {
 		{"POST /api/apps/{slug}/restart", onApp(levelDeploy), s.handleAppOperation(AppOperator.Restart)},
 		{"GET /api/apps/{slug}/services", onApp(levelView), s.handleListServices},
 		{"GET /api/apps/{slug}/memory", onApp(levelView), s.handleMemoryHistory},
+		{"GET /api/apps/{slug}/activity", onApp(levelView), s.handleListActivity},
 		// Below manage, only the keys are returned.
 		{"GET /api/apps/{slug}/env", onApp(levelView), s.handleGetEnv},
 		{"PUT /api/apps/{slug}/env", onApp(levelManage), s.handlePutEnv},

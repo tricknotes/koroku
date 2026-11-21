@@ -140,6 +140,12 @@ func (s *Server) handleStartDBCopy(w http.ResponseWriter, r *http.Request) {
 	if s.writeCopyError(w, r, err) {
 		return
 	}
+	s.recordActivity(r, target.ID, actDBCopyStarted, map[string]any{
+		"copy_id": c.ID, "source": source.Slug, "source_kind": c.SourceKind,
+	})
+	// The source's data went out too. Its entry does not name the target:
+	// members of the source may have no role on it (ARCHITECTURE 10.7).
+	s.recordActivity(r, source.ID, actDBCopySent, map[string]any{"source_kind": c.SourceKind})
 	writeJSON(w, http.StatusAccepted, dbCopyToJSON(c, target.Slug))
 }
 

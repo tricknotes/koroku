@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path"
 
 	"github.com/tricknotes/koroku/internal/compose"
 	"github.com/tricknotes/koroku/internal/deploy"
@@ -52,6 +53,10 @@ func (s *Server) writeOpError(w http.ResponseWriter, r *http.Request, err error)
 	return true
 }
 
+var appOperationActions = map[string]string{
+	"start": actAppStarted, "stop": actAppStopped, "restart": actAppRestarted,
+}
+
 func (s *Server) handleAppOperation(op func(AppOperator, context.Context, store.App) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		app, ok := s.loadApp(w, r)
@@ -60,6 +65,10 @@ func (s *Server) handleAppOperation(op func(AppOperator, context.Context, store.
 		}
 		if s.writeOpError(w, r, op(s.ops, r.Context(), app)) {
 			return
+		}
+		// The route says which operation this is: .../start, /stop or /restart.
+		if action, ok := appOperationActions[path.Base(r.URL.Path)]; ok {
+			s.recordActivity(r, app.ID, action, nil)
 		}
 		updated, err := s.store.GetAppByID(r.Context(), app.ID)
 		if err != nil {

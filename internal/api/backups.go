@@ -192,6 +192,7 @@ func (s *Server) handleRestoreVolume(w http.ResponseWriter, r *http.Request) {
 		s.writeBackupError(w, r, err)
 		return
 	}
+	s.recordActivity(r.WithContext(ctx), app.ID, actVolumeRestored, map[string]any{"snapshot_id": in.SnapshotID})
 	writeJSON(w, http.StatusOK, map[string]any{"restored": true})
 }
 
@@ -214,6 +215,9 @@ func (s *Server) handleDownloadDump(w http.ResponseWriter, r *http.Request) {
 		s.writeBackupError(w, r, err)
 		return
 	}
+	// Recorded when the download starts: the data is on its way out
+	// whether or not the browser keeps the whole file.
+	s.recordActivity(r, app.ID, actDumpDownloaded, map[string]any{"snapshot_id": id})
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
 	w.Header().Set("Cache-Control", "no-store")

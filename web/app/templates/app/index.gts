@@ -5,6 +5,7 @@ import { on } from '@ember/modifier';
 import { hash } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
+import ActivityLog from 'koroku-console/components/activity-log';
 import AsyncView from 'koroku-console/components/async-view';
 import Badge from 'koroku-console/components/badge';
 import Banner from 'koroku-console/components/banner';
@@ -858,6 +859,8 @@ export default class AppOverviewTemplate extends Component<Signature> {
             {{/if}}
           </:default>
         </TabSection>
+
+        <ActivityLog @slug={{this.slug}} />
       </div>
     </div>
   </template>

@@ -461,6 +461,13 @@ export default class DbCopyPanel extends Component<Signature> {
                   <div class="copy-source">
                     <span class="cell-label">コピー元</span>
                     <span class="mono">{{copy.source_app}}</span>
+                    {{#if copy.actor}}
+                      <span
+                        class="deploy-actor copy-actor"
+                        title="コピーを始めた人"
+                        data-test-copy-actor
+                      >実行: {{copy.actor.login}}</span>
+                    {{/if}}
                   </div>
                   <div class="copy-kind-cell">
                     <span class="cell-label">取り出し方</span>

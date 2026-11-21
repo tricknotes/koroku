@@ -164,9 +164,17 @@ func (s *Server) handlePutTasks(w http.ResponseWriter, r *http.Request) {
 	if app.Environment == store.EnvironmentProduction && !s.requireRecentAuth(w, r) {
 		return
 	}
+	previous, err := s.store.ListTasks(r.Context(), app.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	if err := s.store.ReplaceTasks(r.Context(), app.ID, tasks); err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	if change := taskChanges(previous, tasks); change != nil {
+		s.recordActivity(r, app.ID, actTasksChanged, change)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasksToJSON(tasks)})
 }
@@ -269,6 +277,9 @@ func (s *Server) handleCreateTaskRun(w http.ResponseWriter, r *http.Request) {
 	if s.writeOpError(w, r, err) {
 		return
 	}
+	s.recordActivity(r, app.ID, actTaskRunStarted, map[string]any{
+		"run_id": run.ID, "task_name": run.TaskName, "service": run.Service, "command": run.Command,
+	})
 	writeJSON(w, http.StatusAccepted, taskRunToJSON(run, app.Slug))
 }
 

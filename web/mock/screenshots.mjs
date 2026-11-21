@@ -580,6 +580,9 @@ function rollbackShots() {
 /** Overview, environment and domains tabs of the app detail. */
 function appTabShots() {
   const SERVICES = '[data-test-services]';
+  const ACTIVITY = '[data-test-activity-log] [data-test-activity]';
+  const SCROLL_TO_ACTIVITY =
+    "document.querySelector('[data-test-activity-log]').scrollIntoView()";
   const ENV = '[data-test-env-row]';
   const DOMAIN = '[data-test-domain-default]';
   const PENDING = '[data-test-domain-pending]';
@@ -655,6 +658,34 @@ function appTabShots() {
       name: 'overview-loading',
       path: '/apps/blog?scenario=tab-loading',
       wait: '[data-test-overview]',
+      themes: ['light'],
+    },
+    // Who did what (ARCHITECTURE 10.7), at the side of the overview.
+    {
+      name: 'overview-activity',
+      path: '/apps/blog?scenario=healthy',
+      wait: ACTIVITY,
+      script: SCROLL_TO_ACTIVITY,
+    },
+    {
+      name: 'overview-activity-more',
+      path: '/apps/blog?scenario=healthy',
+      wait: ACTIVITY,
+      click: '[data-test-activity-more]',
+      then: '[data-test-activity="app.created"]',
+      fullPage: true,
+    },
+    {
+      name: 'overview-activity-phone',
+      path: '/apps/blog?scenario=healthy',
+      wait: ACTIVITY,
+      ...PHONE,
+    },
+    {
+      name: 'overview-activity-empty',
+      path: '/apps/shop?scenario=healthy',
+      wait: '[data-test-activity-empty]',
+      script: SCROLL_TO_ACTIVITY,
       themes: ['light'],
     },
 
