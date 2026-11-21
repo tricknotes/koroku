@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	mathrand "math/rand/v2"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -136,6 +138,16 @@ func newEnv(t *testing.T) *env {
 // portSpan is how many host ports each test environment may hand out.
 const portSpan = 50
 
+// Host port ranges are taken from below the kernel's ephemeral range (the
+// default Linux one starts at 32768). Ports in that range are handed out to
+// outgoing connections (image pulls, the GitHub fake, Caddy's admin port),
+// so a range there could be taken by one of them between the check and the
+// deployment ("address already in use").
+const (
+	portRegionStart = 21000
+	portRegionEnd   = 32000
+)
+
 // reservedPorts holds the host port ranges of the environments of this
 // process. The tests run in parallel, and each engine only knows the ports
 // in its own database, so two environments must never share a range.
@@ -144,22 +156,42 @@ var reservedPorts struct {
 	ranges [][2]int
 }
 
-// portRange returns a range of host ports, starting at a port that is free
-// now, that does not overlap the range of any other environment.
+// portRange returns a range of host ports whose ports are all free now and
+// that does not overlap the range of any other environment of this process.
+// The start is random so that test processes running at the same time
+// rarely try the same range.
 func portRange(t *testing.T) (start, end int) {
 	t.Helper()
 	reservedPorts.Lock()
 	defer reservedPorts.Unlock()
-	for range 100 {
-		start = freePort(t)
+	blocks := (portRegionEnd - portRegionStart) / (portSpan + 1)
+	for range 200 {
+		start = portRegionStart + mathrand.IntN(blocks)*(portSpan+1)
 		end = start + portSpan
-		if !slices.ContainsFunc(reservedPorts.ranges, func(r [2]int) bool { return start <= r[1] && r[0] <= end }) {
-			reservedPorts.ranges = append(reservedPorts.ranges, [2]int{start, end})
-			return start, end
+		if slices.ContainsFunc(reservedPorts.ranges, func(r [2]int) bool { return start <= r[1] && r[0] <= end }) {
+			continue
 		}
+		if !portsFree(start, end) {
+			continue
+		}
+		reservedPorts.ranges = append(reservedPorts.ranges, [2]int{start, end})
+		return start, end
 	}
 	t.Fatal("no free host port range that does not overlap another environment")
 	return 0, 0
+}
+
+// portsFree reports whether every port of the range can be bound on the
+// loopback address, where the deployed apps publish their ports.
+func portsFree(start, end int) bool {
+	for port := start; port <= end; port++ {
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			return false
+		}
+		_ = l.Close()
+	}
+	return true
 }
 
 func freePort(t *testing.T) int {
