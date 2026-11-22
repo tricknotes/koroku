@@ -1477,6 +1477,67 @@ SHOTS.push(
   },
 );
 
+// The Compose tab (ARCHITECTURE 9.10): containers compared with the current
+// release, and the override and merged configuration of a release.
+const COMPOSE = '[data-test-compose-override]';
+const toComposeFiles = `document.querySelector('[data-test-compose-files]').scrollIntoView()`;
+SHOTS.push(
+  {
+    name: 'compose',
+    path: '/apps/blog/compose?scenario=healthy',
+    wait: COMPOSE,
+    fullPage: true,
+  },
+  {
+    name: 'compose-mismatch',
+    path: '/apps/blog/compose?scenario=compose-mismatch',
+    wait: '[data-test-compose-trouble]',
+    fullPage: true,
+  },
+  {
+    name: 'compose-past-release-error',
+    path: '/apps/blog/compose?scenario=compose-mismatch',
+    wait: COMPOSE,
+    script: `(() => {
+      const select = document.querySelector('[data-test-compose-release]');
+      select.selectedIndex = 1;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      document.querySelector('[data-test-compose-files]').scrollIntoView();
+    })()`,
+    then: '[data-test-compose-config-error]',
+    themes: ['light'],
+  },
+  {
+    name: 'compose-staging',
+    path: '/apps/blog-staging/compose?scenario=healthy',
+    wait: COMPOSE,
+    script: toComposeFiles,
+    themes: ['light'],
+  },
+  {
+    name: 'compose-not-deployed',
+    path: '/apps/notes/compose?scenario=undeployed',
+    wait: '[data-test-compose-not-deployed]',
+  },
+  {
+    name: 'compose-error',
+    path: '/apps/blog/compose?scenario=tab-error',
+    wait: '[data-test-compose-files] [data-test-error]',
+  },
+  {
+    name: 'compose-phone',
+    path: '/apps/blog/compose?scenario=healthy',
+    wait: COMPOSE,
+    ...PHONE,
+  },
+  {
+    name: 'compose-mismatch-phone',
+    path: '/apps/blog/compose?scenario=compose-mismatch',
+    wait: '[data-test-compose-trouble]',
+    ...PHONE,
+  },
+);
+
 // The resources tab: usage now and the memory history (ARCHITECTURE 9.5). In `healthy`, blog's
 // web is near its limit, db is fine and worker has a lot of headroom.
 const MEMORY = '[data-test-memory-service]';

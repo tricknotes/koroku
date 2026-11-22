@@ -193,6 +193,8 @@ func TestAPITokenAllowlist(t *testing.T) {
 		"/api/deployments/1/logs?format=text",
 		"/api/apps/blog/logs/history",
 		"/api/apps/blog/env/requirements",
+		"/api/apps/blog/compose",
+		"/api/apps/blog/containers",
 	}
 	for _, target := range allowed {
 		rec := f.withToken(http.MethodGet, target, token, nil)
@@ -201,7 +203,7 @@ func TestAPITokenAllowlist(t *testing.T) {
 		}
 	}
 	// The ones with a fixed answer in this setup.
-	for _, target := range []string{"/api/system", "/api/apps", "/api/apps/blog", "/api/apps/blog/deployments", "/api/deployments/1", "/api/apps/blog/env/requirements"} {
+	for _, target := range []string{"/api/system", "/api/apps", "/api/apps/blog", "/api/apps/blog/deployments", "/api/deployments/1", "/api/apps/blog/env/requirements", "/api/apps/blog/containers"} {
 		if rec := f.withToken(http.MethodGet, target, token, nil); rec.Code != http.StatusOK {
 			t.Errorf("GET %s with a token: %d %s", target, rec.Code, rec.Body)
 		}

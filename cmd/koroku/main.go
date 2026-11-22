@@ -437,6 +437,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		// Requests cannot be counted; the API refuses the setting.
 		logger.Info("apps do not sleep while idle: Caddy writes no per-app access logs")
 	}
+	apiOpts.Compose = engine
 	go engine.RunMaintenance(ctx)
 	// Memory use history for the limit guidance (ARCHITECTURE 9.5).
 	go engine.NewMemorySampler().Run(ctx)

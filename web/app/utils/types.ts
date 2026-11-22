@@ -865,3 +865,84 @@ export interface ActivityPage {
   /** Pass as `before` for the next page; `null` on the last one. */
   next_before: number | null;
 }
+
+/** A kept release the Compose tab can show (ARCHITECTURE 9.10). */
+export interface ComposeRelease {
+  deployment_id: number;
+  commit_sha: string;
+  commit_message: string;
+  finished_at: string | null;
+  current: boolean;
+}
+
+/** The override and merged configuration of one release, values masked. */
+export interface ComposeView {
+  deployment_id: number;
+  current_deployment_id: number | null;
+  releases: ComposeRelease[];
+  compose_file: string;
+  files: string[];
+  override: string;
+  /** `null` when `docker compose config` failed; see `config_error`. */
+  config: string | null;
+  config_error: string;
+}
+
+export type ContainerMismatch =
+  | 'outdated'
+  | 'orphan'
+  | 'memory_limit'
+  | 'memory_reservation'
+  | 'oom_score_adj'
+  | 'oom_killed'
+  | 'restarting'
+  | 'restarted'
+  | 'unhealthy'
+  | 'exited';
+
+export interface ContainerExpected {
+  memory_limit_bytes: number;
+  memory_reservation_bytes: number;
+  oom_score_adj: number;
+}
+
+export interface PublishedPort {
+  host_ip: string;
+  host_port: string;
+  container_port: string;
+}
+
+/** One container of the app as `docker container inspect` shows it. */
+export interface ContainerInfo {
+  name: string;
+  service: string;
+  image: string;
+  image_id: string;
+  image_digest: string | null;
+  created_at: string;
+  deployment_id: number | null;
+  matched_by: '' | 'image' | 'created_at';
+  /** From the current release's configuration; `null` when not compared. */
+  current: boolean | null;
+  state: string;
+  health: string;
+  exit_code: number;
+  started_at: string | null;
+  finished_at: string | null;
+  restart_count: number;
+  oom_killed: boolean;
+  /** 0 means none, as Docker reports it. */
+  memory_limit_bytes: number;
+  memory_reservation_bytes: number;
+  oom_score_adj: number;
+  expected: ContainerExpected | null;
+  ports: PublishedPort[];
+  mismatches: ContainerMismatch[];
+}
+
+export interface ContainerView {
+  current_deployment_id: number | null;
+  compared: boolean;
+  comparison_error: string;
+  containers: ContainerInfo[];
+}

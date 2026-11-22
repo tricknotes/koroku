@@ -64,6 +64,9 @@ type Options struct {
 	Backups Backups
 	// Volumes lists the named volumes of an app. Optional.
 	Volumes AppVolumes
+	// Compose reads the Compose setup of an app for the configuration
+	// view (ARCHITECTURE 9.10). Optional.
+	Compose ComposeInspector
 	// Copier copies databases into staging apps. Optional.
 	Copier DBCopier
 	// RouteStatus reports the last proxy configuration load. Optional.
@@ -112,6 +115,7 @@ type Server struct {
 	logs           AppLogs
 	backups        Backups
 	volumes        AppVolumes
+	compose        ComposeInspector
 	copier         DBCopier
 	users          UserLookup
 	waker          AppWaker
@@ -176,6 +180,7 @@ func New(opts Options) *Server {
 		logs:        opts.Logs,
 		backups:     opts.Backups,
 		volumes:     opts.Volumes,
+		compose:     opts.Compose,
 		copier:      opts.Copier,
 		users:       opts.Users,
 		waker:       opts.Waker,
@@ -291,6 +296,9 @@ func (s *Server) apiRoutes() []route {
 		{"GET /api/apps/{slug}/services", onApp(levelView), s.handleListServices},
 		{"GET /api/apps/{slug}/memory", onApp(levelView), s.handleMemoryHistory},
 		{"GET /api/apps/{slug}/activity", onApp(levelView), s.handleListActivity},
+		// Every value of a variable is masked, as in the key list of env.
+		{"GET /api/apps/{slug}/compose", onApp(levelView), s.handleComposeView},
+		{"GET /api/apps/{slug}/containers", onApp(levelView), s.handleContainers},
 		// Below manage, only the keys are returned.
 		{"GET /api/apps/{slug}/env", onApp(levelView), s.handleGetEnv},
 		{"PUT /api/apps/{slug}/env", onApp(levelManage), s.handlePutEnv},

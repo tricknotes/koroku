@@ -75,6 +75,26 @@ func (m *Masker) Mask(s string) string {
 	return s
 }
 
+// MaskLong is Mask restricted to the long values: those Mask replaces
+// wherever they appear. Short values are left alone. It is for output where
+// no value of a variable is put in on purpose (the Compose view,
+// ARCHITECTURE 9.10), so that a coincidence such as PORT=3000 does not
+// garble a port number there, while a long secret that the repository
+// happens to repeat is still hidden.
+func (m *Masker) MaskLong(s string) string {
+	if m == nil {
+		return s
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, secret := range m.secrets {
+		if len(secret) >= substringMaskLen {
+			s = strings.ReplaceAll(s, secret, Placeholder)
+		}
+	}
+	return s
+}
+
 func replaceWholeWord(s, word string) string {
 	var out strings.Builder
 	for {

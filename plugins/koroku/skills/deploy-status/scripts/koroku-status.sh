@@ -22,6 +22,13 @@
 #   env <slug> [--ref <branch>|--sha <sha>]
 #                              variables the repository needs vs. those set
 #                              (keys only; values are never available)
+#   containers <slug>          the containers compared with the running
+#                              release: OOM kills, restarts, containers left
+#                              from an older configuration, other limits
+#   compose <slug> [--deployment <id>]
+#                              koroku's override and the merged Compose
+#                              configuration of the running (or a kept)
+#                              release; variable values are masked
 set -euo pipefail
 
 die() { echo "koroku-status: $*" >&2; exit 2; }
@@ -80,6 +87,7 @@ all=0
 service=""
 ref=""
 sha=""
+deployment=""
 cmd="status"
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then cmd="$1"; shift; fi
 args=()
@@ -91,12 +99,14 @@ while [ $# -gt 0 ]; do
     --service) service="${2:?}"; shift 2 ;;
     --ref) ref="${2:?}"; shift 2 ;;
     --sha) sha="${2:?}"; shift 2 ;;
-    -h | --help) sed -n '2,25p' "$0"; exit 0 ;;
+    --deployment) deployment="${2:?}"; shift 2 ;;
+    -h | --help) sed -n '2,32p' "$0"; exit 0 ;;
     -*) die "unknown option $1" ;;
     *) args+=("$1"); shift ;;
   esac
 done
 case "$lines" in '' | *[!0-9]*) [ -z "$lines" ] || die "--lines takes a number" ;; esac
+case "$deployment" in '' | *[!0-9]*) [ -z "$deployment" ] || die "--deployment takes a deployment id" ;; esac
 
 urlencode() {
   local s="$1" out="" c i
@@ -183,6 +193,37 @@ env_requirements() {
   fi
 }
 
+# containers <slug> [troubled]: one line per container with its state,
+# limits and markers; with "troubled", only containers that have markers.
+containers() {
+  local slug="$1" only="${2:-}"
+  if [ "$have_jq" = 1 ]; then
+    api "/api/apps/$(urlencode "$slug")/containers" | jq -r --arg only "$only" '
+      def mib: if . > 0 then "\(. / 1048576 | floor)MiB" else "none" end;
+      (if .compared then empty else "(not compared with the running release: \(if .comparison_error != "" then .comparison_error else "no release" end))" end),
+      (.containers[] | select($only == "" or (.mismatches | length) > 0) |
+        "\(.service)\t\(.state)\(if .health != "" then "/" + .health else "" end)\trestarts \(.restart_count)\tlimit \(.memory_limit_bytes | mib)\(if .expected and .expected.memory_limit_bytes != .memory_limit_bytes then " (release: \(.expected.memory_limit_bytes | mib))" else "" end)\toom_score_adj \(.oom_score_adj)\t\(.image)\(if .deployment_id then " from #\(.deployment_id)" else "" end)\(if (.mismatches | length) > 0 then "\n    marks: " + (.mismatches | join(", ")) else "" end)")'
+  else
+    api "/api/apps/$(urlencode "$slug")/containers"
+    echo
+  fi
+}
+
+compose_view() {
+  local slug="$1" query=""
+  [ -z "$deployment" ] || query="?deployment=$deployment"
+  if [ "$have_jq" = 1 ]; then
+    api "/api/apps/$(urlencode "$slug")/compose$query" | jq -r '
+      "# release #\(.deployment_id)\(if .deployment_id == .current_deployment_id then " (running)" else "" end); kept: \([.releases[].deployment_id | "#\(.)"] | join(", "))",
+      "# ---- koroku.override.yaml", .override,
+      "# ---- \(.compose_file) + koroku.override.yaml, merged (docker compose config --no-interpolate)",
+      (if .config then .config else "config failed: \(.config_error)" end)'
+  else
+    api "/api/apps/$(urlencode "$slug")/compose$query"
+    echo
+  fi
+}
+
 # matching_apps: slugs of the apps deployed from this repository.
 matching_apps() {
   local remote key
@@ -236,8 +277,17 @@ status_of() {
       ;;
     queued | running)
       echo "    (in progress: run again later, or: $0 log $id)"
+      return
       ;;
   esac
+  # A release that started can still misbehave: killed for memory,
+  # restarting, or containers left from an older configuration.
+  containers "$slug" troubled >"$tmp/troubled"
+  if [ -s "$tmp/troubled" ]; then
+    echo
+    echo "==> Containers with marks (all: $0 containers $slug; configuration: $0 compose $slug)"
+    sed 's/^/    /' "$tmp/troubled"
+  fi
 }
 
 case "$cmd" in
@@ -260,6 +310,14 @@ case "$cmd" in
   env)
     [ "${#args[@]}" = 1 ] || die "usage: env <slug> [--ref <branch>|--sha <sha>]"
     env_requirements "${args[0]}"
+    ;;
+  containers)
+    [ "${#args[@]}" = 1 ] || die "usage: containers <slug>"
+    containers "${args[0]}"
+    ;;
+  compose)
+    [ "${#args[@]}" = 1 ] || die "usage: compose <slug> [--deployment <id>]"
+    compose_view "${args[0]}"
     ;;
   status)
     slugs=()
@@ -284,6 +342,6 @@ case "$cmd" in
     done
     ;;
   *)
-    die "unknown command $cmd (status, apps, deployments, log, runtime, env)"
+    die "unknown command $cmd (status, apps, deployments, log, runtime, env, containers, compose)"
     ;;
 esac
