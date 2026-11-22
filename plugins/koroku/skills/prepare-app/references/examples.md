@@ -124,6 +124,54 @@ services:
 - Dockerfile は Rails 7.1 以降の `rails new` が生成するもの（マルチステージ、`assets:precompile` をビルド時に実行、非 root ユーザー）がそのまま使える。
 - ダンプフック: サービス `db`、コマンド `pg_dump -U app app`。ファイルのバックアップから `pgdata` を外す。
 
+## CI がビルドしたイメージを使う
+
+小さい VPS でビルドせずに、GitHub Actions がコミットごとにビルドして GHCR に置いたイメージを pull する。koroku はデプロイするコミットを `KOROKU_COMMIT_SHA`（40 桁）と `KOROKU_COMMIT_SHORT`（先頭 7 桁）で補間に渡す。
+
+```yaml
+services:
+  web:
+    # koroku の外では変数がないので latest を指す
+    image: ghcr.io/octo/app:${KOROKU_COMMIT_SHORT:+sha-}${KOROKU_COMMIT_SHORT:-latest}
+    # pull_policy: always は書かない（koroku はデプロイのたびに pull する）
+```
+
+イメージを作るワークフロー（`.github/workflows/image.yml`）では、`docker/metadata-action` の `type=sha`（既定で `sha-` と 7 桁）でタグを付ける。40 桁の `KOROKU_COMMIT_SHA` を使うなら `type=sha,format=long` にする。
+
+```yaml
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/octo/app
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+```
+
+- private なイメージなら、koroku の設定タブの「コンテナレジストリの認証」に読み取り専用のトークンを入れる。
+- push での自動デプロイを使うなら、設定タブの「先に待つワークフロー」に `.github/workflows/image.yml` を入れる。入れないと push の直後にイメージがまだなく、デプロイログに `The registry has no image with that tag (manifest unknown)` と出て失敗する（稼働中の版はそのまま）。
+
 ## Node.js（Express、Next.js など）
 
 - `HOST=0.0.0.0` / `PORT` で待ち受ける。Next.js の standalone 出力なら `HOSTNAME=0.0.0.0` が要る。

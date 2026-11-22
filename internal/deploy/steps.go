@@ -386,21 +386,49 @@ func (e *Engine) composeTo(ctx context.Context, inv compose.Invocation, dir stri
 // composePulling runs a compose command that may pull images (build, pull,
 // up). When it fails and the output says the registry refused access, the
 // log gets a hint about the app's registry credential and the error is a
-// *RegistryAuthError.
+// *RegistryAuthError. When the output says the registry has no image for a
+// tag, the log says so and the error wraps ErrImageNotFound.
 func (e *Engine) composePulling(ctx context.Context, inv compose.Invocation, dir string, log *deployLog, sub ...string) error {
-	watcher := &registryAuthWatcher{dst: log.Writer()}
-	err := e.composeTo(ctx, inv, dir, watcher, sub...)
-	if err != nil && ctx.Err() == nil && watcher.Seen() {
+	auth := &lineWatcher{dst: log.Writer(), match: looksLikeRegistryAuthFailure}
+	missing := &lineWatcher{dst: auth, match: looksLikeMissingImage}
+	err := e.composeTo(ctx, inv, dir, missing, sub...)
+	if err == nil || ctx.Err() != nil {
+		return err
+	}
+	switch {
+	case auth.Seen():
 		configured := inv.DockerConfig != ""
 		logRegistryHint(log, configured)
 		return &RegistryAuthError{Configured: configured, Err: err}
+	case missing.Seen():
+		logMissingImageHint(log)
+		return fmt.Errorf("%w: %w", ErrImageNotFound, err)
 	}
 	return err
 }
 
 func (e *Engine) up(ctx context.Context, inv compose.Invocation, dir string, log *deployLog) error {
-	wait := strconv.Itoa(int(e.opts.WaitTimeout / time.Second))
-	return e.composePulling(ctx, inv, dir, log, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)
+	return e.composePulling(ctx, inv, dir, log, e.upArgs()...)
+}
+
+// upArgs is the `up` that every deploy, rollback and start runs. With
+// services, only those are brought up, without their dependencies and
+// without removing the others.
+//
+// --pull missing overrides a pull_policy in the Compose file (such as
+// always): images are pulled in the pull step of a deploy, and a rollback or
+// a start must bring up the images the release already has, even when the
+// registry is unreachable or no longer has the tag (ARCHITECTURE 7). An image
+// that is gone from the host is still pulled.
+func (e *Engine) upArgs(services ...string) []string {
+	args := []string{"up", "-d", "--pull", "missing"}
+	if len(services) > 0 {
+		args = append(args, "--no-deps")
+	} else {
+		args = append(args, "--remove-orphans")
+	}
+	args = append(args, "--wait", "--wait-timeout", e.waitSeconds())
+	return append(args, services...)
 }
 
 // containerOutputLines is how many lines of each container are copied into

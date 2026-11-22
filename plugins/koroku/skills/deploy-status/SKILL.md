@@ -58,7 +58,7 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 | `fetch` | コミットが push されていない、submodule や LFS に頼っている | push する。submodule / LFS をやめる |
 | `prepare` / `validate` | Compose の構文、ポリシー検査の違反（特権、ホストの名前空間、bind mount、`container_name` など）、`${VAR:?}` の必須変数が未設定 | Compose ファイル。未設定の変数は利用者に管理画面で入れてもらう |
 | `build` | Dockerfile、依存の取得、`.dockerignore` の漏れ | Dockerfile とその周辺 |
-| `pull` | イメージ名やタグの誤り、private イメージ | Compose の `image:` |
+| `pull` | イメージ名やタグの誤り、private イメージ。`The registry has no image with that tag (manifest unknown)` は、CI がコミットごとにビルドするイメージがまだ push されていない（ワークフローの終了前にデプロイした） | Compose の `image:`。CI のイメージなら、ワークフローが終わってからデプロイし直す。自動デプロイなら koroku の設定タブの「先に待つワークフロー」にイメージを作るワークフローを入れる |
 | `start` | コンテナがすぐ終了する、ヘルスチェックが通らない、ワンショットのサービスが誰にも待たれていない | ログの `Last output of the containers:` に続く行を読む |
 | `check` | 公開サービスが `0.0.0.0:<port>` で待ち受けていない、ヘルスチェックパスが 5xx を返す | アプリの設定、ポート、ヘルスチェックパス |
 

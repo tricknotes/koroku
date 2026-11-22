@@ -316,7 +316,7 @@ show_logs() {
 }
 
 echo "==> Starting (up --wait, up to 300s)"
-if ! "${dc[@]}" up -d --remove-orphans --wait --wait-timeout 300; then
+if ! "${dc[@]}" up -d --pull missing --remove-orphans --wait --wait-timeout 300; then
   show_logs
   echo
   echo "FAILED: docker compose up did not become ready" >&2

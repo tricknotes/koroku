@@ -109,12 +109,13 @@ func (e *Engine) registryConfig(ctx context.Context, app store.App, masker *secr
 	return dir, nil
 }
 
-// registryAuthWatcher passes command output through and notes whether a
-// line reads like a registry refusing a pull. Docker, Compose and BuildKit
-// word it differently ("unauthorized", "no basic auth credentials",
-// "denied", "401 Unauthorized").
-type registryAuthWatcher struct {
-	dst io.Writer
+// lineWatcher passes command output through and notes whether a line
+// matches. It finds a registry refusing a pull (looksLikeRegistryAuthFailure)
+// or a tag the registry does not have (looksLikeMissingImage) in the output of
+// build, pull and up.
+type lineWatcher struct {
+	dst   io.Writer
+	match func(line string) bool
 
 	mu      sync.Mutex
 	partial []byte
@@ -124,7 +125,7 @@ type registryAuthWatcher struct {
 // maxWatchedLine bounds the unterminated line kept between writes.
 const maxWatchedLine = 4 << 10
 
-func (w *registryAuthWatcher) Write(p []byte) (int, error) {
+func (w *lineWatcher) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	w.partial = append(w.partial, p...)
 	for {
@@ -132,13 +133,13 @@ func (w *registryAuthWatcher) Write(p []byte) (int, error) {
 		if i < 0 {
 			break
 		}
-		if looksLikeRegistryAuthFailure(string(w.partial[:i])) {
+		if w.match(string(w.partial[:i])) {
 			w.seen = true
 		}
 		w.partial = w.partial[i+1:]
 	}
 	if len(w.partial) > maxWatchedLine {
-		if looksLikeRegistryAuthFailure(string(w.partial)) {
+		if w.match(string(w.partial)) {
 			w.seen = true
 		}
 		w.partial = w.partial[:0]
@@ -147,12 +148,12 @@ func (w *registryAuthWatcher) Write(p []byte) (int, error) {
 	return w.dst.Write(p)
 }
 
-// Seen reports whether a refusal was printed, including on a last line
+// Seen reports whether a matching line was printed, including a last line
 // without a newline.
-func (w *registryAuthWatcher) Seen() bool {
+func (w *lineWatcher) Seen() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.seen || looksLikeRegistryAuthFailure(string(w.partial))
+	return w.seen || w.match(string(w.partial))
 }
 
 // outputHasRegistryAuthFailure reports whether any line of out reads like a
@@ -164,6 +165,23 @@ func outputHasRegistryAuthFailure(out string) bool {
 		}
 	}
 	return false
+}
+
+// looksLikeMissingImage reports whether a line says the registry has no
+// image for a tag. Docker Hub prints "manifest for <image> not found:
+// manifest unknown: manifest unknown", GHCR a bare "manifest unknown".
+func looksLikeMissingImage(line string) bool {
+	return strings.Contains(strings.ToLower(line), "manifest unknown")
+}
+
+// ErrImageNotFound wraps a build, pull or up that failed because the
+// registry has no image for a tag, typically a per-commit tag that CI has not
+// pushed yet.
+var ErrImageNotFound = errors.New("the registry has no image with that tag yet; if CI builds an image for each commit, deploy again once it is pushed")
+
+// logMissingImageHint explains a missing tag in the deploy log.
+func logMissingImageHint(log *deployLog) {
+	log.Printf("The registry has no image with that tag (manifest unknown). If CI builds an image for each commit, the image of this commit may not be pushed yet: deploy again once the workflow has finished. For automatic deploys, set the workflow to wait for in the app's settings.")
 }
 
 func looksLikeRegistryAuthFailure(line string) bool {

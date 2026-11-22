@@ -297,7 +297,7 @@ services:
 **ビルドと pull の判定**
 
 1. `docker compose -p koroku-<slug> -f compose.yaml -f koroku.override.yaml config --format json` で正規化する。
-2. `build` を持つサービスがあれば `docker compose build`、`image` のみのサービスは `docker compose pull`。
+2. `build` を持つサービスがあれば `docker compose build`、`image` のみのサービスは `docker compose pull`。起動の `up` は、ホストにないイメージだけを取得する（7 章の手順 6）。
 3. private レジストリ（GHCR など）のイメージは、アプリのコンテナレジストリの認証で取得する（6.1）。設定していないアプリは、ホストの root の Docker の設定（`sudo docker login` したもの）を使う。
 
 **ポリシー検査（正規化した JSON に対して実施、違反はデプロイ拒否）**
@@ -354,6 +354,7 @@ private なイメージ（CI がビルドして `ghcr.io/<owner>/<repo>:sha-...`
 - **ビルド**: `docker compose build` が BuildKit に渡す認証は、Compose（クライアント側）が読む Docker の設定から来る。`DOCKER_CONFIG` を渡すと、`FROM` のベースイメージの解決にもその認証が使われる。結合テストで、ログインを求める偽のレジストリを立て、`docker compose pull` と BuildKit の `FROM` の解決の両方が、アプリの認証を送ってくることを確かめている。
 - **Docker CLI のプラグイン**: `DOCKER_CONFIG` を変えると、Docker CLI はプラグインを `$DOCKER_CONFIG/cli-plugins` とシステムのディレクトリ（`/usr/libexec/docker/cli-plugins` など）から探す。プロビジョニングは Compose と Buildx を apt のパッケージで入れるので、システムのディレクトリにあり、見つかる。root のホームの `~/.docker/cli-plugins` にだけ置いたプラグインは、認証を設定したアプリでは見つからない。
 - **エラー**: `build`・`pull`・`up` が失敗し、出力にレジストリの拒否（`unauthorized`、`no basic auth credentials`、`authentication required`、`denied`、`401 Unauthorized` など。`permission denied` は除く）があれば、その手順のログに「アプリのコンテナレジストリの認証（レジストリ、ユーザー名、トークンの期限と権限）を確かめる」案内を 1 行書き、デプロイのエラーも同じ趣旨にする。認証を設定していないアプリでは、設定を促す案内にする。起動の `up` での拒否は 502 `registry_denied`。
+- **タグがない**: `build`・`pull`・`up` が失敗し、出力に `manifest unknown` があれば（Docker Hub は `manifest for <image> not found: manifest unknown`、GHCR は `manifest unknown` とだけ出す。手元で確かめている）、その手順のログに「レジストリにそのタグのイメージがない。CI がコミットごとにビルドするなら、まだ push されていない。ワークフローが終わってからデプロイし直す。自動デプロイなら先に待つワークフロー（5.2）を設定する」という趣旨の案内を 1 行書き、デプロイのエラーも同じ趣旨にする。認証の拒否と両方が出たときは、認証の案内を優先する（認証が通らなければ、タグがあるかどうかも分からないため）。
 - **マスク**: トークンと、`auths` に書く base64 の値をデプロイログのマスクに加える。
 - **トークンの勧め**: 読み取りだけができるもの。GHCR なら `read:packages` だけを付けた classic な Personal access token か、読み取り専用のボットアカウントのトークン（画面のヒントでも勧める）。
 - 限界: 認証を設定している間、トークンは平文でアプリのディレクトリのファイルにある（root だけが読める。env ファイルと同じ扱い）。Docker の credential helper は使わない（デーモンとして常駐するものが増え、アプリごとに分けにくいため）。
@@ -415,7 +416,7 @@ private なイメージ（CI がビルドして `ghcr.io/<owner>/<repo>:sha-...`
 3. **生成**: env ファイル（0600）と `koroku.override.yaml` を書き出す。
 4. **検証**: `docker compose config --format json` を実行し、6 章のポリシー検査をかける。
 5. **ビルド／pull**: 6 章の判定に従う。
-6. **起動**: `docker compose up -d --remove-orphans --wait --wait-timeout 300`。`--wait` はサービスが running または healthy になるまで待つ（[docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/)）。
+6. **起動**: `docker compose up -d --pull missing --remove-orphans --wait --wait-timeout 300`。`--wait` はサービスが running または healthy になるまで待つ（[docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/)）。`--pull missing` は、ホストにないイメージだけを取得する。Compose ファイルの `pull_policy`（`always` など）より優先されることを、手元の Compose で確かめている。pull は手順 5 で済んでいるので、起動では取得しない。ロールバック（下の「失敗時」と 7.1）と起動（10 章「起動制御と削除」）も同じ `up` を使う。リリースが持っているイメージで動かすので、レジストリに届かなくても、レジストリからタグが消えていても戻せる。ホストから消えたイメージだけは、アプリのレジストリの認証（6.1）で取得し直す。
 7. **経路**: Caddy 設定を再生成し、内容が変わっていれば投入する（8 章）。
 8. **確認**: `http://127.0.0.1:<port><ヘルスチェックパス>` が 5xx 以外を返すまで最大 60 秒リトライする。
 9. **完了**: `succeeded` にして `current_deployment_id` を更新。リリースディレクトリは直近 3 件を残し（消すリリースのイメージも消す。6 章）、`docker image prune -f` を実行する。
