@@ -155,7 +155,7 @@ refuses_invalid_daemon_json() {
 }
 
 snapshot() {
-  sha256sum /etc/docker/daemon.json /etc/koroku/* /etc/fstab /etc/ssh/sshd_config.d/02-koroku-keepalive.conf \
+  sha256sum /etc/docker/daemon.json /etc/koroku/* /etc/fstab /etc/tmpfiles.d/koroku-zswap.conf /etc/ssh/sshd_config.d/02-koroku-keepalive.conf \
     /etc/systemd/system/koroku.service /etc/systemd/system/caddy.service.d/koroku.conf \
     /etc/caddy/koroku-initial.json /etc/apt/sources.list.d/docker.list \
     /etc/apt/sources.list.d/caddy-stable.list /etc/apt/keyrings/docker.asc \
@@ -191,6 +191,9 @@ check "no key was created by the script" only_config_in_etc_koroku
 check "access log directory belongs to caddy" mode_is /var/log/caddy/apps "caddy:caddy 750"
 check "caddy user can write an access log" runuser -u caddy -- touch /var/log/caddy/apps/probe.log
 check "swap file is 2 GiB, 0600, in fstab" swap_file_ok
+check "zswap settings applied at boot by systemd-tmpfiles" \
+  grep -qx 'w- /sys/module/zswap/parameters/enabled - - - - Y' /etc/tmpfiles.d/koroku-zswap.conf
+check "Caddy's drop-in sets GOGC=50" grep -qx 'Environment=GOGC=50' /etc/systemd/system/caddy.service.d/koroku.conf
 check "Caddy runs the initial configuration: admin API only" caddy_has_initial_config_only
 check "Caddy serves nothing on port 80" not curl -s --max-time 2 -o /dev/null http://127.0.0.1:80/
 check "ufw: ssh ports 22, 2222 (sshd), 2200 (session), then 80 and 443, before enable" ufw_order_ok
@@ -263,6 +266,17 @@ check "koroku neither started nor restarted" not koroku_start_requested
 check "caddy not restarted" not called "systemctl restart caddy.service"
 check "--http3 opens 443/udp" called "ufw allow 443/udp"
 check "ssh: sshd not reloaded again" not called "systemctl try-reload-or-restart ssh.service"
+
+echo
+echo "######## run 4: a host provisioned before the drop-in changed ########"
+sed -i '/^Environment=GOGC=/d' /etc/systemd/system/caddy.service.d/koroku.conf
+: >"$CALLS"
+provision --skip-upgrade /src/koroku
+echo
+echo "######## checks after run 4 ########"
+check "drop-in brought up to date" grep -qx 'Environment=GOGC=50' /etc/systemd/system/caddy.service.d/koroku.conf
+check "caddy restarted to apply the changed drop-in" called "systemctl restart caddy.service"
+check "Caddy came back with the configuration koroku loaded" caddy_has_console_route
 
 echo
 echo "######## refusals ########"

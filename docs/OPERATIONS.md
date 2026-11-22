@@ -53,7 +53,7 @@ sudo ./deploy/provision.sh ./koroku
 | 7 | Docker Engine と Compose プラグイン。Compose が 2.30 未満なら止まる |
 | 8 | Caddy。2.7 未満なら止まる。アクセスログ用の `/var/log/caddy/apps`（`caddy` 所有、0750）を作る |
 | 9 | restic 0.19.1（公式リリースのバイナリ、SHA-256 を照合）を `/usr/local/bin/restic` に置く |
-| 10 | 2GB の swap ファイル `/swapfile` と `/etc/fstab` への登録。有効な swap が合計 2GB 以上あれば何もしない |
+| 10 | 2GB の swap ファイル `/swapfile` と `/etc/fstab` への登録。有効な swap が合計 2GB 以上あれば何もしない。続けて zswap を有効にする（`/etc/tmpfiles.d/koroku-zswap.conf` に置き、その場でも反映する） |
 | 11 | `/etc/koroku` と `/var/lib/koroku`（どちらも 0700）、`/etc/koroku/config.toml`（なければ例から作成、0600）、`/usr/local/bin/koroku`、`koroku.service` |
 | 12 | ufw で 22（と sshd の待受ポート）、80、443 の TCP を許可して有効化 |
 | 13 | SSH の keepalive。`/etc/ssh/sshd_config.d/02-koroku-keepalive.conf` に `ClientAliveInterval 30` と `ClientAliveCountMax 4` を置き、`sshd -t` で検査してから reload する。放置したセッションが、途中のルーターやファイアウォールに接続を忘れられて固まらないようにするため。応答のないクライアントは約 2 分で切る。鍵の有無に関係なく行う |
@@ -196,6 +196,8 @@ Ubuntu 24.04 の apt が配る restic は 0.16.4（2024 年初めの版）で、
 - **needrestart**: スクリプト中の apt は `NEEDRESTART_MODE=l`（一覧表示のみ）で動かす。自動再起動に任せると、スクリプトの途中で Docker が再起動され、コンテナも巻き込まれるため。古いライブラリを使い続けているサービスは、最後に案内される再起動で入れ替わる。
 - **Docker のログ設定**は、設定後に作られたコンテナから効く。既存のコンテナは次のデプロイで作り直されたときに切り替わる。
 - **swap**: `/swapfile` を作るのは、有効な swap の合計が 2GB に満たないときだけ。OS イメージに最初から十分な swap があれば何も足さない。
+- **zswap**: swap に書き出すページを、先に RAM の中で圧縮して持つ（圧縮は `zstd`、使うのは RAM の最大 20%（カーネルの既定））。アクセスの少ないアプリのヒープはよく縮むので、ディスクの swap より速く、同じ RAM に多く載る。カーネル 6.8 以降では `shrinker_enabled` で、圧縮したページのうち古いものを `/swapfile` へ追い出す。起動のたびに systemd-tmpfiles が `/sys/module/zswap/parameters` に書く。状態は `grep -r . /sys/module/zswap/parameters` で、使われ具合は `sudo grep -r . /sys/kernel/debug/zswap` で見られる。zswap のないカーネルでは何もせず、まとめで知らせる。
+- **Caddy の `GOGC=50`**: drop-in の `Environment=GOGC=50` で、Caddy のヒープが前回の GC の 1.5 倍になったところで GC する（Go の既定は 2 倍）。常駐が 10 MiB ほど減る代わりに、CPU を少し多く使う。drop-in が変わったときは、スクリプトが Caddy を再起動する（`--resume` で経路はすぐ戻るが、開いていた接続は 1 度切れる）。
 - **タイムゾーン**: システムのタイムゾーンは変えない。`tzdata` だけ入れる。
 
 ## 9. `koroku` の更新
@@ -329,20 +331,21 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 | シェルの構文と静的検査 | 使い捨ての `ubuntu:24.04` コンテナで `bash -n` と `shellcheck`（0.9.0） | 指摘なし |
 | unit ファイル | `systemd-analyze verify`（systemd 255）。`koroku.service` と、パッケージの `caddy.service` に drop-in を重ねたもの | 警告なし |
 | Caddy の初期設定 | `caddy validate`（Caddy 2.11.9） | `Valid configuration` |
-| スクリプトの通し実行 | `deploy/test/dry-run.sh`。使い捨ての `ubuntu:24.04`（24.04.5）と `ubuntu:26.04`（26.04.1）のコンテナで、それぞれ 3 回続けて実行 | 24.04 は 45 項目、26.04 は 44 項目（apt の restic が古いことの確認は 24.04 だけ）すべて成功 |
+| スクリプトの通し実行 | `deploy/test/dry-run.sh`。使い捨ての `ubuntu:24.04`（24.04.5）と `ubuntu:26.04`（26.04.1）のコンテナで、それぞれ 4 回続けて実行（4 回目は drop-in が古いホストの再実行） | 24.04 は 50 項目、26.04 は 49 項目（apt の restic が古いことの確認は 24.04 だけ）すべて成功 |
 
 通し実行で確かめたこと:
 
 - Docker、Caddy の apt リポジトリが 24.04（noble）と 26.04（resolute）の両方で解決でき、どちらでも Docker 29.10.0、Compose 5.8.0、Caddy 2.11.9 が入り、版の確認を通る。restic 0.19.1 はチェックサムが一致する。24.04 の Ubuntu 自身の apt が配るのは Caddy 2.6.2、restic 0.16.4。26.04 の apt の restic は 0.18.1。
 - 既存の `daemon.json`（無関係な設定と別のログオプション入り）に合成され、元の設定が残る。壊れた `daemon.json` は上書きせずに止まる。
 - 2 回目、3 回目の実行で、管理対象のファイル、鍵、権限が 1 バイトも変わらない。Docker と Caddy を再起動しない。swap と ufw を二重に有効化しない。
+- Caddy の drop-in が古い（`GOGC` の行がない）ホストで再実行すると、drop-in を入れ替えて Caddy を再起動し、投入済みの設定で戻る。
 - `config.toml` に例の値がある間は `koroku` を起動せず、書き換えたあとの実行で起動する。
 - drop-in の `ExecStart` を `caddy` ユーザーでそのまま実行すると、初回は初期設定（admin API のみ、80 番は応答なし）で起動する。`koroku` が設定を投入したあとに Caddy を再起動すると、`koroku` が止まっていても投入済みの設定で戻る（`--resume`）。
 - `caddy` ユーザーが `/var/log/caddy/apps` に書ける。
 - SSH の keepalive は 1 回目から入り（鍵の有無に関係なく）、2 回目以降は書き換えない。
 - root に鍵がない 1 回目は パスワードログインの設定に触れず、鍵を置いた 2 回目に drop-in を入れて reload し、3 回目は reload しない。
 
-コンテナには systemd もカーネルも本物のネットワークもないので、`systemctl`、`swapon`、`ufw`、`sshd`、`docker info` は呼び出しを記録するだけの代役に差し替えた。つまり、これらが実際に何をするかは確かめていない。
+コンテナには systemd もカーネルも本物のネットワークもないので、zswap はその場では反映できず（「zswap がない」と知らせる経路を通る）、`systemctl`、`swapon`、`ufw`、`sshd`、`docker info` は呼び出しを記録するだけの代役に差し替えた。つまり、これらが実際に何をするかは確かめていない。
 
 ## 未検証（実機で確認が必要）
 
@@ -356,6 +359,8 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 - [ ] **ufw**: 有効化しても実行中の SSH セッションが切れないこと。Docker の iptables ルールと共存し、コンテナからの外向き通信とイメージのビルドができること。アプリのポート（`127.0.0.1` に bind）が外から届かないこと（受け入れシナリオ 4）。
 - [ ] **事業者側のファイアウォール**: 既定で有効か、80/443 を開ける操作が要るか（事業者による）。
 - [ ] **swap**: OS イメージに最初から swap があるか。`/swapfile` が再起動後も有効か。
+- [ ] **zswap**: 事業者のカーネルに zswap と `zstd` があるか。スクリプトの実行直後と再起動後に `grep -r . /sys/module/zswap/parameters` が `enabled:Y`、`compressor:zstd` になるか。swap が使われたとき `/sys/kernel/debug/zswap/stored_pages` が増えるか。
+- [ ] **Caddy の `GOGC`**: `sudo cat /proc/$(pidof caddy)/environ | tr '\0' '\n' | grep GOGC` で効いているか。システム画面で Caddy のメモリが減ったか。
 - [ ] **Docker のログ設定**: 実際のデーモンが `daemon.json` を読み、新しいコンテナのログが 10MB × 3 で回るか（コンテナではデーモンを起動していない）。
 - [ ] **証明書**: Let's Encrypt（staging、本番）での発行。`443/udp` を閉じた状態でブラウザが支障なく HTTP/2 で通信するか。
 - [ ] **needrestart**: `NEEDRESTART_MODE=l` で、スクリプトの途中にサービスが自動再起動されないこと。
