@@ -65,7 +65,8 @@ export default class MembersTemplate extends Component {
       this.api.listMembers(),
       this.api.listApps(),
     ]);
-    return { members, apps };
+    // A review app's roles are its parent's (ARCHITECTURE 9.9).
+    return { members, apps: apps.filter((app) => !app.review) };
   });
 
   @tracked login = '';

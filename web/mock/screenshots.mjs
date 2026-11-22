@@ -2627,6 +2627,114 @@ async function capture(browser, shot, theme) {
   return file;
 }
 
+// Review apps of pull requests (ARCHITECTURE 9.9): grouped under their
+// parent in the list, the parent's list and create dialog (also without
+// the GitHub permission), the result, and a review app's overview.
+const REVIEW_APPS = '[data-test-review-apps]';
+const REVIEW_PULLS = '[data-test-review-pulls]';
+SHOTS.push(
+  { name: 'review-list', path: '/?scenario=review-apps', wait: LIST },
+  {
+    name: 'review-list-phone',
+    path: '/?scenario=review-apps',
+    wait: LIST,
+    ...PHONE,
+  },
+  {
+    name: 'review-parent',
+    path: '/apps/blog-staging?scenario=review-apps',
+    wait: '[data-test-review-app]',
+    script: scrollTo(REVIEW_APPS),
+  },
+  {
+    name: 'review-parent-phone',
+    path: '/apps/blog-staging?scenario=review-apps',
+    wait: '[data-test-review-app]',
+    script: scrollTo(REVIEW_APPS),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'review-parent-empty',
+    path: '/apps/blog-staging?scenario=healthy',
+    wait: '[data-test-review-empty]',
+    script: scrollTo(REVIEW_APPS),
+  },
+  {
+    name: 'review-create',
+    path: '/apps/blog-staging?scenario=review-apps',
+    wait: '[data-test-review-create]',
+    click: '[data-test-review-create]',
+    then: REVIEW_PULLS,
+  },
+  {
+    name: 'review-create-phone',
+    path: '/apps/blog-staging?scenario=review-apps',
+    wait: '[data-test-review-create]',
+    click: '[data-test-review-create]',
+    then: REVIEW_PULLS,
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'review-create-permission',
+    path: '/apps/blog-staging?scenario=review-permission',
+    wait: '[data-test-review-create]',
+    click: '[data-test-review-create]',
+    then: '[data-test-review-permission]',
+  },
+  {
+    name: 'review-created',
+    path: '/apps/blog-staging?scenario=review-apps',
+    wait: '[data-test-review-create]',
+    // The pull requests take a moment to load, and the creation too.
+    script: `(async () => {
+      const until = async (selector) => {
+        while (!document.querySelector(selector)) {
+          await new Promise((done) => setTimeout(done, 50));
+        }
+        return document.querySelector(selector);
+      };
+      document.querySelector('[data-test-review-create]').click();
+      (await until('[data-test-review-pull="46"] input')).click();
+      await new Promise((done) => setTimeout(done, 100));
+      document.querySelector('[data-test-dialog-confirm]').click();
+      (await until('[data-test-review-created]')).scrollIntoView({ block: 'center' });
+    })()`,
+    then: '[data-test-review-created]',
+    settle: 500,
+    mutates: true,
+  },
+  {
+    name: 'review-app',
+    path: '/apps/blog-staging-pr-42?scenario=review-apps',
+    wait: '[data-test-review-summary]',
+  },
+  {
+    name: 'review-app-phone',
+    path: '/apps/blog-staging-pr-42?scenario=review-apps',
+    wait: '[data-test-review-summary]',
+    ...PHONE,
+  },
+  {
+    name: 'review-app-merged',
+    path: '/apps/blog-staging-pr-38?scenario=review-apps',
+    wait: '[data-test-review-finished]',
+  },
+  {
+    name: 'review-app-waiting',
+    path: '/apps/shop-staging-pr-7?scenario=review-apps',
+    wait: '[data-test-review-summary]',
+  },
+  {
+    name: 'review-app-delete',
+    path: '/apps/blog-staging-pr-38/settings?scenario=review-apps',
+    wait: '[data-test-delete]',
+    click: '[data-test-delete]',
+    then: '[data-test-delete-review]',
+  },
+);
+
 const only = process.argv[2] ?? '';
 const profile = await mkdtemp(join(tmpdir(), 'koroku-shots-'));
 await mkdir(OUT, { recursive: true });
