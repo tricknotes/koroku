@@ -659,6 +659,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | --- | --- |
 | `Container registry credential: set for this app` | `prepare` の手順で、アプリのコンテナレジストリの認証（ARCHITECTURE 6.1）をこのデプロイで使うことを示す |
 | `The registry refused access (unauthorized or denied). ...` | `build`・`pull`・`start` の手順が、レジストリにイメージの取得を拒否されて失敗した。認証を設定したアプリには、レジストリ・ユーザー名・トークンの期限と `read:packages` を確かめる案内が、設定していないアプリには設定を促す案内が続く。デプロイの `error` は `the registry refused access to an image; ...` で始まる |
+| `The registry has no image with that tag (manifest unknown). ...` | `build`・`pull`・`start` の手順が、レジストリにないタグを指して失敗した。CI がコミットごとにビルドするイメージなら、まだ push されていない。ワークフローが終わってからデプロイし直す案内と、自動デプロイなら「先に待つワークフロー」（ARCHITECTURE 5.2）を設定する案内が続く。デプロイの `error` は `the registry has no image with that tag yet; ...` で始まる |
 
 最初の見出しより前の行（`Queued deployment of <sha>.` など）は受付の記録。`koroku` の再起動で中断されたデプロイには `failed` の見出しがなく、末尾に `Failed: ...` の行だけが付く。
 
