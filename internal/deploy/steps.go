@@ -219,6 +219,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 
 	// 6. Start. From here on a failure rolls back to the previous release.
 	log.Step(StepStart, "Starting containers")
+	e.logStopGraces(ctx, app, project, log)
 	if err := e.endSleep(ctx, app, log); err != nil {
 		return false, err
 	}
@@ -461,7 +462,7 @@ func (e *Engine) logContainerOutput(ctx context.Context, app store.App, log *dep
 // has already failed. restored reports whether the previous release runs
 // again.
 func (e *Engine) rollback(app store.App, log *deployLog) (restored bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), e.opts.WaitTimeout+time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), e.upTimeout())
 	defer cancel()
 
 	if app.CurrentDeploymentID == nil {

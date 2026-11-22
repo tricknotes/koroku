@@ -1,4 +1,5 @@
 violations:
+  [stop_grace_period] stop_grace_period adds up to 11m0s across the services (agent 8m0s, web 3m0s), above the limit of 10m0s
   [bind_outside_release] service "agent": bind mount of /etc is outside the repository checkout
   [host_network] service "agent": network_mode: host is not allowed
   [host_pid] service "agent": pid: host is not allowed

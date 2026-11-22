@@ -289,8 +289,8 @@ func TestPolicyGolden(t *testing.T) {
 	relaxed := CheckPolicy(p, params)
 	checkGolden(t, "violations.policy.relaxed.txt", render(relaxed))
 	for _, v := range relaxed.Violations {
-		if v.Rule != RulePortExposure {
-			t.Errorf("only port exposure may survive relaxing, got %s", v)
+		if v.Rule != RulePortExposure && v.Rule != RuleStopGracePeriod {
+			t.Errorf("only port exposure and the stop grace limit may survive relaxing, got %s", v)
 		}
 	}
 	if relaxed.OK() {
