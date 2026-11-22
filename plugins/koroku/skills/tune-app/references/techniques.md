@@ -26,6 +26,7 @@ koroku で動いているいくつかの Rails / Rack アプリで実際に測�
 
   - シングルモードの Puma は停止のフックをシグナルのハンドラーの中で呼ぶ。そこでは Sidekiq がロックを取れず `ThreadError: can't be called from trap context` になるので、別スレッドで止めて待つ。
   - 埋め込みモードは `config/sidekiq.yml` を読まない。`max_retries` などはイニシャライザーの `Sidekiq.configure_server` に移す（`configure_server` のブロックは埋め込みでも適用される）。
+  - Puma が止まるとき、走っている Sidekiq のジョブは Sidekiq の shutdown timeout（既定 25 秒）まで待たれる。Docker の `stop_grace_period`（既定 10 秒）がそれより短いと先に強制終了されるので、Web のサービスに `stop_grace_period: 30s` 以上を付ける。Solid Queue も同じく、`SolidQueue.shutdown_timeout` より長くする。
 - **DB の接続プール**を、ジョブのスレッドの数だけ増やす（`database.yml` の `pool` / `max_connections`）。
 - Compose から worker サービスを消す。koroku は `up --remove-orphans` で起動するので、デプロイすると古いコンテナは消える。
 - Web サービスのメモリ上限は、ジョブの分だけ上げる（例 512m → 640m）。消えたサービスの上限がなくなるので、合計は下がる。
@@ -44,7 +45,7 @@ koroku で動いているいくつかの Rails / Rack アプリで実際に測�
   - koroku の定期タスクに移す（上）。ジョブが数個で、どれも 1 回のコマンドで実行できるなら、Compose の変更がいちばん少ない。
   - ジョブキューの定期実行（Solid Queue の `recurring.yml`、`sidekiq-cron`）に書き換える。ジョブキューがすでにあるなら、これがいちばん少ない変更で済む。
   - `rufus-scheduler` を Puma の起動のフック（`after_booted`）で動かす。Puma のワーカーを fork する構成では、ワーカーの数だけ同じジョブが走るので、シングルモードのときだけにする。
-  - `supercronic` などの cron を小さなコンテナで動かし、実行のたびに `bin/rails runner` を起動する。常駐は cron だけ（数 MiB）になる。代わりに、実行のたびに Rails の起動の時間とメモリがかかり、その間はホストのメモリの使用量が一時的に増える。数時間に 1 回のような、間隔の長いジョブに向く。koroku の定期タスクでも同じことができ、こちらは休止中も動き、実行の記録が管理 UI に残る。
+  - `supercronic` などの cron を小さなコンテナで動かし、実行のたびに `bin/rails runner` を起動する。常駐は cron だけ（数 MiB）になる。代わりに、実行のたびに Rails の起動の時間とメモリがかかり、その間はホストのメモリの使用量が一時的に増える。数時間に 1 回のような、間隔の長いジョブに向く。koroku の定期タスクでも同じことができ、こちらは休止中も動き、実行の記録が管理 UI に残る。 デプロイのたびに cron のコンテナも作り直され、走っているジョブは `stop_grace_period`（既定 10 秒）で強制終了される。supercronic は `SIGTERM` で走っているジョブの終わりを待つので、ジョブより長い `stop_grace_period`（全サービスの合計で 10 分まで）を付けるか、ジョブを途中から再開できるように作る（prepare-app の requirements.md「デプロイのたびに止まる長いジョブ」）。
 - どれも、Web のプロセスと同じ場所でジョブが走る、またはジョブのたびに起動する。前のスケジューラーと比べて、実行の時刻（タイムゾーン、`TZ`）、同時に走らせない制御、失敗したときのやり直しが変わらないかを確かめる。アプリを止めている間は定期ジョブも動かないことも、利用者に伝える。
 - まとめたスケジューラーのサービスは Compose から消す（`up --remove-orphans` で古いコンテナは消える）。
 
