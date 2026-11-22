@@ -407,7 +407,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `db_copy.started` | `{"copy_id", "source", "source_kind"}`（受け側のアプリ） |
 | `db_copy.sent` | `{"source_kind"}`（送り側のアプリ。受け側は書かない） |
 | `task_run.started` | `{"run_id", "task_name", "service", "command"}` |
-| `tasks.changed` | `{"added", "changed", "removed": [タスク名], "reordered"}` |
+| `tasks.changed` | `{"added", "changed", "removed": [タスク名], "reordered"}`。予定（`schedule`）の変更も `changed` に入る |
 | `member.role_set` | `{"member": {"id", "login"}, "from", "to"}`（`from` はロールがなければ `""`） |
 | `member.role_removed` | `{"member": {"id", "login"}, "from", "to": ""}` |
 | `auto_deploy.skipped` | `{"workflow", "conclusion", "commit_sha", "branch", "run_url"}`。待つワークフロー（`auto_deploy_workflow`）の実行が成功しなかったので自動デプロイしなかった。`actor` は `null`（koroku 自身）。`run_url` は GitHub の実行の画面（https でなければ空） |
@@ -662,6 +662,32 @@ ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose ru
 **ログの行**: 先頭に `$ <コマンド>`、続いて `Running in service <service> of deployment #<id>.`。終わりに `Exited with code <N>.`、`Timed out after <時間>.`、`Canceled.`、`Failed to run: <理由>` のどれか。コマンドの出力は環境変数の値をマスクしてある。
 
 アプリの実行中（`running` の記録がある間）は、そのアプリへの `POST /api/apps/{slug}/deployments` も `409 busy` になる。起動・停止・再起動・削除・リストアも同じ。
+
+### 定期タスク（2026-11-22）
+
+ARCHITECTURE 9.6「定期実行」。登録タスクに予定を書くと、koroku がその時刻に実行する。
+
+登録タスクの形に次が加わる:
+
+```json
+{
+  "name": "期限切れセッションの掃除",
+  "service": "web",
+  "command": "bin/rails runner 'SessionSweepJob.perform_now'",
+  "schedule": "*/30 * * * *",
+  "next_run_at": "2026-11-22T10:30:00Z",
+  "last_skipped_at": "2026-11-22T10:00:00Z",
+  "last_skip_reason": "overlap",
+  "last_skip_detail": ""
+}
+```
+
+- `schedule` は cron の 5 つの欄（分 時 日 月 曜日）。各欄は `*`、数、範囲 `a-b`、間隔 `*/n` と `a-b/n`、そのカンマ区切り。曜日の 0 と 7 は日曜。名前（`MON`）と `@daily` は使えない。空文字なら定期実行しない。`PUT` で書け、空白は 1 つにまとめて保存する。書式の誤り、範囲外の数、一度も来ない日付（`0 0 31 2 *`）は `422 validation_failed`（`details` のキーは `tasks[0].schedule`、値は理由の英文）。
+- `next_run_at` は次の予定の時刻（予定がなければ `null`）。`last_skipped_at`、`last_skip_reason`、`last_skip_detail` は直近に見送った予定の時刻と理由（なければ `null` と空文字）。理由は `stopped`（アプリが停止中）、`not_deployed`、`overlap`（前の回が待ち行列か実行中）、`busy`（デプロイかほかの操作が 10 分以上続いた）、`error`（実行の前の検査に通らない。`last_skip_detail` にその文）。この 4 つは読み取り専用で、`PUT` では無視する。名前と予定を変えずに保存したタスクは、見送りの記録を保つ。
+- `GET` と `PUT` の応答に `time_zone` が加わる（`{"tasks": [...], "time_zone": "Asia/Tokyo"}`）。予定を読むタイムゾーンで、`config.toml` の `timezone`。
+- 実行記録に `trigger` が加わる。`manual`（管理 UI か API からの実行）か `scheduled`（予定による実行）。`scheduled` の `actor` は `null`。ログの 2 行目に `Scheduled run of task "<名前>" for <予定の時刻（RFC 3339）>.` が入る。
+- 休止中のアプリの定期実行では、ログに `The app is asleep and stays asleep; starting only <サービス>.` と、終わりに `Stopped <サービス> again.` が入る。依存先を起動できなければ `failed`（`error` は `start <サービス> of the sleeping app: ...`、`exit_code` は `null`）。
+- 定期実行は操作の記録（`activity`）に残らない。予定の変更は `tasks.changed` の `changed` に入る。
 
 ## GitHub の Webhook（2026-11-21）
 

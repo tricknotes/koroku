@@ -102,9 +102,9 @@ sudo ./deploy/provision.sh ./koroku
 | `[github] require_two_factor` | 使われない（古い版の設定）。書いてあれば起動時に警告が出るので、消してよい。2 段階認証は GitHub アカウント側で有効にする（ARCHITECTURE 10.3） |
 | `[storage] endpoint`、`region`、`bucket`、`access_key_id`、`secret_access_key` | S3 互換のオブジェクトストレージ。endpoint と region は事業者の S3 互換 API のもの（region の概念がなければ `auto`）。パス形式（`https://<endpoint>/<bucket>/<key>`）で接続する。バケットは先に作っておく（`koroku` も restic もバケットは作らない）。このセクションがないと、ログは VPS 内にだけ残り、バックアップは無効になる |
 | `[backup] restic_password_file` | `/etc/koroku/restic.key`（0600）。中身は自分で決めたパスワード 1 行。ファイルがない、または他人が読める権限だとバックアップは無効になる |
-| `[backup] hour`、`timezone` | 日次バックアップの時刻（既定は `Asia/Tokyo` の 3 時） |
+| `[backup] hour`、`timezone` | 日次バックアップの時刻（既定は `Asia/Tokyo` の 3 時）。`timezone` は定期タスクの予定（ARCHITECTURE 9.6）とログの日付の区切りにも使う |
 | `[logs] retention_days`、`archive_interval_hours` | ログのローカル保持日数（既定 14）と退避の間隔（既定 4 時間） |
-| `[tasks] timeout_minutes` | 管理 UI から実行するワンオフのコマンドの制限時間（既定 30 分、1〜1440） |
+| `[tasks] timeout_minutes` | 管理 UI から実行するワンオフのコマンドと定期タスクの制限時間（既定 30 分、1〜1440） |
 
 `[github]` を書かないと誰もログインできない（API は 401 を返す）。`koroku serve --insecure-no-auth` は開発機専用で、unit ファイルには書かない。
 
@@ -254,6 +254,17 @@ sudo koroku run blog db psql -U postgres app < dump.sql   # 端末でない入�
 - 休止中のアプリのコンテナを手で消した場合は、次のリクエストで koroku が稼働中のリリースのファイルから作り直す。
 - 休止させた・起こしたことは `journalctl -u koroku` に `app went to sleep` / `app woke up` として出る。起こせなかったときは `waking the app failed` と理由が出る。
 - 休止と起こすたびに Caddy の設定を投入するので、ほかのアプリの WebSocket は最長 5 分後に 1 回切れる（アプリの起動・停止と同じ）。
+- 休止中のアプリの定期タスクは、アプリを起こさずに、タスクのサービスが `depends_on` で依存するサービスだけを起動して実行し、終わると止め直す（10.3）。
+
+### 10.3 定期タスク
+
+タスクタブで登録したタスクに予定（cron の 5 つの欄）を書くと、koroku がその時刻に実行する（ARCHITECTURE 9.6）。
+
+- 予定の時刻は `config.toml` の `timezone`（既定 `Asia/Tokyo`）で読む。ホストの OS のタイムゾーンには依らない。
+- 全アプリで 1 件ずつ順に実行する。同じ時刻に重なった予定は待ち行列で順番を待つ。
+- `koroku` が止まっていた（更新や再起動の）間の予定は、あとから実行しない。決まった時刻の更新を避けたいときは、予定の時刻を外して `systemctl restart koroku` する。
+- 実行は実行履歴に「定期」として残る。見送った予定（アプリが停止中、前の回が実行中、デプロイなどが 10 分以上続いた、実行の前の検査に通らない）は、タスクの行に直近の 1 件が出る。`journalctl -u koroku` には `scheduled task started` / `scheduled task skipped` が毎回出る。
+- 実行の途中で `koroku` が再起動すると、その実行は `interrupted` で失敗になる。休止中のアプリなら、起動時に依存先を止め直す。
 
 ## 11. ホスト全損からの復旧
 

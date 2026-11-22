@@ -322,6 +322,12 @@ func TestTaskSchedules(t *testing.T) {
 		t.Errorf("next_run_at = %s (now %s)", got, srv.clock.Now())
 	}
 
+	// A listed task goes back as it is: the read-only fields are ignored.
+	listed := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(rec.Body.String()), `{"tasks":`), `,"time_zone":"Asia/Tokyo"}`)
+	if again := request(t, h, http.MethodPut, "/api/apps/blog/tasks", `{"tasks": `+listed+`}`); again.Code != http.StatusOK {
+		t.Errorf("put back the listed tasks: %d %s", again.Code, again.Body)
+	}
+
 	for schedule, want := range map[string]string{
 		"0 3 * *":     "needs 5 fields",
 		"60 * * * *":  "minute: 60 is out of range 0-59",
