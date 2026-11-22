@@ -33,9 +33,31 @@ func dumpFileName(app App) string { return app.Slug + "-" + app.DumpService + ".
 // snapshot and exit with status 3; that snapshot is removed again and the
 // backup fails, because an empty dump protects nothing.
 func (m *Manager) backupDump(ctx context.Context, app App) TargetResult {
-	res := TargetResult{App: app.Slug, Kind: KindDump, Target: app.DumpService}
 	ctx, cancel := context.WithTimeout(ctx, m.opts.Timeouts.Backup)
 	defer cancel()
+	if app.WithDumpService == nil {
+		return m.storeDump(ctx, app)
+	}
+	var res TargetResult
+	ran := false
+	err := app.WithDumpService(ctx, func(ctx context.Context) error {
+		ran = true
+		res = m.storeDump(ctx, app)
+		return nil
+	})
+	if !ran {
+		res = TargetResult{App: app.Slug, Kind: KindDump, Target: app.DumpService}
+		if err == nil {
+			err = errors.New("the dump service could not be started")
+		}
+		res.Err = err
+	}
+	return res
+}
+
+// storeDump is backupDump once the dump service runs.
+func (m *Manager) storeDump(ctx context.Context, app App) TargetResult {
+	res := TargetResult{App: app.Slug, Kind: KindDump, Target: app.DumpService}
 
 	pr, pw, err := os.Pipe()
 	if err != nil {

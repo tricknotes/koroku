@@ -83,8 +83,28 @@ func toBackupApp(app store.App) backup.App {
 	return out
 }
 
+// dumpRunner makes sure an app's dump service runs while a dump is taken:
+// a sleeping app starts only that service (ARCHITECTURE 8.4).
+// *deploy.Engine implements it.
+type dumpRunner interface {
+	WithServiceRunning(ctx context.Context, appID int64, service string, fn func(context.Context) error) error
+}
+
+// toDumpingApp is toBackupApp for a backup that takes the dump: the dump
+// runs through dumps.
+func toDumpingApp(app store.App, dumps dumpRunner) backup.App {
+	out := toBackupApp(app)
+	if out.DumpService != "" && dumps != nil {
+		id, service := app.ID, out.DumpService
+		out.WithDumpService = func(ctx context.Context, run func(context.Context) error) error {
+			return dumps.WithServiceRunning(ctx, id, service, run)
+		}
+	}
+	return out
+}
+
 // backupApps lists every app for the scheduled and manual runs.
-func backupApps(st *store.Store) func(ctx context.Context) ([]backup.App, error) {
+func backupApps(st *store.Store, dumps dumpRunner) func(ctx context.Context) ([]backup.App, error) {
 	return func(ctx context.Context) ([]backup.App, error) {
 		apps, err := st.ListApps(ctx)
 		if err != nil {
@@ -92,7 +112,7 @@ func backupApps(st *store.Store) func(ctx context.Context) ([]backup.App, error)
 		}
 		out := make([]backup.App, 0, len(apps))
 		for _, app := range apps {
-			out = append(out, toBackupApp(app))
+			out = append(out, toDumpingApp(app, dumps))
 		}
 		return out, nil
 	}
@@ -140,6 +160,14 @@ func (c *appController) Start(ctx context.Context, app backup.App) error {
 	return c.engine.Start(ctx, current)
 }
 
+// WithServiceRunning implements dumpRunner with the engine.
+func (c *appController) WithServiceRunning(ctx context.Context, appID int64, service string, fn func(context.Context) error) error {
+	if c.engine == nil {
+		return fn(ctx)
+	}
+	return c.engine.WithServiceRunning(ctx, appID, service, fn)
+}
+
 // appVolumes lists the named volumes of an app for the API. It goes through
 // the backup package so that the API and the backup runs agree on what the
 // volumes of an app are, but it needs no backup repository: it is wired up
@@ -170,6 +198,7 @@ type backupService struct {
 	// serverCtx outlives single requests: a manual run keeps going after
 	// the request that started it has returned.
 	serverCtx context.Context
+	dumps     dumpRunner
 }
 
 func (b *backupService) Running() bool { return b.manager.State().Running() }
@@ -239,7 +268,7 @@ func (b *backupService) OpenDump(ctx context.Context, app store.App, snapshotID 
 // BackupApp implements deploy.PreDeployBackup: one app, before its
 // containers are replaced.
 func (b *backupService) BackupApp(ctx context.Context, app store.App) error {
-	result, err := b.manager.BackupApp(ctx, toBackupApp(app))
+	result, err := b.manager.BackupApp(ctx, toDumpingApp(app, b.dumps))
 	if errors.Is(err, backup.ErrBusy) {
 		return errors.New("another backup is running; deploy again when it has finished")
 	}
@@ -255,7 +284,7 @@ func (b *backupService) BackupApp(ctx context.Context, app store.App) error {
 // BackupDump implements deploy.CopyBackups: the target of a database copy,
 // before its data is replaced.
 func (b *backupService) BackupDump(ctx context.Context, app store.App) (string, error) {
-	id, err := b.manager.BackupDump(ctx, toBackupApp(app))
+	id, err := b.manager.BackupDump(ctx, toDumpingApp(app, b.dumps))
 	if errors.Is(err, backup.ErrBusy) {
 		return "", errors.New("another backup is running; copy again when it has finished")
 	}
@@ -306,7 +335,7 @@ func newBackupService(ctx context.Context, cfg config.Config, configDir string, 
 		Clock:      deps.clock,
 		Logger:     deps.logger,
 		Recorder:   backupRecorder{store: st},
-		Apps:       backupApps(st),
+		Apps:       backupApps(st, deps.controller),
 		System: &backup.System{
 			SnapshotDB: st.VacuumInto,
 			ConfigDir:  configDir,
@@ -330,5 +359,6 @@ func newBackupService(ctx context.Context, cfg config.Config, configDir string, 
 		},
 		clock:     deps.clock,
 		serverCtx: ctx,
+		dumps:     deps.controller,
 	}, nil
 }
