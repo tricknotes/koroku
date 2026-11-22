@@ -222,6 +222,20 @@ export interface ContainerResources {
 export type DeploymentStatus =
   'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
 
+/**
+ * An automatic deployment received while a command ran on the app, queued
+ * once the command ends (ARCHITECTURE 5.2).
+ */
+export interface PendingAutoDeploy {
+  ref: string;
+  commit_sha: string;
+  commit_message: string;
+  pusher: string;
+  /** The workflow the push waited for, or "". */
+  workflow: string;
+  received_at: string;
+}
+
 export interface Deployment {
   id: number;
   app_slug: string;

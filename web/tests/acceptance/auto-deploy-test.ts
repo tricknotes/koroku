@@ -226,4 +226,45 @@ module('Acceptance | automatic deployment on push', function (hooks) {
       .dom('[data-test-push-trigger]')
       .hasText('octo の push で自動デプロイ');
   });
+
+  test('the deploy tab shows a push kept until the running command ends', async function (assert) {
+    fakes.api
+      .on('GET', '/api/apps/blog/deployments', {
+        deployments: [app.current_deployment],
+        pending_auto_deploy: {
+          ref: 'main',
+          commit_sha: '5eed5eed1234567890abcdef1234567890abcdef',
+          commit_message: 'Show the order history\n\nAlso paginate it.',
+          pusher: 'octo',
+          workflow: '.github/workflows/image.yml',
+          received_at: new Date().toISOString(),
+        },
+      })
+      .on('GET', '/api/repos/octo/blog/branches', { branches: [] })
+      .on('GET', '/api/repos/octo/blog/commits', { commits: [] });
+    await visit('/apps/blog/deploy');
+
+    assert
+      .dom('[data-test-pending-auto-deploy]')
+      .includesText('コマンドの実行が終わったら自動デプロイします')
+      .includesText('5eed5ee')
+      .includesText('Show the order history')
+      .includesText('push: octo')
+      .includesText('.github/workflows/image.yml');
+    assert
+      .dom('[data-test-pending-auto-deploy] a')
+      .hasAttribute('href', '/apps/blog/tasks');
+  });
+
+  test('the deploy tab shows nothing without a kept push', async function (assert) {
+    fakes.api
+      .on('GET', '/api/apps/blog/deployments', {
+        deployments: [app.current_deployment],
+        pending_auto_deploy: null,
+      })
+      .on('GET', '/api/repos/octo/blog/branches', { branches: [] })
+      .on('GET', '/api/repos/octo/blog/commits', { commits: [] });
+    await visit('/apps/blog/deploy');
+    assert.dom('[data-test-pending-auto-deploy]').doesNotExist();
+  });
 });

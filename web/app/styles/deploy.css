@@ -802,3 +802,35 @@ div.step-header {
 .deploy-readonly {
   margin-bottom: var(--space-8);
 }
+
+/* A push kept until the running command ends (ARCHITECTURE 5.2). */
+.deploy-pending {
+  margin-bottom: var(--space-8);
+}
+
+.deploy-pending .banner-body > p {
+  margin: var(--space-1) 0 0;
+}
+
+.deploy-pending-commit code {
+  font-family: var(--font-mono);
+}
+
+.deploy-pending-meta {
+  color: var(--color-text-secondary);
+}
+
+@media (width <= 40rem) {
+  /* The link goes under the text instead of squeezing it. */
+  .deploy-pending {
+    flex-wrap: wrap;
+  }
+
+  .deploy-pending .banner-body {
+    flex-basis: calc(100% - 2.5rem);
+  }
+
+  .deploy-pending .banner-actions {
+    margin-left: calc(var(--text-md) + var(--space-3));
+  }
+}

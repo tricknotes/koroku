@@ -2,6 +2,7 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
+import { LinkTo } from '@ember/routing';
 import { eq, fn } from '@ember/helper';
 import type Owner from '@ember/owner';
 import AsyncView from 'koroku-console/components/async-view';
@@ -55,6 +56,7 @@ import type {
   Commit,
   Deployment,
   EnvRequirements,
+  PendingAutoDeploy,
 } from 'koroku-console/utils/types';
 
 const POLL_INTERVAL = 3000;
@@ -124,9 +126,18 @@ export default class AppDeployTemplate extends Component<Signature> {
   commits = new Loadable<Commit[]>(() =>
     this.api.listCommits(this.app.repo_full_name, this.branch),
   );
-  history = new Loadable<Deployment[]>(() =>
-    this.api.listDeployments(this.app.slug),
-  );
+  history = new Loadable<Deployment[]>(async () => {
+    const { deployments, pendingAutoDeploy } = await this.api.deploymentHistory(
+      this.app.slug,
+    );
+    this.pendingAutoDeploy = pendingAutoDeploy;
+    return deployments;
+  });
+  /**
+   * A push received while a command runs on the app, deployed once the
+   * command ends (ARCHITECTURE 5.2).
+   */
+  @tracked pendingAutoDeploy: PendingAutoDeploy | null = null;
   /** What the commit picked in the form needs (ARCHITECTURE 9.4). */
   targetRequirements = new Loadable<EnvRequirements>(() =>
     this.api.getEnvRequirements(this.app.slug, this.checkedQuery),
@@ -299,7 +310,7 @@ export default class AppDeployTemplate extends Component<Signature> {
 
   /** Keeps the history current while something is queued or running. */
   async poll(): Promise<void> {
-    if (!this.hasActive && !this.behindApp) return;
+    if (!this.hasActive && !this.behindApp && !this.pendingAutoDeploy) return;
     await this.refresh();
   }
 
@@ -685,6 +696,45 @@ export default class AppDeployTemplate extends Component<Signature> {
         class="deploy-readonly"
         data-test-deploy-readonly
       />
+    {{/if}}
+
+    {{#if this.pendingAutoDeploy}}
+      <Banner
+        @title="コマンドの実行が終わったら自動デプロイします"
+        class="deploy-pending"
+        data-test-pending-auto-deploy
+      >
+        <:default>
+          <p>
+            実行中のコマンドがあるため、push
+            されたコミットのデプロイを預かっています。実行が終わると、ふつうのデプロイとして積まれます。後から
+            push されたときは、新しいコミットに置き換わります。
+          </p>
+          <p class="deploy-pending-commit">
+            <code>{{shortSha this.pendingAutoDeploy.commit_sha}}</code>
+            {{firstLine this.pendingAutoDeploy.commit_message}}
+          </p>
+          <p class="deploy-pending-meta">
+            {{this.pendingAutoDeploy.ref}}
+            {{#if this.pendingAutoDeploy.pusher}}
+              ・ push:
+              {{this.pendingAutoDeploy.pusher}}
+            {{/if}}
+            {{#if this.pendingAutoDeploy.workflow}}
+              ・ ワークフロー
+              {{this.pendingAutoDeploy.workflow}}
+              の成功後
+            {{/if}}
+            ・ 受け取り
+            <RelativeTime @time={{this.pendingAutoDeploy.received_at}} />
+          </p>
+        </:default>
+        <:actions>
+          <LinkTo @route="app.tasks" @model={{this.app.slug}}>
+            実行中のコマンドを見る
+          </LinkTo>
+        </:actions>
+      </Banner>
     {{/if}}
 
     {{#unless this.isEmpty}}

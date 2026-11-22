@@ -142,6 +142,26 @@ function workflowGatedStagingActivity() {
   ];
 }
 
+/**
+ * Starts blog-staging's activity with a push that was kept during a command
+ * and then not deployed, because the disk was full (ARCHITECTURE 5.2).
+ */
+export function useDeferredActivity(state) {
+  state.activity ??= new Map();
+  const initial = [
+    entry(3 * HOUR, null, 'auto_deploy.dropped', {
+      commit_sha: 'feedface1234567890feedface1234567890feed',
+      branch: 'main',
+      pusher: 'octo',
+      workflow: '',
+      reason: 'disk_full',
+    }),
+    ...stagingActivity(),
+  ];
+  for (const item of [...initial].reverse()) item.id = nextId++;
+  state.activity.set('blog-staging', initial);
+}
+
 /** Starts blog-staging's activity as an app waiting for a workflow. */
 export function useWorkflowGatedActivity(state) {
   state.activity ??= new Map();
