@@ -174,6 +174,12 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, &compose.PolicyError{Violations: policy.Violations}
 	}
 	log.Printf("Services: %v", project.ServiceNames())
+	// Recorded before pulling, like the built images, so that a failed
+	// deploy does not leave its pulled images behind.
+	meta.PulledImages = project.PulledImages()
+	if err := e.writeMeta(app.Slug, d.ID, meta); err != nil {
+		return false, fmt.Errorf("write release metadata: %w", err)
+	}
 
 	// 5. Build and pull.
 	if project.NeedsBuild() {
