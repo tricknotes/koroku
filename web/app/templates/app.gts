@@ -21,6 +21,7 @@ import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
 import { errorMessage } from 'koroku-console/utils/errors';
 import { hostOf } from 'koroku-console/utils/format';
+import { hasReviewTab } from 'koroku-console/utils/review';
 import { can } from 'koroku-console/utils/roles';
 import {
   APP_STATE_HINTS,
@@ -193,6 +194,17 @@ export default class AppTemplate extends Component<Signature> {
                     @name="external"
                   /></a>
               {{/if}}
+              {{#if @model.app.review}}
+                <span class="app-header-parent" data-test-app-parent>
+                  <span class="app-header-parent-label">親</span>
+                  <LinkTo
+                    @route="app.review-apps"
+                    @model={{@model.app.review.parent}}
+                    data-test-app-parent-link
+                  >{{@model.app.review.parent}}</LinkTo>
+                  <span class="app-header-parent-pr">PR #{{@model.app.review.pr_number}}</span>
+                </span>
+              {{/if}}
             </div>
           </div>
           {{#if this.canDeploy}}
@@ -221,6 +233,13 @@ export default class AppTemplate extends Component<Signature> {
             @model={{@model.slug}}
             data-test-tab="deploy"
           >デプロイ</tabs.Tab>
+          {{#if (hasReviewTab @model.app)}}
+            <tabs.Tab
+              @route="app.review-apps"
+              @model={{@model.slug}}
+              data-test-tab="review-apps"
+            >レビューアプリ</tabs.Tab>
+          {{/if}}
           <tabs.Tab
             @route="app.logs"
             @model={{@model.slug}}

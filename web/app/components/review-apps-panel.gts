@@ -17,7 +17,11 @@ import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import { hostOf } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
-import { PR_STATE_LABELS, PR_STATE_TONES } from 'koroku-console/utils/review';
+import {
+  copyState,
+  PR_STATE_LABELS,
+  PR_STATE_TONES,
+} from 'koroku-console/utils/review';
 import { can } from 'koroku-console/utils/roles';
 import {
   APP_STATE_KINDS,
@@ -28,6 +32,7 @@ import type {
   App,
   CreatedReviewApp,
   PullRequestState,
+  ReviewInfo,
 } from 'koroku-console/utils/types';
 
 /** Review apps deploy and change state while the parent's page is open. */
@@ -49,12 +54,31 @@ function prTone(state: PullRequestState) {
   return PR_STATE_TONES[state];
 }
 
-interface Signature {
-  Element: HTMLElement;
-  Args: { parent: App };
+function copyKind(review: ReviewInfo) {
+  return copyState(review).kind;
 }
 
-/** The review apps of a staging app (ARCHITECTURE 9.9). */
+function copyLabel(review: ReviewInfo): string {
+  return copyState(review).label;
+}
+
+function copyHint(review: ReviewInfo): string {
+  return copyState(review).hint;
+}
+
+interface Signature {
+  Element: HTMLElement;
+  Args: {
+    parent: App;
+    /** Called after a review app was created, to re-read the parent. */
+    onCreated?: () => unknown;
+  };
+}
+
+/**
+ * The review apps of a staging app and the way to create one (ARCHITECTURE
+ * 9.9), on the parent's review apps tab.
+ */
 export default class ReviewAppsPanel extends Component<Signature> {
   @service declare api: ApiService;
   @service declare poller: PollerService;
@@ -78,6 +102,15 @@ export default class ReviewAppsPanel extends Component<Signature> {
     return can(this.args.parent, 'manage');
   }
 
+  /** Only where the owner allowed them; the ones there stay either way. */
+  get allowed(): boolean {
+    return this.args.parent.review_apps_allowed === true;
+  }
+
+  get notAllowed(): boolean {
+    return !this.allowed;
+  }
+
   open = () => {
     this.creating = true;
   };
@@ -92,7 +125,10 @@ export default class ReviewAppsPanel extends Component<Signature> {
   onCreated = async (app: CreatedReviewApp) => {
     this.creating = false;
     this.created = app;
-    await this.reviewApps.load({ quiet: true });
+    await Promise.all([
+      this.reviewApps.load({ quiet: true }),
+      this.args.onCreated?.(),
+    ]);
   };
 
   dismiss = () => {
@@ -105,6 +141,8 @@ export default class ReviewAppsPanel extends Component<Signature> {
         {{#if this.canCreate}}
           <Button
             @size="small"
+            disabled={{this.notAllowed}}
+            title={{if this.notAllowed "オーナーが許可すると作れます"}}
             data-test-review-create
             {{on "click" this.open}}
           >レビューアプリを作成</Button>
@@ -161,6 +199,12 @@ export default class ReviewAppsPanel extends Component<Signature> {
           <:default as |apps|>
             {{#if apps.length}}
               <RowList class="review-rows" @label="レビューアプリ">
+                <:header>
+                  <span>pull request</span>
+                  <span>状態</span>
+                  <span>データ</span>
+                  <span></span>
+                </:header>
                 <:rows as |Row|>
                   {{#each apps key="slug" as |app|}}
                     <Row data-test-review-app={{app.slug}}>
@@ -186,10 +230,23 @@ export default class ReviewAppsPanel extends Component<Signature> {
                         </span>
                       </div>
                       <div class="review-cell-state">
+                        <span class="cell-label">状態</span>
                         <StatusIndicator
                           @kind={{stateKind app}}
                           @label={{stateLabel app}}
+                          data-test-review-state
                         />
+                      </div>
+                      <div class="review-cell-copy">
+                        <span class="cell-label">データ</span>
+                        {{#if app.review}}
+                          <StatusIndicator
+                            @kind={{copyKind app.review}}
+                            @label={{copyLabel app.review}}
+                            title={{copyHint app.review}}
+                            data-test-review-row-copy
+                          />
+                        {{/if}}
                       </div>
                       <div class="review-cell-open">
                         <a
@@ -209,7 +266,11 @@ export default class ReviewAppsPanel extends Component<Signature> {
                 class="box overview-panel overview-quiet"
                 data-test-review-empty
               >
-                レビューアプリはまだありません。
+                {{#if this.allowed}}
+                  レビューアプリはまだありません。
+                {{else}}
+                  レビューアプリはありません。
+                {{/if}}
               </p>
             {{/if}}
           </:default>

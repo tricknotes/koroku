@@ -45,6 +45,11 @@ export const SCREENS: Screen[] = [
   { name: 'create app', url: '/apps/new' },
   { name: 'overview', url: '/apps/blog', tab: 'index' },
   { name: 'deploy', url: '/apps/blog/deploy', tab: 'deploy' },
+  {
+    name: 'review apps',
+    url: '/apps/blog/review-apps',
+    tab: 'review-apps',
+  },
   { name: 'logs', url: '/apps/blog/logs', tab: 'logs' },
   { name: 'log search', url: '/apps/blog/logs?period=1h', tab: 'logs' },
   { name: 'log archives', url: '/apps/blog/logs?period=archive', tab: 'logs' },
