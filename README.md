@@ -107,6 +107,10 @@ CI がビルドして private なレジストリに置いたイメージ（`ghcr
 
 イメージを GitHub Actions でビルドして `image:` で pull するアプリは、「先に待つワークフロー」にそのワークフローのファイル（`.github/workflows/image.yml` など）を入れます。push ではなく、そのワークフローがブランチの最新のコミットで成功したときにデプロイするので、イメージができる前に pull して失敗することがありません。GitHub App に Actions の Read-only と Workflow run のイベントが要ります（[SETUP 4.6](docs/SETUP.md)）。
 
+### pull request ごとのレビューアプリ
+
+staging のアプリの概要タブの「レビューアプリを作成」で、そのリポジトリの開いている pull request を 1 つ選ぶと、その pull request のブランチを動かす別のアプリ（`<staging の slug>-pr-<番号>`）ができます。設定と環境変数は staging の写しで、作るときに選べば、最初のデプロイのあとで staging の DB をコピーし（コピー後のコマンドも実行し）ます。pull request に push すると自動でデプロイし直し、GitHub の pull request の画面にも URL が出ます。数の上限や期限はなく、pull request が閉じても自動では消えないので、不要になったら設定タブから削除します（volume も消えます）。アプリには `KOROKU_APP_URL`、`KOROKU_APP_HOST`、`KOROKU_PR_NUMBER` が渡ります。GitHub App に Pull requests の Read-only が要り、DNS はワイルドカードのレコードがあればそのまま開けます（[SETUP 4.7](docs/SETUP.md)）。
+
 ### staging と本番
 
 同じリポジトリを、複数のアプリに紐づけられます。`myapp-staging` と `myapp` のように別のアプリとして作り、設定で本番にしたアプリでは、デプロイと削除の前に確認が入ります。環境変数と volume はアプリごとに独立しています。

@@ -266,6 +266,17 @@ sudo koroku run blog db psql -U postgres app < dump.sql   # 端末でない入�
 - 実行は実行履歴に「定期」として残る。見送った予定（アプリが停止中、前の回が実行中、デプロイなどが 10 分以上続いた、実行の前の検査に通らない）は、タスクの行に直近の 1 件が出る。`journalctl -u koroku` には `scheduled task started` / `scheduled task skipped` が毎回出る。
 - 実行の途中で `koroku` が再起動すると、その実行は `interrupted` で失敗になる。休止中のアプリなら、起動時に依存先を止め直す。
 
+### 10.4 レビューアプリ
+
+staging アプリの pull request ごとのレビューアプリ（ARCHITECTURE 9.9、作る手順は README）は、アプリが増える機能なので、ホストの資源を見ながら使う。
+
+- 数の上限も期限もない。pull request が閉じても消えないので、アプリ一覧（親の下に字下げして並ぶ）や親の概要タブで「マージ済み」「クローズ」のものを見つけて、設定タブから削除する。削除すると volume も消える。
+- 既定でアクセスがない間は休止するので、開いていないレビューアプリはメモリを使わない。ディスク（イメージとリリース、volume）は消すまで残る。
+- レビューアプリは日次のバックアップに入らない。レビューアプリが残っている親アプリは削除できない。
+- ホスト全損から戻すとき（11 章）、レビューアプリは作り直すほうが早い（再デプロイすれば動き、データは親からコピーし直せる）。
+- 作成のあとでホスト名が解決されないと画面が出したら、DNS にワイルドカードのレコードがないので、そのホスト名を登録する。
+- `journalctl -u koroku` には、データのコピーを始めたとき `copying the parent's data into the review app`、始められなかったとき `the parent's data is not copied into the review app` が出る。
+
 ## 11. ホスト全損からの復旧
 
 ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で控えたもの（restic のパスワード、オブジェクトストレージの接続情報）と、`koroku` のバイナリ。
@@ -371,6 +382,8 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 ## 未検証（実機で確認が必要）
 
 最初の VPS で、上から順に確かめる。
+
+- [ ] **レビューアプリ**: 実際の GitHub App で pull request の一覧が読めること（Pull requests の権限の承認の前後）、作ったレビューアプリの GitHub Deployments が pull request の画面に URL 付きで出ること、head のブランチへの push で自動デプロイされること、親からのデータのコピーが最初のデプロイのあとに始まること。ユニットテストと API のテストは偽の GitHub と偽のコピーで確かめている。
 
 - [ ] **スクリプトの通し実行**: 事業者の Ubuntu 24.04 と 26.04 のイメージで最後まで通るか（26.04 は、対応に加える前に `--force` を付けて最後まで通ることを確かめた。2026-11-21）。特に、初回起動直後の `unattended-upgrades` と apt のロックが競合したときの待ち合わせ、`full-upgrade` 中に対話プロンプトで止まらないこと。
 - [ ] **カーネル更新**: `REBOOT REQUIRED` が表示されるか。再起動後に Docker、Caddy、`koroku`、アプリのコンテナ、swap が自動で戻るか。
