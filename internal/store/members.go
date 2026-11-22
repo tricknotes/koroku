@@ -183,8 +183,13 @@ func (s *Store) CountMembers(ctx context.Context) (int, error) {
 // RolesOf returns the roles of a user, keyed by app ID. It is empty for
 // users who are not members.
 func (s *Store) RolesOf(ctx context.Context, userID int64) (map[int64]string, error) {
+	// A review app has no roles of its own: its parent's apply
+	// (ARCHITECTURE 9.9).
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT app_id, role FROM app_roles WHERE github_user_id = ?`, userID)
+		`SELECT a.id, r.role FROM apps a
+		 LEFT JOIN review_apps ra ON ra.app_id = a.id
+		 JOIN app_roles r ON r.app_id = COALESCE(ra.parent_app_id, a.id)
+		 WHERE r.github_user_id = ?`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list roles: %w", err)
 	}
@@ -207,10 +212,13 @@ func (s *Store) RolesOf(ctx context.Context, userID int64) (map[int64]string, er
 }
 
 // AppRole returns the role of a user on an app, or "" when it has none.
+// On a review app it is the role on the parent (ARCHITECTURE 9.9).
 func (s *Store) AppRole(ctx context.Context, appID, userID int64) (string, error) {
 	var role string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT role FROM app_roles WHERE app_id = ? AND github_user_id = ?`, appID, userID).Scan(&role)
+		`SELECT r.role FROM app_roles r
+		 WHERE r.github_user_id = ? AND r.app_id = COALESCE(
+		   (SELECT parent_app_id FROM review_apps WHERE app_id = ?), ?)`, userID, appID, appID).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -245,6 +253,11 @@ func (s *Store) SetAppRole(ctx context.Context, appID, userID int64, role string
 	}
 	if exists == 0 {
 		return ErrNotFound
+	}
+	if review, err := isReviewApp(ctx, s.db, appID); err != nil {
+		return fmt.Errorf("set role: %w", err)
+	} else if review && role != "" {
+		return ErrRoleFollowsParent
 	}
 	var err error
 	if role == "" {

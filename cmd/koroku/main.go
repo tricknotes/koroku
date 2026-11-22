@@ -243,6 +243,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		Fetcher:          fetcher,
 		Logger:           logger,
 		AppsDir:          cfg.AppsDir(),
+		BaseDomain:       cfg.BaseDomain,
 		DefaultMemory:    cfg.Deploy.DefaultMemoryLimit,
 		DiskLimitPercent: cfg.Deploy.DiskUsageLimitPercent,
 		PruneImages:      cfg.Deploy.PruneImages,

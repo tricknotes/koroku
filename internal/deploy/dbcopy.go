@@ -85,6 +85,10 @@ type CopyRequest struct {
 	Target store.App
 	// Kind is store.CopySourceLive or store.CopySourceSnapshot.
 	Kind string
+	// SkipBackup leaves out the backup of the target: the first copy into
+	// a review app that was just created has nothing to keep
+	// (ARCHITECTURE 9.9).
+	SkipBackup bool
 }
 
 // CopyLogPath is the log of one database copy.
@@ -297,6 +301,8 @@ func (j *copyJob) run(ctx context.Context) (bytes int64, err error) {
 
 	j.log.Step(StepBackup, "Backing up the data of %s", dst.Slug)
 	switch {
+	case j.req.SkipBackup:
+		j.log.Printf("%s was just created; there is no data to back up first.", dst.Slug)
 	case e.opts.CopyBackups == nil:
 		j.log.Printf("Backups are not configured; the current data of %s is not backed up first.", dst.Slug)
 	case dst.DumpHookService == "" || dst.DumpHookCommand == "":
