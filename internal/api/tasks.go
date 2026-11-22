@@ -44,12 +44,19 @@ type taskJSON struct {
 	LastSkipDetail string     `json:"last_skip_detail"`
 }
 
-// taskInputJSON is what PUT accepts for one task.
+// taskInputJSON is what PUT accepts for one task. The read-only fields
+// of taskJSON are accepted and ignored, so that a listed task can be sent
+// back as it is.
 type taskInputJSON struct {
 	Name     string `json:"name"`
 	Service  string `json:"service"`
 	Command  string `json:"command"`
 	Schedule string `json:"schedule"`
+
+	NextRunAt      any `json:"next_run_at"`
+	LastSkippedAt  any `json:"last_skipped_at"`
+	LastSkipReason any `json:"last_skip_reason"`
+	LastSkipDetail any `json:"last_skip_detail"`
 }
 
 type taskRunJSON struct {
