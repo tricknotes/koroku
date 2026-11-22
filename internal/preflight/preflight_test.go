@@ -132,7 +132,7 @@ func healthy(t *testing.T) Deps {
 		HTTP: client,
 		GitHub: fakeApp{
 			app: github.App{ID: 42, Slug: "koroku-test", ClientID: "Iv1.abc", HTMLURL: "https://github.com/apps/koroku-test",
-				Permissions: map[string]string{"contents": "read", "metadata": "read", "deployments": "write", "actions": "read"},
+				Permissions: map[string]string{"contents": "read", "metadata": "read", "deployments": "write", "actions": "read", "pull_requests": "read"},
 				Events:      []string{"push", "workflow_run"}},
 			hook:     github.WebhookConfig{URL: "https://console.apps.test/webhooks/github", ContentType: "json"},
 			installs: []github.Installation{{ID: 1, Account: "octocat", RepositorySelection: "all", Allowed: true}},
@@ -267,6 +267,14 @@ func TestProblems(t *testing.T) {
 				d.GitHub = a
 			},
 			check: "github.app", want: Warn, text: "GitHub deployments will not be updated",
+		},
+		"no pull requests permission": {
+			change: func(d *Deps) {
+				a := d.GitHub.(fakeApp)
+				a.app.Permissions = map[string]string{"contents": "read", "metadata": "read", "deployments": "write"}
+				d.GitHub = a
+			},
+			check: "github.app", want: Warn, text: "review apps cannot be created",
 		},
 		"read-only deployments permission": {
 			change: func(d *Deps) {

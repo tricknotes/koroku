@@ -221,7 +221,10 @@ func (s *Server) handlePutMemberRole(w http.ResponseWriter, r *http.Request) {
 	if roleLevel(body.Role) > roleLevel(current) && !s.requireRecentAuth(w, r) {
 		return
 	}
-	if err := s.store.SetAppRole(r.Context(), app.ID, id, body.Role); err != nil {
+	if err := s.store.SetAppRole(r.Context(), app.ID, id, body.Role); errors.Is(err, store.ErrRoleFollowsParent) {
+		writeError(w, http.StatusUnprocessableEntity, "role_follows_parent", "the roles of a review app are those of its parent app")
+		return
+	} else if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
