@@ -402,7 +402,7 @@ func TestDeploySucceeds(t *testing.T) {
 		"-f", filepath.Join(release, "compose.yaml"),
 		"-f", filepath.Join(release, compose.OverrideFileName),
 		"--env-file", h.engine.EnvFile("blog"),
-		"up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "300"}
+		"up", "-d", "--pull", "missing", "--remove-orphans", "--wait", "--wait-timeout", "300"}
 	if !slices.Equal(up.Args, wantUp) {
 		t.Errorf("up args = %v\nwant      %v", up.Args, wantUp)
 	}

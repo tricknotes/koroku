@@ -8,7 +8,7 @@ koroku の設計（`docs/ARCHITECTURE.md` の 6〜8 章と 10 章）から、デ
 2. 画面で設定した環境変数を env ファイルに書き、override を生成する。
 3. `docker compose -p koroku-<slug> -f <Compose ファイル> -f koroku.override.yaml --env-file <env ファイル> config` で正規化し、ポリシー検査をかける。
 4. `build:` を持つサービスはホスト（x86_64）でビルドし、`image:` だけのサービスは pull する。
-5. `up -d --remove-orphans --wait --wait-timeout 300` で起動する。
+5. `up -d --pull missing --remove-orphans --wait --wait-timeout 300` で起動する。
 6. `http://127.0.0.1:<割当ポート><ヘルスチェックパス>` が 5xx 以外を返すまで最大 60 秒待つ。
 7. 手順 5 以降で失敗したら、直前に成功したリリースへ自動で戻す（DB のマイグレーションは戻さない）。
 
@@ -60,7 +60,7 @@ services:
 - サービスが自分で `env_file: .env` と書いていれば、その中身はコンテナに入る（koroku の値が後ろに付くので、同じ名前なら koroku が勝つ）。ただしコミット済みの `.env` に秘密を書いてはいけない。
 - Compose の `environment:` に直書きした値は `env_file` より強い。`RAILS_ENV: development` のように書いてあると koroku の画面で変えられないので、`RAILS_ENV: ${RAILS_ENV:-production}` のように補間にする。
 - 補間をコンテナ側に遅らせたいときは `$$VAR` と書く。
-- デプロイしたコミットは、koroku が足す `KOROKU_COMMIT_SHA`（40 桁）と `KOROKU_COMMIT_SHORT`（先頭 7 桁）で分かる。補間にも使えるので、CI がコミットごとにビルドしたイメージを `image: ghcr.io/<owner>/<name>:sha-${KOROKU_COMMIT_SHORT}` のように指せる（ホストでビルドせずに pull だけで済む）。`.git` は消えるので、ビルドや起動で `git rev-parse` などに頼らない。`KOROKU_` で始まる名前は予約されていて、画面からは設定できない。
+- デプロイしたコミットは、koroku が足す `KOROKU_COMMIT_SHA`（40 桁）と `KOROKU_COMMIT_SHORT`（先頭 7 桁）で分かる。補間にも使えるので、CI がコミットごとにビルドしたイメージを `image: ghcr.io/<owner>/<name>:sha-${KOROKU_COMMIT_SHORT}` のように指せる（ホストでビルドせずに pull だけで済む）。CI のイメージを指すサービスに `pull_policy: always` は要らない（koroku は `image:` だけのサービスをデプロイのたびに pull する）。書いてあっても、起動・ロールバックの `up` は `--pull missing` で呼ばれ、ホストにあるイメージをそのまま使う（レジストリに届かなくても前の版に戻せるようにするため）。`.git` は消えるので、ビルドや起動で `git rev-parse` などに頼らない。`KOROKU_` で始まる名前は予約されていて、画面からは設定できない。
 - アプリの URL は、koroku が足す `KOROKU_APP_URL`（例 `https://blog-staging.dev.example.com`。プライマリの独自ドメインがあればその URL）と `KOROKU_APP_HOST`（そのホスト名）で分かる。値はデプロイした時点のもの。ホスト名をリポジトリや環境変数に直書きせず、これから組み立てる（Rails の `config.hosts << ENV["KOROKU_APP_HOST"]`、メールの中のリンクの `default_url_options`、`BASE_URL` の既定値など）。レビューアプリ（下記）はホスト名が作るまで決まらないので、直書きしていると開けない（Rails の `config.hosts` で弾かれる）。
 
 ### 必要な変数の宣言（koroku が照合する）

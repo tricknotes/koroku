@@ -195,10 +195,7 @@ func (e *Engine) upCurrent(ctx context.Context, app store.App, services ...strin
 	if inv.DockerConfig, err = e.registryConfig(ctx, app, secrets.NewMasker()); err != nil {
 		return err
 	}
-	if len(services) > 0 {
-		return e.runCompose(ctx, inv, dir, append([]string{"up", "-d", "--no-deps", "--wait", "--wait-timeout", e.waitSeconds()}, services...)...)
-	}
-	return e.runCompose(ctx, inv, dir, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", e.waitSeconds())
+	return e.runCompose(ctx, inv, dir, e.upArgs(services...)...)
 }
 
 // waitSeconds is WaitTimeout as the --wait-timeout of docker compose.
