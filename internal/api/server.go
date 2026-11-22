@@ -70,6 +70,11 @@ type Options struct {
 	RouteStatus func() RouteStatus
 	// Users resolves GitHub logins when the owner adds a member. Optional.
 	Users UserLookup
+	// Waker wakes sleeping apps (ARCHITECTURE 8.4). Optional.
+	Waker AppWaker
+	// WakeHold is how long a request for a sleeping app waits for it.
+	// Default DefaultWakeHold.
+	WakeHold time.Duration
 }
 
 // Server routes HTTP requests.
@@ -101,6 +106,8 @@ type Server struct {
 	volumes        AppVolumes
 	copier         DBCopier
 	users          UserLookup
+	waker          AppWaker
+	wakeHold       time.Duration
 	envReqs        *envreq.Reader
 	// envPresets reads repositories for the create screen (ARCHITECTURE 9.8).
 	envPresets *envpresets.Reader
@@ -124,6 +131,10 @@ func New(opts Options) *Server {
 	clk := opts.Clock
 	if clk == nil {
 		clk = clock.System{}
+	}
+	wakeHold := opts.WakeHold
+	if wakeHold <= 0 {
+		wakeHold = DefaultWakeHold
 	}
 	var files envreq.Files
 	var presetFiles envpresets.Files
@@ -156,6 +167,8 @@ func New(opts Options) *Server {
 		volumes:     opts.Volumes,
 		copier:      opts.Copier,
 		users:       opts.Users,
+		waker:       opts.Waker,
+		wakeHold:    wakeHold,
 
 		routeStatus: opts.RouteStatus,
 
@@ -173,7 +186,7 @@ func New(opts Options) *Server {
 
 // Handler returns the root HTTP handler.
 func (s *Server) Handler() http.Handler {
-	return s.recoverPanics(s.logRequests(s.securityHeaders(s.hostDispatch(s.guard(s.routes()), s.gateMux()))))
+	return s.recoverPanics(s.logRequests(s.wakeDispatch(s.securityHeaders(s.hostDispatch(s.guard(s.routes()), s.gateMux())))))
 }
 
 // routes registers every endpoint. The guard asks the same mux which route
@@ -251,6 +264,8 @@ func (s *Server) apiRoutes() []route {
 		{"POST /api/apps/{slug}/start", onApp(levelDeploy), s.handleAppOperation(AppOperator.Start)},
 		{"POST /api/apps/{slug}/stop", onApp(levelDeploy), s.handleAppOperation(AppOperator.Stop)},
 		{"POST /api/apps/{slug}/restart", onApp(levelDeploy), s.handleAppOperation(AppOperator.Restart)},
+		// Waking a sleeping app is part of starting it (ARCHITECTURE 8.4).
+		{"POST /api/apps/{slug}/wake", onApp(levelDeploy), s.handleWakeApp},
 		{"GET /api/apps/{slug}/services", onApp(levelView), s.handleListServices},
 		{"GET /api/apps/{slug}/memory", onApp(levelView), s.handleMemoryHistory},
 		{"GET /api/apps/{slug}/activity", onApp(levelView), s.handleListActivity},

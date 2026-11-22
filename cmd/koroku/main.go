@@ -24,6 +24,7 @@ import (
 	"github.com/tricknotes/koroku/internal/deploy"
 	"github.com/tricknotes/koroku/internal/domains"
 	"github.com/tricknotes/koroku/internal/github"
+	"github.com/tricknotes/koroku/internal/idle"
 	"github.com/tricknotes/koroku/internal/gitrepo"
 	"github.com/tricknotes/koroku/internal/logs"
 	"github.com/tricknotes/koroku/internal/objstore"
@@ -270,6 +271,15 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	if cfg.Caddy.Enabled {
 		accessLogDir = cfg.Caddy.AccessLogDir
 	}
+	// Requests to the apps, counted from their access logs, put idle apps
+	// to sleep (ARCHITECTURE 8.4). The engine joins it below.
+	tracker := &idle.Tracker{
+		Store:        st,
+		Clock:        clk,
+		Logger:       logger,
+		AccessLogDir: accessLogDir,
+		ConsoleURL:   cfg.ConsoleURL,
+	}
 	collector, err := logs.New(logs.Options{
 		Dir:           cfg.Logs.Dir,
 		Runner:        run,
@@ -279,6 +289,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		ComposePlugin: logs.FindComposePlugin,
 		Logger:        logger,
 		RetentionDays: cfg.Logs.RetentionDays,
+		OnAccess:      tracker.Observe,
 	})
 	if err != nil {
 		return err
@@ -403,6 +414,17 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	apiOpts.Ops = engine
 	apiOpts.Copier = engine
 	apiOpts.Tasks = engine
+	apiOpts.Waker = engine
+	tracker.Sleeper = engine
+	if backups != nil {
+		tracker.Busy = backups.Running
+	}
+	if accessLogDir != "" {
+		go tracker.Run(ctx, idle.DefaultInterval)
+	} else {
+		// Requests cannot be counted; the API refuses the setting.
+		logger.Info("apps do not sleep while idle: Caddy writes no per-app access logs")
+	}
 	go engine.RunMaintenance(ctx)
 	// Memory use history for the limit guidance (ARCHITECTURE 9.5).
 	go engine.NewMemorySampler().Run(ctx)

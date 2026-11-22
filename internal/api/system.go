@@ -46,6 +46,21 @@ type systemResponse struct {
 	// Webhook is where the GitHub App delivers pushes for automatic
 	// deployment (ARCHITECTURE 5.2).
 	Webhook webhookStatusJSON `json:"webhook"`
+	// IdleSleep says whether apps can sleep while idle on this host
+	// (ARCHITECTURE 8.4).
+	IdleSleep idleSleepStatusJSON `json:"idle_sleep"`
+}
+
+type idleSleepStatusJSON struct {
+	// Available is false without per-app access logs: requests cannot
+	// be counted then.
+	Available bool `json:"available"`
+}
+
+// idleSleepAvailable reports whether requests to the apps can be counted:
+// Caddy routes them and writes a per-app access log (ARCHITECTURE 8.4).
+func (s *Server) idleSleepAvailable() bool {
+	return s.cfg.Caddy.Enabled && s.cfg.Caddy.AccessLogDir != ""
 }
 
 type webhookStatusJSON struct {
@@ -66,6 +81,7 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 			URL:              s.cfg.ConsoleURL + WebhookPath,
 			SecretConfigured: s.cfg.GitHub.WebhookSecret != "",
 		},
+		IdleSleep: idleSleepStatusJSON{Available: s.idleSleepAvailable()},
 	}
 	if s.logs != nil {
 		resp.LogArchive = s.logs.ArchiveStatus()

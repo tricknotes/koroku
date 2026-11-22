@@ -68,13 +68,18 @@ type appJSON struct {
 	AutoDeploy           bool              `json:"auto_deploy"`
 	AutoDeployBranch     string            `json:"auto_deploy_branch"`
 	AutoDeployWorkflow   string            `json:"auto_deploy_workflow"`
-	URL                  string            `json:"url"`
-	PrimaryURL           string            `json:"primary_url"`
-	PendingDomains       int               `json:"pending_domains"`
-	CurrentDeployment    *deploymentJSON   `json:"current_deployment"`
-	LatestDeployment     *deploymentJSON   `json:"latest_deployment"`
-	CreatedAt            time.Time         `json:"created_at"`
-	UpdatedAt            time.Time         `json:"updated_at"`
+	IdleSleep            bool              `json:"idle_sleep"`
+	IdleSleepMinutes     int               `json:"idle_sleep_minutes"`
+	// SleepingSince is when the app went to sleep while idle; null while
+	// it is awake (ARCHITECTURE 8.4).
+	SleepingSince     *time.Time      `json:"sleeping_since"`
+	URL               string          `json:"url"`
+	PrimaryURL        string          `json:"primary_url"`
+	PendingDomains    int             `json:"pending_domains"`
+	CurrentDeployment *deploymentJSON `json:"current_deployment"`
+	LatestDeployment  *deploymentJSON `json:"latest_deployment"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
 	// Role is what the requesting user may do on the app: "owner" for the
 	// owner, otherwise the member's role (ARCHITECTURE 10.7).
 	Role string `json:"role"`
@@ -111,6 +116,9 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		AutoDeploy:           app.AutoDeploy,
 		AutoDeployBranch:     app.AutoDeployBranch,
 		AutoDeployWorkflow:   app.AutoDeployWorkflow,
+		IdleSleep:            app.IdleSleep,
+		IdleSleepMinutes:     app.IdleSleepMinutes,
+		SleepingSince:        app.SleepingSince,
 		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
 		CreatedAt:            app.CreatedAt,
 		UpdatedAt:            app.UpdatedAt,
@@ -193,6 +201,8 @@ type appInput struct {
 	AutoDeploy           *bool              `json:"auto_deploy"`
 	AutoDeployBranch     *string            `json:"auto_deploy_branch"`
 	AutoDeployWorkflow   *string            `json:"auto_deploy_workflow"`
+	IdleSleep            *bool              `json:"idle_sleep"`
+	IdleSleepMinutes     *int               `json:"idle_sleep_minutes"`
 }
 
 // fieldErrors collects validation problems keyed by JSON field name.
@@ -303,6 +313,16 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	}
 	if in.AutoDeployWorkflow != nil {
 		app.AutoDeployWorkflow = strings.TrimSpace(*in.AutoDeployWorkflow)
+	}
+
+	if in.IdleSleep != nil {
+		app.IdleSleep = *in.IdleSleep
+	}
+	if in.IdleSleepMinutes != nil {
+		app.IdleSleepMinutes = *in.IdleSleepMinutes
+	}
+	if m := app.IdleSleepMinutes; m < store.MinIdleSleepMinutes || m > store.MaxIdleSleepMinutes {
+		errs.add("idle_sleep_minutes", fmt.Sprintf("must be between %d and %d", store.MinIdleSleepMinutes, store.MaxIdleSleepMinutes))
 	}
 
 	if app.RepoFullName == "" && app.RepoURL == "" {
@@ -524,11 +544,12 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	in := body.appInput
 	app := store.App{
-		DefaultBranch:   "main",
-		WebService:      "web",
-		HealthcheckPath: "/",
-		Environment:     store.EnvironmentStaging,
-		EnvSource:       envreq.SourceCompose,
+		DefaultBranch:    "main",
+		WebService:       "web",
+		HealthcheckPath:  "/",
+		Environment:      store.EnvironmentStaging,
+		EnvSource:        envreq.SourceCompose,
+		IdleSleepMinutes: store.DefaultIdleSleepMinutes,
 	}
 	errs := in.apply(&app, s.cfg.Deploy.AllowFileRepos)
 	if in.AccessProtection == nil {
@@ -550,6 +571,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	s.checkIdleSleep(store.App{}, app, errs)
 	sealEnv := s.sealCreateEnv(body.Env, errs)
 	if len(errs) > 0 {
 		writeValidationError(w, errs)
@@ -584,6 +606,14 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, j)
+}
+
+// checkIdleSleep refuses turning idle sleep on where requests cannot be
+// counted (ARCHITECTURE 8.4). An app that has it on keeps it.
+func (s *Server) checkIdleSleep(before, after store.App, errs fieldErrors) {
+	if after.IdleSleep && !before.IdleSleep && !s.idleSleepAvailable() {
+		errs.add("idle_sleep", "needs the per-app access logs of Caddy ([caddy] enabled and access_log_dir)")
+	}
 }
 
 func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
@@ -635,6 +665,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	s.checkIdleSleep(before, app, errs)
 	if len(errs) > 0 {
 		writeValidationError(w, errs)
 		return
