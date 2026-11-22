@@ -28,6 +28,7 @@ import (
 	"github.com/tricknotes/koroku/internal/idle"
 	"github.com/tricknotes/koroku/internal/logs"
 	"github.com/tricknotes/koroku/internal/objstore"
+	"github.com/tricknotes/koroku/internal/review"
 	"github.com/tricknotes/koroku/internal/routing"
 	"github.com/tricknotes/koroku/internal/runner"
 	"github.com/tricknotes/koroku/internal/secrets"
@@ -347,6 +348,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		gitRefs.Tokens = tokens
 		apiOpts.Refs = deploy.GitHubRefResolver{Client: gh, Fallback: gitRefs}
 		apiOpts.Auth.GitHub = gh
+		apiOpts.Pulls = gh
 		// Mirror deployments into the repositories' GitHub deployments
 		// (ARCHITECTURE 5.1). Best effort, off the deploy path.
 		ghDeployments := deploy.NewGitHubDeployments(deploy.GitHubDeploymentsOptions{
@@ -416,6 +418,15 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	apiOpts.Copier = engine
 	apiOpts.Tasks = engine
 	apiOpts.Waker = engine
+	// Review apps: the parent's data is copied after the first deployment
+	// and the pull requests are read again (ARCHITECTURE 9.9).
+	reviewWatcher := review.New(review.Watcher{Store: st, Copier: engine, Clock: clk, Logger: logger})
+	if gh != nil {
+		reviewWatcher.Pulls = gh
+	}
+	apiOpts.ReviewWatcher = reviewWatcher
+	apiOpts.HostVerifier = checker.Verifier
+	go reviewWatcher.Run(ctx)
 	tracker.Sleeper = engine
 	if backups != nil {
 		tracker.Busy = backups.Running

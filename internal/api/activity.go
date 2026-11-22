@@ -22,8 +22,11 @@ const (
 	actAppCreated      = "app.created"          // {"environment"}
 	actSettingsChanged = "app.settings_changed" // {"changes": [{"field", "from", "to"} | {"field", "secret": true}]}
 	actAppStarted      = "app.started"
-	actAppStopped      = "app.stopped"
-	actAppRestarted    = "app.restarted"
+	// On the parent of a review app (ARCHITECTURE 9.9): {"slug", "pr_number"}.
+	actReviewAppCreated = "review_app.created"
+	actReviewAppDeleted = "review_app.deleted"
+	actAppStopped       = "app.stopped"
+	actAppRestarted     = "app.restarted"
 	// actAppWoken: a sleeping app was woken from the console. Sleeps and
 	// wakes by requests are not recorded (ARCHITECTURE 8.4).
 	actAppWoken         = "app.woken"
