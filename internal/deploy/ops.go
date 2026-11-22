@@ -162,26 +162,7 @@ func (e *Engine) Start(ctx context.Context, app store.App) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, e.opts.WaitTimeout+time.Minute)
 	defer cancel()
-	if inv, dir, ok := e.currentInvocation(app); ok {
-		// The release files are reused: check them again first.
-		meta, metaErr := e.readMeta(app.Slug, *app.CurrentDeploymentID)
-		if metaErr != nil {
-			return metaErr
-		}
-		if err := e.revalidate(ctx, app, *app.CurrentDeploymentID, meta.ComposeFile); err != nil {
-			return fmt.Errorf("the release cannot be started as it is (deploy the app again): %w", err)
-		}
-		// A missing image is pulled with the app's own registry login.
-		if inv.DockerConfig, err = e.registryConfig(ctx, app, secrets.NewMasker()); err != nil {
-			return err
-		}
-		wait := strconv.Itoa(int(e.opts.WaitTimeout / time.Second))
-		err = e.runCompose(ctx, inv, dir, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", wait)
-	} else {
-		// The release files are gone; the stopped containers still exist.
-		err = e.runCompose(ctx, e.projectOnly(app), "", "start")
-	}
-	if err != nil {
+	if err := e.upCurrent(ctx, app); err != nil {
 		return err
 	}
 	if err := e.opts.Store.SetAppDesiredState(ctx, app.ID, store.DesiredRunning, e.opts.Clock.Now()); err != nil {
@@ -191,7 +172,34 @@ func (e *Engine) Start(ctx context.Context, app store.App) error {
 	return nil
 }
 
-// Restart restarts the app's containers. A stopped app is started.
+// upCurrent brings the app's current release up with its files, checked
+// again first, or starts the existing containers when the files are gone.
+func (e *Engine) upCurrent(ctx context.Context, app store.App) error {
+	inv, dir, ok := e.currentInvocation(app)
+	if !ok {
+		// The release files are gone; the stopped containers still exist.
+		return e.runCompose(ctx, e.projectOnly(app), "", "start")
+	}
+	// The release files are reused: check them again first.
+	meta, err := e.readMeta(app.Slug, *app.CurrentDeploymentID)
+	if err != nil {
+		return err
+	}
+	if err := e.revalidate(ctx, app, *app.CurrentDeploymentID, meta.ComposeFile); err != nil {
+		return fmt.Errorf("the release cannot be started as it is (deploy the app again): %w", err)
+	}
+	// A missing image is pulled with the app's own registry login.
+	if inv.DockerConfig, err = e.registryConfig(ctx, app, secrets.NewMasker()); err != nil {
+		return err
+	}
+	return e.runCompose(ctx, inv, dir, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", e.waitSeconds())
+}
+
+// waitSeconds is WaitTimeout as the --wait-timeout of docker compose.
+func (e *Engine) waitSeconds() string { return strconv.Itoa(int(e.opts.WaitTimeout / time.Second)) }
+
+// Restart restarts the app's containers. A stopped app is started, and a
+// sleeping one woken (ARCHITECTURE 8.4).
 func (e *Engine) Restart(ctx context.Context, app store.App) error {
 	if app.CurrentDeploymentID == nil {
 		return ErrNotDeployed
@@ -204,6 +212,16 @@ func (e *Engine) Restart(ctx context.Context, app store.App) error {
 		return err
 	}
 	defer release()
+	current, err := e.opts.Store.GetAppByID(ctx, app.ID)
+	if err != nil {
+		return err
+	}
+	if current.SleepingSince != nil {
+		ctx, cancel := context.WithTimeout(ctx, e.wakeTimeout())
+		defer cancel()
+		_, err := e.wakeLocked(ctx, app.ID, nil)
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
 	return e.runCompose(ctx, e.projectOnly(app), "", "restart")
