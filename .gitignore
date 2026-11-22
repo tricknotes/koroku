@@ -1,5 +1,7 @@
 # Build output
 /bin/koroku
+# `go build ./cmd/koroku` at the root writes here
+/koroku
 
 # Local configuration and data (never commit real config or keys)
 /config.toml
