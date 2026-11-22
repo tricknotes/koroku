@@ -51,6 +51,7 @@ import { deploymentLog } from './deploy-log.mjs';
 import { copyHistory, copyLog, newCopy, settleCopies } from './db-copy.mjs';
 import { LOG_SCENARIOS, registerLogRoutes } from './logs.mjs';
 import { memoryHistory } from './memory.mjs';
+import { composeView, containerView } from './compose.mjs';
 import {
   TASK_SCENARIOS,
   cancelTaskRun,
@@ -452,6 +453,20 @@ route('GET', '/api/apps/:slug/memory', (context) => {
   const collectingHours = context.scenario === 'fresh' ? 3 : undefined;
   return memoryHistory(appOf(context), range, { collectingHours });
 });
+
+route('GET', '/api/apps/:slug/compose', (context) => {
+  const [status, body] = composeView(
+    context.state,
+    appOf(context),
+    context.query.get('deployment'),
+    context.scenario,
+  );
+  if (status !== 200) throw new HttpError(status, body);
+  return body;
+});
+route('GET', '/api/apps/:slug/containers', (context) =>
+  containerView(context.state, appOf(context), context.scenario),
+);
 
 function savedEnv(context) {
   return context.state.env?.get(context.params.slug) ?? ENV_VARS;
