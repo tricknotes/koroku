@@ -164,6 +164,8 @@ koroku でデプロイするリポジトリには、いくつかの前提があ�
 
 デプロイが失敗したら「koroku のデプロイが失敗した理由を見て直して」と頼むか、`/koroku:deploy-status` を実行します。管理画面の「セキュリティ」で作った読み取り専用の API トークンを `KOROKU_URL` と `KOROKU_TOKEN` の環境変数に置いておくと、Skill がこのリポジトリからデプロイしたアプリを見つけ、デプロイログ・実行ログ・未設定の環境変数を読んでリポジトリを直します。トークンではデプロイや設定の変更、環境変数の値の表示はできません（[ARCHITECTURE 10.5](docs/ARCHITECTURE.md)）。中身は [plugins/koroku/skills/deploy-status/](plugins/koroku/skills/deploy-status/) にあります。
 
+本番のメモリを減らしたいとき（「メモリを 70% にして」など）は、`/koroku:tune-app` を実行します。本番と同じ構成を手元で動かして全サービスのメモリを測り、設定だけで済むものから順に試して、効いたものだけを残します。速さと引き換えになる変更や、設計の判断が要る変更は、数字とトレードオフを示して利用者に任せます。中身は [plugins/koroku/skills/tune-app/](plugins/koroku/skills/tune-app/) にあります。
+
 ## 運用
 
 koroku の更新、OS の更新、日常の確認、証明書のトラブル、サーバーを失ったときの復旧、Heroku Postgres からのデータの移し方は [docs/OPERATIONS.md](docs/OPERATIONS.md) にあります。koroku を再起動・更新しても、アプリのコンテナは止まりません。

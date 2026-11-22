@@ -114,7 +114,8 @@ cleanup() {
   status=$?
   if [ "$keep" -eq 1 ]; then
     echo
-    echo "Kept. Clean up with:"
+    echo "Kept. Compose project: $project (measure it with the tune-app Skill's measure.sh --project $project)"
+    echo "Clean up with:"
     echo "  ${dc[*]} down --volumes --remove-orphans --rmi local"
     echo "  rm -rf $work"
   else
