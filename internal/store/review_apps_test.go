@@ -174,13 +174,13 @@ func TestReviewAppsAllowedMigration(t *testing.T) {
 	parent := mustCreateApp(t, s, "shop-staging")
 	plain := mustCreateApp(t, s, "blog-staging")
 	newReview(t, s, parent, "shop-staging-pr-1", 1)
-	// Roll back to before migration 27 with the review app in place.
+	// Roll back to before migration 28 with the review app in place.
 	if _, err := s.db.ExecContext(ctx, `ALTER TABLE apps DROP COLUMN review_apps_allowed;
-		DELETE FROM schema_migrations WHERE version = 27`); err != nil {
+		DELETE FROM schema_migrations WHERE version = 28`); err != nil {
 		t.Fatal(err)
 	}
 	for _, m := range migrations {
-		if m.version == 27 {
+		if m.version == 28 {
 			if err := s.applyMigration(ctx, m); err != nil {
 				t.Fatalf("apply %s: %v", m.name, err)
 			}
