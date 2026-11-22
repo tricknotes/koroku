@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -464,6 +465,64 @@ func TestDeploySucceeds(t *testing.T) {
 		if !strings.Contains(log, want) {
 			t.Errorf("log lacks %q:\n%s", want, log)
 		}
+	}
+}
+
+// TestDeployProtectsProductionMemory: the environment decides the OOM
+// order and the reservation, from the next deploy on (ARCHITECTURE 6.2),
+// and the release records what it reserves.
+func TestDeployProtectsProductionMemory(t *testing.T) {
+	h := newHarness(t, nil)
+	app := h.createApp("blog")
+	app.Environment = store.EnvironmentProduction
+	app.ServiceMemoryReservations = map[string]string{"db": "384m"}
+	if err := h.store.UpdateApp(context.Background(), app, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+
+	read := func(d store.Deployment) (string, map[string]int64) {
+		t.Helper()
+		override, err := os.ReadFile(filepath.Join(h.engine.ReleaseDir("blog", d.ID), compose.OverrideFileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		recorded, err := h.store.DeploymentMemoryReservations(context.Background(), d.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(override), recorded[d.ID]
+	}
+
+	d := h.deploy("blog", shaA)
+	if d.Status != store.StatusSucceeded {
+		t.Fatalf("deployment = %+v\n%s", d, h.log("blog", d.ID))
+	}
+	override, recorded := read(d)
+	for _, want := range []string{"oom_score_adj: -400", `mem_reservation: "256m"`, `mem_reservation: "384m"`} {
+		if !strings.Contains(override, want) {
+			t.Errorf("production override lacks %q:\n%s", want, override)
+		}
+	}
+	if want := map[string]int64{"web": 256 << 20, "db": 384 << 20}; !maps.Equal(recorded, want) {
+		t.Errorf("recorded reservations = %v, want %v", recorded, want)
+	}
+	if log := h.log("blog", d.ID); !strings.Contains(log, "reserving db 384 MiB, web 256 MiB") {
+		t.Errorf("log does not say what is reserved:\n%s", log)
+	}
+
+	app = h.reload("blog")
+	app.Environment = store.EnvironmentStaging
+	if err := h.store.UpdateApp(context.Background(), app, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	d = h.deploy("blog", shaB)
+	override, recorded = read(d)
+	if !strings.Contains(override, "oom_score_adj: 500") || strings.Contains(override, "mem_reservation") {
+		t.Errorf("staging override:\n%s", override)
+	}
+	if recorded == nil || len(recorded) != 0 {
+		t.Errorf("a staging release records an empty map, got %v", recorded)
 	}
 }
 

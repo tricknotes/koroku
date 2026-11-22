@@ -1,11 +1,14 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/tricknotes/koroku/internal/deploy"
+	"github.com/tricknotes/koroku/internal/store"
 	"github.com/tricknotes/koroku/internal/system"
 )
 
@@ -49,6 +52,9 @@ type systemResponse struct {
 	// IdleSleep says whether apps can sleep while idle on this host
 	// (ARCHITECTURE 8.4).
 	IdleSleep idleSleepStatusJSON `json:"idle_sleep"`
+	// MemoryReservation totals what production apps reserve (ARCHITECTURE
+	// 6.2); nil for members, as it names other apps.
+	MemoryReservation *memoryReservationJSON `json:"memory_reservation"`
 }
 
 type idleSleepStatusJSON struct {
@@ -61,6 +67,26 @@ type idleSleepStatusJSON struct {
 // Caddy routes them and writes a per-app access log (ARCHITECTURE 8.4).
 func (s *Server) idleSleepAvailable() bool {
 	return s.cfg.Caddy.Enabled && s.cfg.Caddy.AccessLogDir != ""
+}
+
+// reservationMarginBytes is left free on top of the reservations for the
+// host itself, builds and staging apps before the system screen warns.
+const reservationMarginBytes = 1 << 30
+
+type memoryReservationJSON struct {
+	TotalBytes  int64 `json:"total_bytes"`
+	MarginBytes int64 `json:"margin_bytes"`
+	// Warning is set when the reservations plus the margin exceed the
+	// host's memory.
+	Warning bool                 `json:"warning"`
+	Apps    []appReservationJSON `json:"apps"`
+}
+
+type appReservationJSON struct {
+	Slug        string           `json:"slug"`
+	Environment string           `json:"environment"`
+	TotalBytes  int64            `json:"total_bytes"`
+	Services    map[string]int64 `json:"services"`
 }
 
 type webhookStatusJSON struct {
@@ -93,8 +119,60 @@ func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
 	if !isOwner(r) {
 		// The error texts may name other apps' hosts and objects.
 		resp.LogArchive.LastError, resp.Caddy.LastError = "", ""
+	} else {
+		reservation, err := s.memoryReservation(r.Context(), resp.Memory)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		resp.MemoryReservation = &reservation
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// memoryReservation sums what the running releases of the apps that are
+// not stopped reserve. An app waiting to be started again reserves the
+// same once it runs, so only a stopped app is left out.
+func (s *Server) memoryReservation(ctx context.Context, host *system.Memory) (memoryReservationJSON, error) {
+	out := memoryReservationJSON{MarginBytes: reservationMarginBytes, Apps: []appReservationJSON{}}
+	apps, err := s.store.ListApps(ctx)
+	if err != nil {
+		return out, err
+	}
+	var ids []int64
+	for _, app := range apps {
+		if app.CurrentDeploymentID != nil && app.DesiredState != store.DesiredStopped {
+			ids = append(ids, *app.CurrentDeploymentID)
+		}
+	}
+	recorded, err := s.store.DeploymentMemoryReservations(ctx, ids...)
+	if err != nil {
+		return out, err
+	}
+	for _, app := range apps {
+		if app.CurrentDeploymentID == nil || app.DesiredState == store.DesiredStopped {
+			continue
+		}
+		services := recorded[*app.CurrentDeploymentID]
+		var total int64
+		for _, bytes := range services {
+			total += bytes
+		}
+		if total == 0 {
+			continue
+		}
+		out.TotalBytes += total
+		out.Apps = append(out.Apps, appReservationJSON{
+			Slug: app.Slug, Environment: app.Environment, TotalBytes: total, Services: services,
+		})
+	}
+	slices.SortStableFunc(out.Apps, func(a, b appReservationJSON) int {
+		return cmp.Or(cmp.Compare(b.TotalBytes, a.TotalBytes), cmp.Compare(a.Slug, b.Slug))
+	})
+	if host != nil && host.TotalBytes > 0 {
+		out.Warning = uint64(out.TotalBytes+out.MarginBytes) > host.TotalBytes
+	}
+	return out, nil
 }
 
 func (s *Server) handleDockerUsage(w http.ResponseWriter, r *http.Request) {

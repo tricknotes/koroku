@@ -6,9 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tricknotes/koroku/internal/compose"
@@ -105,12 +108,26 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		DefaultMemory: e.opts.DefaultMemory,
 		AppMemory:     app.MemoryLimit,
 		ServiceMemory: app.ServiceMemoryLimits,
-		ProjectName:   app.ProjectName(),
-		ReleaseTag:    "r" + strconv.FormatInt(d.ID, 10),
+		// The environment decides which apps a host-wide memory shortage
+		// hits first (ARCHITECTURE 6.2).
+		Production:         app.Environment == store.EnvironmentProduction,
+		AppReservation:     app.MemoryReservation,
+		ServiceReservation: app.ServiceMemoryReservations,
+		ProjectName:        app.ProjectName(),
+		ReleaseTag:         "r" + strconv.FormatInt(d.ID, 10),
 	}
 	override, err := compose.Override(overrideParams)
 	if err != nil {
 		return false, err
+	}
+	reservations := overrideParams.Reservations()
+	if err := e.opts.Store.SetDeploymentMemoryReservations(ctx, d.ID, reservations); err != nil {
+		return false, err
+	}
+	if overrideParams.Production {
+		log.Printf("Production app: killed last when the host runs out of memory, reserving %s", describeReservations(reservations))
+	} else {
+		log.Printf("Staging app: killed first when the host runs out of memory, no memory reserved")
 	}
 	// Recorded before building so that the images are removed with the
 	// release even when a later step fails.
@@ -467,6 +484,19 @@ func ensureFile(path string) error {
 		return nil
 	}
 	return writeFileAtomic(path, nil, 0o600)
+}
+
+// describeReservations renders per-service reservations for the deploy
+// log: "db 256 MiB, web 128 MiB", or "nothing".
+func describeReservations(reservations map[string]int64) string {
+	if len(reservations) == 0 {
+		return "nothing"
+	}
+	parts := make([]string, 0, len(reservations))
+	for _, name := range slices.Sorted(maps.Keys(reservations)) {
+		parts = append(parts, fmt.Sprintf("%s %d MiB", name, reservations[name]>>20))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func filterRule(violations []compose.Violation, rule string) []compose.Violation {

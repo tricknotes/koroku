@@ -141,6 +141,8 @@ var settingFields = []settingField{
 	{name: "relax_policy", get: func(a store.App) any { return a.RelaxPolicy }},
 	{name: "memory_limit", get: func(a store.App) any { return a.MemoryLimit }},
 	{name: "service_memory_limits", get: func(a store.App) any { return nonNilMap(a.ServiceMemoryLimits) }},
+	{name: "memory_reservation", get: func(a store.App) any { return a.MemoryReservation }},
+	{name: "service_memory_reservations", get: func(a store.App) any { return nonNilMap(a.ServiceMemoryReservations) }},
 	{name: "backup_exclude_volumes", get: func(a store.App) any { return nonNilSlice(a.BackupExcludeVolumes) }},
 	{name: "dump_hook_service", get: func(a store.App) any { return a.DumpHookService }},
 	{name: "dump_hook_command", get: func(a store.App) any { return a.DumpHookCommand }},

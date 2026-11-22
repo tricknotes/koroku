@@ -113,14 +113,14 @@ func TestListServices(t *testing.T) {
 	if strings.TrimSpace(empty.Body.String()) != `{"services":[]}` {
 		t.Errorf("no containers: %s", empty.Body)
 	}
-	used, limit, cpu := int64(27283947), int64(512<<20), 1.5
+	used, limit, cpu, reserved := int64(27283947), int64(512<<20), 1.5, int64(256<<20)
 	fake.services = []deploy.ServiceStatus{
-		{Name: "db", State: "running", Status: "Up 2 hours (healthy)", Health: "healthy", MemoryBytes: &used, MemoryLimitBytes: &limit, CPUPercent: &cpu},
+		{Name: "db", State: "running", Status: "Up 2 hours (healthy)", Health: "healthy", MemoryBytes: &used, MemoryLimitBytes: &limit, CPUPercent: &cpu, MemoryReservationBytes: &reserved},
 		{Name: "web", State: "restarting", Status: "Restarting (1) 3 seconds ago"},
 	}
 	rec := request(t, h, http.MethodGet, "/api/apps/blog/services", "")
-	want := `{"services":[{"name":"db","state":"running","status":"Up 2 hours (healthy)","health":"healthy","memory_bytes":27283947,"memory_limit_bytes":536870912,"cpu_percent":1.5},` +
-		`{"name":"web","state":"restarting","status":"Restarting (1) 3 seconds ago","health":"","memory_bytes":null,"memory_limit_bytes":null,"cpu_percent":null}]}`
+	want := `{"services":[{"name":"db","state":"running","status":"Up 2 hours (healthy)","health":"healthy","memory_bytes":27283947,"memory_limit_bytes":536870912,"cpu_percent":1.5,"memory_reservation_bytes":268435456},` +
+		`{"name":"web","state":"restarting","status":"Restarting (1) 3 seconds ago","health":"","memory_bytes":null,"memory_limit_bytes":null,"cpu_percent":null,"memory_reservation_bytes":null}]}`
 	if strings.TrimSpace(rec.Body.String()) != want {
 		t.Errorf("services = %s", rec.Body)
 	}
