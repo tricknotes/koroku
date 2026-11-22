@@ -15,6 +15,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 - private なレジストリのイメージの取得（アプリごとのコンテナレジストリの認証。6.1）
 - 起動・停止・再起動・削除、過去コミットへの再デプロイ（ロールバック）
 - ブランチへの push での自動デプロイ（アプリごとに選ぶ。5.2）
+- pull request ごとのレビューアプリ（staging を親にして手で作る。9.9）
 - バックアップとリストア、実行ログの保管
 
 **提供しないもの**
@@ -104,7 +105,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 
 ## 5. GitHub 連携
 
-自分のアカウントに GitHub App を 1 つ登録し、UI ログインとリポジトリ取得の両方に使う。権限は Contents: Read-only と Metadata: Read-only に、デプロイを GitHub に写すための Deployments: Read and write（5.1）を加えたもの。ワークフローを待つ自動デプロイ（5.2）を使うなら Actions: Read-only も加える。
+自分のアカウントに GitHub App を 1 つ登録し、UI ログインとリポジトリ取得の両方に使う。権限は Contents: Read-only と Metadata: Read-only に、デプロイを GitHub に写すための Deployments: Read and write（5.1）を加えたもの。ワークフローを待つ自動デプロイ（5.2）を使うなら Actions: Read-only、レビューアプリ（9.9）を使うなら Pull requests: Read-only も加える。
 
 **デプロイできるリポジトリ**
 
@@ -120,7 +121,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 | 用途 | 方式 |
 | --- | --- |
 | UI ログイン | Web application flow でユーザーアクセストークンを得て `GET /user` の ID をオーナーとメンバーの ID と照合し（10.7）、自前のセッション Cookie を発行する。トークンは保存しない（[ユーザーアクセストークンの生成](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)） |
-| リポジトリ・ブランチ・コミット一覧 | installation access token で REST API を呼ぶ |
+| リポジトリ・ブランチ・コミット・pull request の一覧 | installation access token で REST API を呼ぶ |
 | デプロイの反映 | installation access token で Deployments API を呼ぶ（5.1） |
 | clone | デプロイのたびに installation access token を発行し、HTTP パスワードとして使う。形式は `https://x-access-token:TOKEN@github.com/owner/repo.git`、有効期限は 1 時間（[installation としての認証](https://docs.github.com/en/enterprise-cloud@latest/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)） |
 
@@ -148,7 +149,7 @@ koroku のデプロイを、リポジトリの GitHub Deployments（`POST /repos
 
 **写し方**
 
-- koroku のデプロイ 1 件を、GitHub のデプロイ 1 件にする。`ref` は koroku がデプロイするコミットの完全な SHA、`environment` はアプリの slug（`blog`、`blog-staging` など。staging と本番は別アプリなので別の環境になる。8.2）、`production_environment` はアプリの `environment` が `production` のとき真、`transient_environment` は偽。`auto_merge` は偽、`required_contexts` は空にする（GitHub にブランチのマージやコミットのステータスの確認をさせない。koroku はすでに出すものを決めている）。ロールバック（7.1）と昇格（9.7）も 1 件のデプロイとして写る。
+- koroku のデプロイ 1 件を、GitHub のデプロイ 1 件にする。`ref` は koroku がデプロイするコミットの完全な SHA、`environment` はアプリの slug（`blog`、`blog-staging` など。staging と本番は別アプリなので別の環境になる。8.2）、`production_environment` はアプリの `environment` が `production` のとき真、`transient_environment` はレビューアプリ（9.9）のとき真で、それ以外は偽。`auto_merge` は偽、`required_contexts` は空にする（GitHub にブランチのマージやコミットのステータスの確認をさせない。koroku はすでに出すものを決めている）。ロールバック（7.1）と昇格（9.7）も 1 件のデプロイとして写る。
 - 状態は koroku の状態機械に合わせる。
 
 | koroku | GitHub の state | 説明文（`description`） |
@@ -269,7 +270,7 @@ services:
 - 公開サービスの `ports` は `!override` で割当ポートに置き換え、他サービスの `ports` は `!reset []` で消す。通常のマージでは `ports` が追記されてしまうため、この 2 つのタグが必要（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)）。
 - ホストポートは 20000 番台からアプリ作成時に 1 つ割り当て、DB で一意に保つ。
 - 環境変数は全サービスに `env_file` で注入する（Heroku の config vars と同じ感覚）。`${VAR}` 補間用に `--env-file` でも同じファイルを渡す。
-- env ファイルには、koroku 自身が `KOROKU_COMMIT_SHA`（デプロイしたコミットの 40 桁）と `KOROKU_COMMIT_SHORT`（先頭 7 桁）を足す。チェックアウトから `.git` は消えるので、アプリはほかの方法でコミットを知れない。CI がコミットごとにビルドしたイメージを `image: ...:sha-${KOROKU_COMMIT_SHORT}` で指せば、小さい VPS でビルドせずに pull だけで済む。エラー報告のリリース名などにも使える。名前が `KOROKU_` で始まる変数は koroku が書くものとして予約し、画面からは保存できない。環境変数の照合（9.4）は、これらを設定済みとして扱う。指紋（9.2）は取らない（アプリの変数ではないため）。ロールバックはスナップショットごと戻すので、戻した版のコミットを指す。
+- env ファイルには、koroku 自身が `KOROKU_COMMIT_SHA`（デプロイしたコミットの 40 桁）と `KOROKU_COMMIT_SHORT`（先頭 7 桁）を足す。チェックアウトから `.git` は消えるので、アプリはほかの方法でコミットを知れない。CI がコミットごとにビルドしたイメージを `image: ...:sha-${KOROKU_COMMIT_SHORT}` で指せば、小さい VPS でビルドせずに pull だけで済む。エラー報告のリリース名などにも使える。あわせて `KOROKU_APP_URL`（デプロイした時点のプライマリ URL。9.1 の `primary_url` と同じ規則）と `KOROKU_APP_HOST`（そのホスト名）を足し、レビューアプリ（9.9）には `KOROKU_PR_NUMBER`（pull request の番号）も足す。ホスト名がリポジトリに書けないレビューアプリでも、アプリが自分の URL を組み立てられるようにするため（独自ドメインやプライマリを変えたら、次のデプロイで反映される）。名前が `KOROKU_` で始まる変数は koroku が書くものとして予約し、画面からは保存できない。環境変数の照合（9.4）は、これらを設定済みとして扱う。指紋（9.2）は取らない（アプリの変数ではないため）。ロールバックはスナップショットごと戻すので、戻した版のコミットと、その時点の URL を指す。
 - `--env-file` を指定するので、リポジトリ直下の `.env` は `${VAR}` の補間に使われない（`.env` にしかない変数は未定義になり、`${VAR:-default}` は default になる）。サービスが自分で `env_file: .env` と書いていれば、その内容はコンテナに入る。override が足す koroku の env ファイルはリストの後ろに付くので、同じ名前の変数は koroku 側の値が勝つ。つまり補間は koroku の環境変数だけで決まり、リポジトリの `.env` は「サービスが明示的に読む」ときだけ効く（`testdata/apps/build-app` と結合テストで固定）。
 - named volume はプロジェクト名 `koroku-<slug>` が接頭辞になるため、リリースディレクトリが変わっても引き継がれる。
 
@@ -688,6 +689,7 @@ staging のようにたまにしか開かないアプリを、アクセスがな
 | テーブル | 内容 |
 | --- | --- |
 | `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、DB のコピーの設定（ロードフック、コピー後のコマンド。10.6）、必要な変数の読み方（`env_source`、`env_example_path`、9.4）、アクセスの保護（`access_protection`、`protection_exempt_paths`、8.3）、昇格元のアプリ（`promote_from_app_id`、9.7）、自動デプロイ（`auto_deploy`、`auto_deploy_branch`、`auto_deploy_workflow`、5.2）、アクセスがない間の休止（`idle_sleep`、`idle_sleep_minutes`、`sleeping_since`、8.4） |
+| `review_apps` | レビューアプリの親、pull request の番号・題名・head のブランチ・状態、データのコピーの状態（9.9） |
 | `env_vars` | 環境変数。値は暗号化して保存（`app_id` + `key` で一意） |
 | `registry_credentials` | アプリのコンテナレジストリの認証（`app_id` で一意。レジストリ、ユーザー名、暗号化したトークン、更新時刻。6.1） |
 | `deployments` | ref、コミット、状態、エラー、時刻、環境変数の指紋（9.2）、ロールバックの戻す先（`source_deployment_id`、7.1）、昇格元のデプロイ（`promoted_from_deployment_id`、9.7）、始めたユーザー（`actor_user_id`、`actor_login`。10.7）、何が始めたか（`trigger_kind`、`pusher`、5.2） |
@@ -1066,6 +1068,104 @@ sudo koroku run [-config <path>] <slug> <サービス> [<コマンド> [<引数>
 - 1 回の判定の問い合わせは、直下の一覧と、表のうち直下にあるファイル（と `config/environments/production.rb`、Django の設定ファイル、Compose ファイル）だけ。ブランチは動くので結果はキャッシュしない。
 - 読めなかったときは 200 で `status: "unavailable"` と理由（9.4 と同じ語）を返し、画面は欄を出さない。リポジトリを URL で指定したときは、github.com の URL なら同じ API で（App で読めなければ認証なしで）読み、それ以外の URL では呼ばない。
 
+### 9.9 pull request ごとのレビューアプリ
+
+Heroku の Review Apps に当たるもの。staging アプリ（8.2）を親にして、そのリポジトリの pull request 1 つを選ぶと、その pull request のコードを動かす別のアプリ（レビューアプリ）を作る。レビューの相手に URL を渡して画面で確かめてもらうため。staging は 1 つのブランチしか出せず、複数の pull request を並べて見せられない。
+
+**作るのは手で、pull request ごとに 1 つ**
+
+- 作るのは、親アプリの画面で pull request を 1 つ選んだときだけ。pull request が開かれたら自動で作る、ということはしない。3〜5 アプリを 4GB のホストに置く規模では、開いた pull request すべてにアプリを立てるとメモリとディスクが足りなくなるため。数の上限と期限は koroku では持たない（利用者が要らなくなったものを消す）。
+- （親アプリ、pull request の番号）ごとに 1 つ。同じ pull request のレビューアプリがあれば `409 review_app_exists`。
+- 親にできるのは、`environment = staging` で、GitHub App で取得する（`repo_full_name` を持ち、`repo_url` を明示していない）、それ自身はレビューアプリでないアプリ。それ以外は `422 not_review_parent`（`details.reason` に `not_staging`、`no_github_app`、`review_app`）。本番を親にしないのは、レビューアプリに親の環境変数とデータを写す（下記）ので、本番の秘密（決済の本番キーなど）と利用者のデータが、マージ前のコードを動かすアプリに増えていくのを避けるため。
+- 選べるのは、開いている（`open`）、同じリポジトリのブランチからの pull request だけ。fork からの pull request は `422 pull_request_from_fork`。ポリシー検査（6 章）は他人のコードを安全に動かす隔離ではなく（10 章）、fork の作者のコードに親の環境変数とデータを渡すことになるため。判定は pull request の `head.repo.id` と `base.repo.id` が等しいこと（fork が消されて `head.repo` が空のものも fork として断る）。
+- 作るのに要るロールは親アプリの管理（`manage`）で、直近 10 分以内のログイン（10.3）が要る。レビューアプリは親の環境変数（値を含む）とデータを写した新しいアプリで、環境変数の保存と DB のコピー（10.6）がどちらも管理と再ログインを求めるのと揃える。アプリの作成そのものはオーナーだけ（10.7）だが、レビューアプリは親の設定から作るので、リポジトリとホストの割り当ての判断はオーナーが親を作ったときに済んでいる。
+- 消すのは通常のアプリの削除（10 章「起動制御と削除」、`DELETE /api/apps/{slug}`）で、volume も必ず消す（`?volumes` の指定によらない）。消すのに要るのも親アプリの管理と再ログイン。pull request が閉じられてもマージされても、自動では消さない。画面に pull request の状態を出し、消してよいことが分かるようにする。
+- レビューアプリが残っている親アプリは削除できない（`409 has_review_apps`）。先にレビューアプリを消す。親を消すとレビューアプリが親のない半端なアプリとして残るため。
+
+**名前と経路**
+
+- slug は `<親の slug>-pr-<番号>`。40 文字（slug の上限）を超えるときは親の slug の側を切り詰め、末尾のハイフンを落とす。その slug をほかのアプリが使っていれば `-2` から `-9` を順に付けて空いているものにし、空いていなければ `409 slug_taken`。
+- ホスト名は通常のアプリと同じ `<slug>.<base_domain>`。DNS のワイルドカードのレコード（8 章）があればそのまま開ける。作るときに、そのホスト名を独自ドメインの検証（8.1）と同じ関数で名前解決し、`public_ip` だけに向いていなければ、作成の応答に `dns_warning: true` を付けて、画面はホスト名を DNS に登録するよう案内する（作成は止めない。あとから登録すればよいため）。
+- アクセスの保護（8.3）は有効、アクセスがない間の休止（8.4）は有効（Caddy のアプリ別のアクセスログがないホストでは無効）、`environment` は `staging` で始まる。作ったあとは通常のアプリと同じに設定タブで変えられる。
+
+**親から写すもの**
+
+レビューアプリは作った時点で親の写しになり、あとは独立したアプリとして扱う。親のあとからの変更（設定、環境変数、ロールを除く）は伝わらない。伝えると、レビューアプリで変えた値をどちらが勝つかの規則が要り、レビューの途中で動きが変わるため。
+
+| 項目 | 扱い |
+| --- | --- |
+| リポジトリ、Compose ファイルのパス、公開サービスとポート、ヘルスチェックパス、メモリ上限、`relax_policy`、必要な変数の読み方、保護を外すパス、待つワークフロー | 親と同じ |
+| 既定のブランチ、自動デプロイ | pull request の head のブランチ。自動デプロイ（5.2）を有効にしてそのブランチを追う |
+| 環境変数 | 親の DB の値をすべて写す（同じトランザクションで、新しいアプリの ID で暗号化し直す） |
+| コンテナレジストリの認証（6.1） | 写す（同じく暗号化し直す） |
+| ダンプフック、ロードフック、コピー後のコマンド（10.2、10.6） | 親と同じ。データのコピー（下記）に使う |
+| バックアップから外す volume | 親と同じ。デプロイ前の取得は無効 |
+| ドメイン、登録タスク、昇格元 | 写さない |
+| メンバーのロール | 持たない。親のロールに従う（下記） |
+
+**koroku が足す環境変数**
+
+- すべてのアプリの env ファイルに、koroku は `KOROKU_APP_URL`（デプロイした時点のプライマリ URL。9.1 の `primary_url` と同じ規則）と `KOROKU_APP_HOST`（その URL のホスト名）を足す（6 章）。レビューアプリのホスト名は作るまで決まらないので、Rails の `config.hosts` やメールの中の URL の土台をリポジトリに書いておけない。アプリはこの変数から組み立てる。
+- レビューアプリには、さらに `KOROKU_PR_NUMBER`（pull request の番号）を足す。アプリはこれがあるかでレビューアプリかを見分け、外へ送るもの（メール、Webhook、決済）を止めるなどできる。
+- 写した環境変数にも、外へ届く値（メールの送信先、外部サービスの Webhook の URL、OAuth のコールバックの URL）が含まれる。koroku は値を書き換えない（どれが外へ届くかを知らないため）。必要なら作ったあとで環境変数タブで直す。リポジトリ側は `KOROKU_PR_NUMBER` を見て止める書き方を勧める（Skill の案内）。
+
+**作る流れ**
+
+1. API が pull request を GitHub から読み直し（開いているか、同じリポジトリか、head の SHA とブランチ）、アプリ（上の表の設定）、環境変数、レジストリの認証、`review_apps` の行を 1 つのトランザクションで作る。
+2. head の SHA を、手動のデプロイと同じ経路（7 章）でキューに積む。ref は head のブランチ名。GitHub Deployments（5.1）への反映も通常どおりで、pull request の画面に環境と URL が出る。レビューアプリの環境には `transient_environment: true` を付ける（消えるものだと GitHub に伝える）。
+3. データのコピー（10.6）を、最初のデプロイが成功したあとに始める（下記）。
+
+- デプロイが失敗しても、アプリは消さずに残す。デプロイの失敗は通常どおり履歴とログに出る。pull request に push すれば自動デプロイで出直す。手でも再デプロイできる。
+- 作成の応答はキューに積んだ時点で返す（デプロイを待たない）。
+
+**データのコピー**
+
+- 作るときに「親のデータをコピーする」を選べる（既定は選ぶ）。選んだら、`review_apps.data_copy` を `waiting` にして作る。
+- `koroku serve` の中の 1 つの見張りが、15 秒ごと（と作成の直後）に `waiting` のレビューアプリを見て、最初のデプロイが成功した（`current_deployment_id` がある）ものについて、親を送り側、レビューアプリを受け側、取り元を `live` として 10.6 のコピーを始める。成功したデプロイを待つのは、ロードフックのサービスが動いていないとコピーできないため。デプロイが何度失敗しても、成功するまで待ち続ける。
+- コピーはふつうの DB のコピーと同じ手順・同じ記録（`db_copies`）で、始めた人は koroku 自身（`actor` は `null`）。ただし `backup` の手順は飛ばす（作ったばかりで、残すデータがないため）。コピー後のコマンド（個人情報を消すもの）も親の設定どおりに走る。
+- 始められたら `data_copy` を `started` にし、以後の状態はその DB のコピーの記録で見る。親がデプロイ中・操作中（`busy`）なら、次の回に試し直す。そのほかの理由で始められなければ `failed` にし、理由を `data_copy_detail` に残す（例: 親が止まっている）。
+- 親にダンプフックかロードフックがなければ、コピーはせずに作り、`data_copy` を `skipped`（`data_copy_detail` に `no_dump_hook` か `no_load_hook`）にする。画面は作成のダイアログで先にそのことを出し、作ったあとも「データはコピーしていません」と理由を出す。アプリは空の DB で動く（シードはリポジトリの側で、Compose のワンショットのサービスなどで行う）。
+- コピーのやり直しは、レビューアプリの画面から、親を送り側にした通常の DB のコピー（10.6。確認の slug の入力、再ログイン、管理のロール）で行う。
+- 失敗したコピーで、コピー後のコマンドを設定していて流し込みが途中まで進んだときは、10.6 のとおりアプリのサービスは止まったまま。
+
+**ロール**
+
+- メンバーのレビューアプリでのロールは、親アプリでのロールと同じとする。ロールを読むところ（`authorize`、アプリの一覧の絞り込み、アクセスの保護のゲート）は、`review_apps` を通じて親の `app_roles` を引く。レビューアプリ自身には `app_roles` の行を持たず、メンバーの画面でもロールを付けられない（`PUT /api/members/{id}/roles/{slug}` は `422 role_follows_parent`）。親でロールを外せば、レビューアプリにもその場で入れなくなる。作るたびにロールを写す方式だと、親でロールを外したあとも古いレビューアプリに入れる穴が残るため。
+- デプロイのロールで、レビューアプリの再デプロイ・起動・停止ができる（通常のアプリと同じ）。
+
+**pull request の状態**
+
+- `review_apps` に pull request の題名、head のブランチ、状態（`open` / `closed` / `merged`）を持つ。同じ見張りが 10 分ごとに、レビューアプリごとに GitHub から読み直す（`GET /repos/{owner}/{repo}/pulls/{number}`）。失敗したら前の値のまま。画面の表示のためだけで、何も決めない。
+- head のブランチが消されても（マージ後の削除など）、アプリはそのまま動く。push が来なくなるだけ。
+
+**GitHub App の権限**
+
+- pull request を読むには、Repository permissions の **Pull requests: Read-only** が要る。ない App でも koroku は動き、レビューアプリの作成だけが使えない。pull request の一覧が 403 で断られたら、API は `502 github_permission_missing` を返し、画面は App に権限を足して、インストール先で新しい権限を承認するよう案内する。`koroku check`（10.4）は、この権限がなければ警告する。
+
+**API**（形は [API.md](API.md)）
+
+| メソッドとパス | 用途 | ロール |
+| --- | --- | --- |
+| `GET /api/apps/{slug}/pull-requests` | 親のリポジトリの開いている pull request（fork か、レビューアプリがあるか） | 親の管理 |
+| `GET /api/apps/{slug}/review-apps` | 親のレビューアプリの一覧（アプリの JSON） | 親の閲覧 |
+| `POST /api/apps/{slug}/review-apps` | `{"pr_number": 12, "copy_data": true}` で作る。201 でアプリの JSON と `dns_warning` | 親の管理、再ログイン |
+
+- アプリの JSON の `review`: レビューアプリなら `{parent, pr_number, pr_title, pr_url, pr_state, head_branch, data_copy, data_copy_detail}`、そうでなければ `null`。
+
+**画面**
+
+- 親アプリの概要タブに「レビューアプリ」の欄を置き、レビューアプリごとに pull request の番号と題名、pull request の状態、アプリの状態、URL を出す。「レビューアプリを作成」（管理以上）で、開いている pull request を選ぶダイアログを開く。fork からのものとレビューアプリのあるものは選べない。ダイアログに「親のデータをコピーする」を置き、親にフックがなければ無効にして理由を出す。
+- アプリ一覧では、レビューアプリを親の行のすぐ下に、字下げして並べる。
+- レビューアプリの概要タブに、親と pull request へのリンク、pull request の状態、データのコピーの状態（待機中、コピー中、失敗、しなかった理由）と「親のデータをコピーし直す」（管理以上）を出す。pull request が閉じられていれば、削除できることを示す。
+
+**データ**: テーブル `review_apps`（`app_id`（主キー、アプリの削除で消える）、`parent_app_id`（親のアプリ）、`pr_number`、`pr_title`、`head_branch`、`pr_state`、`pr_checked_at`、`data_copy`（`''` / `waiting` / `started` / `skipped` / `failed`）、`data_copy_detail`、`created_at`。（`parent_app_id`、`pr_number`）で一意）。
+
+**採らない方式**
+
+- pull request が開かれたら自動で作り、閉じたら消す: 上記のとおりホストの資源が足りず、消すときに volume も消えるので、レビュー中のデータが利用者の知らないうちに消える。必要になったら、pull request のイベントの購読と数の上限を別に設計する。
+- 親の環境変数をレビューアプリから参照し続ける: 親を直すと動いているレビューアプリの動きが変わり、レビューアプリだけの値を持てない。
+- レビューアプリのデータをシードだけで作る: 多くのアプリにはシードがなく、staging のデータで確かめたいことが多い。シードを使いたいときは「親のデータをコピーする」を外す。
+
 ## 10. セキュリティと運用
 
 `koroku` は Docker ソケットを操作できるためホストの root 相当であり、管理 UI の認証がこのシステムの唯一の関門になる。
@@ -1157,6 +1257,7 @@ sudo koroku run [-config <path>] <slug> <サービス> [<コマンド> [<引数>
 | アプリの named volume | `docker volume inspect` で得たマウントポイントを稼働中のまま `restic backup`。アップロードファイルなど向け |
 | アプリの DB | アプリ設定の「ダンプフック」（サービス名 + コマンド。例: `db` / `pg_dump -U postgres app`）を `docker compose exec -T` で実行し、標準出力を `restic backup --stdin` に流す（[restic manual](https://restic.readthedocs.io/en/stable/manual_rest.html)） |
 
+- レビューアプリ（9.9）は、定期と手動のバックアップの対象にしない。データは親の写しでいつでもコピーし直せ、restic の世代管理でスナップショットがアプリを消したあとも数か月残るため。
 - 稼働中の DB のデータディレクトリをファイルコピーしても整合性は保証されない。DB はダンプフックで取り、その volume はアプリ設定で対象から外せるようにする。
 - **スケジュール**: 毎日 03:00 JST。UI から手動実行もできる。「デプロイ前に取得」はアプリ単位のオプション（既定オフ）。
 - **世代**: `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune`。スナップショットには `app:<slug>` と `kind:system|volume|dump` のタグを付ける。
@@ -1209,7 +1310,7 @@ sudo koroku run [-config <path>] <slug> <サービス> [<コマンド> [<引数>
   - 本番アプリ（`environment = production`）のデプロイ
   - 環境変数の保存（一括置換も 1 件ずつの追加・変更・削除も、作成時に `env` で一緒に保存するのも。9.8）と、値の表示（下記）
   - volume のリストアと、DB ダンプのダウンロード
-  - DB のコピー（10.6）
+  - DB のコピー（10.6）と、レビューアプリの作成（9.9。親の環境変数とデータを写すため）
   - コンテナレジストリの認証の保存と削除（6.1）
   - アプリ設定のうち、`environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）の変更。本番の確認ダイアログを外す、ポリシー検査を外す、別のコードを動かす、のいずれかにつながるため
   - 本番アプリで自動デプロイ（5.2）を有効にすることと、自動デプロイを有効にしたまま追うブランチ（`auto_deploy_branch`、空なら既定のブランチ）を変えること。push だけで本番が変わるようになるため。無効にするのは求めない
@@ -1240,9 +1341,10 @@ sudo koroku run [-config <path>] <slug> <サービス> [<コマンド> [<引数>
   - DNS: `console_host` と、登録していない名前（`koroku-check-<乱数>.<base_domain>`）が `public_ip` だけに解決されること。後者が解決されなければワイルドカードがないとして警告する（アプリごとの登録でも運用できるため）。判定は独自ドメインの検証（8 章）と同じ関数。
   - Caddy の admin API が応答すること。`console_url` に HTTPS で接続でき、証明書が信頼できること。`acme_ca` が Let's Encrypt の staging なら、信頼できない証明書は警告にとどめ、本番への切り替えを促す。
   - `master.key` があり 0600 であること（ないときは警告。初回起動で作られる）。
-  - GitHub App: App の JWT で `GET /app` が通り、`app_id`・`client_id` が一致し、権限が Contents と Metadata の read（足りなければ失敗）と Deployments の write（なければ GitHub への反映が止まる旨の警告）で、それ以外がないこと（余分なら警告。Actions の read は余分に数えない）。`GET /app/installations` で 1 つ以上インストールされていること。`allowed_user_id` が実在するアカウントであること（`GET /user/{id}`、認証なし）。callback URL は API で読めないので、正しい値を表示するだけにする。
+  - GitHub App: App の JWT で `GET /app` が通り、`app_id`・`client_id` が一致し、権限が Contents と Metadata の read（足りなければ失敗）と Deployments の write（なければ GitHub への反映が止まる旨の警告）で、それ以外がないこと（余分なら警告。Actions の read と Pull requests の read は余分に数えない）。`GET /app/installations` で 1 つ以上インストールされていること。`allowed_user_id` が実在するアカウントであること（`GET /user/{id}`、認証なし）。callback URL は API で読めないので、正しい値を表示するだけにする。
   - 自動デプロイ（5.2）: 有効なアプリがあるのに `webhook_secret` がない、App が push のイベントを購読していない（`GET /app` の `events`）、App の Webhook の URL が `<console_url>/webhooks/github` でない（`GET /app/hook/config`）、のいずれかなら警告。有効なアプリは DB を読み取り専用で開いて数える。Webhook が Active かどうかは API で読めないので、表示するだけにする。
   - ワークフローを待つ自動デプロイ（5.2）: 待つワークフローを設定した、自動デプロイが有効なアプリがあるのに、App に Actions の read がない、または workflow_run のイベントを購読していない（`GET /app` の `permissions` と `events`）なら警告。
+  - レビューアプリ（9.9）: App に Pull requests の read がなければ警告（レビューアプリを作れない旨）。
   - オブジェクトストレージ: `koroku-check/<乱数>` に書き、読み、一覧し、消す。`logs/` と `restic/` の外なので、ライフサイクルルールにも restic にも触れない。トークンの権限不足をここで見つける。
   - restic: 基盤のスナップショットを一覧できること（パスワードの誤りはここで失敗する）。まだ 1 つもなければ警告（リポジトリは最初のバックアップで作られる）。最新が 26 時間より古ければ警告。
 - 外部への書き込みはストレージの確認用オブジェクト 1 つだけで、終わったら消す。DNS、GitHub、Caddy は読むだけ。秘密は表示しない。
@@ -1378,11 +1480,11 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 | --- | --- |
 | 閲覧（`view`） | アプリを見る: 概要、デプロイの履歴とログ、実行ログ（退避済みログのダウンロードを含む）、タスクの登録と実行の履歴、ドメイン、バックアップの一覧と volume の一覧、DB のコピーの履歴、設定（読み取り）、メモリの履歴、必要な環境変数の照合、操作の記録。環境変数はキーだけ（値は返さない）。アプリのリポジトリのブランチとコミットの一覧 |
 | デプロイ（`deploy`） | 閲覧 + デプロイ（ブランチかコミット）、ロールバック、取り消し、そのアプリへの昇格（9.7）と昇格の確認画面、起動・停止・再起動、休止中のアプリを起こす（8.4） |
-| 管理（`manage`） | デプロイ + 環境変数（値の表示と編集）、コンテナレジストリの認証の設定・変更・削除（6.1）、アプリ設定（下のオーナー専用を除く）、ドメイン（追加・再検証・プライマリ・強制有効化・削除）、バックアップ（実行、volume のリストア、ダンプのダウンロード、DB のコピー）、タスク（コマンドと登録タスクの実行、登録タスクの編集、実行の取り消し） |
+| 管理（`manage`） | デプロイ + レビューアプリの作成と削除（9.9）、環境変数（値の表示と編集）、コンテナレジストリの認証の設定・変更・削除（6.1）、アプリ設定（下のオーナー専用を除く）、ドメイン（追加・再検証・プライマリ・強制有効化・削除）、バックアップ（実行、volume のリストア、ダンプのダウンロード、DB のコピー）、タスク（コマンドと登録タスクの実行、登録タスクの編集、実行の取り消し） |
 
 **オーナーだけの操作**
 
-- アプリの作成と削除。リポジトリの一覧、作成画面の Compose 検出と環境変数の初期値（作成と、リポジトリの変更のためのもの）
+- アプリの作成と削除（レビューアプリの作成と削除は親アプリの管理。9.9）。リポジトリの一覧、作成画面の Compose 検出と環境変数の初期値（作成と、リポジトリの変更のためのもの）
 - アプリ設定のうち、`environment`（本番 / staging。本番ではデプロイの前に確認が入るので、これを staging に変えると確認を外せる）、本番アプリの自動デプロイを有効にすることと、追うブランチや待つワークフローを変えること（push だけで本番に出るようになる。5.2）、`relax_policy`（ポリシー検査を緩める）、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、ほかのアプリとの組み合わせ（昇格元 `promote_from`）の変更。ホストを守る検査を外す、別のコードを動かす、ほかのアプリに関わる、のいずれかで、1 つのアプリを任せる範囲を超えるため。管理のメンバーが設定の `PATCH` でこれらを今と違う値にすると `403 forbidden_role`（`details.fields` に項目名）。今と同じ値を送るのはかまわない（設定画面は全項目を送るため）
 - システム画面（ホストのリソース、Docker のディスク、コンテナの内訳、prune、GitHub App）、ホスト全体のバックアップの実行履歴
 - メンバーとロールの管理、ほかのユーザーのセッション・ログイン履歴・API トークン
@@ -1403,7 +1505,8 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 **判定の仕組み**
 
 - API のルートは 1 つの表（`internal/api` の `apiRoutes`）に、必要なもの（全ユーザー / オーナーだけ / `{slug}` のアプリのロールの段階 / `{id}` のデプロイ・タスクの実行・DB のコピーのアプリのロールの段階 / リポジトリ `{owner}/{repo}` から作ったアプリのロールの段階 / どれかのアプリのロールの段階）と一緒に登録する。表を経ずにルートを足せないので、権限を決め忘れたルートは生まれない。判定はハンドラーより前に 1 か所（`authorize`）で行う。テストは表の全ルートについて、オーナー専用がメンバーを断ること、アプリのルートがロールの段階どおりに断ることを確かめる。
-- ハンドラーの中で判定するのは、1 つのルートの中で項目ごとに権限が分かれるものだけ: 設定の `PATCH` のオーナー専用の項目、DB のコピーの送り側、環境変数の `GET` の値（管理未満には返さず `values_hidden: true`、`values_forbidden: true`）、一覧の絞り込み（アプリ、セッション、ログイン履歴、トークン）。
+- レビューアプリ（9.9）では、メンバーのロールは親アプリのロールを使う。`app_roles` を引くところ（`authorize`、一覧の絞り込み、ゲート）は、すべて store の同じ関数を通り、そこでレビューアプリを親に読み替える。
+- ハンドラーの中で判定するのは、1 つのルートの中で項目ごとに権限が分かれるものだけ: 設定の `PATCH` のオーナー専用の項目、アプリの削除（ルートは管理で登録し、レビューアプリでないアプリはオーナーだけに絞る）、DB のコピーの送り側、環境変数の `GET` の値（管理未満には返さず `values_hidden: true`、`values_forbidden: true`）、一覧の絞り込み（アプリ、セッション、ログイン履歴、トークン）。
 - 再ログイン（10.3）の要求は、ロールの判定のあとに、オーナーにもメンバーにも同じに掛かる。
 - API トークン（10.5）のリクエストも、トークンのユーザーとして同じ表で判定する。トークンは読み取りの許可リストの `GET` しか使えない点は変わらない。
 - `--insecure-no-auth` では、すべてのリクエストをオーナー（login は `local`）として扱う。
@@ -1416,7 +1519,8 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 
 | `action` | 操作 | `details` |
 | --- | --- | --- |
-| `app.created` | アプリの作成 | 環境、一緒に保存した環境変数のキー |
+| `app.created` | アプリの作成 | 環境、一緒に保存した環境変数のキー。レビューアプリなら親の slug と pull request の番号 |
+| `review_app.created`、`review_app.deleted` | 親アプリに残す、レビューアプリの作成と削除（9.9） | レビューアプリの slug と pull request の番号 |
 | `app.settings_changed` | アプリ設定の変更（オーナー専用の項目を含む） | 変わった項目ごとに項目名と前後の値。秘密として扱う項目は項目名だけ |
 | `app.started`、`app.stopped`、`app.restarted` | 起動・停止・再起動 | なし |
 | `app.woken` | 休止中のアプリを管理 UI から起こした（8.4。アクセスで起きたときと、休止させたときは残さない） | なし |
