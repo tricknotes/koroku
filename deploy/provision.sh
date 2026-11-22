@@ -34,6 +34,10 @@ readonly SUPPORTED_UBUNTU_VERSIONS=(24.04 26.04)
 
 readonly SWAP_FILE=/swapfile
 readonly SWAP_SIZE_MIB=2048
+# zswap keeps pages on their way to swap compressed in RAM. Its settings are
+# written by systemd-tmpfiles at every boot from this file.
+readonly ZSWAP_TMPFILES=/etc/tmpfiles.d/koroku-zswap.conf
+readonly ZSWAP_PARAMS=/sys/module/zswap/parameters
 
 readonly CONFIG_DIR=/etc/koroku
 readonly CONFIG_FILE=$CONFIG_DIR/config.toml
@@ -68,7 +72,7 @@ usage() {
   cat <<'EOF'
 Usage: provision.sh [options] /path/to/koroku
 
-Sets up Docker, Caddy, restic, swap, the firewall, key-only SSH and the koroku
+Sets up Docker, Caddy, restic, swap with zswap, the firewall, key-only SSH and the koroku
 service on a fresh Ubuntu 24.04 or 26.04 (amd64) host. Run it as root. It can be run
 again safely.
 
@@ -95,6 +99,7 @@ EOF
 # status so that it is never called from a condition, where bash would ignore
 # a failing command inside it.
 FILE_CHANGED=0
+CADDY_DROP_IN_CHANGED=0
 install_file() {
   local src=$1 dst=$2 mode=$3 owner=${4:-root:root} tmp
   if [[ -f $dst ]] && cmp -s -- "$src" "$dst"; then
@@ -263,6 +268,7 @@ configure_caddy_unit() {
   install_file "$SCRIPT_DIR/caddy-initial.json" /etc/caddy/koroku-initial.json 0644
   info "/etc/caddy/koroku-initial.json: $(changed_word "$FILE_CHANGED")"
   install_file "$SCRIPT_DIR/caddy-koroku.conf" /etc/systemd/system/caddy.service.d/koroku.conf 0644
+  CADDY_DROP_IN_CHANGED=$FILE_CHANGED
   info "/etc/systemd/system/caddy.service.d/koroku.conf: $(changed_word "$FILE_CHANGED")"
 }
 
@@ -368,8 +374,13 @@ install_caddy() {
 
   systemctl daemon-reload
   systemctl enable caddy.service
-  if caddy_runs_with_resume; then
+  if caddy_runs_with_resume && [[ $CADDY_DROP_IN_CHANGED != 1 ]]; then
     info "Caddy already runs with --resume"
+  elif caddy_runs_with_resume; then
+    # A changed drop-in (for example its environment) applies only to a new
+    # process. --resume brings the routes koroku loaded back at once.
+    systemctl restart caddy.service
+    note "restarted Caddy to apply its changed drop-in; open connections were closed once"
   else
     # Either not running yet, or started before the drop-in existed. With
     # --resume a restart comes back with the configuration koroku loaded last.
@@ -472,6 +483,50 @@ setup_swap() {
       info "added $SWAP_FILE to /etc/fstab"
     fi
   fi
+}
+
+# zswap: idle apps leave much of their heap untouched, and those pages
+# compress well. Compressing them in RAM before they reach the swap file frees
+# memory without the disk I/O of plain swap. shrinker_enabled (kernel 6.8 and
+# later) moves the coldest compressed pages on to the swap file under
+# pressure; the "w-" lines ignore a parameter the kernel does not have.
+setup_zswap() {
+  step "Enabling zswap"
+  cat >"$WORK_DIR/koroku-zswap.conf" <<'CONF'
+# Installed by koroku's deploy/provision.sh: compress pages in RAM before they
+# are written to swap. Applied at boot by systemd-tmpfiles.
+w- /sys/module/zswap/parameters/compressor - - - - zstd
+w- /sys/module/zswap/parameters/shrinker_enabled - - - - Y
+w- /sys/module/zswap/parameters/enabled - - - - Y
+CONF
+  mkdir -p /etc/tmpfiles.d
+  install_file "$WORK_DIR/koroku-zswap.conf" "$ZSWAP_TMPFILES" 0644
+  info "$ZSWAP_TMPFILES: $(changed_word "$FILE_CHANGED")"
+
+  if [[ ! -r $ZSWAP_PARAMS/enabled ]]; then
+    note "this kernel has no zswap; swap is used uncompressed"
+    return 0
+  fi
+  # Apply now as well, so that no reboot is needed. Only what differs is
+  # written; a value the kernel refuses is reported, not fatal.
+  local name value want failed=()
+  for name in compressor shrinker_enabled enabled; do
+    case $name in
+      compressor) want=zstd ;;
+      *) want=Y ;;
+    esac
+    [[ -e $ZSWAP_PARAMS/$name ]] || continue
+    value=$(cat -- "$ZSWAP_PARAMS/$name" 2>/dev/null || true)
+    if [[ $value != "$want" ]]; then
+      if ! { printf '%s' "$want" >"$ZSWAP_PARAMS/$name"; } 2>/dev/null; then
+        failed+=("$name=$want")
+      fi
+    fi
+  done
+  if ((${#failed[@]} > 0)); then
+    note "could not set zswap ${failed[*]} now; check $ZSWAP_PARAMS after a reboot"
+  fi
+  info "zswap: enabled=$(cat -- "$ZSWAP_PARAMS/enabled" 2>/dev/null || echo '?') compressor=$(cat -- "$ZSWAP_PARAMS/compressor" 2>/dev/null || echo '?')"
 }
 
 # Placeholders of config.example.toml: example.com names and the
@@ -822,6 +877,7 @@ install_docker
 install_caddy
 install_restic
 setup_swap
+setup_zswap
 install_koroku
 setup_firewall
 keep_ssh_alive
