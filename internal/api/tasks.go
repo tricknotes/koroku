@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/tricknotes/koroku/internal/cron"
 	"github.com/tricknotes/koroku/internal/deploy"
 	"github.com/tricknotes/koroku/internal/store"
 )
@@ -33,6 +34,29 @@ type taskJSON struct {
 	Name    string `json:"name"`
 	Service string `json:"service"`
 	Command string `json:"command"`
+	// Schedule is a five-field cron expression, "" for none.
+	Schedule string `json:"schedule"`
+	// The fields below are read-only: the next scheduled time and the
+	// latest scheduled time that was skipped, with why.
+	NextRunAt      *time.Time `json:"next_run_at"`
+	LastSkippedAt  *time.Time `json:"last_skipped_at"`
+	LastSkipReason string     `json:"last_skip_reason"`
+	LastSkipDetail string     `json:"last_skip_detail"`
+}
+
+// taskInputJSON is what PUT accepts for one task. The read-only fields
+// of taskJSON are accepted and ignored, so that a listed task can be sent
+// back as it is.
+type taskInputJSON struct {
+	Name     string `json:"name"`
+	Service  string `json:"service"`
+	Command  string `json:"command"`
+	Schedule string `json:"schedule"`
+
+	NextRunAt      any `json:"next_run_at"`
+	LastSkippedAt  any `json:"last_skipped_at"`
+	LastSkipReason any `json:"last_skip_reason"`
+	LastSkipDetail any `json:"last_skip_detail"`
 }
 
 type taskRunJSON struct {
@@ -48,6 +72,8 @@ type taskRunJSON struct {
 	StartedAt    time.Time  `json:"started_at"`
 	FinishedAt   *time.Time `json:"finished_at"`
 	Actor        *actorJSON `json:"actor"`
+	// Trigger is "manual" or "scheduled".
+	Trigger string `json:"trigger"`
 }
 
 func taskRunToJSON(run store.TaskRun, slug string) taskRunJSON {
@@ -64,15 +90,53 @@ func taskRunToJSON(run store.TaskRun, slug string) taskRunJSON {
 		StartedAt:    run.StartedAt,
 		FinishedAt:   run.FinishedAt,
 		Actor:        actorToJSON(run.Actor),
+		Trigger:      cmpOr(run.Trigger, store.TaskTriggerManual),
 	}
 }
 
-func tasksToJSON(tasks []store.Task) []taskJSON {
+func cmpOr(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+func (s *Server) tasksToJSON(tasks []store.Task) []taskJSON {
+	now := s.clock.Now()
+	loc := s.cfg.Location()
 	out := make([]taskJSON, 0, len(tasks))
 	for _, t := range tasks {
-		out = append(out, taskJSON{Name: t.Name, Service: t.Service, Command: t.Command})
+		j := taskJSON{
+			Name: t.Name, Service: t.Service, Command: t.Command, Schedule: t.Schedule,
+			LastSkippedAt: t.LastSkippedAt, LastSkipReason: t.LastSkipReason, LastSkipDetail: t.LastSkipDetail,
+		}
+		if sched, err := cron.Parse(t.Schedule); t.Schedule != "" && err == nil {
+			if next := sched.Next(now, loc); !next.IsZero() {
+				next = next.UTC()
+				j.NextRunAt = &next
+			}
+		}
+		out = append(out, j)
 	}
 	return out
+}
+
+// writeTasks answers with the tasks and the time zone their schedules
+// are read in.
+func (s *Server) writeTasks(w http.ResponseWriter, tasks []store.Task) {
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": s.tasksToJSON(tasks), "time_zone": s.cfg.Timezone})
+}
+
+// validateSchedule checks a schedule: valid, and with a time to come.
+func validateSchedule(schedule string) string {
+	sched, err := cron.Parse(schedule)
+	if err != nil {
+		return err.Error()
+	}
+	if sched.Next(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), time.UTC).IsZero() {
+		return "never matches a date (for example the 31st of a month that has 30 days)"
+	}
+	return ""
 }
 
 // validateCommand checks a command to run with `sh -c`. It is one line:
@@ -111,7 +175,7 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasksToJSON(tasks)})
+	s.writeTasks(w, tasks)
 }
 
 // handlePutTasks replaces the registered tasks. Changing what a production
@@ -122,7 +186,7 @@ func (s *Server) handlePutTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Tasks []taskJSON `json:"tasks"`
+		Tasks []taskInputJSON `json:"tasks"`
 	}
 	if !decodeJSON(w, r, &in) {
 		return
@@ -139,9 +203,15 @@ func (s *Server) handlePutTasks(w http.ResponseWriter, r *http.Request) {
 	for i, t := range in.Tasks {
 		field := func(name string) string { return fmt.Sprintf("tasks[%d].%s", i, name) }
 		task := store.Task{
-			Name:    strings.TrimSpace(t.Name),
-			Service: strings.TrimSpace(t.Service),
-			Command: strings.TrimSpace(t.Command),
+			Name:     strings.TrimSpace(t.Name),
+			Service:  strings.TrimSpace(t.Service),
+			Command:  strings.TrimSpace(t.Command),
+			Schedule: cron.Normalize(t.Schedule),
+		}
+		if task.Schedule != "" {
+			if msg := validateSchedule(task.Schedule); msg != "" {
+				errs.add(field("schedule"), msg)
+			}
 		}
 		if msg := validateTaskName(task.Name); msg != "" {
 			errs.add(field("name"), msg)
@@ -176,7 +246,12 @@ func (s *Server) handlePutTasks(w http.ResponseWriter, r *http.Request) {
 	if change := taskChanges(previous, tasks); change != nil {
 		s.recordActivity(r, app.ID, actTasksChanged, change)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tasks": tasksToJSON(tasks)})
+	saved, err := s.store.ListTasks(r.Context(), app.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	s.writeTasks(w, saved)
 }
 
 func (s *Server) handleListTaskRuns(w http.ResponseWriter, r *http.Request) {

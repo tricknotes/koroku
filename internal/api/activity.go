@@ -228,7 +228,7 @@ func taskChanges(before, after []store.Task) map[string]any {
 		switch {
 		case !ok:
 			added = append(added, t.Name)
-		case prev.Service != t.Service || prev.Command != t.Command:
+		case prev.Service != t.Service || prev.Command != t.Command || prev.Schedule != t.Schedule:
 			changed = append(changed, t.Name)
 		}
 		kept[t.Name] = true

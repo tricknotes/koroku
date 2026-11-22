@@ -43,6 +43,50 @@
   justify-content: flex-end;
 }
 
+/* The schedule of a task, under its command. */
+.task-schedule,
+.task-schedule-skip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.task-schedule > code {
+  padding: 0;
+  background: none;
+}
+
+.task-schedule-skip {
+  color: var(--color-pending);
+}
+
+.task-schedule-until {
+  color: var(--color-text-tertiary);
+}
+
+.task-schedule-help code {
+  white-space: nowrap;
+}
+
+.task-schedule-help {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.task-dialog-schedules {
+  margin: var(--space-2) 0 var(--space-3);
+  padding-left: var(--space-4);
+}
+
+.task-dialog-schedules code {
+  margin-left: var(--space-2);
+}
+
 .task-rows .skeleton-wide {
   width: 60%;
 }
@@ -68,7 +112,7 @@
 
 .task-editor-row {
   display: grid;
-  grid-template-columns: minmax(8rem, 14rem) 8rem minmax(0, 1fr) auto;
+  grid-template-columns: minmax(8rem, 12rem) 7rem minmax(0, 1fr) 9rem auto;
   gap: var(--space-3);
   align-items: start;
 }
@@ -216,7 +260,8 @@
   }
 
   .task-field-service,
-  .task-field-command {
+  .task-field-command,
+  .task-field-schedule {
     grid-column: 1 / -1;
   }
 

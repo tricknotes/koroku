@@ -58,6 +58,11 @@ type Service struct {
 	Runtime        string `json:"runtime"`
 	OomKillDisable bool   `json:"oom_kill_disable"`
 	MemswapLimit   string `json:"memswap_limit"`
+
+	// DependsOn holds the services this one depends on. The normalized
+	// configuration always prints the long form (a map of conditions);
+	// only the names matter here.
+	DependsOn map[string]json.RawMessage `json:"depends_on"`
 }
 
 // Build is the build section of a service.
@@ -183,6 +188,28 @@ func (p Project) ServiceNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Dependencies returns the services that service depends on, directly or
+// through other services, in sorted order. The service itself is not
+// included, even when a cycle leads back to it.
+func (p Project) Dependencies(service string) []string {
+	seen := map[string]bool{service: true}
+	var walk func(name string)
+	var deps []string
+	walk = func(name string) {
+		for dep := range p.Services[name].DependsOn {
+			if seen[dep] {
+				continue
+			}
+			seen[dep] = true
+			deps = append(deps, dep)
+			walk(dep)
+		}
+	}
+	walk(service)
+	sort.Strings(deps)
+	return deps
 }
 
 // NeedsBuild reports whether any service has a build section.

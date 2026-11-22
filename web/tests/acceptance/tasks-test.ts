@@ -352,8 +352,13 @@ module('Acceptance | tasks', function (hooks) {
       fakes.api.callsTo('PUT', '/api/apps/blog/tasks')[0]?.body,
       {
         tasks: [
-          STATUS_TASK,
-          { name: 'vacuum', service: 'db', command: 'vacuumdb app' },
+          { ...STATUS_TASK, schedule: '' },
+          {
+            name: 'vacuum',
+            service: 'db',
+            command: 'vacuumdb app',
+            schedule: '',
+          },
         ],
       },
     );
@@ -385,6 +390,123 @@ module('Acceptance | tasks', function (hooks) {
     assert
       .dom('[data-test-draft-command]')
       .hasAttribute('aria-invalid', 'true');
+  });
+
+  test('a scheduled task shows its schedule, next run and latest skip', async function (assert) {
+    tasks = [
+      {
+        ...STATUS_TASK,
+        name: 'sweep',
+        schedule: '*/30 * * * *',
+        next_run_at: '2026-11-18T04:00:00Z',
+        last_skipped_at: '2026-11-18T03:00:00Z',
+        last_skip_reason: 'overlap',
+      },
+      STATUS_TASK,
+    ];
+    runs = [
+      makeRun({
+        id: 9,
+        task_name: 'sweep',
+        trigger: 'scheduled',
+        actor: null,
+        started_at: '2026-11-18T02:30:00Z',
+      }),
+      makeRun(),
+    ];
+    serveApp();
+    await visit('/apps/blog/tasks');
+
+    assert
+      .dom('[data-test-task="sweep"] [data-test-task-schedule]')
+      .includesText('*/30 * * * *');
+    assert
+      .dom('[data-test-task="sweep"] [data-test-task-next-run]')
+      .includesText('次回 11/18（水）13:00', 'read on the clock of Asia/Tokyo');
+    assert
+      .dom('[data-test-task="sweep"] [data-test-task-skip]')
+      .includesText('11/18（水）12:00 の予定は見送りました')
+      .includesText('前の回の実行が終わっていませんでした');
+    assert
+      .dom('[data-test-task="status"] [data-test-task-schedule]')
+      .doesNotExist();
+    assert
+      .dom('[data-test-task-run="9"] [data-test-run-scheduled]')
+      .hasText('定期');
+    assert
+      .dom('[data-test-task-run="7"] [data-test-run-scheduled]')
+      .doesNotExist();
+  });
+
+  test('a skip older than the latest scheduled run is not shown', async function (assert) {
+    tasks = [
+      {
+        ...STATUS_TASK,
+        schedule: '0 * * * *',
+        last_skipped_at: '2026-11-18T01:00:00Z',
+        last_skip_reason: 'busy',
+      },
+    ];
+    runs = [makeRun({ trigger: 'scheduled', actor: null })];
+    serveApp();
+    await visit('/apps/blog/tasks');
+    assert.dom('[data-test-task-skip]').doesNotExist();
+  });
+
+  test('a schedule is edited with the task and refused next to its field', async function (assert) {
+    serveApp();
+    await visit('/apps/blog/tasks');
+    await click('[data-test-edit-tasks]');
+    assert.dom('[data-test-schedule-help]').includesText('Asia/Tokyo');
+    await fillIn('[data-test-draft-schedule]', ' 0  3 * * * ');
+    await click('[data-test-save-tasks]');
+    assert.deepEqual(
+      fakes.api.callsTo('PUT', '/api/apps/blog/tasks')[0]?.body,
+      { tasks: [{ ...STATUS_TASK, schedule: '0 3 * * *' }] },
+      'staging saves without asking',
+    );
+
+    fakes.api.fail('PUT', '/api/apps/blog/tasks', 422, 'validation_failed', {
+      'tasks[0].schedule': 'minute: 60 is out of range 0-59',
+    });
+    await click('[data-test-edit-tasks]');
+    await fillIn('[data-test-draft-schedule]', '60 * * * *');
+    await click('[data-test-save-tasks]');
+    assert
+      .dom('[data-test-task-draft] [data-test-field-error]')
+      .hasText('minute: 60 is out of range 0-59');
+    assert
+      .dom('[data-test-draft-schedule]')
+      .hasAttribute('aria-invalid', 'true');
+  });
+
+  test('a production app asks before saving a new schedule', async function (assert) {
+    serveApp({ environment: 'production' });
+    await visit('/apps/blog/tasks');
+    await click('[data-test-edit-tasks]');
+    await fillIn('[data-test-draft-schedule]', '0 3 * * *');
+    await click('[data-test-save-tasks]');
+
+    assert.dom('[data-test-dialog]').exists();
+    assert.dom('[data-test-dialog-schedules]').includesText('status');
+    assert.dom('[data-test-dialog-schedules]').includesText('0 3 * * *');
+    assert.deepEqual(fakes.api.callsTo('PUT', '/api/apps/blog/tasks'), []);
+    await click('[data-test-dialog-confirm]');
+    assert.strictEqual(
+      fakes.api.callsTo('PUT', '/api/apps/blog/tasks').length,
+      1,
+    );
+    assert.dom('[data-test-task-editor]').doesNotExist();
+
+    // Saving without a schedule change does not ask again.
+    await click('[data-test-edit-tasks]');
+    await fillIn('[data-test-draft-command]', 'bin/rails db:version');
+    await click('[data-test-save-tasks]');
+    assert.dom('[data-test-dialog]').doesNotExist();
+    assert.strictEqual(
+      fakes.api.callsTo('PUT', '/api/apps/blog/tasks').length,
+      2,
+    );
   });
 
   test('an app that was never deployed cannot run commands yet', async function (assert) {

@@ -428,6 +428,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	go engine.RunMaintenance(ctx)
 	// Memory use history for the limit guidance (ARCHITECTURE 9.5).
 	go engine.NewMemorySampler().Run(ctx)
+	// Registered tasks with a schedule (ARCHITECTURE 9.6), read in the same
+	// time zone as the backup schedule.
+	go engine.NewTaskScheduler(cfg.Location()).Run(ctx)
 	srv := api.New(apiOpts)
 	go checker.Run(ctx, routing.RecheckInterval)
 

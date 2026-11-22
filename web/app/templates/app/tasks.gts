@@ -6,6 +6,7 @@ import { eq, fn } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import AsyncView from 'koroku-console/components/async-view';
+import Badge from 'koroku-console/components/badge';
 import Banner from 'koroku-console/components/banner';
 import Button, { buttonClass } from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
@@ -20,6 +21,7 @@ import RowList from 'koroku-console/components/row-list';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import TabSection from 'koroku-console/components/tab-section';
 import TaskRunDetail from 'koroku-console/components/task-run-detail';
+import TimeUntil from 'koroku-console/components/time-until';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type SessionService from 'koroku-console/services/session';
@@ -27,7 +29,10 @@ import type AppContext from 'koroku-console/utils/app-context';
 import { inputValue, preventDefault, setValue } from 'koroku-console/utils/dom';
 import { ApiError, fieldErrors } from 'koroku-console/utils/errors';
 import { consoleCommand } from 'koroku-console/utils/console-command';
-import { formatDuration } from 'koroku-console/utils/format';
+import {
+  formatDuration,
+  formatScheduleTime,
+} from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
 import { can } from 'koroku-console/utils/roles';
 import {
@@ -38,7 +43,9 @@ import type {
   App,
   ServiceStatus,
   Task,
+  TaskList,
   TaskRun,
+  TaskSkipReason,
 } from 'koroku-console/utils/types';
 
 const POLL_INTERVAL = 3000;
@@ -63,12 +70,27 @@ class DraftTask {
   @tracked name: string;
   @tracked service: string;
   @tracked command: string;
+  @tracked schedule: string;
 
   constructor(task: Task) {
     this.name = task.name;
     this.service = task.service;
     this.command = task.command;
+    this.schedule = task.schedule ?? '';
   }
+}
+
+/** Why a scheduled time was skipped, as the tasks list says it. */
+const SKIP_REASONS: Record<TaskSkipReason, string> = {
+  stopped: 'アプリが停止中でした',
+  not_deployed: 'デプロイされていませんでした',
+  overlap: '前の回の実行が終わっていませんでした',
+  busy: 'デプロイかほかの操作が 10 分以上続いていました',
+  error: '実行できませんでした',
+};
+
+function isScheduled(run: TaskRun): boolean {
+  return run.trigger === 'scheduled';
 }
 
 function statusKind(run: TaskRun) {
@@ -116,7 +138,7 @@ export default class AppTasksTemplate extends Component<Signature> {
   @service declare poller: PollerService;
   @service declare session: SessionService;
 
-  tasks = new Loadable<Task[]>(() => this.api.listTasks(this.app.slug));
+  tasks = new Loadable<TaskList>(() => this.api.listTasks(this.app.slug));
   runs = new Loadable<TaskRun[]>(() => this.api.listTaskRuns(this.app.slug));
   services = new Loadable<ServiceStatus[]>(() =>
     this.api.listServices(this.app.slug),
@@ -131,6 +153,8 @@ export default class AppTasksTemplate extends Component<Signature> {
   @tracked drafts: DraftTask[] = [];
   @tracked saving = false;
   @tracked saveError: unknown = null;
+  /** The schedules a save would add or change on a production app. */
+  @tracked pendingSchedules: Task[] | null = null;
 
   @tracked pending: RunTarget | null = null;
   @tracked starting = false;
@@ -155,7 +179,7 @@ export default class AppTasksTemplate extends Component<Signature> {
   }
 
   get canEditTasks(): boolean {
-    return this.canManage && Boolean(this.tasks.value?.length);
+    return this.canManage && Boolean(this.tasks.value?.tasks.length);
   }
 
   canCancel = (run: TaskRun): boolean => this.canManage && isActive(run);
@@ -196,8 +220,47 @@ export default class AppTasksTemplate extends Component<Signature> {
   }
 
   get registered(): Task[] {
-    return this.tasks.value ?? [];
+    return this.tasks.value?.tasks ?? [];
   }
+
+  /** The zone schedules are read in (`config.toml`'s timezone). */
+  get timeZone(): string {
+    return this.tasks.value?.time_zone ?? 'Asia/Tokyo';
+  }
+
+  get hasSchedules(): boolean {
+    return this.registered.some((task) => Boolean(task.schedule));
+  }
+
+  nextRun = (task: Task): string =>
+    formatScheduleTime(task.next_run_at, this.timeZone);
+
+  /**
+   * The latest skipped time of a task, unless a scheduled run of it started
+   * since: then the skip is old news.
+   */
+  skipOf = (task: Task): { at: string; reason: string } | null => {
+    const at = task.last_skipped_at;
+    if (!task.schedule || !at) return null;
+    const ranSince = this.history.some(
+      (run) =>
+        isScheduled(run) &&
+        run.task_name === task.name &&
+        Date.parse(run.started_at) > Date.parse(at),
+    );
+    if (ranSince) return null;
+    const reason = task.last_skip_reason
+      ? SKIP_REASONS[task.last_skip_reason]
+      : '見送りました';
+    const detail =
+      task.last_skip_reason === 'error' && task.last_skip_detail
+        ? `: ${task.last_skip_detail}`
+        : '';
+    return {
+      at: formatScheduleTime(at, this.timeZone),
+      reason: `${reason}${detail}`,
+    };
+  };
 
   get history(): TaskRun[] {
     return this.runs.value ?? [];
@@ -364,7 +427,12 @@ export default class AppTasksTemplate extends Component<Signature> {
   addDraft = () => {
     this.drafts = [
       ...this.drafts,
-      new DraftTask({ name: '', service: this.app.web_service, command: '' }),
+      new DraftTask({
+        name: '',
+        service: this.app.web_service,
+        command: '',
+        schedule: '',
+      }),
     ];
   };
 
@@ -372,26 +440,60 @@ export default class AppTasksTemplate extends Component<Signature> {
     this.drafts = this.drafts.filter((entry) => entry !== draft);
   };
 
-  setDraft = (draft: DraftTask, field: 'name' | 'service' | 'command') =>
-    setValue(draft, field);
+  setDraft = (
+    draft: DraftTask,
+    field: 'name' | 'service' | 'command' | 'schedule',
+  ) => setValue(draft, field);
 
   stopEditing = () => {
     this.editing = false;
     this.saveError = null;
   };
 
+  private get draftTasks(): Task[] {
+    return this.drafts.map((draft) => ({
+      name: draft.name.trim(),
+      service: draft.service.trim(),
+      command: draft.command.trim(),
+      schedule: draft.schedule.trim().replace(/\s+/g, ' '),
+    }));
+  }
+
+  /**
+   * A production app asks first when the save makes koroku run something
+   * on its own: a schedule added or changed (ARCHITECTURE 9.6).
+   */
   save = async () => {
+    const drafts = this.draftTasks;
+    if (this.args.model.isProduction) {
+      const before = new Map(
+        this.registered.map((task) => [task.name, task.schedule ?? '']),
+      );
+      const scheduled = drafts.filter(
+        (task) => task.schedule && before.get(task.name) !== task.schedule,
+      );
+      if (scheduled.length > 0) {
+        this.pendingSchedules = scheduled;
+        return;
+      }
+    }
+    await this.store(drafts);
+  };
+
+  confirmSave = async () => {
+    await this.store(this.draftTasks);
+    this.pendingSchedules = null;
+  };
+
+  cancelSave = () => {
+    this.pendingSchedules = null;
+  };
+
+  private async store(drafts: Task[]): Promise<void> {
     this.saving = true;
     this.saveError = null;
     try {
-      const saved = await this.api.putTasks(
-        this.app.slug,
-        this.drafts.map((draft) => ({
-          name: draft.name.trim(),
-          service: draft.service.trim(),
-          command: draft.command.trim(),
-        })),
-      );
+      const saved = await this.api.putTasks(this.app.slug, drafts);
       this.tasks.set(saved);
       this.editing = false;
     } catch (error) {
@@ -399,7 +501,7 @@ export default class AppTasksTemplate extends Component<Signature> {
     } finally {
       this.saving = false;
     }
-  };
+  }
 
   <template>
     <div class="pane-notices" aria-live="polite">
@@ -420,6 +522,9 @@ export default class AppTasksTemplate extends Component<Signature> {
         <Banner @tone="warning" data-test-tasks-stopped>
           アプリは停止中です。コマンドは実行できますが、DB
           など依存するサービスも止まっているため、つながらずに失敗することがあります。
+          {{#if this.hasSchedules}}
+            定期実行の予定は、停止している間は見送ります。
+          {{/if}}
         </Banner>
       {{/if}}
       <ErrorMessage @error={{this.runError}} @showDetails={{true}} />
@@ -510,6 +615,26 @@ export default class AppTasksTemplate extends Component<Signature> {
                       {{on "input" (this.setDraft draft "command")}}
                     />
                   </FormField>
+                  <FormField
+                    class="task-field-schedule"
+                    @label="予定（任意）"
+                    @error={{this.draftError index "schedule"}}
+                    as |field|
+                  >
+                    <input
+                      id={{field.id}}
+                      type="text"
+                      class="mono"
+                      spellcheck="false"
+                      autocomplete="off"
+                      placeholder="0 3 * * *"
+                      value={{draft.schedule}}
+                      aria-describedby="task-schedule-help {{field.describedBy}}"
+                      aria-invalid={{field.invalid}}
+                      data-test-draft-schedule
+                      {{on "input" (this.setDraft draft "schedule")}}
+                    />
+                  </FormField>
                   <Button
                     @variant="ghost"
                     @size="small"
@@ -520,6 +645,23 @@ export default class AppTasksTemplate extends Component<Signature> {
                 </li>
               {{/each}}
             </ol>
+            <p
+              id="task-schedule-help"
+              class="task-schedule-help"
+              data-test-schedule-help
+            >
+              予定を書くと、その時刻に koroku が実行します。cron の 5 つの欄（分
+              時 日 月 曜日）で書き、時刻は
+              <strong>{{this.timeZone}}</strong>
+              で読みます。例:
+              <code>0 3 * * *</code>
+              は毎日 3:00、<code>*/15 * * * *</code>
+              は 15 分ごと、<code>0 9 * * 1-5</code>
+              は平日の
+              9:00。空なら手で実行するときだけ動きます。アクセスがない間は止めているアプリでも、アプリは起こさず、そのサービスが
+              <code>depends_on</code>
+              で依存するサービス（DB など）だけを起動して実行します。
+            </p>
             <div class="task-editor-footer">
               <Button
                 @variant="ghost"
@@ -566,8 +708,8 @@ export default class AppTasksTemplate extends Component<Signature> {
                 {{/each}}
               </div>
             </:loading>
-            <:default as |tasks|>
-              {{#if tasks.length}}
+            <:default as |list|>
+              {{#if list.tasks.length}}
                 <RowList class="task-rows" @label="登録したタスク">
                   <:header>
                     <span>名前</span>
@@ -576,7 +718,7 @@ export default class AppTasksTemplate extends Component<Signature> {
                     <span></span>
                   </:header>
                   <:rows as |Row|>
-                    {{#each tasks key="name" as |task|}}
+                    {{#each list.tasks key="name" as |task|}}
                       <Row data-test-task={{task.name}}>
                         <div class="task-name">{{task.name}}</div>
                         <div class="task-service">
@@ -589,6 +731,29 @@ export default class AppTasksTemplate extends Component<Signature> {
                             class="mono"
                             title={{task.command}}
                           >{{task.command}}</code>
+                          {{#if task.schedule}}
+                            <p class="task-schedule" data-test-task-schedule>
+                              <Badge>定期</Badge>
+                              <code class="mono">{{task.schedule}}</code>
+                              {{#if task.next_run_at}}
+                                <span data-test-task-next-run>次回
+                                  {{this.nextRun task}}</span>
+                                <TimeUntil
+                                  class="task-schedule-until"
+                                  @time={{task.next_run_at}}
+                                />
+                              {{/if}}
+                            </p>
+                            {{#let (this.skipOf task) as |skip|}}
+                              {{#if skip}}
+                                <p
+                                  class="task-schedule-skip"
+                                  data-test-task-skip
+                                >{{skip.at}}
+                                  の予定は見送りました（{{skip.reason}}）</p>
+                              {{/if}}
+                            {{/let}}
+                          {{/if}}
                         </div>
                         <div class="task-action">
                           {{#if this.canManage}}
@@ -778,6 +943,12 @@ export default class AppTasksTemplate extends Component<Signature> {
                           {{on "click" (fn this.toggle run)}}
                         >{{if run.task_name run.task_name run.command}}</button>
                         <span class="deploy-meta">
+                          {{#if (isScheduled run)}}
+                            <Badge
+                              title="予定の時刻に koroku が実行しました"
+                              data-test-run-scheduled
+                            >定期</Badge>
+                          {{/if}}
                           <span class="mono">{{run.service}}</span>
                           {{#if (exitLabel run)}}
                             <span data-test-exit-code>{{exitLabel run}}</span>
@@ -878,6 +1049,28 @@ export default class AppTasksTemplate extends Component<Signature> {
           class="code-block task-dialog-command"
           data-test-dialog-command
         >{{this.pending.command}}</pre>
+        <p>本番のデータを書き換えるコマンドは取り消せません。</p>
+      </ConfirmDialog>
+    {{/if}}
+
+    {{#if this.pendingSchedules}}
+      <ConfirmDialog
+        @title="本番アプリのタスクを定期実行しますか？"
+        @confirmLabel="保存する"
+        @busy={{this.saving}}
+        @onConfirm={{this.confirmSave}}
+        @onCancel={{this.cancelSave}}
+      >
+        <p>本番アプリ
+          <strong>{{this.app.slug}}</strong>
+          で、次のタスクを予定の時刻に確認なしで実行します（時刻は
+          {{this.timeZone}}）。</p>
+        <ul class="task-dialog-schedules" data-test-dialog-schedules>
+          {{#each this.pendingSchedules as |task|}}
+            <li><strong>{{task.name}}</strong>
+              <code class="mono">{{task.schedule}}</code></li>
+          {{/each}}
+        </ul>
         <p>本番のデータを書き換えるコマンドは取り消せません。</p>
       </ConfirmDialog>
     {{/if}}
