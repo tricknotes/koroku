@@ -71,7 +71,7 @@ The page URL selects what the API answers and, optionally, the theme:
 
 Further scenarios cover single screens (`host-trouble`, `unconfigured`,
 `fresh`, `backups-down`, `volumes-down`, `stale-login`, `rollback`, `copy-running`,
-`copy-failed`, `webhook-unset`, `member`); `/__mock` lists every scenario with
+`copy-failed`, `webhook-unset`, `sleeping`, `member`); `/__mock` lists every scenario with
 what it shows. `member` logs in as a member with a different role on each
 app instead of the owner (ARCHITECTURE 10.7).
 

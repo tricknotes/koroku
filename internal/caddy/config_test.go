@@ -91,7 +91,34 @@ func goldenInputs() map[string]Input {
 		{Slug: "paused", HostPort: 20005, Hostnames: []string{"paused.dev.example.com"}, Protected: true, NoIndex: true, Stopped: true},
 	}
 
+	// Sleeping apps (ARCHITECTURE 8.4): one public with a primary domain,
+	// one protected with exempt paths, one awake, and one both stopped and
+	// sleeping (stopped wins).
+	sleeping := baseInput()
+	sleeping.AccessLogDir = "/var/log/caddy/apps"
+	sleeping.Apps = []App{
+		{
+			Slug:      "blog",
+			HostPort:  20001,
+			Hostnames: []string{"blog.dev.example.com", "example.org", "www.example.org"},
+			Primary:   "www.example.org",
+			Sleeping:  true,
+		},
+		{
+			Slug:        "shop-staging",
+			HostPort:    20002,
+			Hostnames:   []string{"shop-staging.dev.example.com"},
+			Protected:   true,
+			ExemptPaths: []string{"/webhooks/"},
+			NoIndex:     true,
+			Sleeping:    true,
+		},
+		{Slug: "shop", HostPort: 20003, Hostnames: []string{"shop.dev.example.com"}},
+		{Slug: "paused", HostPort: 20004, Hostnames: []string{"paused.dev.example.com"}, Stopped: true, Sleeping: true},
+	}
+
 	return map[string]Input{
+		"sleeping":         sleeping,
 		"protected":        protected,
 		"local":            local,
 		"minimal":          minimal,
@@ -576,6 +603,86 @@ func TestGenerateProtectedRoutes(t *testing.T) {
 	}
 	if got := handlerNames(find("paused.dev.example.com")); !slices.Equal(got, []string{"headers", "static_response"}) {
 		t.Errorf("stopped protected handlers = %v", got)
+	}
+}
+
+// A sleeping app keeps everything in front of it (the redirect to the
+// primary hostname, the gate) and only its upstream becomes koroku, told
+// which app the request is for.
+func TestGenerateSleepingRoutes(t *testing.T) {
+	out, err := Generate(goldenInputs()["sleeping"])
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	var cfg struct {
+		Apps struct {
+			HTTP struct {
+				Servers map[string]struct {
+					Routes []testRoute `json:"routes"`
+				} `json:"servers"`
+			} `json:"http"`
+		} `json:"apps"`
+	}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	find := func(host string) testRoute {
+		t.Helper()
+		for _, r := range cfg.Apps.HTTP.Servers["https"].Routes {
+			if len(r.Match) == 1 && strings.Contains(string(r.Match[0]["host"]), `"`+host+`"`) {
+				return r
+			}
+		}
+		t.Fatalf("no route for %s", host)
+		return testRoute{}
+	}
+	wake := func(t *testing.T, h map[string]json.RawMessage, slug string) {
+		t.Helper()
+		if got := compactJSON(t, h["upstreams"]); got != `[{"dial":"127.0.0.1:8080"}]` {
+			t.Errorf("upstreams = %s, want koroku", got)
+		}
+		if got := compactJSON(t, h["headers"]); got != `{"request":{"set":{"X-Koroku-Wake":["`+slug+`"]}}}` {
+			t.Errorf("headers = %s", got)
+		}
+		if got := compactJSON(t, h["flush_interval"]); got != `-1` {
+			t.Errorf("flush_interval = %s", got)
+		}
+	}
+
+	if got := handlerNames(find("blog.dev.example.com")); !slices.Equal(got, []string{"static_response"}) {
+		t.Errorf("the redirect of a sleeping app must stay: %v", got)
+	}
+	served := find("www.example.org")
+	if got := handlerNames(served); !slices.Equal(got, []string{"reverse_proxy"}) {
+		t.Fatalf("sleeping public handlers = %v", got)
+	}
+	wake(t, served.Handle[0], "blog")
+
+	protected := find("shop-staging.dev.example.com")
+	if got := handlerNames(protected); !slices.Equal(got, []string{"headers", "subroute"}) {
+		t.Fatalf("sleeping protected handlers = %v", got)
+	}
+	var sub []testRoute
+	if err := json.Unmarshal(protected.Handle[1]["routes"], &sub); err != nil {
+		t.Fatal(err)
+	}
+	if len(sub) != 4 {
+		t.Fatalf("subroutes = %d", len(sub))
+	}
+	// The gate check still runs first; only what passes it is forwarded.
+	if got := compactJSON(t, sub[2].Handle[0]["rewrite"]); !strings.Contains(got, GateCheckPath) {
+		t.Errorf("the gate check must stay in front: %s", got)
+	}
+	if got := handlerNames(sub[3]); !slices.Equal(got, []string{"headers", "reverse_proxy"}) {
+		t.Fatalf("last subroute = %v", got)
+	}
+	wake(t, sub[3].Handle[1], "shop-staging")
+
+	if got := compactJSON(t, find("shop.dev.example.com").Handle[0]["upstreams"]); got != `[{"dial":"127.0.0.1:20003"}]` {
+		t.Errorf("an awake app goes to its port: %s", got)
+	}
+	if got := handlerNames(find("paused.dev.example.com")); !slices.Equal(got, []string{"static_response"}) {
+		t.Errorf("a stopped app answers the 503 page even when marked sleeping: %v", got)
 	}
 }
 

@@ -202,9 +202,16 @@ func (e *Engine) executeTask(lifetime, jobCtx context.Context, app store.App, ru
 	log.Printf("$ %s", run.Command)
 	log.Printf("Running in service %s of deployment #%d.", run.Service, *run.DeploymentID)
 	logger.Info("command started", "service", run.Service, "task", run.TaskName)
-	err := e.opts.Runner.Run(ctx, runner.Cmd{
-		Name: "docker", Args: args, Dir: dir, Stdout: log.Writer(), Stderr: log.Writer(),
-	})
+	// `run --no-deps` needs the services it talks to running: a sleeping
+	// app is woken first, under the lock this run holds (ARCHITECTURE 8.4).
+	wakeCtx, cancelWake := context.WithTimeout(ctx, e.wakeTimeout())
+	_, err := e.wakeLocked(wakeCtx, app.ID, log.Printf)
+	cancelWake()
+	if err == nil {
+		err = e.opts.Runner.Run(ctx, runner.Cmd{
+			Name: "docker", Args: args, Dir: dir, Stdout: log.Writer(), Stderr: log.Writer(),
+		})
+	}
 
 	status, message := store.StatusSucceeded, ""
 	var exitCode *int

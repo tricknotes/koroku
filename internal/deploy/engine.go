@@ -176,6 +176,12 @@ type Engine struct {
 	// finishTimeout bounds the database writes that record a result.
 	finishTimeout time.Duration
 
+	// wakes are the wakes of sleeping apps in progress and wakeFailed the
+	// ones that failed recently, by app ID (guarded by mu; ARCHITECTURE
+	// 8.4).
+	wakes      map[int64]*wakeCall
+	wakeFailed map[int64]wakeFailure
+
 	// queueing is held by Enqueue and EnqueueRollback from inserting a
 	// deployment until its log file is prepared, and briefly by the worker
 	// before it opens a log. The worker can see the new row as soon as it
@@ -196,6 +202,9 @@ func New(opts Options) *Engine {
 		wake:    make(chan struct{}, 1),
 		cancels: map[int64]context.CancelCauseFunc{},
 		tasks:   map[int64]*runningTask{},
+
+		wakes:      map[int64]*wakeCall{},
+		wakeFailed: map[int64]wakeFailure{},
 
 		lifetime: context.Background(),
 
@@ -523,6 +532,9 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 	appLock := e.locks.get(app.ID)
 	appLock.Lock()
 	defer appLock.Unlock()
+	// The backup before the deployment may start a service of a sleeping
+	// app under this lock.
+	jobCtx = withHeldLock(jobCtx, app.ID)
 
 	logger.Info("deployment started", "commit", d.CommitSHA)
 	run := e.execute
@@ -541,6 +553,11 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 				log.Printf("koroku is shutting down; the previous release is not restored automatically.")
 			} else {
 				rolledBack = e.rollback(app, log)
+				// A sleeping app was woken by the start step, which may
+				// have failed before the route step.
+				routeCtx, cancelRoute := context.WithTimeout(context.WithoutCancel(ctx), e.finishTimeout)
+				e.syncRoutes(routeCtx, "deployment failed")
+				cancelRoute()
 			}
 		}
 	}

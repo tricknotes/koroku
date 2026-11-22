@@ -117,6 +117,12 @@ type Options struct {
 	AccessPollInterval time.Duration
 	// MaintainInterval is the period of RunMaintenance. Default 1h.
 	MaintainInterval time.Duration
+
+	// OnAccess, when set, is called with every new access log entry of an
+	// app as it is collected (not with the entries read again after a
+	// restart). It runs on the collecting goroutine, must return quickly
+	// and must not keep entry. The idle tracker counts requests with it (ARCHITECTURE 8.4).
+	OnAccess func(slug string, entry []byte)
 }
 
 // Collector owns the local log files: it writes them from the running apps,
@@ -130,6 +136,7 @@ type Collector struct {
 	log  *slog.Logger
 
 	composePlugin func() string
+	onAccess      func(slug string, entry []byte)
 
 	retentionDays    int
 	maxLine          int
@@ -170,6 +177,7 @@ func New(opts Options) (*Collector, error) {
 		loc:              opts.Location,
 		apps:             opts.Apps,
 		composePlugin:    opts.ComposePlugin,
+		onAccess:         opts.OnAccess,
 		log:              opts.Logger,
 		retentionDays:    orDefault(opts.RetentionDays, 14),
 		maxLine:          orDefault(opts.MaxLineBytes, 16<<10),

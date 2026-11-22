@@ -19,11 +19,14 @@ import (
 // The actions and the shape of their details are part of the API
 // (docs/API.md); the console turns them into sentences.
 const (
-	actAppCreated       = "app.created"          // {"environment"}
-	actSettingsChanged  = "app.settings_changed" // {"changes": [{"field", "from", "to"} | {"field", "secret": true}]}
-	actAppStarted       = "app.started"
-	actAppStopped       = "app.stopped"
-	actAppRestarted     = "app.restarted"
+	actAppCreated      = "app.created"          // {"environment"}
+	actSettingsChanged = "app.settings_changed" // {"changes": [{"field", "from", "to"} | {"field", "secret": true}]}
+	actAppStarted      = "app.started"
+	actAppStopped      = "app.stopped"
+	actAppRestarted    = "app.restarted"
+	// actAppWoken: a sleeping app was woken from the console. Sleeps and
+	// wakes by requests are not recorded (ARCHITECTURE 8.4).
+	actAppWoken         = "app.woken"
 	actEnvChanged       = "env.changed"       // {"added", "changed", "removed": [keys], "renamed": [{"from", "to"}], "replaced"}
 	actDomainAdded      = "domain.added"      // {"hostname", "status"}
 	actDomainVerified   = "domain.verified"   // {"hostname", "status"}
@@ -150,6 +153,8 @@ var settingFields = []settingField{
 	{name: "auto_deploy", get: func(a store.App) any { return a.AutoDeploy }},
 	{name: "auto_deploy_branch", get: func(a store.App) any { return a.AutoDeployBranch }},
 	{name: "auto_deploy_workflow", get: func(a store.App) any { return a.AutoDeployWorkflow }},
+	{name: "idle_sleep", get: func(a store.App) any { return a.IdleSleep }},
+	{name: "idle_sleep_minutes", get: func(a store.App) any { return a.IdleSleepMinutes }},
 }
 
 func nonNilMap(m map[string]string) map[string]string {

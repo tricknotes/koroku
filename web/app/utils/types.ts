@@ -154,6 +154,11 @@ export interface SystemInfo {
    * (ARCHITECTURE 5.2); absent on older backends.
    */
   webhook?: { url: string; secret_configured: boolean };
+  /**
+   * Whether apps can sleep while idle on this host: Caddy writes per-app
+   * access logs (ARCHITECTURE 8.4). Absent on older backends.
+   */
+  idle_sleep?: { available: boolean };
 }
 
 /** One line of `docker system df` (`GET /api/system/docker`). */
@@ -321,6 +326,11 @@ export interface App {
    * e.g. `.github/workflows/image.yml`; '' deploys on push.
    */
   auto_deploy_workflow?: string;
+  /** Stop the app after `idle_sleep_minutes` without a request (ARCHITECTURE 8.4). */
+  idle_sleep?: boolean;
+  idle_sleep_minutes?: number;
+  /** When the app went to sleep while idle; null while it is awake. */
+  sleeping_since?: string | null;
 }
 
 export interface AppPatch {
@@ -349,6 +359,8 @@ export interface AppPatch {
   auto_deploy?: boolean;
   auto_deploy_branch?: string;
   auto_deploy_workflow?: string;
+  idle_sleep?: boolean;
+  idle_sleep_minutes?: number;
 }
 
 export interface NewApp {

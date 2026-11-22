@@ -196,6 +196,9 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 
 	// 6. Start. From here on a failure rolls back to the previous release.
 	log.Step(StepStart, "Starting containers")
+	if err := e.endSleep(ctx, app, log); err != nil {
+		return false, err
+	}
 	if err := writeFileAtomic(e.EnvFile(app.Slug), []byte(envContent), 0o600); err != nil {
 		return false, fmt.Errorf("write env file: %w", err)
 	}

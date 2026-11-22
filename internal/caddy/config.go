@@ -98,6 +98,12 @@ type App struct {
 	Primary string
 	// Stopped keeps the route but answers 503 with a fixed page instead of proxying.
 	Stopped bool
+	// Sleeping sends the requests that would reach the app to koroku, at
+	// Input.ConsoleUpstream, which wakes the app and then serves them
+	// (ARCHITECTURE 8.4). Everything in front of the app (the redirect to
+	// the primary hostname, the access protection) stays as it is.
+	// Stopped wins over it.
+	Sleeping bool
 	// Protected lets only browsers with a valid gate cookie through; others
 	// are sent to the console to log in (ARCHITECTURE 8.3). koroku, at
 	// Input.ConsoleUpstream, decides. It does not apply to a stopped app.
@@ -362,7 +368,7 @@ func appRoutes(app App, gateUpstream string) []obj {
 	case app.Protected:
 		handlers = append(handlers, obj{"handler": "subroute", "routes": gateRoutes(app, gateUpstream)})
 	default:
-		handlers = append(handlers, appProxy(app))
+		handlers = append(handlers, upstream(app, gateUpstream))
 	}
 	return append(routes, obj{
 		"match":    []obj{{"host": served}},
@@ -454,7 +460,35 @@ func gateRoutes(app App, gateUpstream string) []obj {
 			{"search_regexp": ";\\s*" + GateCookie + "=[^;]*", "replace": ""},
 		}}},
 	}
-	return append(routes, obj{"handle": []obj{strip, appProxy(app)}})
+	return append(routes, obj{"handle": []obj{strip, upstream(app, gateUpstream)}})
+}
+
+// WakeHeader names the app a request forwarded to koroku is for, while
+// the app sleeps (ARCHITECTURE 8.4). Caddy sets it, replacing whatever the
+// client sent.
+const WakeHeader = "X-Koroku-Wake"
+
+// upstream is where the requests that pass everything in front of the app
+// go: the app itself, or koroku while the app sleeps.
+func upstream(app App, korokuUpstream string) obj {
+	if app.Sleeping {
+		return wakeProxy(app, korokuUpstream)
+	}
+	return appProxy(app)
+}
+
+// wakeProxy forwards to koroku, which wakes the app, waits for it and
+// proxies the request on. Responses stream like the app's own.
+func wakeProxy(app App, korokuUpstream string) obj {
+	return obj{
+		"handler":   "reverse_proxy",
+		"upstreams": []obj{{"dial": korokuUpstream}},
+		"headers": obj{"request": obj{"set": obj{
+			WakeHeader: []string{app.Slug},
+		}}},
+		"flush_interval":     -1,
+		"stream_close_delay": streamCloseDelay,
+	}
 }
 
 // CheckExemptPath accepts a path prefix that may skip the access protection:

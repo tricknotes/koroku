@@ -175,6 +175,9 @@ func (a *accessTail) line(raw []byte, truncated bool) {
 		a.seen[key]--
 		return
 	}
+	if !a.catchUp && a.c.onAccess != nil {
+		a.c.onAccess(a.app.Slug, raw)
+	}
 	a.batch = append(a.batch, Line{Service: AccessService, Time: ts, Text: text})
 	a.keys = append(a.keys, key)
 }

@@ -329,6 +329,11 @@ export default class ApiService extends Service {
     return this.request('POST', `/api/apps/${seg(slug)}/${action}`);
   }
 
+  /** Wakes a sleeping app and resolves once it answers (ARCHITECTURE 8.4). */
+  wakeApp(slug: string): Promise<App> {
+    return this.request('POST', `/api/apps/${seg(slug)}/wake`);
+  }
+
   async listServices(slug: string): Promise<ServiceStatus[]> {
     const { services } = await this.request<{
       services: ServiceStatus[] | null;
