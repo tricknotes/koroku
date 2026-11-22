@@ -9,7 +9,7 @@ import type {
 } from './types';
 
 export type AppState =
-  'deploying' | 'failed' | 'undeployed' | 'stopped' | 'running';
+  'deploying' | 'failed' | 'undeployed' | 'stopped' | 'sleeping' | 'running';
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'muted';
 
@@ -31,7 +31,10 @@ export const STATUS_LABELS: Record<StatusKind, string> = {
 
 type AppLike = Pick<
   App,
-  'desired_state' | 'current_deployment' | 'latest_deployment'
+  | 'desired_state'
+  | 'current_deployment'
+  | 'latest_deployment'
+  | 'sleeping_since'
 >;
 
 export function isActiveDeployment(
@@ -51,6 +54,7 @@ export function deriveAppState(app: AppLike): AppState {
   if (latest?.status === 'failed') return 'failed';
   if (!app.current_deployment) return 'undeployed';
   if (app.desired_state === 'stopped') return 'stopped';
+  if (app.sleeping_since) return 'sleeping';
   return 'running';
 }
 
@@ -59,6 +63,7 @@ export const APP_STATE_LABELS: Record<AppState, string> = {
   failed: STATUS_LABELS.failed,
   undeployed: '未デプロイ',
   stopped: STATUS_LABELS.stopped,
+  sleeping: '休止中',
   running: STATUS_LABELS.running,
 };
 
@@ -67,6 +72,8 @@ export const APP_STATE_KINDS: Record<AppState, StatusKind> = {
   failed: 'failed',
   undeployed: 'stopped',
   stopped: 'stopped',
+  // Grey like a stopped app; the label tells them apart.
+  sleeping: 'stopped',
   running: 'running',
 };
 
@@ -77,6 +84,8 @@ export const APP_STATE_HINTS: Record<AppState, string> = {
     '直近のデプロイに失敗しました。以前のリリースがあれば、それが応答し続けています。',
   undeployed: 'まだ一度もデプロイされていません。',
   stopped: '停止中です。アクセスには 503 のページが返ります。',
+  sleeping:
+    'アクセスがないため休止しています。次のアクセスで起動し、最初の応答は起動を待ちます。',
   running: '稼働中です。',
 };
 

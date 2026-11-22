@@ -26,6 +26,16 @@
   margin-top: var(--space-5);
 }
 
+/* Idle sleep: the idle time sits apart from the switch, as narrow as its words. */
+.idle-sleep-minutes,
+.idle-sleep-unavailable {
+  margin-top: var(--space-5);
+}
+
+.idle-sleep-minutes select {
+  max-width: 12rem;
+}
+
 /* The paths that skip the protection, one per row. */
 .exempt-rows {
   display: flex;
