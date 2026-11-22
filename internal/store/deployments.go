@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -415,6 +416,63 @@ func (s *Store) SetDeploymentEnvFingerprints(ctx context.Context, id int64, fing
 		return fmt.Errorf("set env fingerprints of deployment %d: %w", id, ErrNotFound)
 	}
 	return nil
+}
+
+// SetDeploymentMemoryReservations records the memory each service of a
+// deployment's release reserves, in bytes (ARCHITECTURE 6.2). A staging
+// release records an empty map.
+func (s *Store) SetDeploymentMemoryReservations(ctx context.Context, id int64, reservations map[string]int64) error {
+	if reservations == nil {
+		reservations = map[string]int64{}
+	}
+	data, err := json.Marshal(reservations)
+	if err != nil {
+		return fmt.Errorf("set memory reservations: %w", err)
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE deployments SET memory_reservations = ? WHERE id = ?`, string(data), id)
+	if err != nil {
+		return fmt.Errorf("set memory reservations: %w", err)
+	}
+	return requireOneRow(res, "set memory reservations")
+}
+
+// DeploymentMemoryReservations returns what SetDeploymentMemoryReservations
+// recorded for each of the given deployments. Deployments without a
+// record (or that do not exist) are left out.
+func (s *Store) DeploymentMemoryReservations(ctx context.Context, ids ...int64) (map[int64]map[string]int64, error) {
+	out := map[int64]map[string]int64{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?, ", len(ids)), ", ")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, memory_reservations FROM deployments
+		WHERE memory_reservations IS NOT NULL AND id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("memory reservations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		var data string
+		if err := rows.Scan(&id, &data); err != nil {
+			return nil, fmt.Errorf("memory reservations: %w", err)
+		}
+		reservations := map[string]int64{}
+		if err := json.Unmarshal([]byte(data), &reservations); err != nil {
+			return nil, fmt.Errorf("memory reservations of deployment %d: %w", id, err)
+		}
+		out[id] = reservations
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("memory reservations: %w", err)
+	}
+	return out, nil
 }
 
 // DeploymentEnvFingerprints returns what SetDeploymentEnvFingerprints

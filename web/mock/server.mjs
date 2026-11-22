@@ -44,6 +44,7 @@ import {
   startBackup,
   startDeployment,
   startRollback,
+  memoryReservation,
 } from './fixtures.mjs';
 import { activityPage, recordActivity } from './activity.mjs';
 import { deploymentLog } from './deploy-log.mjs';
@@ -182,7 +183,11 @@ function countPending(state, slug) {
   state.apps.get(slug).pending_domains = pending.length;
 }
 
-route('GET', '/api/system', ({ state }) => state.system);
+route('GET', '/api/system', ({ state, scenario }) => ({
+  ...state.system,
+  // Owner only: it names other apps (ARCHITECTURE 6.2).
+  memory_reservation: scenario === 'member' ? null : memoryReservation(state),
+}));
 route('GET', '/api/system/github', () => ({
   configured: true,
   app: {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"path"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tricknotes/koroku/internal/caddy"
+	"github.com/tricknotes/koroku/internal/compose"
 	"github.com/tricknotes/koroku/internal/envreq"
 	"github.com/tricknotes/koroku/internal/gitrepo"
 	"github.com/tricknotes/koroku/internal/store"
@@ -52,6 +54,8 @@ type appJSON struct {
 	RelaxPolicy          bool              `json:"relax_policy"`
 	MemoryLimit          string            `json:"memory_limit"`
 	ServiceMemoryLimits  map[string]string `json:"service_memory_limits"`
+	MemoryReservation    string            `json:"memory_reservation"`
+	ServiceReservations  map[string]string `json:"service_memory_reservations"`
 	BackupExcludeVolumes []string          `json:"backup_exclude_volumes"`
 	DumpHookService      string            `json:"dump_hook_service"`
 	DumpHookCommand      string            `json:"dump_hook_command"`
@@ -104,6 +108,8 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		RelaxPolicy:          app.RelaxPolicy,
 		MemoryLimit:          app.MemoryLimit,
 		ServiceMemoryLimits:  app.ServiceMemoryLimits,
+		MemoryReservation:    app.MemoryReservation,
+		ServiceReservations:  app.ServiceMemoryReservations,
 		BackupExcludeVolumes: app.BackupExcludeVolumes,
 		DumpHookService:      app.DumpHookService,
 		DumpHookCommand:      app.DumpHookCommand,
@@ -191,6 +197,8 @@ type appInput struct {
 	RelaxPolicy          *bool              `json:"relax_policy"`
 	MemoryLimit          *string            `json:"memory_limit"`
 	ServiceMemoryLimits  *map[string]string `json:"service_memory_limits"`
+	MemoryReservation    *string            `json:"memory_reservation"`
+	ServiceReservations  *map[string]string `json:"service_memory_reservations"`
 	BackupExcludeVolumes *[]string          `json:"backup_exclude_volumes"`
 	DumpHookService      *string            `json:"dump_hook_service"`
 	DumpHookCommand      *string            `json:"dump_hook_command"`
@@ -209,6 +217,54 @@ type appInput struct {
 	AutoDeployWorkflow   *string            `json:"auto_deploy_workflow"`
 	IdleSleep            *bool              `json:"idle_sleep"`
 	IdleSleepMinutes     *int               `json:"idle_sleep_minutes"`
+}
+
+// validateReservations checks the memory reservations (ARCHITECTURE 6.2)
+// against Docker's minimum and against the limit known when saving: the
+// per-service limit, else the app-wide one, else the configured default.
+// A repository's own lower limit is only known at deploy time, where the
+// override cuts the reservation down to it.
+func validateReservations(app store.App, defaultLimit string, errs fieldErrors) {
+	limitOf := func(service string) string {
+		if v := app.ServiceMemoryLimits[service]; v != "" {
+			return v
+		}
+		if app.MemoryLimit != "" {
+			return app.MemoryLimit
+		}
+		return defaultLimit
+	}
+	check := func(field, what, value, service string) {
+		if value == "" || value == "0" {
+			return
+		}
+		if !memoryPattern.MatchString(value) {
+			errs.add(field, what+" must be 0 or a number with an optional unit (b, k, m, g), for example 256m")
+			return
+		}
+		bytes, _ := compose.ParseMemory(value)
+		if bytes < compose.MinReservation {
+			errs.add(field, what+" must be at least 6m, or 0 to reserve nothing")
+			return
+		}
+		limitText := limitOf(service)
+		if limit, ok := compose.ParseMemory(limitText); ok && bytes > limit {
+			errs.add(field, fmt.Sprintf("%s must not exceed the memory limit (%s)", what, limitText))
+		}
+	}
+	check("memory_reservation", "the reservation", app.MemoryReservation, "")
+	for _, name := range slices.Sorted(maps.Keys(app.ServiceMemoryReservations)) {
+		if !servicePattern.MatchString(name) {
+			errs.add("service_memory_reservations", fmt.Sprintf("%q is not a valid service name", truncateForError(name)))
+			continue
+		}
+		value := app.ServiceMemoryReservations[name]
+		if value == "" {
+			errs.add("service_memory_reservations", fmt.Sprintf("the reservation of %s is empty", name))
+			continue
+		}
+		check("service_memory_reservations", "the reservation of "+name, value, name)
+	}
 }
 
 // fieldErrors collects validation problems keyed by JSON field name.
@@ -260,6 +316,15 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 		app.ServiceMemoryLimits = map[string]string{}
 		for name, limit := range *in.ServiceMemoryLimits {
 			app.ServiceMemoryLimits[name] = strings.ToLower(strings.TrimSpace(limit))
+		}
+	}
+	if in.MemoryReservation != nil {
+		app.MemoryReservation = strings.ToLower(strings.TrimSpace(*in.MemoryReservation))
+	}
+	if in.ServiceReservations != nil {
+		app.ServiceMemoryReservations = map[string]string{}
+		for name, value := range *in.ServiceReservations {
+			app.ServiceMemoryReservations[name] = strings.ToLower(strings.TrimSpace(value))
 		}
 	}
 
@@ -558,6 +623,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		IdleSleepMinutes: store.DefaultIdleSleepMinutes,
 	}
 	errs := in.apply(&app, s.cfg.Deploy.AllowFileRepos)
+	validateReservations(app, s.cfg.Deploy.DefaultMemoryLimit, errs)
 	if in.AccessProtection == nil {
 		// Staging apps start closed, production apps open (ARCHITECTURE 8.3).
 		app.AccessProtection = app.Environment == store.EnvironmentStaging
@@ -646,6 +712,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	before := app
 	errs := in.apply(&app, s.cfg.Deploy.AllowFileRepos)
+	validateReservations(app, s.cfg.Deploy.DefaultMemoryLimit, errs)
 	if in.Slug != nil && *in.Slug != app.Slug {
 		// The slug names the Compose project, its volumes and the hostname.
 		errs.add("slug", "cannot be changed")

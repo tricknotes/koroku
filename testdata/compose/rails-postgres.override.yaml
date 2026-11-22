@@ -9,12 +9,14 @@ services:
       resources:
         limits:
           memory: "512m"
+    oom_score_adj: 500
   "migrate":
     image: "koroku-blog-migrate:r42"
     ports: !reset []
     env_file:
       - "/var/lib/koroku/apps/blog/env"
     mem_limit: "512m"
+    oom_score_adj: 500
   "web":
     image: "koroku-blog-web:r42"
     ports: !override
@@ -23,9 +25,11 @@ services:
       - "/var/lib/koroku/apps/blog/env"
     restart: unless-stopped
     mem_limit: "512m"
+    oom_score_adj: 500
   "worker":
     image: "koroku-blog-worker:r42"
     ports: !reset []
     env_file:
       - "/var/lib/koroku/apps/blog/env"
     mem_limit: "512m"
+    oom_score_adj: 500

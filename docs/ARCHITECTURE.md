@@ -260,12 +260,20 @@ services:
     env_file:
       - /var/lib/koroku/apps/app-a/env
     restart: unless-stopped
+    mem_limit: "512m"
+    oom_score_adj: -400
+    mem_reservation: "256m"
   db:
     ports: !reset []
     env_file:
       - /var/lib/koroku/apps/app-a/env
     restart: unless-stopped
+    mem_limit: "512m"
+    oom_score_adj: -400
+    mem_reservation: "256m"
 ```
+
+この例は本番アプリ（`environment = production`）のもの。staging アプリでは `oom_score_adj: 500` になり、`mem_reservation` は付かない（6.2）。
 
 - 公開サービスの `ports` は `!override` で割当ポートに置き換え、他サービスの `ports` は `!reset []` で消す。通常のマージでは `ports` が追記されてしまうため、この 2 つのタグが必要（[Compose merge](https://docs.docker.com/reference/compose-file/merge/)）。
 - ホストポートは 20000 番台からアプリ作成時に 1 つ割り当て、DB で一意に保つ。
@@ -280,6 +288,7 @@ services:
 - `build:` を持つサービスには、リリースごとのイメージ名 `koroku-<slug>-<service>:r<deploy_id>` を override の `image:` で与える。Compose の既定では毎回 `<project>-<service>:latest` に上書きされ、起動に失敗した新版のイメージで旧版のタグが置き換わり、旧リリースのディレクトリで `up` し直しても壊れたイメージが起動してしまう。リリース固有のタグにしておくと、ロールバックは旧版のイメージそのものを起動できる。イメージはリリースディレクトリと一緒に削除する。
 - メモリ上限の決まり方は、優先度の高い順に「アプリ設定のサービス別の値」「アプリ設定の全体値」「リポジトリの Compose が自分で指定した値（`config.toml` の既定値以下のときだけ）」「`config.toml` の既定値（512m）」。既定値は、リポジトリが自分で名乗れる上限でもある。それより大きくしたいときはアプリ設定で指定する（Compose に `mem_limit: 64g` と書くだけで上限を外せてしまうのを防ぐため）。リポジトリ側が `deploy.resources.limits.memory` で書いている場合は override も同じ形式で書く。`mem_limit` と値が食い違うと Compose が `can't set distinct values` で設定全体を拒否するため。
 - リポジトリが `memswap_limit` を書いていて、その値が override で付けるメモリ上限より小さくなる場合は、`memswap_limit` も同じ値に上げる。swap を禁じるために `memswap_limit` を `mem_limit` と同じにしておく書き方はよくあり、そのままアプリ設定で上限を上げると、Docker が「memory+swap が memory より小さい」として起動を拒否するため。上限より大きい値（swap を許す書き方）はそのまま残す。
+- `oom_score_adj` と、メモリの予約（`mem_reservation`、または `deploy.resources.reservations.memory`）は koroku が決めて全サービスに書く。アプリの `environment` で値が変わる（6.2）。
 - override に書くサービスは、リポジトリの Compose を正規化した結果（`config --format json`）に存在するものだけにする。存在しないサービス名を書くと Compose がエラーにするため、正規化 → override 生成 → もう一度正規化してポリシー検査、の 2 回 `config` を実行する。
 - 正規化した JSON には `env_file` の中身が展開されて入るので、ログには出さない。
 - env ファイルの値は Compose に補間されない形で書く。英数字と一部の記号だけの値はそのまま、それ以外はシングルクォート、シングルクォートか改行を含む値はダブルクォートで `\ \" \$ \n` をエスケープする。`$`・空白・`#`・引用符を含む値がコンテナにそのまま届くことを結合テストで確認している。
@@ -318,6 +327,8 @@ Compose には上と同じ結果になる書き方がほかにもあるので、
 | `runtime` | `runc` 以外の `runtime` | 隔離の弱いランタイムを選べる |
 | `memory_guard` | `oom_kill_disable: true`、`memswap_limit: -1` | メモリ上限を実質的に無効にできる |
 
+リポジトリが書いた `oom_score_adj` とメモリの予約は拒否しない。override が必ず上書きするので（6.2）、効かないだけで害がない。拒否すると、ほかの基盤向けにこれらを書いたリポジトリが koroku に載らなくなる。
+
 **書き込み可能な bind mount を禁止する理由**: チェックアウト（リリースディレクトリ）に書き込めるコンテナは、別の bind mount の元になっているパスをホストの任意の場所へのシンボリックリンクに置き換えられる。Docker はコンテナの次回起動時（`restart: unless-stopped` による自動再起動を含む）にリンクをたどるので、アプリのコードを実行できるだけの攻撃者がホストのファイルシステムに届いてしまう。また `koroku` が起動・ロールバックで再利用する Compose ファイルや override も書き換えられる。設定ファイルを渡すための bind は `:ro` を付け、データは named volume に置く（バックアップの対象も named volume だけ）。
 
 - `env_file` のパスを検査するため、`docker compose config` には `--no-env-resolution` を付ける（付けないと env ファイルの中身が `environment` に展開され、パスが消える）。この指定で、正規化した JSON にアプリの環境変数の値が入らなくなる利点もある。Compose 2.30 以上が要る。
@@ -345,6 +356,54 @@ private なイメージ（CI がビルドして `ghcr.io/<owner>/<repo>:sha-...`
 - **マスク**: トークンと、`auths` に書く base64 の値をデプロイログのマスクに加える。
 - **トークンの勧め**: 読み取りだけができるもの。GHCR なら `read:packages` だけを付けた classic な Personal access token か、読み取り専用のボットアカウントのトークン（画面のヒントでも勧める）。
 - 限界: 認証を設定している間、トークンは平文でアプリのディレクトリのファイルにある（root だけが読める。env ファイルと同じ扱い）。Docker の credential helper は使わない（デーモンとして常駐するものが増え、アプリごとに分けにくいため）。
+
+### 6.2 本番アプリをメモリ不足から守る
+
+アプリのメモリの使用量は、アクセスの波、夜間のバッチ、ワンオフのコマンド、デプロイ中のビルドで上下する。重なるとホスト全体でメモリが尽き、カーネルの OOM killer が「いちばん大きいプロセス」を選んで止める。そのままでは、たいていいちばん大きい本番アプリが選ばれる。そこで、アプリの `environment`（8.2）を優先度の印として使い、本番アプリのコンテナを staging より後に止めさせ、メモリが足りなくなったときの回収も staging から先に行わせる。優先度という別の概念は足さない。staging と本番は別アプリとして分けてあり（8.2）、守りたいのは本番、という区別がすでにあるため。
+
+**OOM killer の順序（`oom_score_adj`）**
+
+| 対象 | `oom_score_adj` | 決めているもの |
+| --- | --- | --- |
+| staging アプリのコンテナ | `500` | koroku の override |
+| `koroku` と、そこから起動する `docker compose`・`git`・`restic` | `0` | systemd の既定 |
+| systemd-journald | `-250` | Ubuntu の unit |
+| 本番アプリのコンテナ | `-400` | koroku の override |
+| Caddy | `-450` | プロビジョニングの drop-in（`OOMScoreAdjust`） |
+| dockerd | `-500` | Docker の公式パッケージの unit |
+| containerd とコンテナの shim | `-999`、`-998` | containerd の公式パッケージの unit。shim は containerd の値 + 1 |
+| sshd の待受プロセス | `-1000`（止めない） | OpenSSH |
+
+- OOM killer は、プロセスの使用量（RSS + swap + ページテーブル）を RAM と swap の合計の 1000 分率で表した値に `oom_score_adj` を足した点数が最も大きいプロセスを止める。`oom_score_adj` の 1 は RAM と swap の合計の 0.1%（RAM 4GB + swap 2GB なら約 6MB）に当たる。
+- staging の `500` は約 3GB 分の上乗せで、どの staging のプロセスも、ほかのどのプロセスより先に止まる。
+- 本番の `-400` は約 2.4GB 分の割り引きで、`koroku` とその子プロセスは本番より先に止まる。`koroku` が止まっても動いているアプリには影響せず、systemd が起動し直す。
+- 本番を dockerd（`-500`）より上に置くのは、dockerd が止まるとすべてのコンテナが止まるため。同じ `-500` にすると、本番の小さなサービス（数十 MB の Redis など）が dockerd より小さい点数になり、dockerd が先に選ばれうる。100 の差（約 600MB 分）があれば、dockerd の常駐の大きさでは順序が入れ替わらない。
+- Caddy を本番と dockerd の間に置くのは、Caddy が止まるとすべてのアプリへの経路が切れるため。本番のプロセスを 1 つ止めるほうが影響が小さく、空くメモリも多い。Caddy の常駐は数十 MB で、守っても困らない。
+- 1 回の OOM で止まるのは 1 プロセスで、コンテナの中のプロセスはすべてそのコンテナの値を継ぐ。主プロセスが止まったコンテナは `restart: unless-stopped`（6 章）で起動し直す。
+- 値はリポジトリの Compose に何が書いてあっても override で上書きする。リポジトリが負の値を書けば、どのアプリでも本番より前に割り込めてしまうため。メモリ上限（6 章）と同じく、基盤が決める値である。ポリシー検査では拒否しない（6 章）。
+- サービスのメモリ上限に当たったときの OOM（cgroup の中だけで起きる）は、この順序と関係なくそのサービスの中で起きる。この節はホスト全体でメモリが尽きたときの話である。
+- ビルドの手順（`RUN`）のプロセスは Docker の BuildKit が動かし、koroku は値を付けない。
+
+**回収からの保護（メモリの予約）**
+
+本番アプリの各サービスに `mem_reservation` を付ける。Docker はこれを cgroup v2 の `memory.low` にする。カーネルはメモリが足りなくなると、使用量が `memory.low` より少ない cgroup からはできるだけ回収せず、ほかの cgroup（staging のコンテナ、ホストのページキャッシュ）から先にページキャッシュを捨て、swap へ追い出す。OOM の順序が「止めるとき」の順なら、予約は「止める手前で遅くなるとき」の順である。staging アプリには付けない。
+
+- 予約の決まり方は、優先度の高い順に「アプリ設定のサービス別の値」「アプリ設定の全体値」「既定値（そのサービスのメモリ上限の 50%、MiB 単位に切り捨て）」。メモリ上限の決まり方（6 章）と同じ形にしている。値は `512m` の形か `0`（予約しない）。
+- 既定を上限の 50% にするのは、上限を使用量のピークの 1.5 倍程度に合わせたアプリ（9.5 の目安）で、ふだんの使用量がおおよそ収まる量だから。予約を使用量より大きくしても、使っていない分は誰のものにもならない（ほかの cgroup は使える）が、予約の合計が RAM を超えると、カーネルは予約を比例で割り引いて扱い、保護の意味が薄れる。そのため合計をシステム画面で見せる（下記）。
+- 予約はメモリ上限を超えられない（Docker が起動を拒否する）。override は予約を、そのサービスに実際に付く上限（アプリ設定の値、リポジトリ自身の上限、既定値のいずれか）までに切り詰める。API は、保存の時点で分かる上限（サービス別の上限、なければアプリ全体の上限、なければ既定値）を超える予約を 422 で断る。リポジトリ自身の上限はデプロイまで分からないので、そこは切り詰めで扱う。Docker は 6MiB 未満の予約を拒否するので、API も 6MiB 未満（`0` を除く）を断り、既定値の計算が 6MiB 未満になるサービスには付けない。
+- 書き方はメモリ上限と同じ理由で、リポジトリの形に合わせる。リポジトリが `deploy.resources.limits.memory` か `deploy.resources.reservations.memory` を書いていれば `deploy.resources.reservations.memory` に書き、`mem_reservation` を書いていればそれにも同じ値を書く。どちらもなければ `mem_reservation` に書く。同じ項目を 2 つの形で違う値にすると、Compose が設定全体を拒否するため。
+- リポジトリが書いた予約は使わない。本番では koroku の値で上書きし、staging では `!reset null` で消す（staging のコンテナに予約が残ると、本番より先に回収されるという前提が崩れる）。予約を変えたいときはアプリ設定で変える。
+
+**環境を切り替えたとき**
+
+`oom_score_adj` と予約は override に書くので、アプリの `environment` を変えると次のデプロイから反映される（メモリ上限の変更と同じ）。起動（10 章）とロールバック（7.1）は、リリースのファイル（その版の override）をそのまま使うので、その版を作ったときの環境の値になる。設定タブは、環境と予約の欄の近くに「次のデプロイから」と出す。
+
+**予約の記録と表示**
+
+- デプロイの手順 3 で override を作るときに、サービスごとの予約（バイト）を `deployments.memory_reservations` に JSON で記録する。staging のデプロイは空の記録になる。ロールバックの記録は持たない（アプリの現在のリリースは戻す先のデプロイを指すので、7.1）。override をあとから読み直さずに、稼働中のリリースの予約が分かるようにするため。
+- `GET /api/apps/{slug}/services` は、サービスごとの `memory_reservation_bytes`（稼働中のリリースの記録。予約がなければ `null`）を返し、リソースタブの今の値の欄に出す。
+- システム画面（9.3）は「本番アプリのメモリの予約」として、停止していない（`desired_state` が `running` の）アプリの、稼働中のリリースの記録の合計を、ホストの RAM（`/proc/meminfo` の `MemTotal`）と並べて出す。止まって起こされるのを待っているアプリも、起きれば同じ予約を持つので数える。アプリごとの内訳も出す。値は `GET /api/system` の `memory_reservation`（オーナーだけ。メンバーには `null`。内訳にほかのアプリの名前が入るため）。
+- 合計に余白（1GiB）を足すと RAM を超えるとき、システム画面に警告を出す。余白は `koroku`、Caddy、Docker、カーネル、ビルド、staging アプリが使う分の目安で、これを割り込むと予約どうしで回収を押し付け合い、保護が効かなくなる。
 
 ## 7. デプロイフロー
 
@@ -474,9 +533,9 @@ staging と本番は同じ VPS に置き、「環境ごとに別アプリ」と�
 | 環境変数・volume | アプリ単位で独立 | アプリ単位で独立 |
 | 閲覧 | 既定で管理 UI にログインした、そのアプリを扱える人だけ（8.3） | 既定で公開 |
 
-- `apps` の `environment`（production / staging）は表示用で、一覧ではラベルになる。本番アプリのデプロイと削除には確認ダイアログを出す。
+- `apps` の `environment`（production / staging）は、一覧のラベルと確認ダイアログのほかに、メモリ不足のときの優先度を決める（本番のコンテナを後に止め、回収から守る。6.2）。本番アプリのデプロイと削除には確認ダイアログを出す。
 - push での自動デプロイ（5.2）はどちらでも使える。staging は追うブランチ（例 `main`）を自動で出し、本番は昇格（9.7）か手動のデプロイで出す、という分け方を想定する。本番で有効にするときは確認ダイアログと再ログインを経る。
-- 同居の弱点は、staging のビルド負荷やディスク枯渇が本番に波及すること。ビルドの同時実行 1、サービスごとのメモリ上限（override で既定値を付与、アプリ設定で変更可）、ディスク使用率 85% 超でデプロイ拒否、の 3 つで抑える。
+- 同居の弱点は、staging のビルド負荷やメモリ・ディスクの枯渇が本番に波及すること。ビルドの同時実行 1、サービスごとのメモリ上限（override で既定値を付与、アプリ設定で変更可）、本番を後回しにする OOM の順序とメモリの予約（6.2）、ディスク使用率 85% 超でデプロイ拒否、で抑える。
 - staging で確かめたリリースを本番へ出す「昇格」と、そのときのイメージの再利用は 9.7。
 - より強い分離が要るようになったら、同じプロビジョニングスクリプトで 2 台目を立てて `koroku` をもう 1 組動かす。マルチノード対応はしない。
 
@@ -688,11 +747,11 @@ staging のようにたまにしか開かないアプリを、アクセスがな
 
 | テーブル | 内容 |
 | --- | --- |
-| `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、DB のコピーの設定（ロードフック、コピー後のコマンド。10.6）、必要な変数の読み方（`env_source`、`env_example_path`、9.4）、アクセスの保護（`access_protection`、`protection_exempt_paths`、8.3）、昇格元のアプリ（`promote_from_app_id`、9.7）、自動デプロイ（`auto_deploy`、`auto_deploy_branch`、`auto_deploy_workflow`、5.2）、アクセスがない間の休止（`idle_sleep`、`idle_sleep_minutes`、`sleeping_since`、8.4） |
+| `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、メモリの予約（`memory_reservation`、`service_memory_reservations`、6.2）、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、DB のコピーの設定（ロードフック、コピー後のコマンド。10.6）、必要な変数の読み方（`env_source`、`env_example_path`、9.4）、アクセスの保護（`access_protection`、`protection_exempt_paths`、8.3）、昇格元のアプリ（`promote_from_app_id`、9.7）、自動デプロイ（`auto_deploy`、`auto_deploy_branch`、`auto_deploy_workflow`、5.2）、アクセスがない間の休止（`idle_sleep`、`idle_sleep_minutes`、`sleeping_since`、8.4） |
 | `review_apps` | レビューアプリの親、pull request の番号・題名・head のブランチ・状態、データのコピーの状態（9.9） |
 | `env_vars` | 環境変数。値は暗号化して保存（`app_id` + `key` で一意） |
 | `registry_credentials` | アプリのコンテナレジストリの認証（`app_id` で一意。レジストリ、ユーザー名、暗号化したトークン、更新時刻。6.1） |
-| `deployments` | ref、コミット、状態、エラー、時刻、環境変数の指紋（9.2）、ロールバックの戻す先（`source_deployment_id`、7.1）、昇格元のデプロイ（`promoted_from_deployment_id`、9.7）、始めたユーザー（`actor_user_id`、`actor_login`。10.7）、何が始めたか（`trigger_kind`、`pusher`、5.2） |
+| `deployments` | ref、コミット、状態、エラー、時刻、環境変数の指紋（9.2）、サービスごとのメモリの予約（`memory_reservations`、6.2）、ロールバックの戻す先（`source_deployment_id`、7.1）、昇格元のデプロイ（`promoted_from_deployment_id`、9.7）、始めたユーザー（`actor_user_id`、`actor_login`。10.7）、何が始めたか（`trigger_kind`、`pusher`、5.2） |
 | `github_deployments` | デプロイに対応する GitHub のデプロイ ID と、GitHub が最後に受け付けた状態（5.1） |
 | `app_domains` | 独自ドメイン（8.1） |
 | `backup_runs` | バックアップの実行記録（10.2） |
@@ -717,7 +776,8 @@ API はすべて JSON の REST で、ログとデプロイの進行は SSE で�
 | アプリ一覧のホスト状態行、警告バナー | ログ退避の最終成功時刻、ディスク警告のしきい値、Caddy への設定投入の状態 | `GET /api/system` の `disk_limit_percent`、`log_archive`（`configured`、`last_success_at`、`last_error`、`next_run_at`）、`caddy`（`enabled`、`last_loaded_at`、`last_error`）、`swap`、`idle_sleep`（`available`。8.4） |
 | アプリ一覧の行、詳細ヘッダー | プライマリ URL、検証待ちドメインの有無 | アプリの JSON の `primary_url`（プライマリドメインがあればその URL、なければ自動割当の URL）と `pending_domains`（検証待ちの数）。一覧のためにアプリごとにドメイン API を呼ばずに済む |
 | 概要タブのサービス一覧 | メモリ使用量と上限 | `GET /api/apps/{slug}/services` の各サービスの `memory_bytes` と `memory_limit_bytes`（`docker stats --no-stream` の値。取れなければ `null`） |
-| リソースタブ | サービスごとの今の CPU とメモリ、メモリの履歴と上限の目安（9.5） | `GET /api/apps/{slug}/services` の `cpu_percent`、`memory_bytes`、`memory_limit_bytes`（同じ 1 回の `docker stats --no-stream`）と、`GET /api/apps/{slug}/memory` |
+| リソースタブ | サービスごとの今の CPU とメモリ、メモリの予約（6.2）、メモリの履歴と上限の目安（9.5） | `GET /api/apps/{slug}/services` の `cpu_percent`、`memory_bytes`、`memory_limit_bytes`（同じ 1 回の `docker stats --no-stream`）、`memory_reservation_bytes`（稼働中のリリースの記録）と、`GET /api/apps/{slug}/memory` |
+| システム画面のメモリの予約 | 本番アプリの予約の合計と内訳、ホストの RAM、警告 | `GET /api/system` の `memory_reservation`（6.2） |
 | デプロイタブの手順表示 | 手順の区切りと、手順ごとの所要時間 | デプロイログの手順の見出し行（`==> <RFC 3339 の時刻> <手順のキー> <表題>`）。UI はこの行でログを手順に分け、次の見出し（または終了）までを所要時間とする。手順のキーは `fetch` `prepare` `validate` `build` `pull` `backup` `start` `route` `check` `done` `cleanup` と、失敗時の `failed` `rollback`。DB に手順の表は持たない（ログファイルが唯一の記録で、SSE の再接続とも整合する）。自動ロールバックの結果も同じ理由でログの行から読み取り、デプロイの JSON にフィールドは持たない（UI が解釈する行は `docs/API.md`） |
 | バックアップタブ | 次回の実行予定、スナップショットのサイズ | `GET /api/backups` の `next_run_at`、スナップショットの `size_bytes`（restic が記録していれば。なければ `null`）、`GET /api/apps/{slug}/volumes`（下記） |
 | システム画面 | Docker のディスク内訳 | `GET /api/system/docker`（`docker system df` の結果: イメージ、コンテナ、volume、ビルドキャッシュそれぞれの件数と合計と、「不要なデータを削除」で空く量）。数秒かかりうるので `/api/system` とは分ける |
@@ -757,6 +817,7 @@ API はすべて JSON の REST で、ログとデプロイの進行は SSE で�
 - メモリの使用量は stats の値（cgroup の使用量からページキャッシュの非アクティブ分を除いたもの。`docker stats` の表示と同じ）。割合の分母は `docker info` のメモリ総量（VPS ではホストの `MemTotal` と同じ）。上限は `HostConfig.Memory` で、0（上限なし）は `null`。アプリの上限の合計は、そのアプリの稼働中のコンテナすべてに上限があるときだけ出す（koroku は override で全サービスに付けるので、普通は出る）。
 - 競合: stats のあとで inspect する間にコンテナが消えると、inspect は `No such container` で失敗するが、残りのコンテナの出力は出す。その場合は出力を使い、消えたコンテナは除く（消えたものは何も使っていない）。stats と inspect が Docker デーモンのエラーで失敗したときは、`docker system df` と同じく数回やり直す。
 - 履歴は持たない。画面を開いている間、ホストの状態と同じ 30 秒間隔で取り直す。
+- 同じ画面に、本番アプリのメモリの予約の合計と内訳を出す（6.2）。こちらは稼働中のリリースの記録から求めるので Docker に問い合わせず、`/api/system` に入れる。
 
 ### 9.4 リポジトリが必要とする環境変数との照合
 
@@ -1203,6 +1264,7 @@ Heroku の Review Apps に当たるもの。staging アプリ（8.2）を親に�
 - **メモリ**: ビルド時のピークに備えて swap を 2GB 置く。VPS は 2 vCPU、4GB RAM、40GB ディスクを出発点にする（未計測の目安）。
   - swap の手前に zswap を有効にする（圧縮は `zstd`、カーネル 6.8 以降は `shrinker_enabled` で古い圧縮ページを swap ファイルへ追い出す）。3〜5 アプリのうちアクセスの少ないものは、ヒープの多くに触れないまま常駐している。そのページを RAM の中で圧縮して持てば、ディスクの swap ほど遅くならずに空きが増える。アプリの `docker stats` の値は変わらず、効き目はホストの空きメモリに出る。
   - ホストの Caddy は `GOGC=50` で動かす（systemd の drop-in）。リクエストや TLS のハンドシェイクが集中したあとに膨らんだヒープを抱えたままにせず、常駐を 10 MiB ほど減らす。増える CPU は、小さなアプリを数個載せるホストでは問題にならない。
+  - 同じ drop-in で Caddy を `OOMScoreAdjust=-450` にする。ホスト全体でメモリが尽きたとき、本番アプリのコンテナより後に止まるようにするため（6.2）。
 - **バックアップ**: 基盤の設定とアプリのデータを日次でオブジェクトストレージに退避する（10.2）。
 - **koroku の更新**: バイナリを差し替えて `systemctl restart koroku`。アプリのコンテナは影響を受けない。
 - **起動制御と削除**

@@ -4,9 +4,10 @@
 # It mirrors what koroku does on the server: only files Git would commit are
 # used (no .git), an override replaces the web service's ports with a loopback
 # binding, drops every other published port, injects the env file into all
-# services, adds restart: unless-stopped and a memory limit, and then runs
-# config -> build/pull -> up --wait -> an HTTP check that accepts any status
-# below 500. The policy check is not reproduced here.
+# services, adds restart: unless-stopped, a memory limit, oom_score_adj and
+# (for production) a memory reservation, and then runs config -> build/pull
+# -> up --wait -> an HTTP check that accepts any status below 500. The policy
+# check is not reproduced here.
 #
 # Usage: rehearse.sh --port <container port> [options]
 #   --file <path>        Compose file relative to the repository root
@@ -17,6 +18,13 @@
 #   --env-file <path>    env file with test values (default: empty)
 #   --host-port <port>   loopback port to publish on (default: 28080)
 #   --memory <limit>     memory limit for services without one (default: 512m)
+#   --environment <env>  staging (default) or production, as in the app's
+#                        settings: oom_score_adj 500 / -400, and production
+#                        reserves memory (mem_reservation). Rootless Docker
+#                        cannot set a negative oom_score_adj; rehearse
+#                        production on a rootful Docker or Docker Desktop
+#   --reservation <size> production only: memory reserved per service
+#                        (default: half its limit; 0 for none)
 #   --task <svc>:<cmd>   after the check, run a one-off command the way
 #                        koroku's tasks do (run --rm --no-deps -T <svc>
 #                        sh -c <cmd>); repeatable; a non-zero exit fails
@@ -35,6 +43,8 @@ health="/"
 env_src=""
 host_port="28080"
 memory="512m"
+environment="staging"
+reservation=""
 keep=0
 sleep_wake=0
 pr=""
@@ -51,6 +61,8 @@ while [ $# -gt 0 ]; do
     --env-file) env_src="${2:?}"; shift 2 ;;
     --host-port) host_port="${2:?}"; shift 2 ;;
     --memory) memory="${2:?}"; shift 2 ;;
+    --environment) environment="${2:?}"; shift 2 ;;
+    --reservation) reservation="${2:?}"; shift 2 ;;
     --task)
       case "${2:?}" in *:?*) ;; *) die "--task needs <service>:<command>" ;; esac
       tasks+=("$2"); shift 2 ;;
@@ -67,6 +79,27 @@ done
 [ -n "$port" ] || die "--port is required (the port the public service listens on inside the container)"
 case "$port$host_port" in *[!0-9]*) die "ports must be numbers" ;; esac
 case "$health" in /*) ;; *) die "--health must start with /" ;; esac
+case "$environment" in staging|production) ;; *) die "--environment must be staging or production" ;; esac
+
+# to_bytes 512m -> 536870912; Compose's own output is already in bytes.
+to_bytes() {
+  local v="${1,,}"
+  v="${v%b}"
+  case "$v" in
+    *k) echo $(( ${v%k} * 1024 )) ;;
+    *m) echo $(( ${v%m} * 1024 * 1024 )) ;;
+    *g) echo $(( ${v%g} * 1024 * 1024 * 1024 )) ;;
+    *) echo "$v" ;;
+  esac
+}
+is_size() {
+  case "${1,,}" in [1-9]*) ;; *) return 1 ;; esac
+  case "${1,,}" in *[!0-9kmgb]*) return 1 ;; esac
+}
+is_size "$memory" || die "--memory must be a size such as 512m"
+if [ -n "$reservation" ] && [ "$reservation" != "0" ]; then
+  is_size "$reservation" || die "--reservation must be 0 or a size such as 256m"
+fi
 
 command -v docker >/dev/null || die "docker is not installed"
 command -v curl >/dev/null || die "curl is not installed"
@@ -191,6 +224,15 @@ services="$("${base[@]}" config --services)" || die "docker compose config faile
 printf '%s\n' "$services" | grep -qx -- "$service" ||
   die "service \"$service\" is not defined (services: $(printf '%s\n' "$services" | paste -sd ' ' -))"
 
+# deploy_memory <service yaml> limits|reservations prints
+# deploy.resources.<section>.memory in bytes, or nothing.
+deploy_memory() {
+  printf '%s\n' "$1" | awk -v section="        $2:" '
+    $0 == section { on = 1; next }
+    on && /^          memory:/ { gsub(/[^0-9]/, "", $2); print $2; exit }
+    on && !/^          / { on = 0 }'
+}
+
 # Same shape as the override koroku generates (internal/compose/override.go).
 {
   echo "# Rehearsal of the override koroku generates."
@@ -213,8 +255,47 @@ printf '%s\n' "$services" | grep -qx -- "$service" ||
     if ! printf '%s\n' "$svc_yaml" | grep -q '^    restart:'; then
       echo "    restart: unless-stopped"
     fi
-    if ! printf '%s\n' "$svc_yaml" | grep -Eq '^    mem_limit:|^ +memory:'; then
+    # The repository's own limit and reservation, in bytes (config prints
+    # sizes as plain numbers), in either of Compose's two forms.
+    own_limit="$(printf '%s\n' "$svc_yaml" | sed -n 's/^    mem_limit: "\{0,1\}\([0-9]*\)"\{0,1\}$/\1/p')"
+    own_reservation="$(printf '%s\n' "$svc_yaml" | sed -n 's/^    mem_reservation: "\{0,1\}\([0-9]*\)"\{0,1\}$/\1/p')"
+    deploy_limit="$(deploy_memory "$svc_yaml" limits)"
+    deploy_reservation="$(deploy_memory "$svc_yaml" reservations)"
+    limit="${own_limit:-$deploy_limit}"
+    if [ -z "$limit" ]; then
       echo "    mem_limit: \"$memory\""
+      limit="$(to_bytes "$memory")"
+    fi
+    # koroku owns oom_score_adj and the reservation, whatever the
+    # repository wrote (ARCHITECTURE 6.2): production is killed last when
+    # the host runs out of memory and keeps memory.low; staging first.
+    bytes=0
+    if [ "$environment" = production ]; then
+      echo "    oom_score_adj: -400"
+      if [ -z "$reservation" ]; then
+        bytes=$((limit / 2 / 1048576 * 1048576))
+      elif [ "$reservation" != "0" ]; then
+        bytes="$(to_bytes "$reservation")"
+      fi
+      if [ "$bytes" -gt "$limit" ]; then bytes="$limit"; fi
+      if [ "$bytes" -lt 6291456 ]; then bytes=0; fi
+    else
+      echo "    oom_score_adj: 500"
+    fi
+    if [ "$bytes" -gt 0 ]; then
+      if [ -n "$deploy_limit$deploy_reservation" ]; then
+        printf '    deploy:\n      resources:\n        reservations:\n          memory: "%s"\n' "$bytes"
+      fi
+      if [ -n "$own_reservation" ] || [ -z "$deploy_limit$deploy_reservation" ]; then
+        echo "    mem_reservation: \"$bytes\""
+      fi
+    else
+      if [ -n "$deploy_reservation" ]; then
+        printf '    deploy:\n      resources:\n        reservations:\n          memory: !reset null\n'
+      fi
+      if [ -n "$own_reservation" ]; then
+        echo "    mem_reservation: !reset null"
+      fi
     fi
   done
 } > "$override"
