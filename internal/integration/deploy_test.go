@@ -45,6 +45,7 @@ type env struct {
 	t      *testing.T
 	server *httptest.Server
 	engine *deploy.Engine
+	db     *store.Store
 	suffix string
 }
 
@@ -114,6 +115,7 @@ func newEnv(t *testing.T) *env {
 		Ops:      engine,
 		Copier:   engine,
 		Tasks:    engine,
+		Waker:    engine,
 		Refs:     deploy.GitRefResolver{Fetcher: fetcher},
 		// Authentication is covered by the API unit tests.
 		Auth: api.AuthOptions{InsecureNoAuth: true},
@@ -124,7 +126,7 @@ func newEnv(t *testing.T) *env {
 
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
-	e := &env{t: t, server: server, engine: engine, suffix: hex.EncodeToString(suffix)}
+	e := &env{t: t, server: server, engine: engine, db: st, suffix: hex.EncodeToString(suffix)}
 	t.Cleanup(func() {
 		server.CloseClientConnections()
 		server.Close()
