@@ -105,7 +105,10 @@ type App struct {
 	IdleSleepMinutes int
 	// SleepingSince is when the app went to sleep; nil while it is awake.
 	// It is a runtime state: DesiredState stays running.
-	SleepingSince       *time.Time
+	SleepingSince *time.Time
+	// ReviewAppsAllowed lets review apps be created from this app; only
+	// the owner changes it (ARCHITECTURE 9.9).
+	ReviewAppsAllowed   bool
 	CurrentDeploymentID *int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -149,7 +152,7 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	load_hook_service, load_hook_command, post_load_service, post_load_command,
 	access_protection, protection_exempt_paths, promote_from_app_id,
 	auto_deploy, auto_deploy_branch, auto_deploy_workflow,
-	idle_sleep, idle_sleep_minutes, sleeping_since`
+	idle_sleep, idle_sleep_minutes, sleeping_since, review_apps_allowed`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -178,7 +181,7 @@ func scanApp(row rowScanner) (App, error) {
 		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand,
 		&a.AccessProtection, &exemptJSON, &promoteFrom,
 		&a.AutoDeploy, &a.AutoDeployBranch, &a.AutoDeployWorkflow,
-		&a.IdleSleep, &a.IdleSleepMinutes, &sleeping)
+		&a.IdleSleep, &a.IdleSleepMinutes, &sleeping, &a.ReviewAppsAllowed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -467,7 +470,7 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?,
 			access_protection = ?, protection_exempt_paths = ?, promote_from_app_id = ?,
 			auto_deploy = ?, auto_deploy_branch = ?, auto_deploy_workflow = ?,
-			idle_sleep = ?, idle_sleep_minutes = ?
+			idle_sleep = ?, idle_sleep_minutes = ?, review_apps_allowed = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
@@ -478,7 +481,7 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
 		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow,
-		app.IdleSleep, app.IdleSleepMinutes, app.ID)
+		app.IdleSleep, app.IdleSleepMinutes, app.ReviewAppsAllowed, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}

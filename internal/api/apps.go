@@ -90,6 +90,10 @@ type appJSON struct {
 	// Review describes a review app; null for other apps (ARCHITECTURE
 	// 9.9).
 	Review *reviewJSON `json:"review"`
+	// ReviewAppsAllowed is whether the owner lets review apps be created
+	// from this app; ReviewApps counts them, null on a review app.
+	ReviewAppsAllowed bool               `json:"review_apps_allowed"`
+	ReviewApps        *reviewSummaryJSON `json:"review_apps"`
 }
 
 func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
@@ -128,6 +132,7 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		IdleSleep:            app.IdleSleep,
 		IdleSleepMinutes:     app.IdleSleepMinutes,
 		SleepingSince:        app.SleepingSince,
+		ReviewAppsAllowed:    app.ReviewAppsAllowed,
 		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
 		CreatedAt:            app.CreatedAt,
 		UpdatedAt:            app.UpdatedAt,
@@ -147,6 +152,13 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 	out.PromoteFrom = promoteFrom
 	if out.Review, err = s.reviewToJSON(r.Context(), app); err != nil {
 		return appJSON{}, err
+	}
+	if out.Review == nil {
+		sum, err := s.store.SummarizeReviewApps(r.Context(), app.ID)
+		if err != nil {
+			return appJSON{}, err
+		}
+		out.ReviewApps = &reviewSummaryJSON{Count: sum.Count, Failed: sum.Failed, Deploying: sum.Deploying}
 	}
 	domainList, err := s.store.ListDomains(r.Context(), app.ID)
 	if err != nil {
@@ -217,6 +229,8 @@ type appInput struct {
 	AutoDeployWorkflow   *string            `json:"auto_deploy_workflow"`
 	IdleSleep            *bool              `json:"idle_sleep"`
 	IdleSleepMinutes     *int               `json:"idle_sleep_minutes"`
+	// ReviewAppsAllowed is read by PATCH only (ARCHITECTURE 9.9).
+	ReviewAppsAllowed *bool `json:"review_apps_allowed"`
 }
 
 // validateReservations checks the memory reservations (ARCHITECTURE 6.2)
@@ -713,6 +727,9 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	before := app
 	errs := in.apply(&app, s.cfg.Deploy.AllowFileRepos)
 	validateReservations(app, s.cfg.Deploy.DefaultMemoryLimit, errs)
+	if in.ReviewAppsAllowed != nil {
+		app.ReviewAppsAllowed = *in.ReviewAppsAllowed
+	}
 	if in.Slug != nil && *in.Slug != app.Slug {
 		// The slug names the Compose project, its volumes and the hostname.
 		errs.add("slug", "cannot be changed")
@@ -739,6 +756,17 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.checkIdleSleep(before, app, errs)
+	if app.ReviewAppsAllowed && !before.ReviewAppsAllowed {
+		// Only an app review apps can be made from is allowed them.
+		reason, err := s.reviewParentProblem(r.Context(), app)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		if reason != "" {
+			errs.add("review_apps_allowed", "needs a staging app that is fetched through the GitHub App and is not a review app itself")
+		}
+	}
 	if len(errs) > 0 {
 		writeValidationError(w, errs)
 		return
@@ -782,8 +810,8 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 // ownerOnlyChanges lists the settings an update changes that only the owner
 // may change (ARCHITECTURE 10.7): the environment (production asks for a
 // confirmation before each deploy), turning the policy check off, where the
-// code comes from, links to other apps, and making a production app deploy
-// pushes by itself.
+// code comes from, links to other apps, making a production app deploy
+// pushes by itself, and allowing review apps.
 // after has the input applied except promote_from, which is compared by
 // name.
 func (s *Server) ownerOnlyChanges(r *http.Request, before, after store.App, in appInput) ([]string, error) {
@@ -796,6 +824,10 @@ func (s *Server) ownerOnlyChanges(r *http.Request, before, after store.App, in a
 	}
 	if before.RelaxPolicy != after.RelaxPolicy {
 		fields = append(fields, "relax_policy")
+	}
+	if before.ReviewAppsAllowed != after.ReviewAppsAllowed {
+		// Pull request code would receive the app's variables and data.
+		fields = append(fields, "review_apps_allowed")
 	}
 	if before.RepoFullName != after.RepoFullName || before.RepoURL != after.RepoURL ||
 		!sameID(before.RepoID, after.RepoID) {
@@ -831,6 +863,8 @@ func touchesSafeguards(before, after store.App) bool {
 		!sameRepoID ||
 		// Opening the app to everyone (ARCHITECTURE 8.3).
 		(before.AccessProtection && !after.AccessProtection) ||
+		// Handing its variables and data to pull requests (ARCHITECTURE 9.9).
+		(!before.ReviewAppsAllowed && after.ReviewAppsAllowed) ||
 		!slices.Equal(before.ProtectionExemptPaths, after.ProtectionExemptPaths)
 }
 

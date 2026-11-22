@@ -93,6 +93,119 @@ func TestCreateReviewApp(t *testing.T) {
 	}
 }
 
+func TestSummarizeReviewApps(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	parent := mustCreateApp(t, s, "shop-staging")
+	if got, err := s.SummarizeReviewApps(ctx, parent.ID); err != nil || got != (ReviewSummary{}) {
+		t.Fatalf("no review apps: %+v, %v", got, err)
+	}
+
+	// Deployed fine.
+	ok := newReview(t, s, parent, "shop-staging-pr-1", 1)
+	d, _, err := s.EnqueueDeployment(ctx, ok.ID, "search", "a", "", testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StartDeployment(ctx, d.ID, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishDeployment(ctx, d.ID, StatusSucceeded, "", testNow); err != nil {
+		t.Fatal(err)
+	}
+	// The latest deployment failed.
+	broken := newReview(t, s, parent, "shop-staging-pr-2", 2)
+	d, _, _ = s.EnqueueDeployment(ctx, broken.ID, "b", "b", "", testNow)
+	_ = s.StartDeployment(ctx, d.ID, testNow)
+	if err := s.FinishDeployment(ctx, d.ID, StatusFailed, "boom", testNow); err != nil {
+		t.Fatal(err)
+	}
+	// Still deploying.
+	queued := newReview(t, s, parent, "shop-staging-pr-3", 3)
+	if _, _, err := s.EnqueueDeployment(ctx, queued.ID, "c", "c", "", testNow); err != nil {
+		t.Fatal(err)
+	}
+	// The copy of the parent's data could not start.
+	noCopy := newReview(t, s, parent, "shop-staging-pr-4", 4)
+	if err := s.SetReviewDataCopy(ctx, noCopy.ID, DataCopyFailed, "source_not_running"); err != nil {
+		t.Fatal(err)
+	}
+	// The copy ran and failed, then a copy from elsewhere succeeded: only
+	// copies from the parent count.
+	copyFailed := newReview(t, s, parent, "shop-staging-pr-5", 5)
+	c, err := s.StartDBCopy(ctx, copyFailed, parent, CopySourceLive, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FinishDBCopy(ctx, c.ID, false, "load failed", 0, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := s.LatestCopyStatus(ctx, copyFailed.ID, parent.ID); err != nil || status != CopyFailed {
+		t.Errorf("LatestCopyStatus = %q, %v", status, err)
+	}
+	if status, err := s.LatestCopyStatus(ctx, ok.ID, parent.ID); err != nil || status != "" {
+		t.Errorf("LatestCopyStatus without copies = %q, %v", status, err)
+	}
+
+	// Another parent's review apps are not counted.
+	other := mustCreateApp(t, s, "blog-staging")
+	newReview(t, s, other, "blog-staging-pr-1", 1)
+
+	got, err := s.SummarizeReviewApps(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (ReviewSummary{Count: 5, Failed: 3, Deploying: 1}); got != want {
+		t.Errorf("SummarizeReviewApps = %+v, want %+v", got, want)
+	}
+}
+
+func TestReviewAppsAllowedMigration(t *testing.T) {
+	ctx := context.Background()
+	migrations, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	parent := mustCreateApp(t, s, "shop-staging")
+	plain := mustCreateApp(t, s, "blog-staging")
+	newReview(t, s, parent, "shop-staging-pr-1", 1)
+	// Roll back to before migration 27 with the review app in place.
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE apps DROP COLUMN review_apps_allowed;
+		DELETE FROM schema_migrations WHERE version = 27`); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migrations {
+		if m.version == 27 {
+			if err := s.applyMigration(ctx, m); err != nil {
+				t.Fatalf("apply %s: %v", m.name, err)
+			}
+		}
+	}
+	for slug, want := range map[string]bool{"shop-staging": true, "blog-staging": false, "shop-staging-pr-1": false} {
+		app, err := s.GetApp(ctx, slug)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if app.ReviewAppsAllowed != want {
+			t.Errorf("%s: review apps allowed = %v, want %v", slug, app.ReviewAppsAllowed, want)
+		}
+	}
+
+	// The setting is saved like the others.
+	plain.ReviewAppsAllowed = true
+	if err := s.UpdateApp(ctx, plain, testNow); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetApp(ctx, "blog-staging"); !got.ReviewAppsAllowed {
+		t.Error("review_apps_allowed was not saved")
+	}
+}
+
 func TestReviewAppRolesFollowTheParent(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
