@@ -142,34 +142,48 @@
   justify-self: end;
 }
 
-/* A review app sits under its parent (ARCHITECTURE 9.9): indented, with a
-   corner line pointing back up to the parent's row. */
-.app-rows .row.app-row-review {
-  background: var(--color-bg-subtle);
-}
-
-.app-row-review .app-cell-name {
-  position: relative;
-  padding-left: var(--space-5);
-}
-
-.app-row-review .app-cell-name::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: var(--space-1);
-  width: var(--space-3);
-  height: 0.7em;
-  border-bottom: 1px solid var(--color-border-strong, var(--color-border));
-  border-left: 1px solid var(--color-border-strong, var(--color-border));
-}
-
-.app-review-line {
-  overflow: hidden;
+/* The parent's row counts its review apps (ARCHITECTURE 9.9); the count
+   leads to the parent's review apps tab, above the row's own link. */
+.app-review-count {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.4em;
+  align-items: baseline;
+  min-width: 0;
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.app-review-link {
+  position: relative;
+  z-index: 1;
+  color: inherit;
+}
+
+.app-review-link:hover {
+  color: var(--color-text);
+}
+
+.app-review-notes {
+  display: inline-flex;
+  flex-wrap: wrap;
+}
+
+.app-review-notes::before {
+  content: "（";
+}
+
+.app-review-notes::after {
+  content: "）";
+}
+
+.app-review-notes > * + *::before {
+  content: "・";
+}
+
+.app-review-failed {
+  color: var(--color-failed);
+  font-weight: var(--weight-semibold);
 }
 
 /* Column names: read out in every layout, visible only when stacked. */

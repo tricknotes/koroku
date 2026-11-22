@@ -3,8 +3,9 @@ import type {
   App,
   PullRequestState,
   ReviewInfo,
+  ReviewSummary,
 } from 'koroku-console/utils/types';
-import type { Tone } from 'koroku-console/utils/status';
+import type { StatusKind, Tone } from 'koroku-console/utils/status';
 
 export const PR_STATE_LABELS: Record<PullRequestState, string> = {
   open: 'オープン',
@@ -70,38 +71,105 @@ export function parentCanCopy(app: App): string | null {
 }
 
 /**
- * Orders the app list so that each review app follows its parent, newest
- * pull request first. Review apps whose parent is not in the list keep
- * their place.
+ * Whether the app has the review apps tab: an app review apps can be made
+ * from, or one that still has some (it was made production since).
  */
-export function groupReviewApps(apps: App[]): App[] {
-  const slugs = new Set(apps.map((a) => a.slug));
-  const children = new Map<string, App[]>();
-  for (const app of apps) {
-    const parent = app.review?.parent;
-    if (parent && slugs.has(parent)) {
-      const list = children.get(parent) ?? [];
-      list.push(app);
-      children.set(parent, list);
-    }
-  }
-  const out: App[] = [];
-  for (const app of apps) {
-    const parent = app.review?.parent;
-    if (parent && slugs.has(parent)) continue;
-    out.push(app);
-    const list = children.get(app.slug);
-    if (list) {
-      out.push(
-        ...list.sort((a, b) => b.review!.pr_number - a.review!.pr_number),
-      );
-    }
-  }
-  return out;
+export function hasReviewTab(app: App): boolean {
+  if (app.review) return false;
+  return parentProblem(app) === null || (app.review_apps?.count ?? 0) > 0;
 }
 
-/** A review app listed under its parent. */
-export function isChildRow(app: App, apps: App[]): boolean {
-  const parent = app.review?.parent;
-  return !!parent && apps.some((a) => a.slug === parent);
+/** `レビューアプリ 3`, or null without any. */
+export function reviewCount(summary: ReviewSummary | null | undefined) {
+  return summary && summary.count > 0 ? summary.count : null;
+}
+
+/** `1 件失敗`, or null when none failed. */
+export function reviewFailed(summary: ReviewSummary | null | undefined) {
+  return summary && summary.failed > 0 ? `${summary.failed} 件失敗` : null;
+}
+
+/** `1 件デプロイ中`, or null when none is deploying. */
+export function reviewDeploying(summary: ReviewSummary | null | undefined) {
+  return summary && summary.deploying > 0
+    ? `${summary.deploying} 件デプロイ中`
+    : null;
+}
+
+export interface CopyState {
+  kind: StatusKind;
+  label: string;
+  hint: string;
+}
+
+/** The newest copy from the parent, as far as it is known. */
+export interface LatestCopy {
+  status: string;
+  error?: string;
+}
+
+/**
+ * The state of the copy of the parent's data: the newest copy from the
+ * parent once there is one, before that what the review app was created
+ * with.
+ */
+export function copyState(
+  review: ReviewInfo,
+  latest: LatestCopy | null = review.data_copy_status
+    ? { status: review.data_copy_status }
+    : null,
+): CopyState {
+  if (latest) {
+    if (latest.status === 'running') {
+      return {
+        kind: 'deploying',
+        label: 'コピー中',
+        hint: '親アプリの DB を流し込んでいます。',
+      };
+    }
+    if (latest.status === 'succeeded') {
+      return {
+        kind: 'running',
+        label: 'コピー済み',
+        hint: '親アプリのデータをコピーしました。',
+      };
+    }
+    return {
+      kind: 'failed',
+      label: 'コピーに失敗',
+      hint: latest.error || 'ログはバックアップタブで確認できます。',
+    };
+  }
+  switch (review.data_copy) {
+    case 'waiting':
+      return {
+        kind: 'pending',
+        label: '待機中',
+        hint: '最初のデプロイが成功したあとで、親アプリのデータをコピーします。',
+      };
+    case 'started':
+      return {
+        kind: 'deploying',
+        label: 'コピー中',
+        hint: '親アプリの DB を流し込んでいます。',
+      };
+    case 'failed':
+      return {
+        kind: 'failed',
+        label: 'コピーできませんでした',
+        hint: copyDetail(review.data_copy_detail),
+      };
+    case 'skipped':
+      return {
+        kind: 'stopped',
+        label: 'コピーしていません',
+        hint: copyDetail(review.data_copy_detail),
+      };
+    default:
+      return {
+        kind: 'stopped',
+        label: 'コピーしていません',
+        hint: '作成のときにコピーしないことを選びました。',
+      };
+  }
 }

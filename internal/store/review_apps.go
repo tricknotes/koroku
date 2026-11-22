@@ -197,3 +197,62 @@ func isReviewApp(ctx context.Context, q interface {
 	}
 	return n > 0, nil
 }
+
+// ReviewSummary counts the review apps of a parent (ARCHITECTURE 9.9).
+type ReviewSummary struct {
+	Count int
+	// Failed counts the review apps whose latest deployment failed or
+	// whose copy of the parent's data failed.
+	Failed int
+	// Deploying counts the review apps with a deployment queued or
+	// running.
+	Deploying int
+}
+
+// SummarizeReviewApps counts the review apps of a parent from the
+// database alone: the containers are not asked about.
+func (s *Store) SummarizeReviewApps(ctx context.Context, parentID int64) (ReviewSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT
+			COALESCE((SELECT status FROM deployments d WHERE d.app_id = ra.app_id ORDER BY d.id DESC LIMIT 1), ''),
+			ra.data_copy,
+			COALESCE((SELECT status FROM db_copies c WHERE c.target_app_id = ra.app_id
+				AND c.source_app_id = ra.parent_app_id ORDER BY c.id DESC LIMIT 1), '')
+		FROM review_apps ra WHERE ra.parent_app_id = ?`, parentID)
+	if err != nil {
+		return ReviewSummary{}, fmt.Errorf("summarize review apps: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out ReviewSummary
+	for rows.Next() {
+		var deployment, dataCopy, copyStatus string
+		if err := rows.Scan(&deployment, &dataCopy, &copyStatus); err != nil {
+			return ReviewSummary{}, fmt.Errorf("summarize review apps: %w", err)
+		}
+		out.Count++
+		if deployment == StatusFailed || dataCopy == DataCopyFailed || copyStatus == CopyFailed {
+			out.Failed++
+		}
+		if deployment == StatusQueued || deployment == StatusRunning {
+			out.Deploying++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return ReviewSummary{}, fmt.Errorf("summarize review apps: %w", err)
+	}
+	return out, nil
+}
+
+// LatestCopyStatus returns the status of the newest copy of source's
+// database into target, or "" when there is none.
+func (s *Store) LatestCopyStatus(ctx context.Context, targetID, sourceID int64) (string, error) {
+	var status string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM db_copies
+		WHERE target_app_id = ? AND source_app_id = ? ORDER BY id DESC LIMIT 1`, targetID, sourceID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("latest copy status: %w", err)
+	}
+	return status, nil
+}

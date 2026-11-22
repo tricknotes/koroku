@@ -49,6 +49,17 @@ type reviewJSON struct {
 	HeadBranch     string `json:"head_branch"`
 	DataCopy       string `json:"data_copy"`
 	DataCopyDetail string `json:"data_copy_detail"`
+	// DataCopyStatus is the status of the newest copy of the parent's
+	// database into the review app, or "".
+	DataCopyStatus string `json:"data_copy_status"`
+}
+
+// reviewSummaryJSON is the "review_apps" field of an app that is not a
+// review app.
+type reviewSummaryJSON struct {
+	Count     int `json:"count"`
+	Failed    int `json:"failed"`
+	Deploying int `json:"deploying"`
 }
 
 // reviewToJSON describes a review app, or returns nil for other apps.
@@ -64,6 +75,10 @@ func (s *Server) reviewToJSON(ctx context.Context, app store.App) (*reviewJSON, 
 	if err != nil {
 		return nil, err
 	}
+	copyStatus, err := s.store.LatestCopyStatus(ctx, app.ID, parent.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &reviewJSON{
 		Parent:         parent.Slug,
 		PRNumber:       r.PRNumber,
@@ -73,6 +88,7 @@ func (s *Server) reviewToJSON(ctx context.Context, app store.App) (*reviewJSON, 
 		HeadBranch:     r.HeadBranch,
 		DataCopy:       r.DataCopy,
 		DataCopyDetail: r.DataCopyDetail,
+		DataCopyStatus: copyStatus,
 	}, nil
 }
 
@@ -244,6 +260,13 @@ type createdReviewJSON struct {
 func (s *Server) handleCreateReviewApp(w http.ResponseWriter, r *http.Request) {
 	parent, ok := s.loadReviewParent(w, r)
 	if !ok {
+		return
+	}
+	if !parent.ReviewAppsAllowed {
+		// The owner decides which apps hand their variables and data to
+		// pull requests.
+		writeError(w, http.StatusConflict, "review_apps_not_allowed",
+			"the owner has not allowed review apps of this app")
 		return
 	}
 	var in struct {

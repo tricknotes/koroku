@@ -10,22 +10,16 @@ import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import Loadable from 'koroku-console/utils/loadable';
 import {
-  copyDetail,
+  copyState,
+  type CopyState,
   PR_STATE_LABELS,
   PR_STATE_TONES,
   prFinished,
 } from 'koroku-console/utils/review';
 import { can } from 'koroku-console/utils/roles';
-import type { StatusKind } from 'koroku-console/utils/status';
 import type { App, DbCopy, ReviewInfo } from 'koroku-console/utils/types';
 
 const INTERVAL = 10000;
-
-interface CopyState {
-  kind: StatusKind;
-  label: string;
-  hint: string;
-}
 
 interface Signature {
   Element: HTMLElement;
@@ -75,61 +69,11 @@ export default class ReviewAppSummary extends Component<Signature> {
   }
 
   get copyState(): CopyState {
-    const r = this.args.review;
     const latest = this.latestCopy;
-    if (latest) {
-      if (latest.status === 'running') {
-        return {
-          kind: 'deploying',
-          label: 'コピー中',
-          hint: '親アプリの DB を流し込んでいます。',
-        };
-      }
-      if (latest.status === 'succeeded') {
-        return {
-          kind: 'running',
-          label: 'コピー済み',
-          hint: '親アプリのデータをコピーしました。',
-        };
-      }
-      return {
-        kind: 'failed',
-        label: 'コピーに失敗',
-        hint: latest.error || 'ログはバックアップタブで確認できます。',
-      };
-    }
-    switch (r.data_copy) {
-      case 'waiting':
-        return {
-          kind: 'pending',
-          label: '待機中',
-          hint: '最初のデプロイが成功したあとで、親アプリのデータをコピーします。',
-        };
-      case 'started':
-        return {
-          kind: 'deploying',
-          label: 'コピー中',
-          hint: '親アプリの DB を流し込んでいます。',
-        };
-      case 'failed':
-        return {
-          kind: 'failed',
-          label: 'コピーできませんでした',
-          hint: copyDetail(r.data_copy_detail),
-        };
-      case 'skipped':
-        return {
-          kind: 'stopped',
-          label: 'コピーしていません',
-          hint: copyDetail(r.data_copy_detail),
-        };
-      default:
-        return {
-          kind: 'stopped',
-          label: 'コピーしていません',
-          hint: '作成のときにコピーしないことを選びました。',
-        };
-    }
+    return copyState(
+      this.args.review,
+      latest ? { status: latest.status, error: latest.error } : undefined,
+    );
   }
 
   <template>

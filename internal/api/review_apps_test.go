@@ -91,6 +91,7 @@ func newReviewFixture(t *testing.T) *reviewFixture {
 	blog.LoadHookService, blog.LoadHookCommand = "db", "pg_restore"
 	blog.PostLoadService, blog.PostLoadCommand = "web", "bin/rails db:anonymize"
 	blog.ProtectionExemptPaths = []string{"/webhooks/"}
+	blog.ReviewAppsAllowed = true
 	if err := f.srv.store.UpdateApp(ctx, blog, f.clk.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -306,6 +307,139 @@ func TestDeleteReviewApp(t *testing.T) {
 	acts, _ := f.srv.store.ListActivity(context.Background(), f.app(t, "blog").ID, 0, 10)
 	if len(acts) == 0 || acts[0].Action != actReviewAppDeleted {
 		t.Errorf("parent activity = %+v", acts)
+	}
+}
+
+func TestReviewAppsNeedTheOwnersPermission(t *testing.T) {
+	f := newReviewFixture(t)
+	ctx := context.Background()
+	if rec := f.owner.do(http.MethodPost, "/api/apps/blog/review-apps", `{"pr_number":12}`, originHeader); rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+
+	// A manager can neither turn the switch off nor on.
+	rec := f.as[managerID].do(http.MethodPatch, "/api/apps/blog", `{"review_apps_allowed":false}`, originHeader)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"fields":["review_apps_allowed"]`) {
+		t.Errorf("manager turns it off: %d %s", rec.Code, rec.Body)
+	}
+	// Sending the current value with other settings is fine.
+	rec = f.as[managerID].do(http.MethodPatch, "/api/apps/blog", `{"review_apps_allowed":true,"healthcheck_path":"/up"}`, originHeader)
+	if rec.Code != http.StatusOK {
+		t.Errorf("manager sends the same value: %d %s", rec.Code, rec.Body)
+	}
+
+	// The owner turns it off; turning it off needs no recent login.
+	f.clk.Advance(11 * time.Minute)
+	rec = f.owner.do(http.MethodPatch, "/api/apps/blog", `{"review_apps_allowed":false}`, originHeader)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"review_apps_allowed":false`) {
+		t.Fatalf("owner turns it off: %d %s", rec.Code, rec.Body)
+	}
+	acts, _ := f.srv.store.ListActivity(ctx, f.app(t, "blog").ID, 0, 1)
+	if len(acts) != 1 || acts[0].Action != actSettingsChanged || !strings.Contains(string(acts[0].Details), "review_apps_allowed") {
+		t.Errorf("activity = %+v", acts)
+	}
+
+	// New review apps are refused, for the owner and for managers.
+	for name, b := range map[string]*browser{"owner": f.owner, "manager": f.as[managerID]} {
+		rec := b.do(http.MethodPost, "/api/apps/blog/review-apps", `{"pr_number":15}`, originHeader)
+		if rec.Code != http.StatusConflict || errorCode(t, rec) != "review_apps_not_allowed" {
+			t.Errorf("%s creates while not allowed: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+
+	// The existing review app stays: it deploys, starts and is deleted
+	// as before.
+	if rec := f.as[deployerID].do(http.MethodPost, "/api/apps/blog-pr-12/deployments", `{"ref":"main"}`, originHeader); rec.Code >= 300 {
+		t.Errorf("deploy the review app: %d %s", rec.Code, rec.Body)
+	}
+	rec = f.owner.do(http.MethodGet, "/api/apps/blog/review-apps", "", nil)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"slug":"blog-pr-12"`) {
+		t.Errorf("review apps while not allowed: %d %s", rec.Code, rec.Body)
+	}
+
+	// Turning it on again needs a recent login.
+	rec = f.owner.do(http.MethodPatch, "/api/apps/blog", `{"review_apps_allowed":true}`, originHeader)
+	if rec.Code != http.StatusForbidden || errorCode(t, rec) != "reauth_required" {
+		t.Errorf("stale owner turns it on: %d %s", rec.Code, rec.Body)
+	}
+	f.owner.login("code-owner")
+	rec = f.owner.do(http.MethodPatch, "/api/apps/blog", `{"review_apps_allowed":true}`, originHeader)
+	if rec.Code != http.StatusOK || !f.app(t, "blog").ReviewAppsAllowed {
+		t.Errorf("owner turns it on: %d %s", rec.Code, rec.Body)
+	}
+
+	f.as[managerID].login("code-max")
+	if rec := f.as[managerID].do(http.MethodDelete, "/api/apps/blog-pr-12", "", originHeader); rec.Code != http.StatusNoContent {
+		t.Errorf("delete the review app: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestReviewAppsAllowedOnlyWhereTheyCanBeMade(t *testing.T) {
+	f := newReviewFixture(t)
+	// shop is a production app.
+	rec := f.owner.do(http.MethodPatch, "/api/apps/shop", `{"review_apps_allowed":true}`, originHeader)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"review_apps_allowed"`) {
+		t.Errorf("production: %d %s", rec.Code, rec.Body)
+	}
+	if rec := f.owner.do(http.MethodPost, "/api/apps/blog/review-apps", `{"pr_number":12}`, originHeader); rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	rec = f.owner.do(http.MethodPatch, "/api/apps/blog-pr-12", `{"review_apps_allowed":true}`, originHeader)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("review app: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestAppListCountsReviewApps(t *testing.T) {
+	f := newReviewFixture(t)
+	ctx := context.Background()
+	for _, n := range []string{"12", "15"} {
+		if n == "15" {
+			f.pulls.prs = append(f.pulls.prs, github.PullRequest{Number: 15, Title: "Dark mode", State: "open", HeadBranch: "dark", HeadSHA: headSHA})
+		}
+		if rec := f.owner.do(http.MethodPost, "/api/apps/blog/review-apps", `{"pr_number":`+n+`}`, originHeader); rec.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", n, rec.Code, rec.Body)
+		}
+	}
+	// The first deployment of #12 failed; #15 is still queued.
+	failed := f.app(t, "blog-pr-12")
+	ds, _ := f.srv.store.ListDeployments(ctx, failed.ID, 1)
+	if err := f.srv.store.StartDeployment(ctx, ds[0].ID, f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.srv.store.FinishDeployment(ctx, ds[0].ID, store.StatusFailed, "boom", f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, b := range map[string]*browser{"owner": f.owner, "viewer": f.as[viewerID]} {
+		rec := b.do(http.MethodGet, "/api/apps", "", nil)
+		var out struct {
+			Apps []appJSON `json:"apps"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		bySlug := map[string]appJSON{}
+		for _, a := range out.Apps {
+			bySlug[a.Slug] = a
+		}
+		blog := bySlug["blog"]
+		if blog.ReviewApps == nil || *blog.ReviewApps != (reviewSummaryJSON{Count: 2, Failed: 1, Deploying: 1}) || !blog.ReviewAppsAllowed {
+			t.Errorf("%s: blog review apps = %+v", name, blog.ReviewApps)
+		}
+		// The review apps are listed too, through the parent's role.
+		if r, ok := bySlug["blog-pr-12"]; !ok || r.ReviewApps != nil || r.Review == nil {
+			t.Errorf("%s: blog-pr-12 = %+v", name, r)
+		}
+		if name == "viewer" {
+			if _, ok := bySlug["shop"]; ok {
+				t.Errorf("viewer sees shop")
+			}
+			continue
+		}
+		if shop := bySlug["shop"]; shop.ReviewApps == nil || shop.ReviewApps.Count != 0 {
+			t.Errorf("shop review apps = %+v", shop.ReviewApps)
+		}
 	}
 }
 

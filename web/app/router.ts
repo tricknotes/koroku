@@ -11,6 +11,7 @@ Router.map(function () {
   this.route('new-app', { path: '/apps/new' });
   this.route('app', { path: '/apps/:slug' }, function () {
     this.route('deploy');
+    this.route('review-apps');
     this.route('logs');
     this.route('resources');
     this.route('compose');

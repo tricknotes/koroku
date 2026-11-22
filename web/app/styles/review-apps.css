@@ -1,8 +1,52 @@
-/* Review apps of pull requests (ARCHITECTURE 9.9): the list on the parent's
-   overview, the summary on a review app's overview, the create dialog. */
+/* Review apps of pull requests (ARCHITECTURE 9.9): the parent's review apps
+   tab (the owner's permission, the list, the create dialog), the line on the
+   parent's overview, the summary on a review app's overview. */
+
+.review-permission {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-4);
+}
+
+.review-permission .switch {
+  margin-left: calc(var(--space-1) * -1);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  white-space: normal;
+}
+
+.review-permission .switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.review-permission-text {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.review-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+}
+
+.review-line-quiet {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
 
 .review-rows {
-  --row-columns: minmax(0, 1fr) 7.5rem auto;
+  --row-columns: minmax(0, 1fr) 7.5rem 8.5rem 4.5rem;
+}
+
+.review-cell-state > .cell-label,
+.review-cell-copy > .cell-label {
+  margin-right: var(--space-2);
 }
 
 .review-cell-pr {
@@ -81,11 +125,35 @@
 }
 
 @media (width <= 56rem) {
+  .review-rows .row-list-header {
+    display: none;
+  }
+
   .review-rows .row {
     grid-template:
       "pr pr" auto
-      "state open" auto / minmax(0, 1fr) auto;
+      "state open" auto
+      "copy open" auto / minmax(0, 1fr) auto;
     gap: var(--space-2) var(--space-4);
+  }
+
+  .review-cell-state,
+  .review-cell-copy {
+    display: flex;
+    align-items: center;
+  }
+
+  .review-rows .cell-label {
+    position: static;
+    width: auto;
+    height: auto;
+    clip-path: none;
+    color: var(--color-text-secondary);
+    font-size: var(--text-xs);
+  }
+
+  .review-cell-copy {
+    grid-area: copy;
   }
 
   .review-cell-pr {
