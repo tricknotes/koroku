@@ -121,22 +121,35 @@ func quoteEnvValue(v string) string {
 // three forms RenderEnvFile produces, and serves to mask the values a
 // container receives (ARCHITECTURE 9.6).
 func ParseEnvFileValues(content string) []string {
-	var values []string
+	entries := parseEnvFileEntries(content)
+	values := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		values = append(values, entry[1])
+	}
+	return values
+}
+
+// parseEnvFileEntries is ParseEnvFileValues with the keys: pairs of key
+// and value in file order.
+func parseEnvFileEntries(content string) [][2]string {
+	var entries [][2]string
 	for _, line := range strings.Split(content, "\n") {
-		_, raw, ok := strings.Cut(line, "=")
+		key, raw, ok := strings.Cut(line, "=")
 		if !ok {
 			continue
 		}
+		var value string
 		switch {
 		case len(raw) >= 2 && raw[0] == '\'' && raw[len(raw)-1] == '\'':
-			values = append(values, raw[1:len(raw)-1])
+			value = raw[1 : len(raw)-1]
 		case len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"':
-			values = append(values, unquoteEnvValue(raw[1:len(raw)-1]))
+			value = unquoteEnvValue(raw[1 : len(raw)-1])
 		default:
-			values = append(values, raw)
+			value = raw
 		}
+		entries = append(entries, [2]string{key, value})
 	}
-	return values
+	return entries
 }
 
 func unquoteEnvValue(s string) string {
