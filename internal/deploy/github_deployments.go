@@ -189,6 +189,10 @@ func (g *GitHubDeployments) sync(ctx context.Context, change StatusChange) {
 			// Canceled before GitHub heard of it: nothing to show there.
 			return
 		}
+		// A review app is an environment that will be deleted
+		// (ARCHITECTURE 9.9).
+		_, reviewErr := g.opts.Store.GetReviewApp(ctx, app.ID)
+		transient := reviewErr == nil
 		var id int64
 		err := g.call(ctx, func(ctx context.Context) error {
 			var err error
@@ -197,6 +201,7 @@ func (g *GitHubDeployments) sync(ctx context.Context, change StatusChange) {
 				Environment: app.Slug,
 				Description: deploymentDescription(d),
 				Production:  app.Environment == store.EnvironmentProduction,
+				Transient:   transient,
 			})
 			return err
 		})
@@ -315,20 +320,26 @@ func (g *GitHubDeployments) logURL(app store.App, d store.Deployment) string {
 	return g.opts.ConsoleURL + "/apps/" + app.Slug + "/deploy?deployment=" + strconv.FormatInt(d.ID, 10)
 }
 
-// environmentURL is the app's primary URL: its primary domain when that is
-// active, otherwise the automatic one (the same rule as the console's).
+// environmentURL is the app's primary URL.
 func (g *GitHubDeployments) environmentURL(ctx context.Context, app store.App) string {
-	if domains, err := g.opts.Store.ListDomains(ctx, app.ID); err == nil {
+	return PrimaryURL(ctx, g.opts.Store, app, g.opts.BaseDomain)
+}
+
+// PrimaryURL is the app's primary URL: its primary domain when that is
+// active, otherwise the automatic one (the same rule as the console's
+// primary_url). It is "" without a base domain and a primary domain.
+func PrimaryURL(ctx context.Context, st *store.Store, app store.App, baseDomain string) string {
+	if domains, err := st.ListDomains(ctx, app.ID); err == nil {
 		for _, dom := range domains {
 			if dom.IsPrimary && dom.Status != store.DomainPending {
 				return "https://" + dom.Hostname
 			}
 		}
 	}
-	if g.opts.BaseDomain == "" {
+	if baseDomain == "" {
 		return ""
 	}
-	return "https://" + app.Slug + "." + g.opts.BaseDomain
+	return "https://" + app.Slug + "." + baseDomain
 }
 
 // deploymentKind names a deployment in the descriptions shown on GitHub.

@@ -2,10 +2,12 @@ package deploy
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -23,20 +25,44 @@ func ValidEnvKey(key string) bool {
 // every release's env file itself. Apps cannot save variables with it.
 const ProvidedEnvPrefix = "KOROKU_"
 
+// Provided is what the variables koroku provides describe (ProvidedEnv).
+type Provided struct {
+	// CommitSHA is the full commit of the release.
+	CommitSHA string
+	// AppURL is the app's primary URL when it is deployed; "" leaves out
+	// KOROKU_APP_URL and KOROKU_APP_HOST.
+	AppURL string
+	// PRNumber is the pull request a review app runs (ARCHITECTURE 9.9);
+	// 0 for other apps.
+	PRNumber int
+}
+
 // ProvidedEnv returns the variables koroku adds to a release's env file:
 // the commit it was built from, so that a Compose file can name images a
 // CI built for that commit (`image: ...:sha-${KOROKU_COMMIT_SHORT}`) and
-// an app can report its release. They take part in interpolation and are
-// passed to every service like the app's own variables.
-func ProvidedEnv(commitSHA string) map[string]string {
-	short := commitSHA
+// an app can report its release; the app's URL and host, which a review
+// app cannot write into its repository; and a review app's pull request.
+// They take part in interpolation and are passed to every service like
+// the app's own variables.
+func ProvidedEnv(p Provided) map[string]string {
+	short := p.CommitSHA
 	if len(short) > 7 {
 		short = short[:7]
 	}
-	return map[string]string{
-		"KOROKU_COMMIT_SHA":   commitSHA,
+	out := map[string]string{
+		"KOROKU_COMMIT_SHA":   p.CommitSHA,
 		"KOROKU_COMMIT_SHORT": short,
 	}
+	if p.AppURL != "" {
+		out["KOROKU_APP_URL"] = p.AppURL
+		if u, err := url.Parse(p.AppURL); err == nil {
+			out["KOROKU_APP_HOST"] = u.Host
+		}
+	}
+	if p.PRNumber > 0 {
+		out["KOROKU_PR_NUMBER"] = strconv.Itoa(p.PRNumber)
+	}
+	return out
 }
 
 // RenderEnvFile renders variables in the dotenv dialect Compose reads for

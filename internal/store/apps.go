@@ -250,6 +250,13 @@ func (s *Store) CreateApp(ctx context.Context, app App, portStart, portEnd int, 
 // is only known inside the transaction: env receives it and returns the
 // variables. A nil env stores none.
 func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEnd int, now time.Time, env func(appID int64) ([]EnvVar, error)) (App, error) {
+	return s.createApp(ctx, app, portStart, portEnd, now, env, nil)
+}
+
+// createApp is CreateAppWithEnv with a hook that writes more rows of the
+// new app in the same transaction (a review app's, ARCHITECTURE 9.9).
+func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, now time.Time,
+	env func(appID int64) ([]EnvVar, error), extra func(tx *sql.Tx, appID int64) error) (App, error) {
 	limits, err := encodeLimits(app.ServiceMemoryLimits)
 	if err != nil {
 		return App{}, err
@@ -340,6 +347,11 @@ func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEn
 				}
 				return App{}, fmt.Errorf("create app: insert env var: %w", err)
 			}
+		}
+	}
+	if extra != nil {
+		if err := extra(tx, id); err != nil {
+			return App{}, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
