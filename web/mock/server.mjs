@@ -34,6 +34,8 @@ import {
   members,
   newApp,
   newDomain,
+  newReviewApp,
+  pullRequestsOf,
   promotionPreview,
   services,
   settle,
@@ -297,8 +299,90 @@ route('PATCH', '/api/apps/:slug', (context) => {
   return Object.assign(target, body);
 });
 route('DELETE', '/api/apps/:slug', (context) => {
-  context.state.apps.delete(appOf(context).slug);
+  const target = appOf(context);
+  if (
+    [...context.state.apps.values()].some(
+      (a) => a.review?.parent === target.slug,
+    )
+  ) {
+    throw new HttpError(409, 'has_review_apps');
+  }
+  if (target.review) {
+    record(context, target.review.parent, 'review_app.deleted', {
+      slug: target.slug,
+      pr_number: target.review.pr_number,
+    });
+  }
+  context.state.apps.delete(target.slug);
   return { status: 204 };
+});
+
+// Review apps (ARCHITECTURE 9.9).
+function reviewParentOf(context) {
+  const parent = appOf(context);
+  let reason = '';
+  if (parent.review) reason = 'review_app';
+  else if (parent.environment !== 'staging') reason = 'not_staging';
+  else if (!parent.repo_full_name || parent.repo_url) reason = 'no_github_app';
+  if (reason) throw new HttpError(422, 'not_review_parent', { reason });
+  return parent;
+}
+route('GET', '/api/apps/:slug/review-apps', (context) => {
+  const parent = appOf(context);
+  return {
+    review_apps: [...context.state.apps.values()]
+      .filter((a) => a.review?.parent === parent.slug)
+      .sort((a, b) => b.review.pr_number - a.review.pr_number),
+  };
+});
+route('GET', '/api/apps/:slug/pull-requests', async (context) => {
+  const parent = reviewParentOf(context);
+  await new Promise((done) => setTimeout(done, 300));
+  if (context.state.pullRequestsDenied) {
+    throw new HttpError(502, 'github_permission_missing');
+  }
+  return { pull_requests: pullRequestsOf(context.state, parent) };
+});
+route('POST', '/api/apps/:slug/review-apps', async (context) => {
+  const parent = reviewParentOf(context);
+  if (context.scenario === 'stale-login') {
+    throw new HttpError(403, 'reauth_required');
+  }
+  if (context.state.pullRequestsDenied) {
+    throw new HttpError(502, 'github_permission_missing');
+  }
+  const pr = pullRequestsOf(context.state, parent).find(
+    (p) => p.number === context.body.pr_number,
+  );
+  if (!pr) throw new HttpError(404, 'pull_request_not_found');
+  if (pr.from_fork) throw new HttpError(422, 'pull_request_from_fork');
+  if (pr.review_app) throw new HttpError(409, 'review_app_exists');
+  await new Promise((done) => setTimeout(done, 600));
+  const created = newReviewApp(
+    context.state,
+    parent,
+    pr,
+    context.body.copy_data !== false,
+    20000 + context.state.apps.size,
+  );
+  context.state.apps.set(created.slug, created);
+  context.state.domains.set(created.slug, []);
+  context.state.deployments.set(created.slug, []);
+  startDeployment(context.state, created.slug, {
+    ref: pr.head_branch,
+    sha: pr.head_sha,
+  });
+  record(context, parent.slug, 'review_app.created', {
+    slug: created.slug,
+    pr_number: pr.number,
+  });
+  record(context, created.slug, 'app.created', {
+    environment: 'staging',
+    env_added: [],
+    review: { parent: parent.slug, pr_number: pr.number },
+  });
+  // The mock host has no wildcard record, to show the warning.
+  return { status: 201, json: { ...created, dns_warning: true } };
 });
 for (const [action, desired, done] of [
   ['start', 'running', 'app.started'],

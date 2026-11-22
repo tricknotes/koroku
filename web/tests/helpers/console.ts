@@ -332,6 +332,7 @@ export function serveConsole(
       default_hostname: `${slug}.dev.example.com`,
       domains: state.domains,
     }))
+    .on('GET', `${app}/review-apps`, { review_apps: [] })
     .on('GET', `${app}/backups`, () => ({ snapshots: state.snapshots }))
     .on('GET', `${app}/volumes`, {
       volumes: [makeVolume('pgdata'), makeVolume('uploads')],

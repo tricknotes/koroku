@@ -627,6 +627,16 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   confirmStop = () => this.control('stop');
 
+  /**
+   * The owner deletes apps; a review app can also be deleted with manage
+   * (ARCHITECTURE 9.9).
+   */
+  get canDelete(): boolean {
+    return (
+      this.isOwner || (Boolean(this.app.review) && can(this.app, 'manage'))
+    );
+  }
+
   requestDelete = () => {
     this.deleteError = null;
     this.deleteVolumes = false;
@@ -640,7 +650,9 @@ export default class AppSettingsTemplate extends Component<Signature> {
   confirmDelete = async () => {
     this.deleting = true;
     try {
-      await this.api.deleteApp(this.app.slug, { volumes: this.deleteVolumes });
+      await this.api.deleteApp(this.app.slug, {
+        volumes: this.deleteVolumes || Boolean(this.app.review),
+      });
       this.router.transitionTo('index');
     } catch (error) {
       this.deleteError = error;
@@ -1670,7 +1682,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
               {{on "click" this.requestStop}}
             >停止…</Button>
           </li>
-          {{#if this.isOwner}}
+          {{#if this.canDelete}}
             <li class="action-row">
               <div class="action-row-text">
                 <p class="action-row-title">アプリを削除</p>
@@ -1814,31 +1826,38 @@ export default class AppSettingsTemplate extends Component<Signature> {
           <strong>{{this.app.slug}}</strong>
           を削除します。元に戻せません。
         </p>
-        <label class="option dialog-option">
-          <input
-            type="checkbox"
-            checked={{this.deleteVolumes}}
-            disabled={{this.deleting}}
-            data-test-delete-volumes
-            {{on "change" (setChecked this "deleteVolumes")}}
-          />
-          <span class="option-body">
-            <span class="option-label">volume も削除する</span>
-            <span class="option-hint">
-              DB やアップロードファイルなど、アプリのデータが消えます。
+        {{#if this.app.review}}
+          <p data-test-delete-review>
+            レビューアプリなので、volume
+            も削除します（データは親アプリの写しです）。
+          </p>
+        {{else}}
+          <label class="option dialog-option">
+            <input
+              type="checkbox"
+              checked={{this.deleteVolumes}}
+              disabled={{this.deleting}}
+              data-test-delete-volumes
+              {{on "change" (setChecked this "deleteVolumes")}}
+            />
+            <span class="option-body">
+              <span class="option-label">volume も削除する</span>
+              <span class="option-hint">
+                DB やアップロードファイルなど、アプリのデータが消えます。
+              </span>
             </span>
-          </span>
-        </label>
-        <p aria-live="polite">
-          {{#if this.deleteVolumes}}
-            <strong data-test-delete-volumes-warning>
-              volume も削除します。データは残りません。
-            </strong>
-          {{else}}
-            volume は残します。同じ名前でアプリを作り直すと、残した volume
-            がそのまま使われます。
-          {{/if}}
-        </p>
+          </label>
+          <p aria-live="polite">
+            {{#if this.deleteVolumes}}
+              <strong data-test-delete-volumes-warning>
+                volume も削除します。データは残りません。
+              </strong>
+            {{else}}
+              volume は残します。同じ名前でアプリを作り直すと、残した volume
+              がそのまま使われます。
+            {{/if}}
+          </p>
+        {{/if}}
       </ConfirmDialog>
     {{/if}}
   </template>

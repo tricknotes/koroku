@@ -19,6 +19,7 @@ import './styles/tasks.css';
 import './styles/panes.css';
 import './styles/tab-section.css';
 import './styles/overview.css';
+import './styles/review-apps.css';
 import './styles/env.css';
 import './styles/domains.css';
 import './styles/backups.css';

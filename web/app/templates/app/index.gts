@@ -16,6 +16,8 @@ import ErrorMessage from 'koroku-console/components/error-message';
 import Icon from 'koroku-console/components/icon';
 import Meter from 'koroku-console/components/meter';
 import RelativeTime from 'koroku-console/components/relative-time';
+import ReviewAppSummary from 'koroku-console/components/review-app-summary';
+import ReviewAppsPanel from 'koroku-console/components/review-apps-panel';
 import RowList from 'koroku-console/components/row-list';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import TabSection from 'koroku-console/components/tab-section';
@@ -30,6 +32,7 @@ import {
   shortSha,
 } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import { parentProblem } from 'koroku-console/utils/review';
 import { can } from 'koroku-console/utils/roles';
 import { isRollback, rollbackSummary } from 'koroku-console/utils/rollback';
 import {
@@ -189,6 +192,11 @@ export default class AppOverviewTemplate extends Component<Signature> {
 
   get app(): App {
     return this.args.model.app;
+  }
+
+  /** A staging app with a GitHub repository can have review apps. */
+  get reviewParent(): boolean {
+    return parentProblem(this.app) === null;
   }
 
   get state(): AppState {
@@ -807,9 +815,16 @@ export default class AppOverviewTemplate extends Component<Signature> {
             </EmptyState>
           </div>
         {{/if}}
+
+        {{#if this.reviewParent}}
+          <ReviewAppsPanel @parent={{this.app}} />
+        {{/if}}
       </div>
 
       <div class="overview-side">
+        {{#if this.app.review}}
+          <ReviewAppSummary @app={{this.app}} @review={{this.app.review}} />
+        {{/if}}
         <TabSection @title="ドメイン" data-test-overview-domains>
           <:actions>
             <LinkTo

@@ -16,7 +16,9 @@ import type {
   ComposeDetection,
   CreatedApiToken,
   ContainerResources,
+  CreatedReviewApp,
   GitHubAppStatus,
+  PullRequest,
   CopySourceKind,
   DbCopy,
   Deployment,
@@ -336,6 +338,32 @@ export default class ApiService extends Service {
 
   controlApp(slug: string, action: 'start' | 'stop' | 'restart'): Promise<App> {
     return this.request('POST', `/api/apps/${seg(slug)}/${action}`);
+  }
+
+  // Review apps (ARCHITECTURE 9.9)
+
+  async listReviewApps(slug: string): Promise<App[]> {
+    const { review_apps } = await this.request<{ review_apps: App[] | null }>(
+      'GET',
+      `/api/apps/${seg(slug)}/review-apps`,
+    );
+    return review_apps ?? [];
+  }
+
+  async listPullRequests(slug: string): Promise<PullRequest[]> {
+    const { pull_requests } = await this.request<{
+      pull_requests: PullRequest[] | null;
+    }>('GET', `/api/apps/${seg(slug)}/pull-requests`);
+    return pull_requests ?? [];
+  }
+
+  createReviewApp(
+    slug: string,
+    body: { pr_number: number; copy_data: boolean },
+  ): Promise<CreatedReviewApp> {
+    return this.request('POST', `/api/apps/${seg(slug)}/review-apps`, {
+      body,
+    });
   }
 
   /** Wakes a sleeping app and resolves once it answers (ARCHITECTURE 8.4). */

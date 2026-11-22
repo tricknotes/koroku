@@ -24,6 +24,7 @@ import {
   type AttentionItem,
 } from 'koroku-console/utils/attention';
 import { firstLine, hostOf, shortSha } from 'koroku-console/utils/format';
+import { groupReviewApps, isChildRow } from 'koroku-console/utils/review';
 import Loadable from 'koroku-console/utils/loadable';
 import {
   APP_STATE_HINTS,
@@ -210,8 +211,11 @@ export default class IndexTemplate extends Component {
               <span>直近のデプロイ</span>
             </:header>
             <:rows as |Row|>
-              {{#each apps key="slug" as |app|}}
-                <Row data-test-app={{app.slug}}>
+              {{#each (groupReviewApps apps) key="slug" as |app|}}
+                <Row
+                  class={{if (isChildRow app apps) "app-row-review"}}
+                  data-test-app={{app.slug}}
+                >
                   <div class="app-cell-state">
                     <StatusIndicator
                       @kind={{stateKind app}}
@@ -238,6 +242,12 @@ export default class IndexTemplate extends Component {
                       {{/if}}
                       <RoleBadge @role={{app.role}} />
                     </span>
+                    {{#if app.review}}
+                      <span class="app-review-line" data-test-review-of>
+                        PR #{{app.review.pr_number}}
+                        {{app.review.pr_title}}
+                      </span>
+                    {{/if}}
                     {{#if (openUrl app)}}
                       <span class="app-url" data-test-url>
                         {{hostOf (openUrl app)}}

@@ -55,6 +55,10 @@ export const SCENARIOS = {
     'everything fine, and a copy of the production database into blog-staging is running',
   'copy-failed':
     'everything fine, but the last copy into blog-staging failed while loading and left its services stopped',
+  'review-apps':
+    'blog-staging and shop-staging have review apps of pull requests: one running, one whose pull request was merged (sleeping), one whose first deployment failed',
+  'review-permission':
+    'review apps as in review-apps, but the GitHub App lacks Pull requests: Read-only, so no pull request can be listed',
   'promote-unpaired':
     'everything fine, but blog has no promotion source (shop still promotes from shop-staging)',
   member:
@@ -228,6 +232,7 @@ function app(slug, overrides = {}) {
     idle_sleep: false,
     idle_sleep_minutes: 30,
     sleeping_since: null,
+    review: null,
     url,
     primary_url: url,
     pending_domains: 0,
@@ -463,6 +468,226 @@ function healthyApps() {
   ];
 }
 
+/** The review part of an app's JSON (ARCHITECTURE 9.9). */
+function review(parent, number, title, branch, state, copy) {
+  return {
+    parent,
+    pr_number: number,
+    pr_title: title,
+    pr_url: `https://github.com/octo/${parent.replace(/-staging$/, '')}/pull/${number}`,
+    pr_state: state,
+    head_branch: branch,
+    data_copy: copy,
+    data_copy_detail: '',
+  };
+}
+
+/** Review apps of blog-staging and shop-staging. */
+function reviewApps() {
+  const search = deployment(
+    'blog-staging-pr-42',
+    'Add full-text search to the archive',
+    18 * MINUTE,
+    { ref: 'search', trigger: 'push', pusher: 'mona' },
+  );
+  const dark = deployment(
+    'blog-staging-pr-38',
+    'Dark mode for the reader',
+    5 * DAY,
+    { ref: 'dark-mode' },
+  );
+  const checkout = deployment(
+    'shop-staging-pr-7',
+    'Split the checkout form into steps',
+    4 * MINUTE,
+    {
+      ref: 'checkout-steps',
+      status: 'failed',
+      error: 'health check did not pass within 1m0s (last result: HTTP 500)',
+    },
+  );
+  const reviewApp = (slug, repo, branch, overrides) =>
+    app(slug, {
+      repo_full_name: repo,
+      default_branch: branch,
+      auto_deploy: true,
+      auto_deploy_branch: branch,
+      idle_sleep: true,
+      created_at: ago(2 * DAY),
+      ...overrides,
+    });
+  return [
+    {
+      app: reviewApp('blog-staging-pr-42', 'octo/blog', 'search', {
+        host_port: 20010,
+        current_deployment: search,
+        latest_deployment: search,
+        review: review(
+          'blog-staging',
+          42,
+          'Add full-text search to the archive',
+          'search',
+          'open',
+          'started',
+        ),
+      }),
+    },
+    {
+      app: reviewApp('blog-staging-pr-38', 'octo/blog', 'dark-mode', {
+        host_port: 20011,
+        sleeping_since: ago(20 * HOUR),
+        current_deployment: dark,
+        latest_deployment: dark,
+        created_at: ago(6 * DAY),
+        review: review(
+          'blog-staging',
+          38,
+          'Dark mode for the reader',
+          'dark-mode',
+          'merged',
+          'started',
+        ),
+      }),
+    },
+    {
+      app: reviewApp('shop-staging-pr-7', 'octo/shop', 'checkout-steps', {
+        host_port: 20012,
+        protection_exempt_paths: ['/webhooks/', '/api/payments/callback'],
+        latest_deployment: checkout,
+        created_at: ago(5 * MINUTE),
+        review: review(
+          'shop-staging',
+          7,
+          'Split the checkout form into steps',
+          'checkout-steps',
+          'open',
+          'waiting',
+        ),
+      }),
+    },
+  ];
+}
+
+/** The open pull requests of each repository (`GET .../pull-requests`). */
+export const PULL_REQUESTS = {
+  'octo/blog': [
+    {
+      number: 46,
+      title: 'Paginate the archive by month',
+      head_branch: 'archive-months',
+      author: 'mona',
+      updatedAgo: 25 * MINUTE,
+    },
+    {
+      number: 45,
+      title: 'Fix typo in the about page',
+      head_branch: 'patch-1',
+      author: 'drive-by',
+      updatedAgo: 3 * HOUR,
+      from_fork: true,
+    },
+    {
+      number: 42,
+      title: 'Add full-text search to the archive',
+      head_branch: 'search',
+      author: 'mona',
+      updatedAgo: 20 * MINUTE,
+    },
+    {
+      number: 40,
+      title: 'Move images to the CDN',
+      head_branch: 'cdn-images',
+      author: 'octo',
+      updatedAgo: 2 * DAY,
+    },
+  ],
+  'octo/shop': [
+    {
+      number: 9,
+      title: 'Show stock levels on product pages',
+      head_branch: 'stock-levels',
+      author: 'octo',
+      updatedAgo: 1 * HOUR,
+    },
+    {
+      number: 7,
+      title: 'Split the checkout form into steps',
+      head_branch: 'checkout-steps',
+      author: 'mona',
+      updatedAgo: 6 * MINUTE,
+    },
+  ],
+};
+
+/** The pull requests of a parent, as the API lists them. */
+export function pullRequestsOf(state, parent) {
+  return (PULL_REQUESTS[parent.repo_full_name] ?? []).map(
+    ({ updatedAgo, from_fork = false, ...pr }) => {
+      const existing = [...state.apps.values()].find(
+        (a) =>
+          a.review?.parent === parent.slug && a.review.pr_number === pr.number,
+      );
+      return {
+        ...pr,
+        head_sha: `${pr.number}`.padEnd(40, 'a'),
+        url: `https://github.com/${parent.repo_full_name}/pull/${pr.number}`,
+        updated_at: ago(updatedAgo),
+        from_fork,
+        review_app: existing?.slug ?? null,
+      };
+    },
+  );
+}
+
+/** A review app as `POST .../review-apps` would create it. */
+export function newReviewApp(state, parent, pr, copyData, hostPort) {
+  let slug = `${parent.slug}-pr-${pr.number}`;
+  for (let n = 2; state.apps.has(slug); n++) {
+    slug = `${parent.slug}-pr-${pr.number}-${n}`;
+  }
+  const hooks = parent.dump_hook_command && parent.load_hook_command;
+  const created = app(slug, {
+    ...Object.fromEntries(
+      [
+        'repo_full_name',
+        'compose_path',
+        'web_service',
+        'web_port',
+        'healthcheck_path',
+        'memory_limit',
+        'service_memory_limits',
+        'backup_exclude_volumes',
+        'dump_hook_service',
+        'dump_hook_command',
+        'load_hook_service',
+        'load_hook_command',
+        'post_load_service',
+        'post_load_command',
+        'protection_exempt_paths',
+        'auto_deploy_workflow',
+      ].map((key) => [key, parent[key]]),
+    ),
+    host_port: hostPort,
+    default_branch: pr.head_branch,
+    auto_deploy: true,
+    auto_deploy_branch: pr.head_branch,
+    idle_sleep: true,
+    created_at: ago(0),
+    review: {
+      ...review(parent.slug, pr.number, pr.title, pr.head_branch, 'open', ''),
+      pr_url: pr.url,
+      data_copy: copyData ? (hooks ? 'waiting' : 'skipped') : '',
+      data_copy_detail:
+        copyData && !hooks
+          ? parent.dump_hook_command
+            ? 'no_load_hook'
+            : 'no_dump_hook'
+          : '',
+    },
+  });
+  return created;
+}
+
 function warningApps() {
   const [blog, blogStaging, shop, shopStaging] = healthyApps();
 
@@ -603,6 +828,12 @@ export function buildScenario(name) {
     case 'webhook-unset': {
       const state = scenario(healthyApps());
       state.system.webhook.secret_configured = false;
+      return state;
+    }
+    case 'review-apps':
+    case 'review-permission': {
+      const state = scenario([...healthyApps(), ...reviewApps()]);
+      state.pullRequestsDenied = name === 'review-permission';
       return state;
     }
     case 'sleeping': {

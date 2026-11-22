@@ -91,6 +91,19 @@ const MESSAGES: Record<string, string> = {
     'GitHub API の利用上限に達しました。しばらくしてからやり直してください。',
   github_error: 'GitHub との通信に失敗しました。',
   network_error: 'サーバーに接続できませんでした。',
+  github_permission_missing:
+    'GitHub が pull request の読み取りを断りました。GitHub App の Repository permissions に「Pull requests: Read-only」を足し、インストール先で新しい権限を承認してください。',
+  not_review_parent:
+    'このアプリにはレビューアプリを作れません。staging で、GitHub App で取得するアプリだけが親になれます。',
+  review_app_exists: 'この pull request のレビューアプリはすでにあります。',
+  pull_request_not_found: 'pull request が見つかりません。',
+  pull_request_not_open: 'この pull request は閉じられています。',
+  pull_request_from_fork:
+    'fork からの pull request にはレビューアプリを作れません（親の環境変数とデータが fork のコードに渡るため）。',
+  has_review_apps:
+    'このアプリにはレビューアプリが残っています。先にレビューアプリを削除してください。',
+  role_follows_parent:
+    'レビューアプリのロールは親アプリのロールに従います。親アプリのロールを変えてください。',
 };
 
 const GENERIC = 'エラーが発生しました。';
