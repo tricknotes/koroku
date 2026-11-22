@@ -90,6 +90,10 @@ type App struct {
 	// use `set -o pipefail` or avoid pipes.
 	DumpService string
 	DumpCommand string
+	// WithDumpService, when set, runs the dump inside it: it makes sure
+	// the dump service runs while run does (an app that sleeps while idle
+	// starts only that service for the dump).
+	WithDumpService func(ctx context.Context, run func(context.Context) error) error
 }
 
 // Recorder keeps the history of runs. The caller implements it on the

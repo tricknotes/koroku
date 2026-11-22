@@ -1191,14 +1191,20 @@ type fakeBackup struct {
 	apps  []string
 	err   error
 	calls int
+	// hook, when set, runs as the backup (outside mu).
+	hook func(ctx context.Context, app store.App) error
 }
 
-func (f *fakeBackup) BackupApp(_ context.Context, app store.App) error {
+func (f *fakeBackup) BackupApp(ctx context.Context, app store.App) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls++
 	f.apps = append(f.apps, app.Slug)
-	return f.err
+	err, hook := f.err, f.hook
+	f.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, app)
+	}
+	return err
 }
 
 func TestBackupBeforeDeploy(t *testing.T) {

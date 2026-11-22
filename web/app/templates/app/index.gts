@@ -118,7 +118,13 @@ function isQuiet(service: ServiceStatus): boolean {
 /** Everything that moves an app from one state to another. */
 function stateKey(app: App): string {
   const { latest_deployment: latest, current_deployment: current } = app;
-  return [latest?.id, latest?.status, current?.id, app.desired_state].join(':');
+  return [
+    latest?.id,
+    latest?.status,
+    current?.id,
+    app.desired_state,
+    app.sleeping_since ?? '',
+  ].join(':');
 }
 
 interface Signature {
@@ -217,6 +223,11 @@ export default class AppOverviewTemplate extends Component<Signature> {
 
   get stoppedHint(): string {
     return APP_STATE_HINTS.stopped;
+  }
+
+  /** Stopped while idle; the next request wakes it (ARCHITECTURE 8.4). */
+  get isSleeping(): boolean {
+    return !this.isStopped && Boolean(this.app.sleeping_since);
   }
 
   /** Shown instead of a release while the app has never been deployed. */
@@ -372,6 +383,24 @@ export default class AppOverviewTemplate extends Component<Signature> {
     }
   };
 
+  /** Wakes a sleeping app without waiting for a visitor. */
+  wake = async () => {
+    this.starting = true;
+    this.error = null;
+    this.notice = '';
+    try {
+      const app = await this.api.wakeApp(this.slug);
+      this.args.model.set(app);
+      this.lastState = stateKey(app);
+      this.notice = '起こしました。';
+      await this.services.load({ quiet: this.services.loaded });
+    } catch (error) {
+      this.error = error;
+    } finally {
+      this.starting = false;
+    }
+  };
+
   <template>
     <div class="overview" data-test-overview>
       <div class="overview-top">
@@ -448,7 +477,11 @@ export default class AppOverviewTemplate extends Component<Signature> {
       <div class="overview-main">
         {{#if this.app.current_deployment}}
           <TabSection
-            @title={{if this.isStopped "停止中のリリース" "稼働中のリリース"}}
+            @title={{if
+              this.isStopped
+              "停止中のリリース"
+              (if this.isSleeping "休止中のリリース" "稼働中のリリース")
+            }}
             data-test-release
           >
             <:default>
@@ -494,6 +527,14 @@ export default class AppOverviewTemplate extends Component<Signature> {
                       <dd>{{duration this.app.current_deployment}}</dd>
                     </div>
                   {{/if}}
+                  {{#if this.isSleeping}}
+                    <div class="fact" data-test-sleeping-since>
+                      <dt>休止</dt>
+                      <dd>
+                        <RelativeTime @time={{this.app.sleeping_since}} />
+                      </dd>
+                    </div>
+                  {{/if}}
                 </dl>
                 {{#if this.isStopped}}
                   <div class="overview-stopped">
@@ -507,6 +548,20 @@ export default class AppOverviewTemplate extends Component<Signature> {
                         data-test-control="start"
                         {{on "click" this.start}}
                       >起動</Button>
+                    {{/if}}
+                  </div>
+                {{else if this.isSleeping}}
+                  <div class="overview-stopped" data-test-sleeping>
+                    <p class="overview-stopped-hint" data-test-sleeping-hint>
+                      アクセスがないため休止しています。次のアクセスで起動し、最初の応答は起動を待ちます。
+                    </p>
+                    {{#if this.canDeploy}}
+                      <Button
+                        @busy={{this.starting}}
+                        @busyLabel="起動中…"
+                        data-test-control="wake"
+                        {{on "click" this.wake}}
+                      >起こす</Button>
                     {{/if}}
                   </div>
                 {{/if}}

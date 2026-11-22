@@ -59,6 +59,12 @@ export function exemptPathProblem(path: string): string | null {
   return null;
 }
 
+/** The idle time of a new app, as the API has it. */
+export const DEFAULT_IDLE_MINUTES = 30;
+
+/** The idle times the settings offer (the API takes 10 to 1440). */
+export const IDLE_MINUTES_CHOICES = [15, 30, 60, 180];
+
 const MEMORY_PATTERN = /^[0-9]+[bkmg]$/;
 
 /** Empty (use the default) or digits plus one of `b` `k` `m` `g`. */
@@ -102,6 +108,9 @@ export default class SettingsForm {
   @tracked autoDeployBranch: string;
   /** The workflow to wait for before deploying a push; '' for none. */
   @tracked autoDeployWorkflow: string;
+  /** Sleep while idle (ARCHITECTURE 8.4) and after how many minutes. */
+  @tracked idleSleep: boolean;
+  @tracked idleSleepMinutes: number;
 
   constructor(app: App) {
     this.defaultBranch = app.default_branch;
@@ -125,6 +134,8 @@ export default class SettingsForm {
     this.autoDeploy = app.auto_deploy ?? false;
     this.autoDeployBranch = app.auto_deploy_branch ?? '';
     this.autoDeployWorkflow = app.auto_deploy_workflow ?? '';
+    this.idleSleep = app.idle_sleep ?? false;
+    this.idleSleepMinutes = app.idle_sleep_minutes ?? DEFAULT_IDLE_MINUTES;
   }
 
   /** The branch whose pushes would deploy, as the form stands. */
@@ -243,6 +254,14 @@ export default class SettingsForm {
     const autoDeployWorkflow = this.autoDeployWorkflow.trim();
     if (autoDeployWorkflow !== (app.auto_deploy_workflow ?? '')) {
       patch.auto_deploy_workflow = autoDeployWorkflow;
+    }
+    if (this.idleSleep !== (app.idle_sleep ?? false)) {
+      patch.idle_sleep = this.idleSleep;
+    }
+    if (
+      this.idleSleepMinutes !== (app.idle_sleep_minutes ?? DEFAULT_IDLE_MINUTES)
+    ) {
+      patch.idle_sleep_minutes = this.idleSleepMinutes;
     }
     return patch;
   }

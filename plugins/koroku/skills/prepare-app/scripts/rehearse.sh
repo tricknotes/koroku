@@ -20,6 +20,9 @@
 #   --task <svc>:<cmd>   after the check, run a one-off command the way
 #                        koroku's tasks do (run --rm --no-deps -T <svc>
 #                        sh -c <cmd>); repeatable; a non-zero exit fails
+#   --sleep              after the check, put the app to sleep and wake it
+#                        the way koroku does for an app that sleeps while
+#                        idle (stop, then start --wait), and check again
 #   --keep               leave the containers, volumes and work directory
 set -euo pipefail
 
@@ -31,6 +34,7 @@ env_src=""
 host_port="28080"
 memory="512m"
 keep=0
+sleep_wake=0
 tasks=()
 
 die() { echo "rehearse: $*" >&2; exit 2; }
@@ -47,6 +51,7 @@ while [ $# -gt 0 ]; do
     --task)
       case "${2:?}" in *:?*) ;; *) die "--task needs <service>:<command>" ;; esac
       tasks+=("$2"); shift 2 ;;
+    --sleep) sleep_wake=1; shift ;;
     --keep) keep=1; shift ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option: $1" ;;
@@ -220,22 +225,42 @@ if ! "${dc[@]}" up -d --remove-orphans --wait --wait-timeout 300; then
 fi
 
 url="http://127.0.0.1:$host_port$health"
-echo "==> Checking $url (any status below 500, up to 60s)"
-deadline=$(( $(date +%s) + 60 ))
 code="000"
-while :; do
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" || true)"
-  if [ "$code" != "000" ] && [ "$code" -lt 500 ]; then
-    break
-  fi
-  if [ "$(date +%s)" -ge "$deadline" ]; then
+# check_http waits up to 60s for any status below 500, like koroku.
+check_http() {
+  echo "==> Checking $url (any status below 500, up to 60s)"
+  local deadline=$(( $(date +%s) + 60 ))
+  while :; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" || true)"
+    if [ "$code" != "000" ] && [ "$code" -lt 500 ]; then
+      return 0
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      show_logs
+      echo
+      echo "FAILED: $url did not answer below 500 within 60s (last: $code)" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
+check_http
+
+if [ "$sleep_wake" = 1 ]; then
+  # koroku stops an idle app with its containers kept, and the next request
+  # starts the same containers again (one-shot services run again too).
+  echo "==> Sleeping (stop) and waking (start --wait, up to 300s)"
+  "${dc[@]}" stop
+  start=$(date +%s)
+  if ! "${dc[@]}" start --wait --wait-timeout 300; then
     show_logs
     echo
-    echo "FAILED: $url did not answer below 500 within 60s (last: $code)" >&2
+    echo "FAILED: the app did not start again after a sleep" >&2
     exit 1
   fi
-  sleep 1
-done
+  check_http
+  echo "    woke up in $(( $(date +%s) - start ))s (the first request after a sleep waits this long)"
+fi
 
 for task in ${tasks[@]+"${tasks[@]}"}; do
   task_service="${task%%:*}"

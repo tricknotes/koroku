@@ -274,6 +274,19 @@ func (j *copyJob) run(ctx context.Context) (bytes int64, err error) {
 		j.log.Printf("Source: snapshot %s of %s, taken %s", shortSnapshotID(j.snapshot.ID), src.Slug, j.snapshot.Time.UTC().Format(time.RFC3339))
 	}
 	j.log.Printf("Target: %s, load hook in service %s: %s", dst.Slug, dst.LoadHookService, dst.LoadHookCommand)
+	// The copy holds the locks of the apps it runs in; a sleeping one is
+	// woken under them (ARCHITECTURE 8.4).
+	awake := []store.App{dst}
+	if j.req.Kind == store.CopySourceLive {
+		awake = append(awake, src)
+	}
+	for _, app := range awake {
+		if _, err := e.wakeLocked(ctx, app.ID, func(format string, args ...any) {
+			j.log.Printf("%s: "+format, append([]any{app.Slug}, args...)...)
+		}); err != nil {
+			return 0, err
+		}
+	}
 	running, err := e.runningServices(ctx, dst)
 	if err != nil {
 		return 0, err

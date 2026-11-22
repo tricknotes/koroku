@@ -145,6 +145,9 @@ func (e *Engine) executeRollback(ctx context.Context, d store.Deployment, app st
 	if err != nil {
 		return false, err
 	}
+	if err := e.endSleep(ctx, app, log); err != nil {
+		return false, err
+	}
 	if err := writeFileAtomic(e.EnvFile(app.Slug), env, 0o600); err != nil {
 		return false, fmt.Errorf("write env file: %w", err)
 	}

@@ -76,6 +76,11 @@ export default class AppResourcesTemplate extends Component<Signature> {
           稼働中のコンテナを数秒ごとに測った値です。CPU は Docker と同じく 1
           コアを 100% とします。
         </p>
+        {{#if this.app.sleeping_since}}
+          <Banner data-test-resources-sleeping>
+            アクセスがないため休止中で、サービスは止まっています。休止の間はメモリの履歴も記録しません。
+          </Banner>
+        {{/if}}
         {{#if this.services.stale}}
           <Banner @tone="warning" data-test-stale>
             最新の値を取得できていません。表示は最後に取得できた値です。

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -213,4 +214,27 @@ func TestAccessLogIsCollectedByRun(t *testing.T) {
 			}
 		}
 	}
+}
+
+// OnAccess hears of the entries collected now, not of those a restarted
+// collector reads again.
+func TestAccessTailReportsNewEntries(t *testing.T) {
+	var mu sync.Mutex
+	var heard []string
+	f := newFixture(t, func(o *Options) {
+		o.OnAccess = func(slug string, entry []byte) {
+			mu.Lock()
+			defer mu.Unlock()
+			heard = append(heard, slug+" "+uris([]string{string(entry)})[0])
+		}
+	})
+	path := filepath.Join(t.TempDir(), "blog.log")
+	appendFile(t, path, accessEntry(1795000000, "/before-start")+"\n")
+	a := newAccessTail(f, path)
+	mustPoll(t, a)
+	appendFile(t, path, accessEntry(1795000001, "/new")+"\n")
+	mustPoll(t, a)
+	mu.Lock()
+	defer mu.Unlock()
+	wantStrings(t, "reported entries", heard, []string{"blog /new"})
 }

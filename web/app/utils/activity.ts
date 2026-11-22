@@ -40,6 +40,8 @@ const SETTING_LABELS: Record<string, string> = {
   auto_deploy: 'push での自動デプロイ',
   auto_deploy_branch: '自動デプロイするブランチ',
   auto_deploy_workflow: '先に待つワークフロー',
+  idle_sleep: 'アクセスがない間は止める',
+  idle_sleep_minutes: '止めるまでの時間（分）',
   promote_from: '昇格元のステージングアプリ',
 };
 
@@ -203,6 +205,8 @@ export function describeActivity(entry: ActivityEntry): ActivityText {
       return { summary: 'アプリを停止', details: [] };
     case 'app.restarted':
       return { summary: 'アプリを再起動', details: [] };
+    case 'app.woken':
+      return { summary: '休止中のアプリを起こした', details: [] };
     case 'env.changed':
       return {
         summary:
