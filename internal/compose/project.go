@@ -45,6 +45,11 @@ type Service struct {
 	Restart     string   `json:"restart"`
 	MemLimit    string   `json:"mem_limit"`
 	Deploy      *Deploy  `json:"deploy"`
+	// MemReservation and OomScoreAdj are replaced by the override
+	// (ARCHITECTURE 6.2); they are read to pick the form to write and to
+	// check the merged result.
+	MemReservation string `json:"mem_reservation"`
+	OomScoreAdj    *int   `json:"oom_score_adj"`
 
 	CapAdd            []string          `json:"cap_add"`
 	Devices           []json.RawMessage `json:"devices"`
@@ -129,6 +134,14 @@ func (s Service) DeployMemoryLimit() string {
 	return s.Deploy.Resources.Limits.Memory
 }
 
+// DeployMemoryReservation returns deploy.resources.reservations.memory, or "".
+func (s Service) DeployMemoryReservation() string {
+	if s.Deploy == nil || s.Deploy.Resources == nil || s.Deploy.Resources.Reservations == nil {
+		return ""
+	}
+	return s.Deploy.Resources.Reservations.Memory
+}
+
 // Port is one published port.
 type Port struct {
 	HostIP    string `json:"host_ip"`
@@ -150,12 +163,13 @@ type Deploy struct {
 	Resources *Resources `json:"resources"`
 }
 
-// Resources holds resource limits.
+// Resources holds resource limits and reservations.
 type Resources struct {
-	Limits *Limits `json:"limits"`
+	Limits       *Limits `json:"limits"`
+	Reservations *Limits `json:"reservations"`
 }
 
-// Limits holds the memory limit.
+// Limits holds a memory limit or reservation.
 type Limits struct {
 	Memory string `json:"memory"`
 }
