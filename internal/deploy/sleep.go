@@ -221,6 +221,15 @@ func (e *Engine) hasContainers(ctx context.Context, app store.App) bool {
 // the app stays asleep and its route does not change (ARCHITECTURE 8.4).
 // The dump hook of a backup uses it.
 func (e *Engine) WithServiceRunning(ctx context.Context, appID int64, service string, fn func(context.Context) error) error {
+	return e.withServicesRunning(ctx, appID, []string{service}, nil, fn)
+}
+
+// withServicesRunning is WithServiceRunning for several services, which
+// may be none: then a sleeping app runs fn with nothing started. A caller
+// that holds the app's lock passes a context from withHeldLock. say, when
+// set, receives lines for the log of the operation.
+func (e *Engine) withServicesRunning(ctx context.Context, appID int64, services []string,
+	say func(format string, args ...any), fn func(context.Context) error) error {
 	app, err := e.opts.Store.GetAppByID(ctx, appID)
 	if err != nil {
 		return err
@@ -239,18 +248,52 @@ func (e *Engine) WithServiceRunning(ctx context.Context, appID int64, service st
 	if app.SleepingSince == nil {
 		return fn(ctx)
 	}
-	if err := e.runCompose(ctx, e.projectOnly(app), "", "start", "--wait", "--wait-timeout", e.waitSeconds(), service); err != nil {
-		return fmt.Errorf("start the %s service of the sleeping app: %w", service, err)
+	if len(services) == 0 {
+		if say != nil {
+			say("The app is asleep and stays asleep: the service depends on no other service.")
+		}
+		return fn(ctx)
+	}
+	if say != nil {
+		say("The app is asleep and stays asleep; starting only %s.", strings.Join(services, ", "))
 	}
 	defer func() {
 		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), opTimeout)
 		defer cancel()
 		if err := e.runCompose(stopCtx, e.projectOnly(app), "", "stop"); err != nil {
 			e.opts.Logger.Warn("stopping the sleeping app again failed", "app", app.Slug, "error", err)
+			if say != nil {
+				say("Stopping %s again failed: %v", strings.Join(services, ", "), err)
+			}
+		} else if say != nil {
+			say("Stopped %s again.", strings.Join(services, ", "))
 		}
 	}()
+	start := append([]string{"start", "--wait", "--wait-timeout", e.waitSeconds()}, services...)
+	err = e.runCompose(ctx, e.projectOnly(app), "", start...)
+	if err != nil && ctx.Err() == nil && !e.hasContainers(ctx, app) {
+		// Someone removed the containers: create the services again from
+		// the release.
+		err = e.upCurrent(ctx, app, services...)
+	}
+	if err != nil {
+		return &ServicesStartError{Services: services, Err: err}
+	}
 	return fn(ctx)
 }
+
+// ServicesStartError is the failure to start services of a sleeping app
+// for an operation that needs them.
+type ServicesStartError struct {
+	Services []string
+	Err      error
+}
+
+func (e *ServicesStartError) Error() string {
+	return fmt.Sprintf("start %s of the sleeping app: %v", strings.Join(e.Services, ", "), e.Err)
+}
+
+func (e *ServicesStartError) Unwrap() error { return e.Err }
 
 // endSleep records that a deployment is about to start the app's
 // containers: whatever it starts runs awake.

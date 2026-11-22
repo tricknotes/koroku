@@ -19,7 +19,8 @@ public_ip = "203.0.113.10"
 # Key used to encrypt environment variable values (32 random bytes, mode 0600).
 master_key_file = "/etc/koroku/master.key"
 
-# Time zone for schedules (daily backup, log archive windows) and log file dates.
+# Time zone for schedules (daily backup, scheduled tasks, log archive windows)
+# and log file dates.
 timezone = "Asia/Tokyo"
 
 [deploy]

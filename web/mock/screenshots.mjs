@@ -2060,6 +2060,18 @@ function tabs(count) {
 const TASK_RUN = '[data-test-task-run]';
 const RUN_OUTPUT = '[data-test-task-run-detail] [data-test-step-log]';
 
+// Types a schedule into the first task of the open editor and saves.
+const SAVE_SCHEDULE = (schedule) => `(() => {
+  const fill = () => {
+    const input = document.querySelector('[data-test-draft-schedule]');
+    if (!input) return setTimeout(fill, 50);
+    input.value = ${JSON.stringify(schedule)};
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    setTimeout(() => document.querySelector('[data-test-save-tasks]').click(), 50);
+  };
+  fill();
+})()`;
+
 /** Tasks tab: registered tasks, the command form and the runs. */
 const TASK_SHOTS = [
   {
@@ -2182,6 +2194,54 @@ const TASK_SHOTS = [
     then: '[data-test-task-editor]',
     ...PHONE,
     themes: ['light'],
+  },
+  // Scheduled tasks (ARCHITECTURE 9.6): a skipped time, a refused
+  // schedule, and the confirmation before a production app runs one.
+  {
+    name: 'tasks-skipped',
+    path: '/apps/blog/tasks?scenario=tasks-skipped',
+    wait: '[data-test-task-skip]',
+  },
+  {
+    name: 'tasks-skipped-phone',
+    path: '/apps/blog/tasks?scenario=tasks-skipped',
+    wait: '[data-test-task-skip]',
+    ...PHONE,
+  },
+  {
+    name: 'tasks-schedule-error',
+    path: '/apps/blog-staging/tasks?scenario=healthy',
+    wait: '[data-test-edit-tasks]',
+    click: '[data-test-edit-tasks]',
+    script: SAVE_SCHEDULE('60 3 * * *'),
+    then: '[data-test-task-draft] [data-test-field-error]',
+  },
+  {
+    name: 'tasks-schedule-error-phone',
+    path: '/apps/blog-staging/tasks?scenario=healthy',
+    wait: '[data-test-edit-tasks]',
+    click: '[data-test-edit-tasks]',
+    script: SAVE_SCHEDULE('60 3 * * *'),
+    then: '[data-test-task-draft] [data-test-field-error]',
+    ...PHONE,
+  },
+  {
+    name: 'tasks-schedule-confirm',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: '[data-test-edit-tasks]',
+    click: '[data-test-edit-tasks]',
+    script: SAVE_SCHEDULE('0 3 * * *'),
+    then: '[data-test-dialog-schedules]',
+  },
+  {
+    name: 'tasks-schedule-confirm-phone',
+    path: '/apps/blog/tasks?scenario=healthy',
+    wait: '[data-test-edit-tasks]',
+    click: '[data-test-edit-tasks]',
+    script: SAVE_SCHEDULE('0 3 * * *'),
+    then: '[data-test-dialog-schedules]',
+    ...PHONE,
+    fullPage: false,
   },
   // Last, because it changes the scenario: a task started in the UI of a
   // staging app (no confirmation), its output streaming in.

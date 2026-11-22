@@ -174,11 +174,14 @@ func (e *Engine) Start(ctx context.Context, app store.App) error {
 
 // upCurrent brings the app's current release up with its files, checked
 // again first, or starts the existing containers when the files are gone.
-func (e *Engine) upCurrent(ctx context.Context, app store.App) error {
+//
+// With services, only those are brought up, without their dependencies
+// and without removing the others.
+func (e *Engine) upCurrent(ctx context.Context, app store.App, services ...string) error {
 	inv, dir, ok := e.currentInvocation(app)
 	if !ok {
 		// The release files are gone; the stopped containers still exist.
-		return e.runCompose(ctx, e.projectOnly(app), "", "start")
+		return e.runCompose(ctx, e.projectOnly(app), "", append([]string{"start"}, services...)...)
 	}
 	// The release files are reused: check them again first.
 	meta, err := e.readMeta(app.Slug, *app.CurrentDeploymentID)
@@ -191,6 +194,9 @@ func (e *Engine) upCurrent(ctx context.Context, app store.App) error {
 	// A missing image is pulled with the app's own registry login.
 	if inv.DockerConfig, err = e.registryConfig(ctx, app, secrets.NewMasker()); err != nil {
 		return err
+	}
+	if len(services) > 0 {
+		return e.runCompose(ctx, inv, dir, append([]string{"up", "-d", "--no-deps", "--wait", "--wait-timeout", e.waitSeconds()}, services...)...)
 	}
 	return e.runCompose(ctx, inv, dir, "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", e.waitSeconds())
 }

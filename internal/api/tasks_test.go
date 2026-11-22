@@ -52,7 +52,7 @@ func TestRegisteredTasks(t *testing.T) {
 	h := srv.Handler()
 	createApp(t, h, "blog")
 
-	if rec := request(t, h, http.MethodGet, "/api/apps/blog/tasks", ""); strings.TrimSpace(rec.Body.String()) != `{"tasks":[]}` {
+	if rec := request(t, h, http.MethodGet, "/api/apps/blog/tasks", ""); strings.TrimSpace(rec.Body.String()) != `{"tasks":[],"time_zone":"Asia/Tokyo"}` {
 		t.Errorf("no tasks: %d %s", rec.Code, rec.Body)
 	}
 	body := `{"tasks": [
@@ -63,8 +63,9 @@ func TestRegisteredTasks(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("put: %d %s", rec.Code, rec.Body)
 	}
-	want := `{"tasks":[{"name":"マイグレーションの状態","service":"web","command":"bin/rails db:migrate:status"},` +
-		`{"name":"vacuum","service":"db","command":"vacuumdb -U postgres app"}]}`
+	const none = `"schedule":"","next_run_at":null,"last_skipped_at":null,"last_skip_reason":"","last_skip_detail":""`
+	want := `{"tasks":[{"name":"マイグレーションの状態","service":"web","command":"bin/rails db:migrate:status",` + none + `},` +
+		`{"name":"vacuum","service":"db","command":"vacuumdb -U postgres app",` + none + `}],"time_zone":"Asia/Tokyo"}`
 	if got := strings.TrimSpace(rec.Body.String()); got != want {
 		t.Errorf("put response = %s", got)
 	}
@@ -293,5 +294,52 @@ func TestProductionTasksNeedRecentLogin(t *testing.T) {
 	}
 	if rec := b.do(http.MethodPost, "/api/apps/blog/task-runs", `{"service":"web","command":"true"}`, origin); rec.Code != http.StatusAccepted {
 		t.Errorf("staging run: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTaskSchedules(t *testing.T) {
+	srv := newTestServer(t, nil)
+	h := srv.Handler()
+	createApp(t, h, "blog")
+
+	rec := request(t, h, http.MethodPut, "/api/apps/blog/tasks",
+		`{"tasks": [{"name": "nightly", "service": "web", "command": "true", "schedule": "  0  3 * * * "}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put: %d %s", rec.Code, rec.Body)
+	}
+	out := decode[struct {
+		Tasks []struct {
+			Schedule  string     `json:"schedule"`
+			NextRunAt *time.Time `json:"next_run_at"`
+		} `json:"tasks"`
+		TimeZone string `json:"time_zone"`
+	}](t, rec)
+	if len(out.Tasks) != 1 || out.Tasks[0].Schedule != "0 3 * * *" || out.Tasks[0].NextRunAt == nil || out.TimeZone != "Asia/Tokyo" {
+		t.Fatalf("put response = %s", rec.Body)
+	}
+	// 03:00 in Tokyo is 18:00 UTC.
+	if got := out.Tasks[0].NextRunAt.UTC(); got.Hour() != 18 || got.Minute() != 0 || !got.After(srv.clock.Now()) {
+		t.Errorf("next_run_at = %s (now %s)", got, srv.clock.Now())
+	}
+
+	// A listed task goes back as it is: the read-only fields are ignored.
+	listed := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(rec.Body.String()), `{"tasks":`), `,"time_zone":"Asia/Tokyo"}`)
+	if again := request(t, h, http.MethodPut, "/api/apps/blog/tasks", `{"tasks": `+listed+`}`); again.Code != http.StatusOK {
+		t.Errorf("put back the listed tasks: %d %s", again.Code, again.Body)
+	}
+
+	for schedule, want := range map[string]string{
+		"0 3 * *":     "needs 5 fields",
+		"60 * * * *":  "minute: 60 is out of range 0-59",
+		"0 0 31 2 *":  "never matches a date",
+		"@daily":      "needs 5 fields",
+		"*/0 * * * *": "step",
+	} {
+		rec := request(t, h, http.MethodPut, "/api/apps/blog/tasks",
+			fmt.Sprintf(`{"tasks": [{"name": "nightly", "service": "web", "command": "true", "schedule": %q}]}`, schedule))
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"tasks[0].schedule"`) ||
+			!strings.Contains(rec.Body.String(), want) {
+			t.Errorf("%q: %d %s", schedule, rec.Code, rec.Body)
+		}
 	}
 }
