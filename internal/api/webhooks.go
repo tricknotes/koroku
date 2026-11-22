@@ -59,13 +59,14 @@ type webhookResultJSON struct {
 
 type pushResultJSON struct {
 	App string `json:"app"`
-	// Status is queued, duplicate, stopped or failed; for a push to an
+	// Status is queued, deferred (kept until a running command ends),
+	// duplicate, stopped or failed; for a push to an
 	// app that waits for a workflow, waiting_workflow; for a workflow run,
 	// also skipped (the run did not succeed) or stale (the branch has a
 	// newer commit).
 	Status       string `json:"status"`
 	DeploymentID int64  `json:"deployment_id,omitempty"`
-	// Error is the code of a failure: busy, disk_full, branch_unresolved
+	// Error is the code of a failure: disk_full, branch_unresolved
 	// or internal.
 	Error string `json:"error,omitempty"`
 	// Conclusion is the run's conclusion, for skipped.
@@ -172,6 +173,13 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			res.Status = "duplicate"
 		default:
 			d, err := s.pushDeployer.EnqueuePush(ctx, app, branch, ev.After, ev.HeadMessage, pusher)
+			if errors.Is(err, deploy.ErrDeferred) {
+				// Kept until the app's command ends; the delivery stays
+				// remembered so that a redelivery is a duplicate.
+				res.Status = "deferred"
+				s.log.Info("push deployment deferred until the running command ends", "app", app.Slug, "branch", branch, "pusher", pusher)
+				break
+			}
 			if err != nil {
 				// Let a redelivery from GitHub try again.
 				s.deliveries.release(keys...)
@@ -304,6 +312,12 @@ func (s *Server) handleWorkflowRun(w http.ResponseWriter, r *http.Request, body 
 				break
 			}
 			d, err := s.pushDeployer.EnqueueWorkflowRun(ctx, app, ev.HeadBranch, ev.HeadSHA, message, pusher, ev.WorkflowPath)
+			if errors.Is(err, deploy.ErrDeferred) {
+				res.Status = "deferred"
+				s.log.Info("workflow run deployment deferred until the running command ends", "app", app.Slug,
+					"branch", ev.HeadBranch, "workflow", ev.WorkflowPath)
+				break
+			}
 			if err != nil {
 				s.deliveries.release(keys...)
 				failed = true

@@ -174,6 +174,7 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 		e.mu.Unlock()
 		cancelJob(nil)
 		e.finishTask(run.ID, store.StatusFailed, nil, "the log could not be opened")
+		e.queuePendingAutoDeploy(lifetime, app.ID)
 		return store.TaskRun{}, err
 	}
 
@@ -184,6 +185,10 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 			delete(e.tasks, run.ID)
 			e.mu.Unlock()
 			cancelJob(nil)
+			// A push that arrived during the run waited for it. The run is
+			// no longer registered, so a push from now on is queued
+			// directly (ARCHITECTURE 5.2).
+			e.queuePendingAutoDeploy(lifetime, app.ID)
 			close(done)
 		}()
 		defer log.Close()

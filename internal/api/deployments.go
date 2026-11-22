@@ -144,7 +144,28 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 	for _, d := range list {
 		out = append(out, s.deploymentToJSON(r.Context(), app, d))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deployments": out})
+	var pending *pendingAutoDeployJSON
+	if p, err := s.store.GetPendingAutoDeploy(r.Context(), app.ID); err == nil {
+		pending = &pendingAutoDeployJSON{
+			Ref: p.Ref, CommitSHA: p.CommitSHA, CommitMessage: p.CommitMessage,
+			Pusher: p.Pusher, Workflow: p.Workflow, ReceivedAt: p.ReceivedAt,
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deployments": out, "pending_auto_deploy": pending})
+}
+
+// pendingAutoDeployJSON is an automatic deployment kept until the command
+// running on the app ends (ARCHITECTURE 5.2).
+type pendingAutoDeployJSON struct {
+	Ref           string    `json:"ref"`
+	CommitSHA     string    `json:"commit_sha"`
+	CommitMessage string    `json:"commit_message"`
+	Pusher        string    `json:"pusher"`
+	Workflow      string    `json:"workflow"`
+	ReceivedAt    time.Time `json:"received_at"`
 }
 
 type createDeploymentInput struct {

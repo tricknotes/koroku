@@ -49,6 +49,10 @@ const (
 	// actAutoDeploySkipped is recorded by koroku itself when the workflow
 	// an app waits for did not succeed (ARCHITECTURE 5.2).
 	actAutoDeploySkipped = "auto_deploy.skipped" // {"workflow", "conclusion", "commit_sha", "branch", "run_url"}
+	// deploy.ActAutoDeployDropped ("auto_deploy.dropped") is recorded by the
+	// deploy engine: a deferred auto-deploy could not be queued once the
+	// command ended (ARCHITECTURE 5.2). {"commit_sha", "branch", "pusher",
+	// "workflow", "reason"}
 )
 
 // Bounds of GET /api/apps/{slug}/activity.

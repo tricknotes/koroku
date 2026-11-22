@@ -144,6 +144,9 @@ type Origin struct {
 	// Workflow is the workflow whose successful run released a push
 	// deployment (ARCHITECTURE 5.2). It is only written to the deploy log.
 	Workflow string
+	// Deferred marks a push kept while a command ran on the app and queued
+	// once it ended (ARCHITECTURE 5.2). It is only written to the deploy log.
+	Deferred bool
 }
 
 // EnqueueTriggered is EnqueueDeployment (or EnqueuePromotion, with
@@ -212,6 +215,11 @@ func (s *Store) enqueue(ctx context.Context, appID int64, ref, sha, message stri
 		`SELECT `+deploymentColumns+` FROM deployments WHERE id = ?`, id))
 	if err != nil {
 		return Deployment{}, nil, err
+	}
+	// A deferred auto-deploy is older than this deployment, which would
+	// supersede it once queued anyway (ARCHITECTURE 5.2).
+	if _, err := tx.ExecContext(ctx, `DELETE FROM pending_auto_deploys WHERE app_id = ?`, appID); err != nil {
+		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return Deployment{}, nil, fmt.Errorf("enqueue deployment: %w", err)
