@@ -107,6 +107,7 @@
 | Repository permissions → Metadata | Read-only（自動で付く） |
 | Repository permissions → Deployments | **Read and write**（デプロイの状態をリポジトリの Deployments に出す。なくても動くが、反映されない） |
 | Repository permissions → Actions | ワークフローを待つ自動デプロイ（4.6）を使うなら **Read-only**。使わないなら No access |
+| Repository permissions → Pull requests | レビューアプリ（4.7）を使うなら **Read-only**。使わないなら No access |
 | ほかの権限 | すべて No access |
 | Subscribe to events | 自動デプロイを使うなら **Push**。ワークフローを待つなら **Workflow run** も。使わないなら何も選ばない |
 | Where can this GitHub App be installed? | **Only on this account**（別の org のリポジトリも使うなら **Any account**。4.5） |
@@ -196,6 +197,15 @@ rm github-app.pem
 4. `sudo koroku check` の `github.workflow` が `[ ok ]` になることを確かめる。
 
 CI のあとで別のワークフローがイメージを作る（`on: workflow_run` でつなぐ）場合は、最後にイメージを置くほうのワークフローを入れる。成功しなかった実行（失敗・取り消しなど）ではデプロイせず、アプリの概要タブの「操作の記録」に koroku の記録として残る。
+
+### 4.7 レビューアプリ（任意）
+
+staging アプリの概要タブの「レビューアプリ」から、そのリポジトリの pull request ごとに別のアプリを作れる（ARCHITECTURE 9.9）。使うときは次を用意する。
+
+1. App の設定画面の **Permissions & events** → **Repository permissions** で **Pull requests** を **Read-only** にして保存し、インストール先で新しい権限を承認する。承認するまで、作成のダイアログは pull request を読めないと表示する。`sudo koroku check` の `github.app` は、この権限がなければ警告する。
+2. DNS にワイルドカードのレコード（`*.dev.example.com`）を置く。レビューアプリのホスト名 `<親の slug>-pr-<番号>.dev.example.com` は作るまで決まらない。ワイルドカードを登録できない DNS サービスでは、作るたびにそのホスト名を登録する（作成のあとで、名前解決できなければ画面が知らせる）。
+3. pull request への push でレビューアプリを更新するなら、4.6 の Webhook を設定する（レビューアプリは pull request のブランチの自動デプロイを有効にして作る）。設定しなければ、デプロイタブから手で出し直す。
+4. 親のデータをコピーするなら、親アプリのバックアップタブでダンプフックとロードフック（と、個人情報を消すコピー後のコマンド）を設定しておく。
 
 ## 5. オブジェクトストレージ
 
@@ -298,7 +308,7 @@ sudo koroku check
 | `caddy` | Caddy の admin API が応答する |
 | `https` | 管理 UI に HTTPS で接続でき、証明書が信頼できる（staging の間は警告） |
 | `master_key` | `master.key` があり、0600 |
-| `github.app` | App ID と秘密鍵の組が正しく、Client ID が一致し、権限が Contents と Metadata の Read-only と Deployments の Read and write（と、使うなら Actions の Read-only）だけ（Deployments がなければ警告） |
+| `github.app` | App ID と秘密鍵の組が正しく、Client ID が一致し、権限が Contents と Metadata の Read-only と Deployments の Read and write（と、使うなら Actions と Pull requests の Read-only）だけ（Deployments か Pull requests がなければ警告） |
 | `github.install` | App が 1 つ以上のアカウントにインストールされている |
 | `github.user` | 許可するユーザー ID のアカウントが実在する |
 | `github.webhook` | 自動デプロイを使うアプリがあるとき、`webhook_secret` があり、App が Push を購読し、Webhook URL が `https://<console_host>/webhooks/github`（使うアプリがなく secret もなければ `[skip]`） |
