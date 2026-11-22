@@ -41,6 +41,8 @@ import type {
   MemberRole,
   MemoryHistory,
   MemoryRange,
+  ComposeView,
+  ContainerView,
   NewApp,
   Repo,
   ServiceStatus,
@@ -389,6 +391,28 @@ export default class ApiService extends Service {
       { query: { range } },
     );
     return { ...history, services: history.services ?? [] };
+  }
+
+  /** A release's override and merged configuration (ARCHITECTURE 9.10). */
+  async getComposeView(
+    slug: string,
+    deploymentId?: number,
+  ): Promise<ComposeView> {
+    const view = await this.request<ComposeView>(
+      'GET',
+      `/api/apps/${seg(slug)}/compose`,
+      deploymentId ? { query: { deployment: String(deploymentId) } } : {},
+    );
+    return { ...view, releases: view.releases ?? [] };
+  }
+
+  /** The app's containers compared with its current release. */
+  async getContainers(slug: string): Promise<ContainerView> {
+    const view = await this.request<ContainerView>(
+      'GET',
+      `/api/apps/${seg(slug)}/containers`,
+    );
+    return { ...view, containers: view.containers ?? [] };
   }
 
   // Environment variables

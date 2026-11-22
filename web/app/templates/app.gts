@@ -232,6 +232,11 @@ export default class AppTemplate extends Component<Signature> {
             data-test-tab="resources"
           >リソース</tabs.Tab>
           <tabs.Tab
+            @route="app.compose"
+            @model={{@model.slug}}
+            data-test-tab="compose"
+          >構成</tabs.Tab>
+          <tabs.Tab
             @route="app.tasks"
             @model={{@model.slug}}
             data-test-tab="tasks"

@@ -50,6 +50,8 @@ export const SCENARIOS = {
     'blog compares with .env.example: one key is missing, one saved key is no longer listed',
   'env-unavailable':
     'blog compares with .env.example, which the repository does not have; shop is private and the GitHub App is not installed on it',
+  'compose-mismatch':
+    "blog's web was killed for memory and restarted, its worker is left from the release before, its db keeps restarting with another OOM score; the merged configuration of its previous release fails",
   rollback:
     'blog and blog-staging were rolled back to a kept release after a bad deploy; older releases are kept or already removed',
   'copy-running':

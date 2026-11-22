@@ -1,0 +1,85 @@
+configs:
+  nginx:
+    content: "server_name ${HOST};"
+    name: koroku-blog_nginx
+name: koroku-blog
+networks:
+  default:
+    name: koroku-blog_default
+secrets:
+  api_key:
+    content: "[MASKED]"
+    name: koroku-blog_api_key
+  db_password:
+    environment: DB_PASSWORD
+    name: koroku-blog_db_password
+services:
+  db:
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    env_file:
+      - path: /var/lib/koroku/apps/blog/env
+        required: true
+    environment:
+      - "POSTGRES_PASSWORD=[MASKED]"
+      - PGDATA
+    image: postgres:16
+    mem_reservation: 512m
+    networks:
+      default: null
+    oom_score_adj: -400
+    ports: []
+    restart: unless-stopped
+    volumes:
+      - source: pgdata
+        target: /var/lib/postgresql/data
+        type: volume
+  web:
+    build:
+      args:
+        BUNDLE_TOKEN: "[MASKED]"
+        RUBY_VERSION: "[MASKED]"
+      context: /var/lib/koroku/apps/blog/releases/42
+      dockerfile: Dockerfile
+    command:
+      - bin/rails
+      - server
+      - "-b"
+      - "0.0.0.0"
+    depends_on:
+      db:
+        condition: service_healthy
+        required: true
+    env_file:
+      - path: /var/lib/koroku/apps/blog/env
+        required: true
+    environment:
+      DATABASE_URL: "[MASKED]"
+      RAILS_LOG_TO_STDOUT: "[MASKED]"
+      SECRET_KEY_BASE: null
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - "-f"
+        - http://localhost:3000/up
+    image: koroku-blog-web:r42
+    labels:
+      com.example.team: blog
+    mem_limit: "${WEB_MEMORY:-512m}"
+    networks:
+      default: null
+    oom_score_adj: -400
+    ports:
+      - host_ip: "127.0.0.1"
+        mode: ingress
+        protocol: tcp
+        published: "20001"
+        target: 3000
+    read_only: false
+    restart: unless-stopped
+volumes:
+  pgdata:
+    name: koroku-blog_pgdata

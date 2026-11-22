@@ -186,6 +186,18 @@ func TestMaskerAddAndNil(t *testing.T) {
 	}
 }
 
+func TestMaskerMaskLong(t *testing.T) {
+	m := NewMasker("3000", "s3cr3t-password", "prod")
+	got := m.MaskLong("127.0.0.1:20001:3000 url=postgres://u:s3cr3t-password@db prod")
+	if got != "127.0.0.1:20001:3000 url=postgres://u:[MASKED]@db prod" {
+		t.Errorf("got %q", got)
+	}
+	var nilMasker *Masker
+	if got := nilMasker.MaskLong("plain"); got != "plain" {
+		t.Errorf("nil masker changed the text: %q", got)
+	}
+}
+
 func TestLineWriterMasksAcrossWrites(t *testing.T) {
 	var out bytes.Buffer
 	w := NewLineWriter(&out, NewMasker("s3cr3t-password"))

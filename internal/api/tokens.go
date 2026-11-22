@@ -52,6 +52,10 @@ var tokenRoutes = map[string]bool{
 	"GET /api/apps/{slug}/logs":             true,
 	"GET /api/apps/{slug}/logs/history":     true,
 	"GET /api/apps/{slug}/env/requirements": true,
+	// Masked like the key list; for diagnosing releases that started but
+	// misbehave (ARCHITECTURE 9.10).
+	"GET /api/apps/{slug}/compose":    true,
+	"GET /api/apps/{slug}/containers": true,
 }
 
 type tokenKey struct{}
