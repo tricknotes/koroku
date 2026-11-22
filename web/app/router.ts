@@ -13,6 +13,7 @@ Router.map(function () {
     this.route('deploy');
     this.route('logs');
     this.route('resources');
+    this.route('compose');
     this.route('tasks');
     this.route('env');
     this.route('domains');

@@ -9,6 +9,7 @@ import {
   makeVolume,
   type Fakes,
 } from './fakes';
+import { makeComposeView, makeContainerView } from './compose';
 import type {
   App,
   BackupOverview,
@@ -48,6 +49,7 @@ export const SCREENS: Screen[] = [
   { name: 'log search', url: '/apps/blog/logs?period=1h', tab: 'logs' },
   { name: 'log archives', url: '/apps/blog/logs?period=archive', tab: 'logs' },
   { name: 'resources', url: '/apps/blog/resources', tab: 'resources' },
+  { name: 'compose', url: '/apps/blog/compose', tab: 'compose' },
   { name: 'tasks', url: '/apps/blog/tasks', tab: 'tasks' },
   { name: 'environment variables', url: '/apps/blog/env', tab: 'env' },
   { name: 'domains', url: '/apps/blog/domains', tab: 'domains' },
@@ -232,6 +234,8 @@ export function serveConsole(
     .on('GET', '/api/backups', () => state.backups)
     .on('GET', app, () => state.app)
     .on('GET', `${app}/backups/status`, makeAppBackupStatus())
+    .on('GET', `${app}/compose`, makeComposeView())
+    .on('GET', `${app}/containers`, makeContainerView())
     .on('GET', `${app}/services`, {
       services: [
         {
