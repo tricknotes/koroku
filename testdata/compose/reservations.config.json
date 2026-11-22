@@ -1,0 +1,39 @@
+{
+  "name": "koroku-shop",
+  "services": {
+    "web": {
+      "image": "ghcr.io/example/shop:latest",
+      "ports": [
+        {"mode": "ingress", "target": 3000, "published": "3000", "protocol": "tcp"}
+      ],
+      "mem_limit": "402653184",
+      "mem_reservation": "314572800",
+      "oom_score_adj": -1000
+    },
+    "db": {
+      "image": "postgres:17",
+      "oom_score_adj": -900,
+      "deploy": {
+        "resources": {
+          "limits": {"memory": "1073741824"},
+          "reservations": {"memory": "536870912"}
+        },
+        "placement": {}
+      }
+    },
+    "cache": {
+      "image": "valkey/valkey:8",
+      "deploy": {
+        "resources": {
+          "reservations": {"memory": "67108864"}
+        },
+        "placement": {}
+      }
+    },
+    "sidecar": {
+      "image": "busybox:1.37",
+      "mem_limit": "8388608",
+      "oom_score_adj": 1000
+    }
+  }
+}

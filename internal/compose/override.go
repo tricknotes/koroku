@@ -24,11 +24,35 @@ type OverrideParams struct {
 	AppMemory string
 	// ServiceMemory overrides the limit of individual services.
 	ServiceMemory map[string]string
+	// Production marks an app whose environment is production: its
+	// services are killed last and reserve memory (ARCHITECTURE 6.2).
+	Production bool
+	// AppReservation and ServiceReservation set the memory reservation of
+	// a production app like AppMemory and ServiceMemory set the limit.
+	// "" falls back to the default (half the limit), "0" reserves nothing.
+	AppReservation     string
+	ServiceReservation map[string]string
 	// ProjectName and ReleaseTag name the images of built services (see
 	// ReleaseImage). When ReleaseTag is empty, image names are left alone.
 	ProjectName string
 	ReleaseTag  string
 }
+
+// OOM score adjustments written for every service (ARCHITECTURE 6.2).
+// Production sits above dockerd (-500) and Caddy (-450) so that neither
+// is picked before an app, and below koroku itself (0); staging is above
+// everything, so that a host-wide OOM kills staging processes first.
+const (
+	OOMScoreAdjProduction = -400
+	OOMScoreAdjStaging    = 500
+)
+
+// DefaultReservationPercent is the share of a production service's memory
+// limit reserved when the app settings do not say otherwise.
+const DefaultReservationPercent = 50
+
+// MinReservation is the smallest reservation Docker accepts.
+const MinReservation = 6 << 20
 
 // ReleaseImage is the image name given to a built service for one release.
 // Compose would otherwise tag every build as <project>-<service>:latest, so
@@ -63,7 +87,10 @@ func (p OverrideParams) ReleaseImages() []string {
 //     (one-shot services such as migrations declare restart: "no");
 //   - applies a memory limit (see memoryLimit), raising memswap_limit with it
 //     when the repository's value would end up below the limit;
-//   - gives built services a per-release image name (see ReleaseImage).
+//   - gives built services a per-release image name (see ReleaseImage);
+//   - sets oom_score_adj by the app's environment and, for production, a
+//     memory reservation (see Reservations); a staging service loses any
+//     reservation the repository set.
 func Override(p OverrideParams) ([]byte, error) {
 	if _, ok := p.Project.Services[p.WebService]; !ok {
 		return nil, fmt.Errorf("web service %q is not defined in the Compose file", p.WebService)
@@ -95,14 +122,28 @@ func Override(p OverrideParams) ([]byte, error) {
 		if svc.Restart == "" {
 			b.WriteString("    restart: unless-stopped\n")
 		}
-		if limit := p.memoryLimit(name, svc); limit != "" {
-			// Compose rejects a project that sets mem_limit and
-			// deploy.resources.limits.memory to different values, so the
-			// limit is written in whichever form the repository already uses.
-			if svc.DeployMemoryLimit() != "" {
-				b.WriteString("    deploy:\n      resources:\n        limits:\n")
-				fmt.Fprintf(&b, "          memory: %s\n", quote(limit))
+		limit := p.memoryLimit(name, svc)
+		reservation := p.reservation(name, svc)
+		// Compose rejects a project that sets mem_limit and
+		// deploy.resources.limits.memory (or mem_reservation and
+		// deploy.resources.reservations.memory) to different values, so
+		// each is written in whichever form the repository already uses.
+		usesDeploy := svc.DeployMemoryLimit() != "" || svc.DeployMemoryReservation() != ""
+		deployLimit := limit != "" && svc.DeployMemoryLimit() != ""
+		deployReservation := reservation > 0 && usesDeploy
+		resetDeployReservation := reservation == 0 && svc.DeployMemoryReservation() != ""
+		if deployLimit || deployReservation || resetDeployReservation {
+			b.WriteString("    deploy:\n      resources:\n")
+			if deployLimit {
+				fmt.Fprintf(&b, "        limits:\n          memory: %s\n", quote(limit))
 			}
+			if deployReservation {
+				fmt.Fprintf(&b, "        reservations:\n          memory: %s\n", quote(formatMemory(reservation)))
+			} else if resetDeployReservation {
+				b.WriteString("        reservations:\n          memory: !reset null\n")
+			}
+		}
+		if limit != "" {
 			if svc.MemLimit != "" || svc.DeployMemoryLimit() == "" {
 				fmt.Fprintf(&b, "    mem_limit: %s\n", quote(limit))
 			}
@@ -116,8 +157,89 @@ func Override(p OverrideParams) ([]byte, error) {
 				}
 			}
 		}
+		// Whatever the repository wrote: a negative value would let any
+		// app jump the queue ahead of production.
+		adj := OOMScoreAdjStaging
+		if p.Production {
+			adj = OOMScoreAdjProduction
+		}
+		fmt.Fprintf(&b, "    oom_score_adj: %d\n", adj)
+		switch {
+		case reservation > 0 && (svc.MemReservation != "" || !usesDeploy):
+			fmt.Fprintf(&b, "    mem_reservation: %s\n", quote(formatMemory(reservation)))
+		case reservation == 0 && svc.MemReservation != "":
+			b.WriteString("    mem_reservation: !reset null\n")
+		}
 	}
 	return []byte(b.String()), nil
+}
+
+// Reservations returns the memory reservation, in bytes, that Override
+// gives each service. Services without one are left out, so a staging app
+// has none.
+func (p OverrideParams) Reservations() map[string]int64 {
+	out := map[string]int64{}
+	for _, name := range p.Project.ServiceNames() {
+		if r := p.reservation(name, p.Project.Services[name]); r > 0 {
+			out[name] = r
+		}
+	}
+	return out
+}
+
+// reservation is the memory reservation of a service in bytes, 0 for none.
+// Only production apps reserve. Precedence mirrors the limit: per-service
+// app setting, app-wide setting, DefaultReservationPercent of the limit.
+// The result never exceeds the limit the service ends up with (Docker
+// refuses that), and one below MinReservation is dropped.
+func (p OverrideParams) reservation(name string, svc Service) int64 {
+	if !p.Production {
+		return 0
+	}
+	limit, hasLimit := ParseMemory(p.effectiveLimit(name, svc))
+	value := p.ServiceReservation[name]
+	if value == "" {
+		value = p.AppReservation
+	}
+	var r int64
+	switch value {
+	case "":
+		if hasLimit {
+			r = limit * DefaultReservationPercent / 100 / (1 << 20) * (1 << 20)
+		}
+	case "0":
+		return 0
+	default:
+		r, _ = ParseMemory(value)
+	}
+	if hasLimit && r > limit {
+		r = limit
+	}
+	if r < MinReservation {
+		return 0
+	}
+	return r
+}
+
+// effectiveLimit is the memory limit the service runs with: the one the
+// override writes, or the repository's own when the override leaves it.
+func (p OverrideParams) effectiveLimit(name string, svc Service) string {
+	if limit := p.memoryLimit(name, svc); limit != "" {
+		return limit
+	}
+	if svc.MemLimit != "" {
+		return svc.MemLimit
+	}
+	return svc.DeployMemoryLimit()
+}
+
+// formatMemory renders bytes in MiB when they divide evenly, for a
+// readable override, and as plain bytes otherwise.
+func formatMemory(bytes int64) string {
+	if bytes%(1<<20) == 0 {
+		return strconv.FormatInt(bytes>>20, 10) + "m"
+	}
+	return strconv.FormatInt(bytes, 10)
 }
 
 // memoryLimit picks the limit to write for a service, or "" to leave the

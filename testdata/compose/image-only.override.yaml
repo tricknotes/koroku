@@ -5,9 +5,11 @@ services:
     env_file:
       - "/var/lib/koroku/apps/static/env"
     restart: unless-stopped
+    oom_score_adj: 500
   "web":
     ports: !override
       - "127.0.0.1:20002:80"
     env_file:
       - "/var/lib/koroku/apps/static/env"
     restart: unless-stopped
+    oom_score_adj: 500

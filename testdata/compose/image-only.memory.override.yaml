@@ -10,6 +10,7 @@ services:
         limits:
           memory: "96m"
     mem_limit: "96m"
+    oom_score_adj: 500
   "web":
     ports: !override
       - "127.0.0.1:20002:80"
@@ -17,3 +18,4 @@ services:
       - "/var/lib/koroku/apps/static/env"
     restart: unless-stopped
     mem_limit: "256m"
+    oom_score_adj: 500
