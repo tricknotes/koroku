@@ -16,38 +16,36 @@ function releaseOf(entry) {
   return entry.source_deployment_id ?? entry.id;
 }
 
-/** Kept releases, newest first, as the engine lists them. */
+/**
+ * Kept releases, newest first, as the engine lists them: the newest three
+ * distinct releases of successful deployments, and the current one.
+ */
 function keptReleases(state, app) {
-  const list = state.deployments.get(app.slug) ?? [];
+  const current = app.current_deployment;
+  // The mock makes the history after the running deployment, so its IDs
+  // are higher; order by time instead.
+  const list = (state.deployments.get(app.slug) ?? [])
+    .filter((entry) => !current || entry.finished_at <= current.finished_at)
+    .sort((a, b) => (a.finished_at < b.finished_at ? 1 : -1));
   const byId = new Map(list.map((entry) => [entry.id, entry]));
-  const out = [];
-  const seen = new Set();
+  if (current) byId.set(current.id, current);
+  const ids = [];
+  if (current) ids.push(current.id);
   for (const entry of list) {
-    if (entry.status !== 'succeeded' || !entry.rollback_available) continue;
+    if (ids.length >= 3) break;
     const id = releaseOf(entry);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    const target = byId.get(id) ?? entry;
-    out.push({
+    if (entry.status === 'succeeded' && !ids.includes(id)) ids.push(id);
+  }
+  return ids.map((id) => {
+    const target = byId.get(id);
+    return {
       deployment_id: id,
       commit_sha: target.commit_sha,
       commit_message: target.commit_message,
       finished_at: target.finished_at,
-      current: id === app.current_deployment?.id,
-    });
-    if (out.length === 3) break;
-  }
-  const current = app.current_deployment;
-  if (current && !seen.has(current.id)) {
-    out.unshift({
-      deployment_id: current.id,
-      commit_sha: current.commit_sha,
-      commit_message: current.commit_message,
-      finished_at: current.finished_at,
-      current: true,
-    });
-  }
-  return out;
+      current: id === current?.id,
+    };
+  });
 }
 
 function limitOf(app, svc, older) {
@@ -258,10 +256,7 @@ export function containerView(state, app, scenario) {
   const stopped = app.desired_state === 'stopped';
   const production = app.environment === 'production';
   const troubled = scenario === 'compose-mismatch' && app.slug === 'blog';
-  const list = state.deployments.get(app.slug) ?? [];
-  const previous = list.find(
-    (entry) => entry.status === 'succeeded' && releaseOf(entry) !== current.id,
-  );
+  const previous = keptReleases(state, app).find((r) => !r.current);
   const created = current.finished_at;
   const containers = SERVICES.map((svc) => {
     const limit = bytesOf(limitOf(app, svc, false));
@@ -321,10 +316,10 @@ export function containerView(state, app, scenario) {
       // Left over from the release before, with that release's limit.
       return {
         ...info,
-        image: `koroku-${app.slug}-worker:r${releaseOf(previous)}`,
+        image: `koroku-${app.slug}-worker:r${previous.deployment_id}`,
         created_at: previous.finished_at,
         started_at: previous.finished_at,
-        deployment_id: releaseOf(previous),
+        deployment_id: previous.deployment_id,
         matched_by: 'image',
         current: false,
         memory_limit_bytes: 384 * MiB,
