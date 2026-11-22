@@ -21,6 +21,12 @@ type TaskSpec struct {
 	TaskName string
 	Service  string
 	Command  string
+	// Scheduled marks a run started by the task's schedule
+	// (ARCHITECTURE 9.6), DueAt being the scheduled time it is for. A
+	// scheduled run does not wake a sleeping app: it starts only the
+	// services the task's service depends on.
+	Scheduled bool
+	DueAt     time.Time
 }
 
 // UnknownServiceError is returned when the service to run a command in is
@@ -37,6 +43,8 @@ func (e *UnknownServiceError) Error() string {
 type runningTask struct {
 	appID  int64
 	cancel context.CancelCauseFunc
+	// done is closed when the run has ended and its result is recorded.
+	done chan struct{}
 }
 
 // cleanupTimeout bounds the removal of a run's container after it was
@@ -113,6 +121,10 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 	if _, ok := project.Services[spec.Service]; !ok {
 		return store.TaskRun{}, &UnknownServiceError{Service: spec.Service, Services: project.ServiceNames()}
 	}
+	var deps []string
+	if spec.Scheduled {
+		deps = project.Dependencies(spec.Service)
+	}
 	masker, err := e.taskMasker(ctx, app)
 	if err != nil {
 		return store.TaskRun{}, err
@@ -130,9 +142,13 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 		}
 		return store.TaskRun{}, ErrBusy
 	}
+	trigger := store.TaskTriggerManual
+	if spec.Scheduled {
+		trigger = store.TaskTriggerScheduled
+	}
 	run, err := e.opts.Store.StartTaskRun(ctx, store.TaskRun{
 		AppID: app.ID, TaskName: spec.TaskName, Service: spec.Service, Command: spec.Command,
-		DeploymentID: &deploymentID,
+		DeploymentID: &deploymentID, Trigger: trigger,
 	}, e.opts.Clock.Now())
 	if err != nil {
 		e.admit.Unlock()
@@ -141,7 +157,8 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 	e.mu.Lock()
 	lifetime := e.lifetime
 	jobCtx, cancelJob := context.WithCancelCause(lifetime)
-	e.tasks[run.ID] = &runningTask{appID: app.ID, cancel: cancelJob}
+	done := make(chan struct{})
+	e.tasks[run.ID] = &runningTask{appID: app.ID, cancel: cancelJob, done: done}
 	e.mu.Unlock()
 	e.admit.Unlock()
 
@@ -167,9 +184,10 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 			delete(e.tasks, run.ID)
 			e.mu.Unlock()
 			cancelJob(nil)
+			close(done)
 		}()
 		defer log.Close()
-		e.executeTask(lifetime, jobCtx, app, run, inv.Args(
+		e.executeTask(lifetime, jobCtx, app, run, spec, deps, inv.Args(
 			"run", "--rm", "--no-deps", "-T", "--name", taskContainerName(app, run.ID),
 			spec.Service, "sh", "-c", spec.Command,
 		), dir, log, masker)
@@ -194,28 +212,44 @@ func (e *Engine) taskMasker(ctx context.Context, app store.App) (*secrets.Masker
 }
 
 func (e *Engine) executeTask(lifetime, jobCtx context.Context, app store.App, run store.TaskRun,
-	args []string, dir string, log *deployLog, masker *secrets.Masker) {
+	spec TaskSpec, deps []string, args []string, dir string, log *deployLog, masker *secrets.Masker) {
 	logger := e.opts.Logger.With("app", app.Slug, "task_run", run.ID)
 	ctx, cancel := context.WithTimeout(jobCtx, e.opts.TaskTimeout)
 	defer cancel()
 
 	log.Printf("$ %s", run.Command)
+	if spec.Scheduled {
+		log.Printf("Scheduled run of task %q for %s.", run.TaskName, spec.DueAt.Format(time.RFC3339))
+	}
 	log.Printf("Running in service %s of deployment #%d.", run.Service, *run.DeploymentID)
-	logger.Info("command started", "service", run.Service, "task", run.TaskName)
-	// `run --no-deps` needs the services it talks to running: a sleeping
-	// app is woken first, under the lock this run holds (ARCHITECTURE 8.4).
-	wakeCtx, cancelWake := context.WithTimeout(ctx, e.wakeTimeout())
-	_, err := e.wakeLocked(wakeCtx, app.ID, log.Printf)
-	cancelWake()
-	if err == nil {
-		err = e.opts.Runner.Run(ctx, runner.Cmd{
+	logger.Info("command started", "service", run.Service, "task", run.TaskName, "trigger", run.Trigger)
+	command := func(ctx context.Context) error {
+		return e.opts.Runner.Run(ctx, runner.Cmd{
 			Name: "docker", Args: args, Dir: dir, Stdout: log.Writer(), Stderr: log.Writer(),
 		})
+	}
+	var err error
+	if spec.Scheduled {
+		// A scheduled run leaves a sleeping app asleep and starts only
+		// the services its service depends on, under the lock this run
+		// holds (ARCHITECTURE 8.4).
+		err = e.withServicesRunning(withHeldLock(ctx, app.ID), app.ID, deps, log.Printf, command)
+	} else {
+		// `run --no-deps` needs the services it talks to running: a
+		// sleeping app is woken first, under the lock this run holds
+		// (ARCHITECTURE 8.4).
+		wakeCtx, cancelWake := context.WithTimeout(ctx, e.wakeTimeout())
+		_, err = e.wakeLocked(wakeCtx, app.ID, log.Printf)
+		cancelWake()
+		if err == nil {
+			err = command(ctx)
+		}
 	}
 
 	status, message := store.StatusSucceeded, ""
 	var exitCode *int
 	var exitErr *runner.ExitError
+	var startErr *ServicesStartError
 	switch {
 	case err == nil:
 		code := 0
@@ -230,6 +264,10 @@ func (e *Engine) executeTask(lifetime, jobCtx context.Context, app store.App, ru
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		status, message = store.StatusFailed, fmt.Sprintf("timed out after %s", e.opts.TaskTimeout)
 		log.Printf("Timed out after %s.", e.opts.TaskTimeout)
+	case errors.As(err, &startErr):
+		// Not the command's exit code: the services it needs did not start.
+		status, message = store.StatusFailed, masker.Mask(startErr.Error())
+		log.Printf("Failed to run: %s", message)
 	case errors.As(err, &exitErr):
 		code := exitErr.Code
 		exitCode = &code
@@ -284,6 +322,23 @@ func (e *Engine) pruneTaskRuns(app store.App) {
 	}
 }
 
+// WaitTask waits until the run ends and its result is recorded, or until
+// ctx ends. It returns at once for a run that is not in progress.
+func (e *Engine) WaitTask(ctx context.Context, id int64) error {
+	e.mu.Lock()
+	t, ok := e.tasks[id]
+	e.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	select {
+	case <-t.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // CancelTask stops a running command. ErrNotCancelable means it has ended.
 func (e *Engine) CancelTask(ctx context.Context, id int64) error {
 	if _, err := e.opts.Store.GetTaskRun(ctx, id); err != nil {
@@ -314,6 +369,15 @@ func (e *Engine) failInterruptedTaskRuns(ctx context.Context, now time.Time) err
 		e.opts.Logger.Warn("a command was interrupted by a restart", "app", app.Slug, "task_run", run.ID)
 		appendLogLine(e.TaskLogPath(app.Slug, run.ID), "Failed: "+store.InterruptedTaskError+".")
 		e.removeTaskContainer(app, run.ID)
+		if app.SleepingSince != nil {
+			// A scheduled run may have started services of the sleeping
+			// app; they must not keep running (ARCHITECTURE 9.6).
+			stopCtx, cancel := context.WithTimeout(ctx, opTimeout)
+			if err := e.runCompose(stopCtx, e.projectOnly(app), "", "stop"); err != nil {
+				e.opts.Logger.Warn("stopping the sleeping app after an interrupted command failed", "app", app.Slug, "error", err)
+			}
+			cancel()
+		}
 	}
 	return nil
 }
