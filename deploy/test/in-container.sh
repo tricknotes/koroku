@@ -194,6 +194,7 @@ check "swap file is 2 GiB, 0600, in fstab" swap_file_ok
 check "zswap settings applied at boot by systemd-tmpfiles" \
   grep -qx 'w- /sys/module/zswap/parameters/enabled - - - - Y' /etc/tmpfiles.d/koroku-zswap.conf
 check "Caddy's drop-in sets GOGC=50" grep -qx 'Environment=GOGC=50' /etc/systemd/system/caddy.service.d/koroku.conf
+check "Caddy's drop-in puts Caddy below production apps in the OOM order" grep -qx 'OOMScoreAdjust=-450' /etc/systemd/system/caddy.service.d/koroku.conf
 check "Caddy runs the initial configuration: admin API only" caddy_has_initial_config_only
 check "Caddy serves nothing on port 80" not curl -s --max-time 2 -o /dev/null http://127.0.0.1:80/
 check "ufw: ssh ports 22, 2222 (sshd), 2200 (session), then 80 and 443, before enable" ufw_order_ok
