@@ -80,6 +80,8 @@ type Options struct {
 
 	// AppsDir holds one directory per app (releases, env file, deploy logs).
 	AppsDir string
+	// BaseDomain gives the automatic URL of apps (KOROKU_APP_URL).
+	BaseDomain string
 	// DefaultMemory is the memory limit for services without one.
 	DefaultMemory string
 	// DiskLimitPercent rejects deployments when the data disk is fuller.

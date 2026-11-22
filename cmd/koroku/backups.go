@@ -103,15 +103,28 @@ func toDumpingApp(app store.App, dumps dumpRunner) backup.App {
 	return out
 }
 
-// backupApps lists every app for the scheduled and manual runs.
+// backupApps lists the apps of the scheduled and manual runs: every app
+// but review apps, whose data is a copy of their parent's (ARCHITECTURE
+// 10.2).
 func backupApps(st *store.Store, dumps dumpRunner) func(ctx context.Context) ([]backup.App, error) {
 	return func(ctx context.Context) ([]backup.App, error) {
 		apps, err := st.ListApps(ctx)
 		if err != nil {
 			return nil, err
 		}
+		reviews, err := st.ListReviewApps(ctx, 0)
+		if err != nil {
+			return nil, err
+		}
+		review := map[int64]bool{}
+		for _, r := range reviews {
+			review[r.AppID] = true
+		}
 		out := make([]backup.App, 0, len(apps))
 		for _, app := range apps {
+			if review[app.ID] {
+				continue
+			}
 			out = append(out, toDumpingApp(app, dumps))
 		}
 		return out, nil

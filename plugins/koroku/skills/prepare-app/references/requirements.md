@@ -55,6 +55,7 @@ services:
 - Compose の `environment:` に直書きした値は `env_file` より強い。`RAILS_ENV: development` のように書いてあると koroku の画面で変えられないので、`RAILS_ENV: ${RAILS_ENV:-production}` のように補間にする。
 - 補間をコンテナ側に遅らせたいときは `$$VAR` と書く。
 - デプロイしたコミットは、koroku が足す `KOROKU_COMMIT_SHA`（40 桁）と `KOROKU_COMMIT_SHORT`（先頭 7 桁）で分かる。補間にも使えるので、CI がコミットごとにビルドしたイメージを `image: ghcr.io/<owner>/<name>:sha-${KOROKU_COMMIT_SHORT}` のように指せる（ホストでビルドせずに pull だけで済む）。`.git` は消えるので、ビルドや起動で `git rev-parse` などに頼らない。`KOROKU_` で始まる名前は予約されていて、画面からは設定できない。
+- アプリの URL は、koroku が足す `KOROKU_APP_URL`（例 `https://blog-staging.dev.example.com`。プライマリの独自ドメインがあればその URL）と `KOROKU_APP_HOST`（そのホスト名）で分かる。値はデプロイした時点のもの。ホスト名をリポジトリや環境変数に直書きせず、これから組み立てる（Rails の `config.hosts << ENV["KOROKU_APP_HOST"]`、メールの中のリンクの `default_url_options`、`BASE_URL` の既定値など）。レビューアプリ（下記）はホスト名が作るまで決まらないので、直書きしていると開けない（Rails の `config.hosts` で弾かれる）。
 
 ### 必要な変数の宣言（koroku が照合する）
 
@@ -212,6 +213,17 @@ koroku の画面から、稼働中のリリースと同じイメージ・環境�
   - MySQL: `mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" --single-transaction "$MYSQL_DATABASE"`
   - SQLite（アプリのコンテナにある場合）: `sqlite3 /data/app.db .dump`（イメージに `sqlite3` が要る）
 - ダンプの流し込みは手動。リストアの手順を README などに残しておくとよい。
+
+## pull request ごとのレビューアプリ
+
+koroku は、staging アプリを親にして、pull request ごとに別のアプリ（レビューアプリ）を作れる。ホスト名は `<親の slug>-pr-<番号>.<ベースドメイン>`、設定と環境変数は親の写しで、pull request のブランチへの push で自動でデプロイし直す。リポジトリ側では次を揃える。
+
+- **ホスト名を直書きしない**。`KOROKU_APP_URL` と `KOROKU_APP_HOST`（上の「環境変数」）から、許可するホスト（Rails の `config.hosts`、Django の `ALLOWED_HOSTS`）、メールやリダイレクトの URL の土台、CORS の許可元を組み立てる。
+- **レビューアプリかどうかは `KOROKU_PR_NUMBER` で分かる**（レビューアプリにだけ入る）。環境変数は親（staging）の値がそのまま写るので、外へ届くもの（メールの送信、外部サービスへの Webhook、決済、SMS）は、この変数があるときに止めるか、送り先をテスト用に切り替える書き方にする。画面に「PR #12 のレビュー環境」と出すのにも使える。
+- **外部サービスのコールバックは届かないことがある**。OAuth のリダイレクト URL や Webhook の送り先は、外部サービスの側に登録したホスト名（staging）のまま。レビューアプリで確かめたいなら、利用者がレビューアプリの環境変数タブでテスト用の値に直す。
+- **データ**: 作るときに「親のデータをコピーする」を選ぶと、最初のデプロイが成功したあとで、親のダンプフックの出力をレビューアプリのロードフックへ流し、コピー後のコマンドを実行する（下の「本番の DB を staging にコピーする」と同じ仕組み。フックは親の設定が写る）。親にダンプフックかロードフックがなければ空の DB で始まる。そのときに要るデータ（初期のユーザーなど）は、起動時のワンショットのサービス（`db:prepare` と `db:seed` を冪等に流すなど）で入れる。
+- **起動のたびに動くマイグレーション**は、親のスキーマにレビュー中のブランチのマイグレーションを当てることになる。コピーのあとはサービスが起動し直すので、マイグレーションは起動時に流す作り（ワンショットのサービスか起動コマンド）にしておく。
+- レビューアプリは日次のバックアップの対象外で、不要になったら利用者が手で消す（volume も消える）。手元のリハーサルでは `scripts/rehearse.sh --pr <番号>` で `KOROKU_PR_NUMBER` を入れて確かめられる。
 
 ## 本番の DB を staging にコピーする
 

@@ -48,7 +48,7 @@ var originHeader = map[string]string{"Origin": consoleURL}
 // newRoleFixture creates the staging app blog and the production app shop,
 // and members with each role on blog plus one with a role on shop only,
 // all logged in.
-func newRoleFixture(t *testing.T) *roleFixture {
+func newRoleFixture(t *testing.T, extra ...func(*Options)) *roleFixture {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC))
 	gh := defaultGitHub()
@@ -66,6 +66,9 @@ func newRoleFixture(t *testing.T) *roleFixture {
 		o.Clock = clk
 		o.Auth = AuthOptions{AllowedUserID: 42, ConsoleURL: consoleURL, GitHub: gh}
 		o.Users = users
+		for _, m := range extra {
+			m(o)
+		}
 	})
 	f := &roleFixture{srv: srv, h: srv.Handler(), clk: clk, gh: gh, as: map[int64]*browser{}}
 	f.owner = newBrowser(t, f.h)
@@ -233,7 +236,9 @@ func TestAppRoutesNeedTheirLevel(t *testing.T) {
 	checked := 0
 	for _, rt := range f.srv.apiRoutes() {
 		id, ok := ids[rt.access.scope]
-		if !ok {
+		if !ok || rt.pattern == "DELETE /api/apps/{slug}" {
+			// Deleting narrows manage to review apps in the handler
+			// (TestDeleteReviewApp).
 			continue
 		}
 		method, path := fillPattern(rt.pattern, "blog", id)

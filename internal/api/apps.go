@@ -83,6 +83,9 @@ type appJSON struct {
 	// Role is what the requesting user may do on the app: "owner" for the
 	// owner, otherwise the member's role (ARCHITECTURE 10.7).
 	Role string `json:"role"`
+	// Review describes a review app; null for other apps (ARCHITECTURE
+	// 9.9).
+	Review *reviewJSON `json:"review"`
 }
 
 func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
@@ -136,6 +139,9 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		return appJSON{}, err
 	}
 	out.PromoteFrom = promoteFrom
+	if out.Review, err = s.reviewToJSON(r.Context(), app); err != nil {
+		return appJSON{}, err
+	}
 	domainList, err := s.store.ListDomains(r.Context(), app.ID)
 	if err != nil {
 		return appJSON{}, err

@@ -356,7 +356,7 @@ var wantedPermissions = map[string]string{"contents": "read", "metadata": "read"
 // feature is off. deployments: write lets koroku record its deployments on
 // GitHub (ARCHITECTURE 5.1); actions: read lets the App subscribe to
 // workflow runs, which apps that wait for a workflow deploy on (5.2).
-var optionalPermissions = map[string]string{"deployments": "write", "actions": "read"}
+var optionalPermissions = map[string]string{"deployments": "write", "actions": "read", "pull_requests": "read"}
 
 func checkGitHub(ctx context.Context, d Deps) []Result {
 	cfg := d.Config.GitHub
@@ -497,14 +497,18 @@ func permissionResult(app github.App, consoleURL string) Result {
 			"App %q lacks %s", app.Slug, strings.Join(missing, ", "))
 	}
 	if len(extra) > 0 {
-		return warn(name, "koroku needs Contents and Metadata read-only, Deployments read and write, and (to wait for workflows) Actions read-only only; remove the rest (docs/SETUP.md 4)",
+		return warn(name, "koroku needs Contents and Metadata read-only, Deployments read and write, and (to wait for workflows) Actions read-only and (for review apps) Pull requests read-only only; remove the rest (docs/SETUP.md 4)",
 			"App %q also has %s", app.Slug, strings.Join(extra, ", "))
 	}
 	if app.Permissions["deployments"] != optionalPermissions["deployments"] {
 		return warn(name, "set Repository permissions > Deployments to Read and write, then accept the new permission on the installation (docs/SETUP.md 4)",
 			"App %q lacks deployments: write; GitHub deployments will not be updated", app.Slug)
 	}
-	return ok(name, "App %q (ID %d), Contents and Metadata read-only, Deployments read and write; %s", app.Slug, app.ID, callback)
+	if app.Permissions["pull_requests"] != "read" && app.Permissions["pull_requests"] != "write" {
+		return warn(name, "set Repository permissions > Pull requests to Read-only, then accept the new permission on the installation (docs/SETUP.md 4)",
+			"App %q lacks pull_requests: read; review apps cannot be created", app.Slug)
+	}
+	return ok(name, "App %q (ID %d), Contents and Metadata read-only, Deployments read and write, Pull requests read-only; %s", app.Slug, app.ID, callback)
 }
 
 func installationResult(ctx context.Context, gh GitHubApp, app github.App) Result {

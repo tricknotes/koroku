@@ -32,6 +32,9 @@ type NewDeployment struct {
 	Description string
 	// Production marks the environment as one that end users reach.
 	Production bool
+	// Transient marks an environment that will go away (a review app,
+	// ARCHITECTURE 9.9).
+	Transient bool
 }
 
 // DeploymentStatus is one status update of a GitHub deployment.
@@ -82,7 +85,7 @@ func (c *Client) CreateDeployment(ctx context.Context, owner, repo string, in Ne
 			"required_contexts":      []string{},
 			"environment":            in.Environment,
 			"description":            truncateDescription(in.Description),
-			"transient_environment":  false,
+			"transient_environment":  in.Transient,
 			"production_environment": in.Production,
 		},
 	}, &resp)
