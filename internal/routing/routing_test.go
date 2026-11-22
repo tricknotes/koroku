@@ -467,3 +467,31 @@ func TestBuildAccessProtection(t *testing.T) {
 		t.Errorf("noindex headers = %d, want 2 (the staging apps)", n)
 	}
 }
+
+// A sleeping app is routed to koroku with its slug; waking it routes it to
+// its port again (ARCHITECTURE 8.4).
+func TestBuildSleepingApp(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	blog := createApp(t, st, "blog")
+	markDeployed(t, st, blog)
+	if ok, err := st.MarkAppSleeping(ctx, blog.ID, now); err != nil || !ok {
+		t.Fatalf("MarkAppSleeping = %v, %v", ok, err)
+	}
+	router := newRouter(st, &fakeLoader{})
+	config, err := router.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(config)
+	if strings.Contains(text, "127.0.0.1:20000") || !strings.Contains(text, `"X-Koroku-Wake"`) {
+		t.Errorf("a sleeping app must be routed to koroku:\n%s", text)
+	}
+	if _, err := st.MarkAppAwake(ctx, blog.ID); err != nil {
+		t.Fatal(err)
+	}
+	config, _ = router.Build(ctx)
+	if text := string(config); !strings.Contains(text, "127.0.0.1:20000") || strings.Contains(text, "X-Koroku-Wake") {
+		t.Errorf("an awake app must be routed to its port:\n%s", text)
+	}
+}

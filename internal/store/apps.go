@@ -26,6 +26,13 @@ const (
 	EnvironmentStaging    = "staging"
 )
 
+// Bounds and default of App.IdleSleepMinutes (ARCHITECTURE 8.4).
+const (
+	DefaultIdleSleepMinutes = 30
+	MinIdleSleepMinutes     = 10
+	MaxIdleSleepMinutes     = 1440
+)
+
 // EnvSourceCompose is the default source of required variables for new
 // apps (ARCHITECTURE 9.4). The values are defined by package envreq.
 const EnvSourceCompose = "compose"
@@ -85,7 +92,14 @@ type App struct {
 	// AutoDeployWorkflow is the workflow file (.github/workflows/<name>.yml)
 	// whose successful run on the branch deploys the app instead of the
 	// push itself (ARCHITECTURE 5.2). "" deploys on push.
-	AutoDeployWorkflow  string
+	AutoDeployWorkflow string
+	// IdleSleep stops the app after IdleSleepMinutes without a request
+	// through the proxy; the next request wakes it (ARCHITECTURE 8.4).
+	IdleSleep        bool
+	IdleSleepMinutes int
+	// SleepingSince is when the app went to sleep; nil while it is awake.
+	// It is a runtime state: DesiredState stays running.
+	SleepingSince       *time.Time
 	CurrentDeploymentID *int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -127,7 +141,8 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	env_source, env_example_path,
 	load_hook_service, load_hook_command, post_load_service, post_load_command,
 	access_protection, protection_exempt_paths, promote_from_app_id,
-	auto_deploy, auto_deploy_branch, auto_deploy_workflow`
+	auto_deploy, auto_deploy_branch, auto_deploy_workflow,
+	idle_sleep, idle_sleep_minutes, sleeping_since`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -139,6 +154,7 @@ func scanApp(row rowScanner) (App, error) {
 		repoID      sql.NullInt64
 		currentID   sql.NullInt64
 		promoteFrom sql.NullInt64
+		sleeping    sql.NullInt64
 		limitsJSON  string
 		excludeJSON string
 		exemptJSON  string
@@ -152,7 +168,8 @@ func scanApp(row rowScanner) (App, error) {
 		&a.EnvSource, &a.EnvExamplePath,
 		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand,
 		&a.AccessProtection, &exemptJSON, &promoteFrom,
-		&a.AutoDeploy, &a.AutoDeployBranch, &a.AutoDeployWorkflow)
+		&a.AutoDeploy, &a.AutoDeployBranch, &a.AutoDeployWorkflow,
+		&a.IdleSleep, &a.IdleSleepMinutes, &sleeping)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -168,6 +185,7 @@ func scanApp(row rowScanner) (App, error) {
 	if promoteFrom.Valid {
 		a.PromoteFromAppID = &promoteFrom.Int64
 	}
+	a.SleepingSince = fromNullMillis(sleeping)
 	a.ServiceMemoryLimits = map[string]string{}
 	if limitsJSON != "" {
 		if err := json.Unmarshal([]byte(limitsJSON), &a.ServiceMemoryLimits); err != nil {
@@ -271,6 +289,9 @@ func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEn
 	if app.EnvSource == "" {
 		app.EnvSource = EnvSourceCompose
 	}
+	if app.IdleSleepMinutes == 0 {
+		app.IdleSleepMinutes = DefaultIdleSleepMinutes
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO apps (
 			slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 			web_service, web_port, host_port, healthcheck_path, desired_state, environment,
@@ -279,8 +300,9 @@ func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEn
 			env_source, env_example_path,
 			load_hook_service, load_hook_command, post_load_service, post_load_command,
 			access_protection, protection_exempt_paths, promote_from_app_id,
-			auto_deploy, auto_deploy_branch, auto_deploy_workflow)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			auto_deploy, auto_deploy_branch, auto_deploy_workflow,
+			idle_sleep, idle_sleep_minutes)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now),
@@ -288,7 +310,8 @@ func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEn
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
-		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow)
+		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow,
+		app.IdleSleep, app.IdleSleepMinutes)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -384,7 +407,8 @@ func (s *Store) ListApps(ctx context.Context) ([]App, error) {
 }
 
 // UpdateApp saves the user-editable settings of an app. Slug, host port,
-// desired state and the current deployment are not changed here.
+// desired state, the sleeping state and the current deployment are not
+// changed here.
 func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 	limits, err := encodeLimits(app.ServiceMemoryLimits)
 	if err != nil {
@@ -406,7 +430,8 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			env_source = ?, env_example_path = ?,
 			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?,
 			access_protection = ?, protection_exempt_paths = ?, promote_from_app_id = ?,
-			auto_deploy = ?, auto_deploy_branch = ?, auto_deploy_workflow = ?
+			auto_deploy = ?, auto_deploy_branch = ?, auto_deploy_workflow = ?,
+			idle_sleep = ?, idle_sleep_minutes = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
@@ -415,7 +440,8 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
-		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow, app.ID)
+		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow,
+		app.IdleSleep, app.IdleSleepMinutes, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}
@@ -423,13 +449,47 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 }
 
 // SetAppDesiredState records whether the app should be running or stopped.
+// Either ends a sleep (ARCHITECTURE 8.4): a stopped app does not wake on a
+// request, and a started one is awake.
 func (s *Store) SetAppDesiredState(ctx context.Context, appID int64, state string, now time.Time) error {
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE apps SET desired_state = ?, updated_at = ? WHERE id = ?`, state, toMillis(now), appID)
+		`UPDATE apps SET desired_state = ?, sleeping_since = NULL, updated_at = ? WHERE id = ?`, state, toMillis(now), appID)
 	if err != nil {
 		return fmt.Errorf("set desired state: %w", err)
 	}
 	return requireOneRow(res, "set desired state")
+}
+
+// MarkAppSleeping records that a running, deployed app went to sleep at
+// now (ARCHITECTURE 8.4). It reports false, changing nothing, when the app
+// is stopped, not deployed or already asleep.
+func (s *Store) MarkAppSleeping(ctx context.Context, appID int64, now time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE apps SET sleeping_since = ?
+		WHERE id = ? AND desired_state = ? AND current_deployment_id IS NOT NULL AND sleeping_since IS NULL`,
+		toMillis(now), appID, DesiredRunning)
+	if err != nil {
+		return false, fmt.Errorf("mark app sleeping: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("mark app sleeping: %w", err)
+	}
+	return n == 1, nil
+}
+
+// MarkAppAwake ends the sleep of an app. It reports whether the app was
+// asleep.
+func (s *Store) MarkAppAwake(ctx context.Context, appID int64) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE apps SET sleeping_since = NULL WHERE id = ? AND sleeping_since IS NOT NULL`, appID)
+	if err != nil {
+		return false, fmt.Errorf("mark app awake: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("mark app awake: %w", err)
+	}
+	return n == 1, nil
 }
 
 // DeleteApp removes an app with its env vars and deployments.

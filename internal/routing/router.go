@@ -103,7 +103,9 @@ func (r *Router) Build(ctx context.Context) ([]byte, error) {
 			Hostnames: []string{DefaultHostname(app.Slug, r.Settings.BaseDomain)},
 			// An app that was never deployed has nothing to proxy to; it
 			// gets the same fixed 503 page as a stopped one.
-			Stopped:     app.DesiredState != store.DesiredRunning || app.CurrentDeploymentID == nil,
+			Stopped: app.DesiredState != store.DesiredRunning || app.CurrentDeploymentID == nil,
+			// koroku answers for a sleeping app and wakes it (ARCHITECTURE 8.4).
+			Sleeping:    app.SleepingSince != nil,
 			Protected:   app.AccessProtection,
 			ExemptPaths: app.ProtectionExemptPaths,
 			// Staging apps stay out of search engines even when public
