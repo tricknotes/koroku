@@ -13,7 +13,120 @@ export const TASK_SCENARIOS = {
     'blog is running a registered task right now (its output streams in)',
   'tasks-failed':
     'the latest command on blog failed with exit code 1; shop-staging has no tasks and no runs',
+  'tasks-skipped':
+    'a scheduled task of blog skipped its latest time because the previous run was still going',
 };
+
+/** The zone the mock reads schedules in, as config.toml's timezone. */
+export const TIME_ZONE = 'Asia/Tokyo';
+const ZONE_OFFSET = 9 * HOUR;
+
+const FIELDS = [
+  ['minute', 0, 59],
+  ['hour', 0, 23],
+  ['day of month', 1, 31],
+  ['month', 1, 12],
+  ['day of week', 0, 7],
+];
+
+/**
+ * Parses a schedule like the backend (internal/cron): the sets of each
+ * field, or an error message.
+ */
+export function parseSchedule(expr) {
+  const parts = expr.trim().split(/\s+/).filter(Boolean);
+  if (parts.length !== 5) {
+    return {
+      error: `needs 5 fields (minute hour day-of-month month day-of-week) separated by spaces, got ${parts.length}`,
+    };
+  }
+  const sets = [];
+  for (const [i, part] of parts.entries()) {
+    const [name, min, max] = FIELDS[i];
+    const set = new Set();
+    for (const item of part.split(',')) {
+      const [range, stepText] = item.split('/');
+      const step = stepText === undefined ? 1 : Number(stepText);
+      if (!Number.isInteger(step) || step < 1) {
+        return {
+          error: `${name}: step "${stepText}" must be a whole number of at least 1`,
+        };
+      }
+      let lo = min;
+      let hi = max;
+      if (range !== '*') {
+        const [a, b = a] = range.split('-');
+        for (const text of [a, b]) {
+          if (!/^\d+$/.test(text)) {
+            return { error: `${name}: "${text}" is not a number` };
+          }
+          const n = Number(text);
+          if (n < min || n > max) {
+            return { error: `${name}: ${n} is out of range ${min}-${max}` };
+          }
+        }
+        lo = Number(a);
+        hi = Number(b);
+        if (lo > hi) return { error: `${name}: range ${range} goes backwards` };
+      }
+      for (let v = lo; v <= hi; v += step) set.add(v === 7 && i === 4 ? 0 : v);
+    }
+    sets.push(set);
+  }
+  return {
+    sets,
+    domStar: parts[2].startsWith('*'),
+    dowStar: parts[4].startsWith('*'),
+  };
+}
+
+/** The next time of a schedule after now (ISO), or null. */
+export function nextRunAt(expr, now = Date.now()) {
+  const parsed = parseSchedule(expr);
+  if (parsed.error) return null;
+  const [minutes, hours, doms, months, dows] = parsed.sets;
+  let t = Math.floor((now + ZONE_OFFSET) / MINUTE) * MINUTE + MINUTE;
+  const end = t + 400 * DAY;
+  for (; t < end; t += MINUTE) {
+    const d = new Date(t);
+    const dom = doms.has(d.getUTCDate());
+    const dow = dows.has(d.getUTCDay());
+    const day = parsed.domStar || parsed.dowStar ? dom && dow : dom || dow;
+    if (
+      months.has(d.getUTCMonth() + 1) &&
+      day &&
+      hours.has(d.getUTCHours()) &&
+      minutes.has(d.getUTCMinutes())
+    ) {
+      return new Date(t - ZONE_OFFSET).toISOString();
+    }
+  }
+  return null;
+}
+
+/** The latest time of a schedule before now (ISO). */
+function previousTime(expr) {
+  for (let back = HOUR; back <= 400 * DAY; back += HOUR) {
+    const next = nextRunAt(expr, Date.now() - back);
+    if (next && Date.parse(next) < Date.now()) return next;
+  }
+  return ago(HOUR);
+}
+
+/** A registered task as the API returns it. */
+export function publicTask(task) {
+  const schedule = task.schedule ?? '';
+  return {
+    name: task.name,
+    service: task.service,
+    command: task.command,
+    schedule,
+    next_run_at: schedule ? nextRunAt(schedule) : null,
+    last_skipped_at: task.last_skipped_at ?? null,
+    last_skip_reason: task.last_skip_reason ?? '',
+    last_skip_detail: task.last_skip_detail ?? '',
+  };
+}
 
 function ago(ms) {
   return new Date(Date.now() - ms).toISOString();
@@ -29,6 +142,13 @@ const BLOG_TASKS = [
     name: '検索インデックスの再構築',
     service: 'worker',
     command: 'bin/rails search:reindex',
+    schedule: '0 4 * * *',
+  },
+  {
+    name: '期限切れセッションの掃除',
+    service: 'web',
+    command: "bin/rails runner 'SessionSweepJob.perform_now'",
+    schedule: '*/30 * * * *',
   },
   {
     name: 'DB の容量',
@@ -100,23 +220,32 @@ function makeRun(slug, deploymentId, task, startedAgo, overrides = {}) {
     started_at: ago(startedAgo),
     finished_at: ago(Math.max(0, startedAgo - duration)),
     actor: { id: 1, login: 'octo' },
+    trigger: 'manual',
     ...overrides,
   };
   return run;
 }
 
+/** A run the schedule started: nobody started it. */
+function scheduled(overrides = {}) {
+  return { actor: null, trigger: 'scheduled', ...overrides };
+}
+
 function blogRuns(deploymentId, headFailed) {
-  const [status, reindex] = BLOG_TASKS;
+  const [status, reindex, sweep] = BLOG_TASKS;
   const runner = {
     name: '',
     service: 'web',
     command: "bin/rails runner 'Post.find_each(&:recount!)'",
   };
   const runs = [
+    makeRun('blog', deploymentId, sweep, 12 * MINUTE, scheduled()),
     makeRun('blog', deploymentId, status, 25 * MINUTE),
+    makeRun('blog', deploymentId, sweep, 42 * MINUTE, scheduled()),
     makeRun('blog', deploymentId, reindex, 3 * HOUR, {
       actor: { id: 2, login: 'mia' },
     }),
+    makeRun('blog', deploymentId, reindex, 9 * HOUR, scheduled()),
     makeRun('blog', deploymentId, status, 2 * DAY),
   ];
   if (headFailed)
@@ -138,6 +267,33 @@ export function buildTasks(name, apps) {
         BLOG_TASKS.map((task) => ({ ...task })),
       );
       runs.set(slug, blogRuns(deploymentId, name === 'tasks-failed'));
+      if (name === 'tasks-skipped') {
+        // 04:00 came while the reindex started by hand was still going.
+        const reindex = tasks.get(slug)[1];
+        const skipped = previousTime(reindex.schedule);
+        reindex.last_skipped_at = skipped;
+        reindex.last_skip_reason = 'overlap';
+        // No scheduled reindex since: the skip is the latest news.
+        const list = runs
+          .get(slug)
+          .filter(
+            (run) =>
+              !(run.trigger === 'scheduled' && run.task_name === reindex.name),
+          );
+        runs.set(slug, list);
+        list.push(
+          makeRun(
+            'blog',
+            deploymentId,
+            reindex,
+            Date.now() - Date.parse(skipped) + 20 * MINUTE,
+            { actor: { id: 2, login: 'mia' } },
+          ),
+        );
+        list.sort(
+          (a, b) => Date.parse(b.started_at) - Date.parse(a.started_at),
+        );
+      }
     } else if (slug === 'blog-staging' && deploymentId !== null) {
       tasks.set(
         slug,
@@ -238,10 +394,16 @@ function linesDue(run) {
 }
 
 function header(run) {
-  return [
-    `$ ${run.command}`,
+  const lines = [`$ ${run.command}`];
+  if (run.trigger === 'scheduled') {
+    lines.push(
+      `Scheduled run of task "${run.task_name}" for ${run.started_at.replace(/\.\d+Z$/, 'Z')}.`,
+    );
+  }
+  lines.push(
     `Running in service ${run.service} of deployment #${run.deployment_id}.`,
-  ];
+  );
+  return lines;
 }
 
 function footer(run) {

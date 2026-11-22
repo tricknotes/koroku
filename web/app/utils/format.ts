@@ -46,6 +46,38 @@ export function formatDateTimeJst(iso: string | null | undefined): string {
 }
 
 /**
+ * `11/23（月）03:00` in timeZone: a scheduled time, on the clock the
+ * schedule is read on (ARCHITECTURE 9.6).
+ */
+export function formatScheduleTime(
+  iso: string | null | undefined,
+  timeZone: string,
+): string {
+  const date = parse(iso);
+  if (!date) return '';
+  let parts: Record<string, string>;
+  try {
+    parts = Object.fromEntries(
+      new Intl.DateTimeFormat('ja-JP', {
+        timeZone,
+        month: 'numeric',
+        day: 'numeric',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      })
+        .formatToParts(date)
+        .map((part) => [part.type, part.value]),
+    );
+  } catch {
+    // An unknown zone: fall back to JST, the default of the host.
+    return formatDateTimeJst(iso);
+  }
+  return `${parts['month']}/${parts['day']}（${parts['weekday']}）${parts['hour']}:${parts['minute']}`;
+}
+
+/**
  * `3 分前` style distance from `now`; falls back to the date (JST, like the
  * absolute time shown next to it) after 30 days.
  */

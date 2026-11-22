@@ -55,6 +55,10 @@ import {
   startTaskRun,
   taskRunLog,
   tasksState,
+  TIME_ZONE,
+  nextRunAt,
+  parseSchedule,
+  publicTask,
 } from './tasks.mjs';
 
 const HOST = '127.0.0.1';
@@ -721,7 +725,8 @@ function publicRun(run) {
 const SERVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 route('GET', '/api/apps/:slug/tasks', (context) => ({
-  tasks: tasksOf(context).tasks.get(appOf(context).slug),
+  tasks: tasksOf(context).tasks.get(appOf(context).slug).map(publicTask),
+  time_zone: TIME_ZONE,
 }));
 route('PUT', '/api/apps/:slug/tasks', (context) => {
   const app = appOf(context);
@@ -740,14 +745,24 @@ route('PUT', '/api/apps/:slug/tasks', (context) => {
     if (!SERVICE_NAME.test(service))
       errors[`tasks[${index}].service`] = 'is not a valid service name';
     if (!command) errors[`tasks[${index}].command`] = 'is required';
-    return { name, service, command };
+    const schedule = String(task.schedule ?? '')
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (schedule) {
+      const parsed = parseSchedule(schedule);
+      if (parsed.error) errors[`tasks[${index}].schedule`] = parsed.error;
+      else if (!nextRunAt(schedule))
+        errors[`tasks[${index}].schedule`] =
+          'never matches a date (for example the 31st of a month that has 30 days)';
+    }
+    return { name, service, command, schedule };
   });
   if (tasks.length > 20) errors.tasks = 'at most 20 tasks can be registered';
   if (Object.keys(errors).length > 0) {
     throw new HttpError(422, 'validation_failed', errors);
   }
   tasksOf(context).tasks.set(app.slug, tasks);
-  return { tasks };
+  return { tasks: tasks.map(publicTask), time_zone: TIME_ZONE };
 });
 route('GET', '/api/apps/:slug/task-runs', (context) => ({
   runs: tasksOf(context).runs.get(appOf(context).slug).map(publicRun),
