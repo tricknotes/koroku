@@ -1632,3 +1632,15 @@ func TestComposeConfigDoesNotResolveEnvFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestRunStoppedWhileStartingIsNotAnError: koroku can be stopped right after
+// it starts, while the worker is still recording what the previous process
+// left behind. The canceled context must end Run quietly, not as a failure.
+func TestRunStoppedWhileStartingIsNotAnError(t *testing.T) {
+	h := newHarness(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := h.engine.Run(ctx); err != nil {
+		t.Fatalf("Run with a canceled context = %v, want nil", err)
+	}
+}
