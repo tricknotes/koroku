@@ -2,6 +2,7 @@ package compose
 
 import (
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -128,6 +129,57 @@ func TestOverrideGolden(t *testing.T) {
 				EnvFile:       "/var/lib/koroku/apps/blog/env",
 				DefaultMemory: "512m",
 				ServiceMemory: map[string]string{"db": "2g", "web": "1g"},
+			},
+		},
+		{
+			// Production: every service reserves half its limit, the
+			// deploy.resources form included, and is killed last.
+			name:   "rails-postgres",
+			golden: "rails-postgres.production.override.yaml",
+			params: OverrideParams{
+				WebService: "web", WebPort: 3000, HostPort: 20001,
+				EnvFile:       "/var/lib/koroku/apps/blog/env",
+				DefaultMemory: "512m",
+				ProjectName:   "koroku-blog",
+				ReleaseTag:    "r42",
+				Production:    true,
+			},
+		},
+		{
+			// App settings choose the reservation; one above the limit is
+			// cut down to it, "0" reserves nothing.
+			name:   "rails-postgres",
+			golden: "rails-postgres.reservation.override.yaml",
+			params: OverrideParams{
+				WebService: "web", WebPort: 3000, HostPort: 20001,
+				EnvFile:            "/var/lib/koroku/apps/blog/env",
+				DefaultMemory:      "512m",
+				Production:         true,
+				AppReservation:     "128m",
+				ServiceReservation: map[string]string{"db": "4g", "migrate": "0"},
+			},
+		},
+		{
+			// The repository's own oom_score_adj and reservations do not
+			// survive: production gets koroku's values in the forms the
+			// repository used, a too small default is dropped.
+			name:   "reservations",
+			golden: "reservations.production.override.yaml",
+			params: OverrideParams{
+				WebService: "web", WebPort: 3000, HostPort: 20003,
+				EnvFile:       "/var/lib/koroku/apps/shop/env",
+				DefaultMemory: "512m",
+				Production:    true,
+			},
+		},
+		{
+			// Staging loses the reservations the repository set.
+			name:   "reservations",
+			golden: "reservations.staging.override.yaml",
+			params: OverrideParams{
+				WebService: "web", WebPort: 3000, HostPort: 20003,
+				EnvFile:       "/var/lib/koroku/apps/shop/env",
+				DefaultMemory: "512m",
 			},
 		},
 	}
@@ -598,5 +650,31 @@ func TestMemswapLimitFollowsARaisedLimit(t *testing.T) {
 	}
 	if strings.Contains(section("db"), "memswap_limit") {
 		t.Errorf("memswap_limit -1 is the policy's business, not the override's:\n%s", section("db"))
+	}
+}
+
+// TestReservations: what Override reserves is what Reservations reports,
+// so the deployment record matches the containers.
+func TestReservations(t *testing.T) {
+	params := OverrideParams{
+		Project:    loadProject(t, "reservations"),
+		WebService: "web", WebPort: 3000, HostPort: 20003,
+		EnvFile: "/env", DefaultMemory: "512m", Production: true,
+	}
+	want := map[string]int64{"web": 192 << 20, "db": 256 << 20, "cache": 256 << 20}
+	if got := params.Reservations(); !maps.Equal(got, want) {
+		t.Errorf("Reservations() = %v, want %v (the 8m sidecar's 4m is below Docker's minimum)", got, want)
+	}
+
+	params.AppReservation = "0"
+	params.ServiceReservation = map[string]string{"web": "1g", "sidecar": "6m"}
+	want = map[string]int64{"web": 384 << 20, "sidecar": 6 << 20}
+	if got := params.Reservations(); !maps.Equal(got, want) {
+		t.Errorf("Reservations() = %v, want %v (capped at the limit, 0 for none)", got, want)
+	}
+
+	params.Production = false
+	if got := params.Reservations(); len(got) != 0 {
+		t.Errorf("a staging app must reserve nothing, got %v", got)
 	}
 }

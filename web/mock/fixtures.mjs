@@ -8,6 +8,7 @@ const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const GB = 1024 ** 3;
+const MB = 1024 ** 2;
 
 export const BASE_DOMAIN = 'dev.example.com';
 export const PUBLIC_IP = '203.0.113.10';
@@ -69,6 +70,8 @@ export const SCENARIOS = {
     'everything fine; blog-staging deploys after its image workflow succeeds, and the last run failed',
   sleeping:
     'everything fine; shop-staging is asleep after 30 minutes without requests, blog-staging sleeps after an hour',
+  'reservations-tight':
+    'production apps reserve more memory than a 4 GB host can keep with its 1 GB margin; docs was switched to staging but not redeployed',
 };
 
 /** The owner of every scenario, and the members it let in (ARCHITECTURE 10.7). */
@@ -209,6 +212,8 @@ function app(slug, overrides = {}) {
     relax_policy: false,
     memory_limit: '',
     service_memory_limits: { db: '1g' },
+    memory_reservation: '',
+    service_memory_reservations: {},
     backup_exclude_volumes: ['pgdata'],
     dump_hook_service: 'db',
     dump_hook_command: 'pg_dump -U postgres app',
@@ -427,6 +432,8 @@ function healthyApps() {
     {
       app: app('blog', {
         environment: 'production',
+        // The worker can wait for memory (ARCHITECTURE 6.2).
+        service_memory_reservations: { worker: '0' },
         host_port: 20000,
         primary_url: 'https://www.example.org',
         promote_from: 'blog-staging',
@@ -825,6 +832,27 @@ export function buildScenario(name) {
       };
       return state;
     }
+    case 'reservations-tight': {
+      // Raised reservations on both production apps, and docs still runs
+      // the production release it had before it became staging.
+      const state = scenario([
+        ...healthyApps(),
+        {
+          app: app('docs', {
+            host_port: 20004,
+            current_deployment: deployment(
+              'docs',
+              'Add the search page',
+              6 * DAY,
+            ),
+          }),
+        },
+      ]);
+      state.apps.get('blog').memory_reservation = '768m';
+      state.apps.get('blog').service_memory_reservations = {};
+      state.apps.get('docs').reserved = { web: 256 * MB, db: 512 * MB };
+      return state;
+    }
     case 'webhook-unset': {
       const state = scenario(healthyApps());
       state.system.webhook.secret_configured = false;
@@ -1177,6 +1205,68 @@ export function settle(state) {
   }
 }
 
+function parseSize(value) {
+  const match = /^([0-9]+)([kmg]?)b?$/.exec(value);
+  if (!match) return 0;
+  const unit = { '': 1, k: 1024, m: MB, g: 1024 * MB }[match[2]];
+  return Number(match[1]) * unit;
+}
+
+/**
+ * What a production release reserves for a service, like the override
+ * (ARCHITECTURE 6.2): the app setting, else half the limit; null for none.
+ */
+function reservationOf(target, name, limit) {
+  if (target.environment !== 'production') return null;
+  const value =
+    target.service_memory_reservations?.[name] || target.memory_reservation;
+  if (value === '0') return null;
+  const bytes = value
+    ? Math.min(parseSize(value), limit)
+    : Math.floor(limit / 2 / MB) * MB;
+  return bytes >= 6 * MB ? bytes : null;
+}
+
+/**
+ * `memory_reservation` of `GET /api/system`: what the running releases of
+ * the apps that are not stopped reserve, against the host's memory.
+ */
+export function memoryReservation(state) {
+  const apps = [];
+  for (const target of state.apps.values()) {
+    if (target.desired_state === 'stopped' || !target.current_deployment) {
+      continue;
+    }
+    const reserved = {};
+    for (const svc of services(target)) {
+      if (svc.memory_reservation_bytes) {
+        reserved[svc.name] = svc.memory_reservation_bytes;
+      }
+    }
+    const total = Object.values(reserved).reduce((a, b) => a + b, 0);
+    if (total > 0) {
+      apps.push({
+        slug: target.slug,
+        environment: target.environment,
+        total_bytes: total,
+        services: reserved,
+      });
+    }
+  }
+  apps.sort(
+    (a, b) => b.total_bytes - a.total_bytes || a.slug.localeCompare(b.slug),
+  );
+  const total = apps.reduce((sum, a) => sum + a.total_bytes, 0);
+  const margin = 1024 * MB;
+  const host = state.system.memory?.total_bytes ?? 0;
+  return {
+    total_bytes: total,
+    margin_bytes: margin,
+    warning: host > 0 && total + margin > host,
+    apps,
+  };
+}
+
 export function services(target) {
   if (target.desired_state === 'stopped' || !target.current_deployment) {
     return [];
@@ -1195,7 +1285,14 @@ export function services(target) {
   }
   // Staging sees little traffic and holds little data.
   const scale = target.environment === 'production' ? 1 : 0.35;
-  return [
+  const reserved = (list) =>
+    list.map((svc) => ({
+      ...svc,
+      memory_reservation_bytes:
+        target.reserved?.[svc.name] ??
+        reservationOf(target, svc.name, svc.memory_limit_bytes),
+    }));
+  return reserved([
     {
       name: 'web',
       state: 'running',
@@ -1223,7 +1320,7 @@ export function services(target) {
       memory_limit_bytes: 0.5 * GB,
       cpu_percent: 1.6,
     },
-  ];
+  ]);
 }
 
 /**

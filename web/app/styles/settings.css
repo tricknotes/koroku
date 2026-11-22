@@ -158,3 +158,8 @@
 .settings-requirements-warning > .icon {
   color: var(--color-pending);
 }
+
+/* Memory reservation (ARCHITECTURE 6.2): a staging app reserves nothing. */
+.reservation-staging-note {
+  margin-bottom: var(--space-3);
+}

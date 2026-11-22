@@ -13,7 +13,7 @@ import TabSection from 'koroku-console/components/tab-section';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
-import { formatPercent } from 'koroku-console/utils/format';
+import { formatBytes, formatPercent } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
 import { memoryUsage, type MemoryUsage } from 'koroku-console/utils/services';
 import type { App, ServiceStatus } from 'koroku-console/utils/types';
@@ -33,6 +33,12 @@ function percentOf(memory: MemoryUsage): number {
 
 function cpuText(service: ServiceStatus): string {
   return formatPercent(service.cpu_percent);
+}
+
+/** What the running release reserves (ARCHITECTURE 6.2), or ''. */
+function reservationText(service: ServiceStatus): string {
+  const bytes = service.memory_reservation_bytes;
+  return typeof bytes === 'number' && bytes > 0 ? formatBytes(bytes) : '';
 }
 
 interface Signature {
@@ -74,7 +80,8 @@ export default class AppResourcesTemplate extends Component<Signature> {
       <TabSection @title="今の使用量" data-test-resources-now>
         <p class="pane-description">
           稼働中のコンテナを数秒ごとに測った値です。CPU は Docker と同じく 1
-          コアを 100% とします。
+          コアを 100%
+          とします。本番のアプリでは、稼働中のリリースが予約しているメモリも出します。
         </p>
         {{#if this.app.sleeping_since}}
           <Banner data-test-resources-sleeping>
@@ -160,6 +167,15 @@ export default class AppResourcesTemplate extends Component<Signature> {
                               title="止まっているか、取得できませんでした。"
                             >—</span>
                           {{/if}}
+                          {{#let (reservationText svc) as |reserved|}}
+                            {{#if reserved}}
+                              <span
+                                class="resource-reservation overview-secondary"
+                                title="ホストのメモリが足りなくなっても、この量までは後回しに回収されます。"
+                                data-test-resource-reservation
+                              >予約 {{reserved}}</span>
+                            {{/if}}
+                          {{/let}}
                         </div>
                       </Row>
                     {{/let}}

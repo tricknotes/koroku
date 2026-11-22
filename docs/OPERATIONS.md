@@ -198,6 +198,7 @@ Ubuntu 24.04 の apt が配る restic は 0.16.4（2024 年初めの版）で、
 - **swap**: `/swapfile` を作るのは、有効な swap の合計が 2GB に満たないときだけ。OS イメージに最初から十分な swap があれば何も足さない。
 - **zswap**: swap に書き出すページを、先に RAM の中で圧縮して持つ（圧縮は `zstd`、使うのは RAM の最大 20%（カーネルの既定））。アクセスの少ないアプリのヒープはよく縮むので、ディスクの swap より速く、同じ RAM に多く載る。カーネル 6.8 以降では `shrinker_enabled` で、圧縮したページのうち古いものを `/swapfile` へ追い出す。起動のたびに systemd-tmpfiles が `/sys/module/zswap/parameters` に書く。状態は `grep -r . /sys/module/zswap/parameters` で、使われ具合は `sudo grep -r . /sys/kernel/debug/zswap` で見られる。zswap のないカーネルでは何もせず、まとめで知らせる。
 - **Caddy の `GOGC=50`**: drop-in の `Environment=GOGC=50` で、Caddy のヒープが前回の GC の 1.5 倍になったところで GC する（Go の既定は 2 倍）。常駐が 10 MiB ほど減る代わりに、CPU を少し多く使う。drop-in が変わったときは、スクリプトが Caddy を再起動する（`--resume` で経路はすぐ戻るが、開いていた接続は 1 度切れる）。
+- **Caddy の `OOMScoreAdjust=-450`**: ホスト全体でメモリが尽きたとき、カーネルが Caddy を本番アプリのコンテナ（`-400`）より後に、dockerd（`-500`）より先に止めるようにする。アプリのコンテナの値は koroku が override で付ける（staging は `500`、本番は `-400`。ARCHITECTURE 6.2）。今の値は `cat /proc/$(pidof caddy)/oom_score_adj` と `cat /proc/$(pidof dockerd)/oom_score_adj`、コンテナは `docker inspect -f '{{.HostConfig.OomScoreAdj}} {{.HostConfig.MemoryReservation}}' <コンテナ>` で見られる。
 - **タイムゾーン**: システムのタイムゾーンは変えない。`tzdata` だけ入れる。
 
 ## 9. `koroku` の更新
@@ -395,6 +396,7 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 - [ ] **swap**: OS イメージに最初から swap があるか。`/swapfile` が再起動後も有効か。
 - [ ] **zswap**: 事業者のカーネルに zswap と `zstd` があるか。スクリプトの実行直後と再起動後に `grep -r . /sys/module/zswap/parameters` が `enabled:Y`、`compressor:zstd` になるか。swap が使われたとき `/sys/kernel/debug/zswap/stored_pages` が増えるか。
 - [ ] **Caddy の `GOGC`**: `sudo cat /proc/$(pidof caddy)/environ | tr '\0' '\n' | grep GOGC` で効いているか。システム画面で Caddy のメモリが減ったか。
+- [ ] **OOM の順序**: 公式パッケージの dockerd が `-500`、containerd が `-999` で動いているか（`systemctl show -p OOMScoreAdjust docker containerd`）。Caddy が `-450` か。本番と staging のアプリを並べてホスト全体のメモリを使い切らせたとき、staging のコンテナから止まるか、本番のコンテナの `memory.low`（`/sys/fs/cgroup/system.slice/docker-<id>.scope/memory.low`）が予約の値か。
 - [ ] **Docker のログ設定**: 実際のデーモンが `daemon.json` を読み、新しいコンテナのログが 10MB × 3 で回るか（コンテナではデーモンを起動していない）。
 - [ ] **証明書**: Let's Encrypt（staging、本番）での発行。`443/udp` を閉じた状態でブラウザが支障なく HTTP/2 で通信するか。
 - [ ] **needrestart**: `NEEDRESTART_MODE=l` で、スクリプトの途中にサービスが自動再起動されないこと。

@@ -159,6 +159,25 @@ export interface SystemInfo {
    * access logs (ARCHITECTURE 8.4). Absent on older backends.
    */
   idle_sleep?: { available: boolean };
+  /**
+   * What production apps reserve (ARCHITECTURE 6.2); `null` for members,
+   * absent on older backends.
+   */
+  memory_reservation?: MemoryReservationSummary | null;
+}
+
+export interface MemoryReservationSummary {
+  total_bytes: number;
+  /** Left free for the host, builds and staging apps. */
+  margin_bytes: number;
+  /** The reservations plus the margin exceed the host's memory. */
+  warning: boolean;
+  apps: {
+    slug: string;
+    environment: Environment;
+    total_bytes: number;
+    services: Record<string, number>;
+  }[];
 }
 
 /** One line of `docker system df` (`GET /api/system/docker`). */
@@ -300,6 +319,9 @@ export interface App {
   relax_policy: boolean;
   memory_limit: string;
   service_memory_limits: Record<string, string> | null;
+  /** Production only (ARCHITECTURE 6.2): '' = half the limit, '0' = none. */
+  memory_reservation?: string;
+  service_memory_reservations?: Record<string, string> | null;
   url: string;
   /** URL of the primary domain, or `url` when there is none. */
   primary_url?: string;
@@ -407,6 +429,8 @@ export interface AppPatch {
   relax_policy?: boolean;
   memory_limit?: string;
   service_memory_limits?: Record<string, string>;
+  memory_reservation?: string;
+  service_memory_reservations?: Record<string, string>;
   backup_exclude_volumes?: string[];
   dump_hook_service?: string;
   dump_hook_command?: string;
@@ -451,6 +475,8 @@ export interface ServiceStatus {
   memory_limit_bytes?: number | null;
   /** CPU as Docker shows it (one core is 100%); `null` when unknown. */
   cpu_percent?: number | null;
+  /** What the running release reserves for it; `null` for none. */
+  memory_reservation_bytes?: number | null;
 }
 
 export type MemoryRange = '24h' | '7d' | '14d';

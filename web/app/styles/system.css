@@ -74,6 +74,27 @@
   color: var(--color-pending);
 }
 
+/* Production memory reservations (ARCHITECTURE 6.2), one line per app. */
+
+.reservation-apps {
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reservation-app {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  min-height: 3rem;
+  padding: var(--space-3) var(--space-4);
+}
+
+.reservation-app + .reservation-app {
+  border-top: 1px solid var(--color-border);
+}
+
 /* Docker usage */
 
 .docker-rows {

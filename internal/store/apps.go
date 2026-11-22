@@ -19,8 +19,9 @@ const (
 	DesiredStopped = "stopped"
 )
 
-// Environment labels of an app. They are for display and confirmation
-// dialogs only; staging and production are otherwise ordinary apps.
+// Environment labels of an app. Besides the label and the confirmation
+// dialogs, production apps are protected first when the host runs out of
+// memory (ARCHITECTURE 6.2); otherwise they are ordinary apps.
 const (
 	EnvironmentProduction = "production"
 	EnvironmentStaging    = "staging"
@@ -62,6 +63,11 @@ type App struct {
 	RelaxPolicy         bool
 	MemoryLimit         string
 	ServiceMemoryLimits map[string]string
+	// MemoryReservation and ServiceMemoryReservations set the memory a
+	// production app reserves (ARCHITECTURE 6.2): "" for the default,
+	// "0" for none.
+	MemoryReservation         string
+	ServiceMemoryReservations map[string]string
 	// Backup settings (ARCHITECTURE 10.2).
 	BackupExcludeVolumes []string
 	DumpHookService      string
@@ -136,7 +142,8 @@ func (a App) ProjectName() string { return "koroku-" + a.Slug }
 
 const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 	web_service, web_port, host_port, healthcheck_path, desired_state, environment,
-	relax_policy, memory_limit, service_memory_limits, current_deployment_id, created_at, updated_at,
+	relax_policy, memory_limit, service_memory_limits, memory_reservation, service_memory_reservations,
+	current_deployment_id, created_at, updated_at,
 	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
 	env_source, env_example_path,
 	load_hook_service, load_hook_command, post_load_service, post_load_command,
@@ -150,20 +157,22 @@ type rowScanner interface {
 
 func scanApp(row rowScanner) (App, error) {
 	var (
-		a           App
-		repoID      sql.NullInt64
-		currentID   sql.NullInt64
-		promoteFrom sql.NullInt64
-		sleeping    sql.NullInt64
-		limitsJSON  string
-		excludeJSON string
-		exemptJSON  string
-		created     int64
-		updated     int64
+		a                App
+		repoID           sql.NullInt64
+		currentID        sql.NullInt64
+		promoteFrom      sql.NullInt64
+		sleeping         sql.NullInt64
+		limitsJSON       string
+		reservationsJSON string
+		excludeJSON      string
+		exemptJSON       string
+		created          int64
+		updated          int64
 	)
 	err := row.Scan(&a.ID, &a.Slug, &repoID, &a.RepoFullName, &a.RepoURL, &a.DefaultBranch, &a.ComposePath,
 		&a.WebService, &a.WebPort, &a.HostPort, &a.HealthcheckPath, &a.DesiredState, &a.Environment,
-		&a.RelaxPolicy, &a.MemoryLimit, &limitsJSON, &currentID, &created, &updated,
+		&a.RelaxPolicy, &a.MemoryLimit, &limitsJSON, &a.MemoryReservation, &reservationsJSON,
+		&currentID, &created, &updated,
 		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy,
 		&a.EnvSource, &a.EnvExamplePath,
 		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand,
@@ -190,6 +199,12 @@ func scanApp(row rowScanner) (App, error) {
 	if limitsJSON != "" {
 		if err := json.Unmarshal([]byte(limitsJSON), &a.ServiceMemoryLimits); err != nil {
 			return App{}, fmt.Errorf("decode service_memory_limits of app %s: %w", a.Slug, err)
+		}
+	}
+	a.ServiceMemoryReservations = map[string]string{}
+	if reservationsJSON != "" {
+		if err := json.Unmarshal([]byte(reservationsJSON), &a.ServiceMemoryReservations); err != nil {
+			return App{}, fmt.Errorf("decode service_memory_reservations of app %s: %w", a.Slug, err)
 		}
 	}
 	a.BackupExcludeVolumes = []string{}
@@ -226,7 +241,7 @@ func encodeLimits(limits map[string]string) (string, error) {
 	}
 	b, err := json.Marshal(limits)
 	if err != nil {
-		return "", fmt.Errorf("encode service_memory_limits: %w", err)
+		return "", fmt.Errorf("encode per-service memory settings: %w", err)
 	}
 	return string(b), nil
 }
@@ -258,6 +273,10 @@ func (s *Store) CreateAppWithEnv(ctx context.Context, app App, portStart, portEn
 func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, now time.Time,
 	env func(appID int64) ([]EnvVar, error), extra func(tx *sql.Tx, appID int64) error) (App, error) {
 	limits, err := encodeLimits(app.ServiceMemoryLimits)
+	if err != nil {
+		return App{}, err
+	}
+	reservations, err := encodeLimits(app.ServiceMemoryReservations)
 	if err != nil {
 		return App{}, err
 	}
@@ -302,17 +321,17 @@ func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, 
 	res, err := tx.ExecContext(ctx, `INSERT INTO apps (
 			slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 			web_service, web_port, host_port, healthcheck_path, desired_state, environment,
-			relax_policy, memory_limit, service_memory_limits, created_at, updated_at,
+			relax_policy, memory_limit, service_memory_limits, memory_reservation, service_memory_reservations, created_at, updated_at,
 			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
 			env_source, env_example_path,
 			load_hook_service, load_hook_command, post_load_service, post_load_command,
 			access_protection, protection_exempt_paths, promote_from_app_id,
 			auto_deploy, auto_deploy_branch, auto_deploy_workflow,
 			idle_sleep, idle_sleep_minutes)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
-		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now), toMillis(now),
+		app.RelaxPolicy, app.MemoryLimit, limits, app.MemoryReservation, reservations, toMillis(now), toMillis(now),
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
@@ -426,6 +445,10 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	reservations, err := encodeLimits(app.ServiceMemoryReservations)
+	if err != nil {
+		return err
+	}
 	exclude, err := encodeStrings(app.BackupExcludeVolumes)
 	if err != nil {
 		return err
@@ -437,7 +460,8 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE apps SET
 			repo_id = ?, repo_full_name = ?, repo_url = ?, default_branch = ?, compose_path = ?,
 			web_service = ?, web_port = ?, healthcheck_path = ?, environment = ?,
-			relax_policy = ?, memory_limit = ?, service_memory_limits = ?, updated_at = ?,
+			relax_policy = ?, memory_limit = ?, service_memory_limits = ?,
+			memory_reservation = ?, service_memory_reservations = ?, updated_at = ?,
 			backup_exclude_volumes = ?, dump_hook_service = ?, dump_hook_command = ?, backup_before_deploy = ?,
 			env_source = ?, env_example_path = ?,
 			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?,
@@ -447,7 +471,8 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
-		app.RelaxPolicy, app.MemoryLimit, limits, toMillis(now),
+		app.RelaxPolicy, app.MemoryLimit, limits,
+		app.MemoryReservation, reservations, toMillis(now),
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,

@@ -9,11 +9,13 @@ services:
       resources:
         limits:
           memory: "2g"
+    oom_score_adj: 500
   "migrate":
     ports: !reset []
     env_file:
       - "/var/lib/koroku/apps/blog/env"
     mem_limit: "512m"
+    oom_score_adj: 500
   "web":
     ports: !override
       - "127.0.0.1:20001:3000"
@@ -21,8 +23,10 @@ services:
       - "/var/lib/koroku/apps/blog/env"
     restart: unless-stopped
     mem_limit: "1g"
+    oom_score_adj: 500
   "worker":
     ports: !reset []
     env_file:
       - "/var/lib/koroku/apps/blog/env"
     mem_limit: "512m"
+    oom_score_adj: 500

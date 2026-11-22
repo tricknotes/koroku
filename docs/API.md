@@ -200,6 +200,26 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 
 - `idle_sleep.available` は、このホストでアプリの休止を有効にできるか。Caddy が有効でアプリ別のアクセスログ（`[caddy] access_log_dir`）があるときだけ `true`。`false` のホストでは `PATCH /api/apps/{slug}` で `idle_sleep` を `true` にできない。
 
+本番アプリのメモリの予約（ARCHITECTURE 6.2）の合計も加わる。オーナーだけに返し、メンバーには `null`（内訳にほかのアプリの名前が入るため）。
+
+```json
+{
+  "memory_reservation": {
+    "total_bytes": 1879048192,
+    "margin_bytes": 1073741824,
+    "warning": false,
+    "apps": [
+      { "slug": "shop", "environment": "production", "total_bytes": 1610612736, "services": { "db": 536870912, "web": 1073741824 } },
+      { "slug": "blog", "environment": "production", "total_bytes": 268435456, "services": { "web": 268435456 } }
+    ]
+  }
+}
+```
+
+- 数えるのは、停止していない（`desired_state` が `running`）アプリの、稼働中のリリースが予約している量（デプロイのときの記録）。予約のないアプリは `apps` に出ない。`apps` は予約の多い順。
+- `environment` はアプリの今の設定。staging に切り替えてまだデプロイしていないアプリは、`staging` のまま予約を持って出る（次のデプロイで外れる）。
+- `warning` は、`total_bytes` に `margin_bytes`（1 GiB。ホスト、ビルド、staging アプリのための余白）を足すと `memory.total_bytes` を超えるとき `true`。`memory` が取れなければ `false`。
+
 `GET /api/system/docker`: Docker のディスク使用量。
 
 ```json
@@ -274,6 +294,8 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "relax_policy": false,
   "memory_limit": "",
   "service_memory_limits": { "db": "1g" },
+  "memory_reservation": "",
+  "service_memory_reservations": { "worker": "0" },
   "env_source": "compose",
   "env_example_path": "",
   "access_protection": true,
@@ -304,6 +326,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - `current_deployment` は稼働中の（最後に成功した）デプロイ、`latest_deployment` は最新のデプロイ。どちらも「デプロイ」の形か `null`。
 - `compose_path` が空なら自動検出（`compose.yaml`、`compose.yml`、`docker-compose.yml`、`docker-compose.yaml` の順）。
 - `memory_limit` が空なら基盤の既定値。書式は数字 + 単位 `b` `k` `m` `g`（例 `512m`）。
+- メモリの予約（ARCHITECTURE 6.2）: `memory_reservation`（全体）と `service_memory_reservations`（サービスごと）は、`environment` が `production` のアプリにだけ効く。空なら各サービスのメモリ上限の半分、`0` なら予約しない。書式はメモリ上限と同じで、`0` 以外は 6 MiB 以上。保存の時点で分かる上限（サービスごとの上限、なければ `memory_limit`、なければ基盤の既定値）を超えると `422 validation_failed`（`details.memory_reservation` か `details.service_memory_reservations`）。サービスごとの値に空文字は使えない（既定に戻すにはキーを消す）。どちらも、環境の切り替えと同じく次のデプロイから反映される。
 - 必要な環境変数の読み取り方（ARCHITECTURE 9.4）: `env_source` は `compose`（既定。Compose ファイルの `${VAR}`）/ `dotenv`（`.env.example`）/ `off`。`env_example_path` は `dotenv` で読むファイルのパスで、空なら `.env.example`。
 - アクセスの保護（ARCHITECTURE 8.3、2026-11-21）: `access_protection` が `true` なら、アプリのホスト名（自動割当と有効な独自ドメイン）を開けるのは管理 UI にログインした本人だけになる。`POST` で省略すると `environment` が `staging` なら `true`、`production` なら `false`。`protection_exempt_paths` は保護を外すパスの前方一致の一覧（既定は空）。各要素は `/` で始まり、英数字と `. _ ~ - / @ : +` だけからなる 200 文字以内で、20 件まで。`/` そのもの、`/.koroku` で始まるもの、`.` や `..` の区切り、`//` は `422 validation_failed`（`details.protection_exempt_paths`）。重複は 1 つにまとめる。どちらも変えると Caddy の設定を投入し直す。
 - `promote_from` は昇格元の staging アプリの slug（ARCHITECTURE 9.7）。空なら組み合わせなし。`PATCH` で設定できるのは、自分が `production`（同じリクエストで変える値を含む）で、相手が同じリポジトリの `staging` アプリのときだけ。違えば 422 `validation_failed`（`details.promote_from`）。空文字で外す。
@@ -321,7 +344,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204。オーナーだけ（レビューアプリは管理以上で、volume は常に消す）。レビューアプリが残っていれば `409 has_review_apps` |
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る）。起動でイメージの取得がレジストリに拒否されたら `502 registry_denied`（アプリのコンテナレジストリの認証を確かめる） |
 | `POST /api/apps/{slug}/wake` | 休止中のアプリを起こす（ARCHITECTURE 8.4）。起きるまで（コンテナの起動と HTTP の確認、最長 10 分）待って 200 でアプリ。休止中でなければ何もせず 200 でアプリ。起こせなければ `502 wake_failed`（理由はサーバーログ）。ロールはデプロイ以上 |
-| `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）、`memory_limit_bytes`（上限。無制限なら 0）、`cpu_percent`（`docker stats` の CPU。1 コアを 100% とする値）も付く。止まっているサービスや、取得できないときは `null` |
+| `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）、`memory_limit_bytes`（上限。無制限なら 0）、`cpu_percent`（`docker stats` の CPU。1 コアを 100% とする値）も付く。止まっているサービスや、取得できないときは `null`。`memory_reservation_bytes` は稼働中のリリースがそのサービスに付けたメモリの予約（ARCHITECTURE 6.2。予約がなければ `null`。止まっていても出る） |
 
 - 作成時の環境変数（ARCHITECTURE 9.8、2026-11-21）: `POST /api/apps` の `env` は `PUT /api/apps/{slug}/env` の `vars` と同じ形と検査（key の形式、`KOROKU_` で始まらない、重複なし、500 件まで、値は 64 KiB まで）。不正なら `422 validation_failed`（`details.env`）で、アプリも作らない。空でない `env` は環境変数の保存なので、直近 10 分以内のログインでなければ `403 reauth_required`（アプリは作らない）。`PATCH` では受け付けない（`400 invalid_json`）。
 

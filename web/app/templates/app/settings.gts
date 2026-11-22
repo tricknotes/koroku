@@ -70,6 +70,8 @@ const KNOWN_FIELDS = new Set([
   'environment',
   'memory_limit',
   'service_memory_limits',
+  'memory_reservation',
+  'service_memory_reservations',
   'env_source',
   'env_example_path',
   'access_protection',
@@ -378,6 +380,15 @@ export default class AppSettingsTemplate extends Component<Signature> {
 
   removeLimit = (row: LimitRow) => {
     this.form.limits = this.form.limits.filter((r) => r !== row);
+    this.touch();
+  };
+
+  addReservation = () => {
+    this.form.reservations = [...this.form.reservations, new LimitRow()];
+  };
+
+  removeReservation = (row: LimitRow) => {
+    this.form.reservations = this.form.reservations.filter((r) => r !== row);
     this.touch();
   };
 
@@ -980,7 +991,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
           <div>
             <h2 class="form-group-title">環境</h2>
             <p class="form-group-description">
-              本番とステージングを取り違えないための目印です。アプリの動作は変わりません。
+              本番とステージングを取り違えないための目印です。ホストのメモリが足りなくなったときの優先度も決まり、こちらは次のデプロイから反映されます。
             </p>
           </div>
           <div class="form-group-body">
@@ -1009,7 +1020,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                   <span class="option-label">ステージング</span>
                   <span
                     class="option-hint"
-                  >デプロイは確認なしで始まります。</span>
+                  >デプロイは確認なしで始まります。メモリが足りなくなると、本番より先に止まります。</span>
                 </span>
               </label>
               <label class="option">
@@ -1025,7 +1036,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                 <span class="option-body">
                   <span class="option-label">本番</span>
                   <span class="option-hint">
-                    バッジで目立たせ、デプロイの前に確認します。
+                    バッジで目立たせ、デプロイの前に確認します。メモリが足りなくなっても最後まで止まらず、メモリを予約します。
                   </span>
                 </span>
               </label>
@@ -1478,6 +1489,116 @@ export default class AppSettingsTemplate extends Component<Signature> {
           </div>
         </div>
 
+        <div class="form-group" data-test-reservation-group>
+          <div>
+            <h2 class="form-group-title">メモリの予約（本番）</h2>
+            <p class="form-group-description">
+              ホストのメモリが足りなくなったとき、予約した量まではほかのアプリより後に回収されます。空なら各サービスの上限の半分、0
+              なら予約しません。上限を超える値は上限に切り詰めます。ホスト全体の合計はシステム画面で確かめられます。
+            </p>
+          </div>
+          <div class="form-group-body">
+            {{#unless this.isProductionForm}}
+              <p
+                class="field-hint reservation-staging-note"
+                data-test-reservation-staging-note
+              >
+                ステージングのアプリには付きません。本番に切り替えると、次のデプロイから付きます。
+              </p>
+            {{/unless}}
+            <FormField
+              class="field-narrow"
+              @label="既定（全サービス共通）"
+              @hint="空なら上限の半分です。"
+              @error={{this.errors.memory_reservation}}
+              data-test-field-group="memory_reservation"
+              as |field|
+            >
+              <input
+                id={{field.id}}
+                type="text"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="上限の半分"
+                value={{this.form.memoryReservation}}
+                aria-describedby={{field.describedBy}}
+                aria-invalid={{field.invalid}}
+                data-test-field="memory_reservation"
+                {{on "input" (setValue this.form "memoryReservation")}}
+              />
+            </FormField>
+
+            <div
+              class="field"
+              role="group"
+              aria-labelledby="settings-reservations-label"
+              data-test-field-group="service_memory_reservations"
+            >
+              <span class="field-label" id="settings-reservations-label">
+                サービス別
+              </span>
+              {{#if this.form.reservations.length}}
+                <ul class="limit-rows">
+                  {{#each this.form.reservations key="id" as |row|}}
+                    <li class="limit-row" data-test-reservation-row>
+                      <input
+                        type="text"
+                        placeholder="サービス名"
+                        spellcheck="false"
+                        autocomplete="off"
+                        aria-label="サービス名"
+                        value={{row.service}}
+                        data-test-reservation-service
+                        {{on "input" (setValue row "service")}}
+                      />
+                      <input
+                        type="text"
+                        placeholder="256m"
+                        spellcheck="false"
+                        autocomplete="off"
+                        aria-label="{{if
+                          row.service
+                          row.service
+                          'サービス'
+                        }} の予約"
+                        aria-invalid={{if
+                          this.errors.service_memory_reservations
+                          "true"
+                        }}
+                        value={{row.limit}}
+                        data-test-reservation-value
+                        {{on "input" (setValue row "limit")}}
+                      />
+                      <Button
+                        @size="small"
+                        aria-label="{{if
+                          row.service
+                          row.service
+                          'この行'
+                        }} の予約を外す"
+                        data-test-reservation-remove
+                        {{on "click" (fn this.removeReservation row)}}
+                      >外す</Button>
+                    </li>
+                  {{/each}}
+                </ul>
+              {{/if}}
+              <div>
+                <Button
+                  @size="small"
+                  data-test-reservation-add
+                  {{on "click" this.addReservation}}
+                >サービス別の予約を追加</Button>
+              </div>
+              {{#if this.errors.service_memory_reservations}}
+                <p class="field-error" data-test-field-error>
+                  {{this.errors.service_memory_reservations}}
+                </p>
+              {{/if}}
+            </div>
+          </div>
+        </div>
+
         <div class="form-group">
           <div>
             <h2 class="form-group-title">デプロイの安全装置</h2>
@@ -1559,13 +1680,12 @@ export default class AppSettingsTemplate extends Component<Signature> {
             {{#if this.saved}}
               <span class="form-saved" data-test-settings-saved>
                 <Icon @name="check" />
-                保存しました。Compose
-                やメモリ上限の変更は、次のデプロイから反映されます。
+                保存しました。Compose、メモリ上限と予約、環境による優先度の変更は、次のデプロイから反映されます。
               </span>
             {{else if this.nothingToSave}}
               <span data-test-settings-unchanged>変更はありません。</span>
             {{else}}
-              Compose やメモリ上限の変更は、次のデプロイから反映されます。
+              Compose、メモリ上限と予約、環境による優先度の変更は、次のデプロイから反映されます。
             {{/if}}
           </p>
         </div>

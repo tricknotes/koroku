@@ -48,12 +48,14 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 <skill-dir>/scripts/rehearse.sh --service web --port 3000 --health /up --env-file /path/to/test.env
 ```
 
+本番アプリとして出すなら `--environment production` を付けると、koroku が本番に付ける `oom_score_adj: -400` とメモリの予約（既定は上限の半分、`--reservation` で変更）も重ねる。既定は staging（`oom_score_adj: 500`、予約なし）。rootless の Docker は負の `oom_score_adj` を付けられないので、本番のリハーサルは rootful の Docker か Docker Desktop で行う。
+
 登録しておくと便利なコマンドがあれば `--task web:'bin/rails db:migrate:status'` のように渡すと、koroku のタスクと同じ形（新しいコンテナ、端末と入力なし）で実行して確かめる。
 
 アクセスがない間の休止を使うアプリ（たいていの staging）は `--sleep` を付ける。koroku が休止と起動でするのと同じく、`stop` してから `start --wait` し、もう一度 HTTP で確かめ、起きるまでの秒数（休止のあとの最初のリクエストが待つ時間）を出す。
 
 - リポジトリの追跡中と未追跡（ignore されていない）のファイルだけを一時ディレクトリにコピーし、`.git` なしで動かす。
-- koroku と同じ形の override（公開サービスのポートを `127.0.0.1` に置き換え、ほかのポートを消し、env ファイルを全サービスに注入し、メモリ上限 512m）を重ねて `config` → `build` / `pull` → `up --wait` → HTTP 確認（5xx 以外が返るまで最大 60 秒）を行う。
+- koroku と同じ形の override（公開サービスのポートを `127.0.0.1` に置き換え、ほかのポートを消し、env ファイルを全サービスに注入し、メモリ上限 512m、`oom_score_adj`、本番ならメモリの予約）を重ねて `config` → `build` / `pull` → `up --wait` → HTTP 確認（5xx 以外が返るまで最大 60 秒）を行う。
 - 最初に Compose ファイルが参照する変数（`docker compose config --variables`）を出す。koroku が照合に使うのと同じ一覧なので、アプリが必要とする変数が並んでいるか確かめる。
 - 変数を読む `build.args` を出す。ここに環境ごとの値があると、staging から本番への昇格でイメージを再利用できず、値がイメージに焼き込まれる。実行時に読む形へ直せないか確かめる。
 - 失敗したらコンテナの出力の末尾を出す。終わると Compose プロジェクトを volume ごと消す（`--keep` で残す）。
@@ -73,6 +75,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 | ヘルスチェックパス | 5xx 以外をすぐ返すパス。例 `/up` |
 | 環境変数 | 名前と意味、必須か任意か、秘密かどうか、値の作り方（例 `openssl rand -hex 64`）。値そのものは書かない。Compose に `${VAR}` で宣言したことも書く（koroku の「設定」で照合元が「Compose ファイルの `${VAR}`」になっていれば、環境変数の画面に未設定のものが出る） |
 | メモリ上限 | 512m を超えるサービスがあれば、その値と理由（アプリ設定で上げる） |
+| メモリの予約（本番だけ） | 本番アプリで、上限の半分（既定）では足りない、または予約の要らないサービスがあれば、その値（`0` で予約しない）。koroku の「設定」タブで入れる。Compose に `mem_reservation` や `oom_score_adj` を書いても koroku が上書きする |
 | コンテナレジストリの認証 | private なイメージ（CI がビルドしたイメージや private なベースイメージ）を使うなら、そのレジストリ（例 `ghcr.io`）と、読み取り専用のトークンの作り方（GHCR なら `read:packages` だけの classic な Personal access token か、読み取り専用のボットアカウント）。koroku の「設定」タブの「コンテナレジストリの認証」に入れる。トークンの値は書かない |
 | 先に待つワークフロー | `image:` だけの Compose で、イメージを GitHub Actions がコミットごとにビルドするなら、そのワークフローのファイル（例 `.github/workflows/image.yml`。CI のあとに `on: workflow_run` でつなぐなら、最後にイメージを置くほう）。koroku の「設定」タブの自動デプロイの「先に待つワークフロー」に入れる。push で自動デプロイするときに、イメージができる前に pull して失敗しないようにするため |
 | バックアップ | ダンプフック（サービス名とコマンド。例 `db` / `pg_dump -U postgres app`）と、ファイルのバックアップから外す volume（DB のデータ volume） |

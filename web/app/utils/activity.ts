@@ -25,6 +25,8 @@ const SETTING_LABELS: Record<string, string> = {
   relax_policy: 'ポリシー検査を緩める',
   memory_limit: 'メモリ上限（既定）',
   service_memory_limits: 'サービスごとのメモリ上限',
+  memory_reservation: 'メモリの予約（本番）',
+  service_memory_reservations: 'サービスごとのメモリの予約（本番）',
   backup_exclude_volumes: 'バックアップから外す volume',
   dump_hook_service: 'ダンプフックのサービス',
   dump_hook_command: 'ダンプフックのコマンド',
