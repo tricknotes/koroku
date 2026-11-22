@@ -245,6 +245,16 @@ sudo koroku run blog db psql -U postgres app < dump.sql   # 端末でない入�
 - 終了コードはコマンドのものを返す。
 - `koroku` のバイナリを入れ替えたあと、`koroku` を再起動するまでは「schema is version N but this binary expects M」で断る。`sudo systemctl restart koroku` のあとに実行する。
 
+### 10.2 アクセスがない間の休止
+
+アプリの設定タブで「アクセスがない間は止める」を有効にしたアプリは、決めた時間 Caddy を通るリクエストがなければ koroku がコンテナを止め、次のリクエストで起こす（ARCHITECTURE 8.4）。
+
+- アクセスは Caddy のアプリ別のアクセスログ（`[caddy] access_log_dir`、既定 `/var/log/caddy/apps`）から数える。このディレクトリがない設定（`access_log_dir = ""` か Caddy を使わない）では有効にできない。
+- 休止中のアプリのコンテナは `docker ps -a` に `Exited` として残る。手で `docker compose start` や `docker start` で起動しないで、管理 UI の「起こす」か、アプリの URL を開く（koroku の DB が休止中のままだと、Caddy は起こす経路のままになる。起こす処理は動いているコンテナを見つけると、そのまま休止を解く）。
+- 休止中のアプリのコンテナを手で消した場合は、次のリクエストで koroku が稼働中のリリースのファイルから作り直す。
+- 休止させた・起こしたことは `journalctl -u koroku` に `app went to sleep` / `app woke up` として出る。起こせなかったときは `waking the app failed` と理由が出る。
+- 休止と起こすたびに Caddy の設定を投入するので、ほかのアプリの WebSocket は最長 5 分後に 1 回切れる（アプリの起動・停止と同じ）。
+
 ## 11. ホスト全損からの復旧
 
 ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で控えたもの（restic のパスワード、オブジェクトストレージの接続情報）と、`koroku` のバイナリ。
@@ -366,6 +376,7 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 - [ ] **needrestart**: `NEEDRESTART_MODE=l` で、スクリプトの途中にサービスが自動再起動されないこと。
 - [ ] **SSH の keepalive**: 実機で、放置したセッションが固まらず、回線が切れたクライアントのセッションが約 2 分で消えること。
 - [ ] **SSH を鍵だけにする手順**: 実際の sshd が `01-koroku.conf` を `50-cloud-init.conf` より優先し、パスワードでのログインを断ること（別の端末から `ssh -o PubkeyAuthentication=no` で確かめる）。reload で実行中のセッションが切れないこと。Ubuntu 24.04 の `ssh.socket` による起動でも `systemctl try-reload-or-restart ssh.service` が効くこと。
+- [ ] **アクセスがない間の休止**: 実際の Caddy で、休止中のアプリのホスト名が `koroku` に転送され（`X-Koroku-Wake`）、保護したアプリではゲートを通ったリクエストだけが起こすこと。起こしたあとの設定の投入で、起こしたリクエストと WebSocket がどうなるか。アクセスログが Caddy の書き込みからコレクタ経由で見張りに届き、ログのローテーションをまたいでも休止の判定が狂わないこと。Compose 2.30 の `docker compose start --wait`（開発環境の Compose 5.8.0 では結合テストで確認済み）。
 - [ ] **`koroku check`**: 実際の DNS、Let's Encrypt（staging と本番）、GitHub、オブジェクトストレージに対して、各項目が期待どおりの結果になること。
 - [ ] **SSH のポート検出**: `sshd -T` が待受ポートを返すこと（22 番以外にしている場合）。
 - [ ] **`bin/dev make build` のバイナリ**: 通し実行で使ったのは、フロントエンドを含めずにビルドしたバイナリ。
