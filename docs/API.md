@@ -285,6 +285,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "idle_sleep": false,
   "idle_sleep_minutes": 30,
   "sleeping_since": null,
+  "review": null,
   "url": "https://blog.dev.example.com",
   "primary_url": "https://www.example.org",
   "pending_domains": 0,
@@ -317,7 +318,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `POST /api/apps` | 作成。必須は `slug`、`web_port`、リポジトリ（`repo_full_name` か `repo_url`）。ほかは既定値あり。201 でアプリ。`slug` は英小文字で始まる英小文字・数字・ハイフン 40 文字以内で、作成後は変えられない。`env`（`[{"key": "...", "value": "..."}]`）を付けると、環境変数もアプリと同じトランザクションで保存する（下記） |
 | `GET /api/apps/{slug}` | アプリ |
 | `PATCH /api/apps/{slug}` | 送ったフィールドだけ更新。200 でアプリ |
-| `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204 |
+| `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204。オーナーだけ（レビューアプリは管理以上で、volume は常に消す）。レビューアプリが残っていれば `409 has_review_apps` |
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る）。起動でイメージの取得がレジストリに拒否されたら `502 registry_denied`（アプリのコンテナレジストリの認証を確かめる） |
 | `POST /api/apps/{slug}/wake` | 休止中のアプリを起こす（ARCHITECTURE 8.4）。起きるまで（コンテナの起動と HTTP の確認、最長 10 分）待って 200 でアプリ。休止中でなければ何もせず 200 でアプリ。起こせなければ `502 wake_failed`（理由はサーバーログ）。ロールはデプロイ以上 |
 | `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）、`memory_limit_bytes`（上限。無制限なら 0）、`cpu_percent`（`docker stats` の CPU。1 コアを 100% とする値）も付く。止まっているサービスや、取得できないときは `null` |
@@ -823,6 +824,51 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
 - バックアップが未設定でも応答する。アプリがなければ `404 app_not_found`、Docker に問い合わせられなければ `500 internal`。
 
 バックアップが未設定（`[storage]` か restic のパスワードファイルがない）のとき、`GET /api/backups` は `configured: false` で応答し、`GET /api/apps/{slug}/volumes` と `GET /api/apps/{slug}/backups/status` は通常どおり応答し、それ以外は `503 not_configured`。そのアプリのものでないスナップショットや、種別が合わないスナップショット（volume のリストアにダンプを指定するなど）は `404 snapshot_not_found`。リストアはアプリを停止・起動するので、デプロイ中は `409 busy`。
+
+## レビューアプリ（2026-11-22）
+
+staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9）。パスの `{slug}` は親。
+
+アプリの形の `review` は、レビューアプリなら次の形、ほかのアプリは `null`。
+
+```json
+{
+  "parent": "blog-staging",
+  "pr_number": 42,
+  "pr_title": "Add search",
+  "pr_url": "https://github.com/octo/blog/pull/42",
+  "pr_state": "open",
+  "head_branch": "search",
+  "data_copy": "started",
+  "data_copy_detail": ""
+}
+```
+
+- `pr_state` は `open` / `closed` / `merged`（koroku が 10 分ごとに読み直す）。
+- `data_copy` は親のデータのコピー: `""`（作成時にコピーしないと選んだ）/ `waiting`（最初のデプロイの成功を待っている）/ `started`（始めた。状態は `GET /api/apps/{slug}/db-copies`）/ `skipped`（`data_copy_detail` が `no_dump_hook` か `no_load_hook`）/ `failed`（`data_copy_detail` が `source_not_running`、`target_not_running`、`target_not_staging`、`parent_missing`、`error`）。
+
+| メソッドとパス | 内容 |
+| --- | --- |
+| `GET /api/apps/{slug}/pull-requests` | 親のリポジトリの開いている pull request（新しく更新された順、100 件まで）。`{"pull_requests": [{"number", "title", "head_branch", "head_sha", "author", "url", "updated_at", "from_fork", "review_app"}]}`。`review_app` はその pull request のレビューアプリの slug か `null`。ロールは親の管理 |
+| `GET /api/apps/{slug}/review-apps` | 親のレビューアプリ。`{"review_apps": [アプリ, ...]}`（番号の大きい順）。ロールは親の閲覧 |
+| `POST /api/apps/{slug}/review-apps` | ボディ `{"pr_number": 42, "copy_data": true}`（`copy_data` は省略時 `true`）。201 でアプリに `dns_warning`（ホスト名がこのホストに解決されない）と、最初のデプロイを積めなかったときの `deploy_error` を足したもの。ロールは親の管理で、直近 10 分以内のログインが要る |
+
+断り方:
+
+| ステータス | `code` | 意味 |
+| --- | --- | --- |
+| 403 | `reauth_required` | 直近 10 分以内のログインが要る（作成） |
+| 404 | `pull_request_not_found` | pull request がない |
+| 409 | `review_app_exists` | その pull request のレビューアプリがある |
+| 409 | `slug_taken`、`no_free_port` | slug（`-2` から `-9` まで試す）かホストのポートが空いていない |
+| 422 | `not_review_parent` | 親になれない（`details.reason` が `not_staging`、`no_github_app`、`review_app`） |
+| 422 | `pull_request_not_open` | pull request が閉じている |
+| 422 | `pull_request_from_fork` | fork からの pull request |
+| 422 | `validation_failed` | `pr_number` がない、head のブランチ名が扱えない |
+| 502 | `github_permission_missing` | GitHub App に Pull requests: Read-only がない |
+| 503 | `not_configured` | GitHub App が未設定 |
+
+レビューアプリのロールは親のロールに従うので、`PUT /api/members/{id}/roles/{slug}` でレビューアプリを指すと `422 role_follows_parent`。
 
 ## DB のコピー（2026-11-21）
 

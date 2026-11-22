@@ -66,10 +66,28 @@ export function copyHistory(scenario) {
       }),
     );
   }
-  return new Map([
+  const history = new Map([
     ['blog-staging', blog],
     ['shop-staging', []],
   ]);
+  if (scenario.startsWith('review')) {
+    // The copies koroku started into review apps (ARCHITECTURE 9.9).
+    history.set('blog-staging-pr-42', [
+      copy('blog-staging-pr-42', 'blog-staging', 2 * DAY - 6 * MINUTE, {
+        actor: null,
+        backup_snapshot_id: '',
+        bytes: 3.2 * MB,
+      }),
+    ]);
+    history.set('blog-staging-pr-38', [
+      copy('blog-staging-pr-38', 'blog-staging', 5 * DAY, {
+        actor: null,
+        backup_snapshot_id: '',
+        bytes: 3.1 * MB,
+      }),
+    ]);
+  }
+  return history;
 }
 
 /** A copy started from the UI: it runs for a few seconds. */

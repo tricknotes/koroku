@@ -72,6 +72,14 @@ type Options struct {
 	Users UserLookup
 	// Waker wakes sleeping apps (ARCHITECTURE 8.4). Optional.
 	Waker AppWaker
+	// Pulls reads pull requests for review apps (ARCHITECTURE 9.9).
+	// Optional.
+	Pulls PullRequests
+	// HostVerifier checks the DNS of a new review app's hostname. Optional.
+	HostVerifier HostVerifier
+	// ReviewWatcher copies the parent's data into new review apps.
+	// Optional.
+	ReviewWatcher ReviewWatcher
 	// WakeHold is how long a request for a sleeping app waits for it.
 	// Default DefaultWakeHold.
 	WakeHold time.Duration
@@ -108,6 +116,9 @@ type Server struct {
 	users          UserLookup
 	waker          AppWaker
 	wakeHold       time.Duration
+	pulls          PullRequests
+	hostVerifier   HostVerifier
+	reviewWatcher  ReviewWatcher
 	envReqs        *envreq.Reader
 	// envPresets reads repositories for the create screen (ARCHITECTURE 9.8).
 	envPresets *envpresets.Reader
@@ -168,7 +179,11 @@ func New(opts Options) *Server {
 		copier:      opts.Copier,
 		users:       opts.Users,
 		waker:       opts.Waker,
-		wakeHold:    wakeHold,
+		pulls:       opts.Pulls,
+
+		hostVerifier:  opts.HostVerifier,
+		reviewWatcher: opts.ReviewWatcher,
+		wakeHold:      wakeHold,
 
 		routeStatus: opts.RouteStatus,
 
@@ -260,7 +275,14 @@ func (s *Server) apiRoutes() []route {
 		{"GET /api/apps/{slug}", onApp(levelView), s.handleGetApp},
 		// Owner-only settings are refused inside the handler.
 		{"PATCH /api/apps/{slug}", onApp(levelManage), s.handleUpdateApp},
-		{"DELETE /api/apps/{slug}", ownerOnly, s.handleDeleteApp},
+		// Review apps are deleted with manage (on the parent, whose roles
+		// they follow); other apps by the owner only. Checked in the handler.
+		{"DELETE /api/apps/{slug}", onApp(levelManage), s.handleDeleteApp},
+		// Review apps of a staging app (ARCHITECTURE 9.9). Creating one
+		// copies the parent's variables and data: manage, as for a copy.
+		{"GET /api/apps/{slug}/review-apps", onApp(levelView), s.handleListReviewApps},
+		{"POST /api/apps/{slug}/review-apps", onApp(levelManage), s.handleCreateReviewApp},
+		{"GET /api/apps/{slug}/pull-requests", onApp(levelManage), s.handleListPullRequests},
 		{"POST /api/apps/{slug}/start", onApp(levelDeploy), s.handleAppOperation(AppOperator.Start)},
 		{"POST /api/apps/{slug}/stop", onApp(levelDeploy), s.handleAppOperation(AppOperator.Stop)},
 		{"POST /api/apps/{slug}/restart", onApp(levelDeploy), s.handleAppOperation(AppOperator.Restart)},

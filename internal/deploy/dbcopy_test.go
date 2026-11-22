@@ -304,6 +304,28 @@ func TestCopyBacksUpTheTargetFirst(t *testing.T) {
 	}
 }
 
+func TestCopyIntoANewReviewAppSkipsTheBackup(t *testing.T) {
+	c := newCopyHarness(t, nil)
+	target := c.reload("blog-staging")
+	target.DumpHookService, target.DumpHookCommand = "db", "pg_dump app"
+	if err := c.store.UpdateApp(context.Background(), target, c.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	started, err := c.engine.StartCopy(context.Background(), CopyRequest{
+		Source: c.reload("blog"), Target: c.reload("blog-staging"), Kind: store.CopySourceLive, SkipBackup: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := c.waitCopy(started.ID)
+	if got.Status != store.CopySucceeded || got.BackupSnapshotID != "" || len(c.backups.backedUp) != 0 {
+		t.Errorf("copy = %+v, backed up %v", got, c.backups.backedUp)
+	}
+	if log := c.copyLog(got.ID); !strings.Contains(log, "was just created; there is no data to back up first") {
+		t.Errorf("log:\n%s", log)
+	}
+}
+
 func TestFailedDumpNeverReachesTheEndOfTheLoadInput(t *testing.T) {
 	c := newCopyHarness(t, nil)
 	c.dumpErr = &runner.ExitError{Cmd: "docker", Code: 1}

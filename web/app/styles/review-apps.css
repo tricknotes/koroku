@@ -1,0 +1,106 @@
+/* Review apps of pull requests (ARCHITECTURE 9.9): the list on the parent's
+   overview, the summary on a review app's overview, the create dialog. */
+
+.review-rows {
+  --row-columns: minmax(0, 1fr) 7.5rem auto;
+}
+
+.review-cell-pr {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.review-title {
+  overflow: hidden;
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-pull-number {
+  margin-right: 0.25em;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-regular);
+}
+
+.review-meta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.review-host {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-cell-open {
+  justify-self: end;
+}
+
+.review-summary-pr {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.review-summary-pr a {
+  overflow-wrap: anywhere;
+}
+
+.review-summary-hint {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.review-pulls {
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+.review-pulls .option-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  align-items: center;
+}
+
+.review-empty {
+  color: var(--color-text-secondary);
+}
+
+@media (width <= 56rem) {
+  .review-rows .row {
+    grid-template:
+      "pr pr" auto
+      "state open" auto / minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-4);
+  }
+
+  .review-cell-pr {
+    grid-area: pr;
+  }
+
+  .review-cell-state {
+    grid-area: state;
+  }
+
+  .review-cell-open {
+    grid-area: open;
+  }
+}
+
+.review-created {
+  margin-bottom: var(--space-3);
+}

@@ -20,6 +20,8 @@
 #   --task <svc>:<cmd>   after the check, run a one-off command the way
 #                        koroku's tasks do (run --rm --no-deps -T <svc>
 #                        sh -c <cmd>); repeatable; a non-zero exit fails
+#   --pr <number>        rehearse a review app of that pull request: koroku
+#                        then also sets KOROKU_PR_NUMBER
 #   --sleep              after the check, put the app to sleep and wake it
 #                        the way koroku does for an app that sleeps while
 #                        idle (stop, then start --wait), and check again
@@ -35,6 +37,7 @@ host_port="28080"
 memory="512m"
 keep=0
 sleep_wake=0
+pr=""
 tasks=()
 
 die() { echo "rehearse: $*" >&2; exit 2; }
@@ -51,6 +54,9 @@ while [ $# -gt 0 ]; do
     --task)
       case "${2:?}" in *:?*) ;; *) die "--task needs <service>:<command>" ;; esac
       tasks+=("$2"); shift 2 ;;
+    --pr)
+      case "${2:?}" in *[!0-9]*|0*) die "--pr needs a pull request number" ;; esac
+      pr="$2"; shift 2 ;;
     --sleep) sleep_wake=1; shift ;;
     --keep) keep=1; shift ;;
     -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
@@ -109,6 +115,18 @@ if [ -n "$env_src" ]; then
 else
   : > "$env_file"
 fi
+# The variables koroku adds to every release (KOROKU_ is reserved): the
+# commit, the app's URL and host (here the loopback port), and a review
+# app's pull request.
+commit="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo 0000000000000000000000000000000000000000)"
+{
+  echo ""
+  echo "KOROKU_COMMIT_SHA=$commit"
+  echo "KOROKU_COMMIT_SHORT=${commit:0:7}"
+  echo "KOROKU_APP_URL=http://127.0.0.1:$host_port"
+  echo "KOROKU_APP_HOST=127.0.0.1:$host_port"
+  if [ -n "$pr" ]; then echo "KOROKU_PR_NUMBER=$pr"; fi
+} >> "$env_file"
 chmod 600 "$env_file"
 
 base=(docker compose -p "$project" -f "$release/$file" --env-file "$env_file")

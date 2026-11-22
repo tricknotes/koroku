@@ -187,11 +187,28 @@ export function describeActivity(entry: ActivityEntry): ActivityText {
   switch (entry.action) {
     case 'app.created': {
       const env = list(d['env_added']);
+      const review = d['review'] as Record<string, unknown> | undefined;
+      const details = env.length ? [`環境変数: ${env.join(', ')}`] : [];
+      if (review) {
+        details.unshift(
+          `${str(review['parent'])} の PR #${String(review['pr_number'])} のレビューアプリ`,
+        );
+      }
       return {
-        summary: 'アプリを作成',
-        details: env.length ? [`環境変数: ${env.join(', ')}`] : [],
+        summary: review ? 'レビューアプリを作成' : 'アプリを作成',
+        details,
       };
     }
+    case 'review_app.created':
+      return {
+        summary: `PR #${String(d['pr_number'])} のレビューアプリ ${str(d['slug'])} を作成`,
+        details: [],
+      };
+    case 'review_app.deleted':
+      return {
+        summary: `PR #${String(d['pr_number'])} のレビューアプリ ${str(d['slug'])} を削除`,
+        details: [],
+      };
     case 'app.settings_changed': {
       const changes = Array.isArray(d['changes']) ? d['changes'] : [];
       return {

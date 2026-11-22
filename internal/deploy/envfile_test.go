@@ -163,9 +163,15 @@ func TestHTTPHealthChecker(t *testing.T) {
 }
 
 func TestProvidedEnv(t *testing.T) {
-	got := ProvidedEnv("0123456789abcdef0123456789abcdef01234567")
-	if got["KOROKU_COMMIT_SHA"] != "0123456789abcdef0123456789abcdef01234567" || got["KOROKU_COMMIT_SHORT"] != "0123456" {
+	got := ProvidedEnv(Provided{CommitSHA: "0123456789abcdef0123456789abcdef01234567"})
+	if got["KOROKU_COMMIT_SHA"] != "0123456789abcdef0123456789abcdef01234567" || got["KOROKU_COMMIT_SHORT"] != "0123456" || len(got) != 2 {
 		t.Errorf("ProvidedEnv = %v", got)
+	}
+	got = ProvidedEnv(Provided{CommitSHA: "0123456789abcdef0123456789abcdef01234567",
+		AppURL: "https://shop-staging-pr-12.dev.example.com", PRNumber: 12})
+	if got["KOROKU_APP_URL"] != "https://shop-staging-pr-12.dev.example.com" ||
+		got["KOROKU_APP_HOST"] != "shop-staging-pr-12.dev.example.com" || got["KOROKU_PR_NUMBER"] != "12" {
+		t.Errorf("ProvidedEnv of a review app = %v", got)
 	}
 	for k := range got {
 		if !strings.HasPrefix(k, ProvidedEnvPrefix) {

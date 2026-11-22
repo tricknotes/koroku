@@ -17,6 +17,8 @@ interface ConfirmDialogSignature {
     requireText?: string;
     /** Disables both buttons while the confirmed action runs. */
     busy?: boolean;
+    /** Disables the confirm button (nothing chosen yet). */
+    disabled?: boolean;
     onConfirm: () => unknown;
     onCancel: () => unknown;
     /** An optional third choice between cancelling and confirming. */
@@ -36,7 +38,7 @@ export default class ConfirmDialog extends Component<ConfirmDialogSignature> {
   @tracked typed = '';
 
   get canConfirm(): boolean {
-    if (this.args.busy) return false;
+    if (this.args.busy || this.args.disabled) return false;
     const required = this.args.requireText;
     return !required || this.typed === required;
   }

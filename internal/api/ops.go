@@ -86,7 +86,30 @@ func (s *Server) handleAppOperation(op func(AppOperator, context.Context, store.
 
 func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.loadApp(w, r)
-	if !ok || !s.requireRecentAuth(w, r) {
+	if !ok {
+		return
+	}
+	review, err := s.store.GetReviewApp(r.Context(), app.ID)
+	isReview := err == nil
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.internalError(w, r, err)
+		return
+	}
+	// Only review apps may be deleted with manage (ARCHITECTURE 9.9).
+	if !isReview && !isOwner(r) {
+		writeForbiddenRole(w, levelOwner)
+		return
+	}
+	children, err := s.store.ListReviewApps(r.Context(), app.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if len(children) > 0 {
+		writeError(w, http.StatusConflict, "has_review_apps", "delete the review apps of this app first")
+		return
+	}
+	if !s.requireRecentAuth(w, r) {
 		return
 	}
 	removeVolumes := false
@@ -99,8 +122,15 @@ func (s *Server) handleDeleteApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_volumes", "volumes must be true or false")
 		return
 	}
+	if isReview {
+		// A review app's data is a copy of the parent's.
+		removeVolumes = true
+	}
 	if s.writeOpError(w, r, s.ops.Delete(r.Context(), app, removeVolumes)) {
 		return
+	}
+	if isReview {
+		s.recordActivity(r, review.ParentAppID, actReviewAppDeleted, map[string]any{"slug": app.Slug, "pr_number": review.PRNumber})
 	}
 	// The app's roles went with it; members left without any role can no
 	// longer log in.

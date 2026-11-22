@@ -271,8 +271,14 @@ func (e *Engine) renderEnv(ctx context.Context, app store.App, commitSHA string,
 		masker.Add(string(plain))
 	}
 	// The provided variables are not the app's: they are not fingerprinted
-	// (ARCHITECTURE 9.2) and not masked (a commit is not a secret).
-	for k, v := range ProvidedEnv(commitSHA) {
+	// (ARCHITECTURE 9.2) and not masked (a commit or a URL is not a secret).
+	provided := Provided{CommitSHA: commitSHA, AppURL: PrimaryURL(ctx, e.opts.Store, app, e.opts.BaseDomain)}
+	if review, err := e.opts.Store.GetReviewApp(ctx, app.ID); err == nil {
+		provided.PRNumber = review.PRNumber
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return "", nil, err
+	}
+	for k, v := range ProvidedEnv(provided) {
 		vars[k] = v
 	}
 	content, err := RenderEnvFile(vars)

@@ -351,6 +351,50 @@ export interface App {
   idle_sleep_minutes?: number;
   /** When the app went to sleep while idle; null while it is awake. */
   sleeping_since?: string | null;
+  /** Set on a review app of a pull request (ARCHITECTURE 9.9). */
+  review?: ReviewInfo | null;
+}
+
+export type PullRequestState = 'open' | 'closed' | 'merged';
+
+/**
+ * The copy of the parent's data into a review app: '' not asked, then
+ * waiting for the first successful deployment, started (see the database
+ * copies), skipped or failed (why in `data_copy_detail`).
+ */
+export type ReviewDataCopy = '' | 'waiting' | 'started' | 'skipped' | 'failed';
+
+export interface ReviewInfo {
+  parent: string;
+  pr_number: number;
+  pr_title: string;
+  pr_url: string;
+  pr_state: PullRequestState;
+  head_branch: string;
+  data_copy: ReviewDataCopy;
+  data_copy_detail: string;
+}
+
+/** An open pull request of a review parent's repository. */
+export interface PullRequest {
+  number: number;
+  title: string;
+  head_branch: string;
+  head_sha: string;
+  author: string;
+  url: string;
+  updated_at: string;
+  from_fork: boolean;
+  /** Slug of the pull request's review app, or null. */
+  review_app: string | null;
+}
+
+/** The answer to creating a review app. */
+export interface CreatedReviewApp extends App {
+  /** The hostname does not resolve to the host yet (no wildcard record). */
+  dns_warning: boolean;
+  /** The first deployment could not be queued. */
+  deploy_error?: string;
 }
 
 export interface AppPatch {
