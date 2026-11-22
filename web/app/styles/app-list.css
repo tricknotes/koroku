@@ -164,6 +164,11 @@
   color: var(--color-text);
 }
 
+.app-review-notes {
+  display: inline-flex;
+  flex-wrap: wrap;
+}
+
 .app-review-notes::before {
   content: "（";
 }
