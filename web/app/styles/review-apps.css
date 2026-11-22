@@ -41,7 +41,7 @@
 }
 
 .review-rows {
-  --row-columns: minmax(0, 1fr) 7.5rem 8.5rem auto;
+  --row-columns: minmax(0, 1fr) 7.5rem 8.5rem 4.5rem;
 }
 
 .review-cell-state > .cell-label,
@@ -125,6 +125,10 @@
 }
 
 @media (width <= 56rem) {
+  .review-rows .row-list-header {
+    display: none;
+  }
+
   .review-rows .row {
     grid-template:
       "pr pr" auto

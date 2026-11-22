@@ -2763,10 +2763,12 @@ async function capture(browser, shot, theme) {
   return file;
 }
 
-// Review apps of pull requests (ARCHITECTURE 9.9): grouped under their
-// parent in the list, the parent's list and create dialog (also without
-// the GitHub permission), the result, and a review app's overview.
-const REVIEW_APPS = '[data-test-review-apps]';
+// Review apps of pull requests (ARCHITECTURE 9.9): counted on their parent
+// in the list, the parent's review apps tab (allowed with review apps, not
+// allowed for the owner and for a member, allowed and empty), the create
+// dialog (also without the GitHub permission), the owner's confirmation,
+// the overview line, and a review app with its parent in the header.
+const REVIEW_TAB = '/apps/blog-staging/review-apps';
 const REVIEW_PULLS = '[data-test-review-pulls]';
 SHOTS.push(
   { name: 'review-list', path: '/?scenario=review-apps', wait: LIST },
@@ -2777,35 +2779,70 @@ SHOTS.push(
     ...PHONE,
   },
   {
-    name: 'review-parent',
-    path: '/apps/blog-staging?scenario=review-apps',
+    name: 'review-tab',
+    path: `${REVIEW_TAB}?scenario=review-apps`,
     wait: '[data-test-review-app]',
-    script: scrollTo(REVIEW_APPS),
   },
   {
-    name: 'review-parent-phone',
-    path: '/apps/blog-staging?scenario=review-apps',
+    name: 'review-tab-phone',
+    path: `${REVIEW_TAB}?scenario=review-apps`,
     wait: '[data-test-review-app]',
-    script: scrollTo(REVIEW_APPS),
     ...PHONE,
-    fullPage: false,
   },
   {
-    name: 'review-parent-empty',
-    path: '/apps/blog-staging?scenario=healthy',
+    name: 'review-tab-failed',
+    path: '/apps/shop-staging/review-apps?scenario=review-apps',
+    wait: '[data-test-review-app]',
+  },
+  {
+    name: 'review-tab-not-allowed',
+    path: `${REVIEW_TAB}?scenario=healthy`,
     wait: '[data-test-review-empty]',
-    script: scrollTo(REVIEW_APPS),
+  },
+  {
+    name: 'review-tab-member',
+    path: `${REVIEW_TAB}?scenario=review-member`,
+    wait: '[data-test-review-app]',
+  },
+  {
+    name: 'review-tab-member-phone',
+    path: `${REVIEW_TAB}?scenario=member`,
+    wait: '[data-test-review-empty]',
+    ...PHONE,
+  },
+  {
+    name: 'review-tab-empty',
+    path: `${REVIEW_TAB}?scenario=review-allowed`,
+    wait: '[data-test-review-empty]',
+  },
+  {
+    name: 'review-allow-confirm',
+    path: `${REVIEW_TAB}?scenario=healthy`,
+    wait: '[data-test-review-allow]',
+    click: '[data-test-review-allow]',
+    then: '[data-test-review-allow-confirm]',
+  },
+  {
+    name: 'review-overview',
+    path: '/apps/blog-staging?scenario=review-apps',
+    wait: '[data-test-review-line]',
+  },
+  {
+    name: 'review-overview-phone',
+    path: '/apps/shop-staging?scenario=review-apps',
+    wait: '[data-test-review-line]',
+    ...PHONE,
   },
   {
     name: 'review-create',
-    path: '/apps/blog-staging?scenario=review-apps',
+    path: `${REVIEW_TAB}?scenario=review-apps`,
     wait: '[data-test-review-create]',
     click: '[data-test-review-create]',
     then: REVIEW_PULLS,
   },
   {
     name: 'review-create-phone',
-    path: '/apps/blog-staging?scenario=review-apps',
+    path: `${REVIEW_TAB}?scenario=review-apps`,
     wait: '[data-test-review-create]',
     click: '[data-test-review-create]',
     then: REVIEW_PULLS,
@@ -2814,14 +2851,14 @@ SHOTS.push(
   },
   {
     name: 'review-create-permission',
-    path: '/apps/blog-staging?scenario=review-permission',
+    path: `${REVIEW_TAB}?scenario=review-permission`,
     wait: '[data-test-review-create]',
     click: '[data-test-review-create]',
     then: '[data-test-review-permission]',
   },
   {
     name: 'review-created',
-    path: '/apps/blog-staging?scenario=review-apps',
+    path: `${REVIEW_TAB}?scenario=review-apps`,
     wait: '[data-test-review-create]',
     // The pull requests take a moment to load, and the creation too.
     script: `(async () => {
@@ -2851,6 +2888,13 @@ SHOTS.push(
     path: '/apps/blog-staging-pr-42?scenario=review-apps',
     wait: '[data-test-review-summary]',
     ...PHONE,
+  },
+  {
+    name: 'review-app-header-phone',
+    path: '/apps/shop-staging-pr-7/deploy?scenario=review-apps',
+    wait: '[data-test-app-parent]',
+    ...PHONE,
+    fullPage: false,
   },
   {
     name: 'review-app-merged',
