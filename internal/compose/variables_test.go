@@ -44,6 +44,7 @@ func TestVariablesCases(t *testing.T) {
 		{"escaped", "x: $$FOO $${BAR}\n", ""},
 		{"default", "x: ${A:-1} ${B-2}\n", "A optional mandatory=false default=\"1\" message=\"\"\nB optional mandatory=false default=\"2\" message=\"\"\n"},
 		{"alternate", "x: ${A:+on}\n", "A optional mandatory=false default=- message=\"\"\n"},
+		{"per-commit tag with a fallback", "image: app:${A:+sha-}${A:-latest}\n", "A optional mandatory=false default=\"latest\" message=\"\"\n"},
 		{"mandatory", "x: ${A:?need A}\n", "A required mandatory=true default=- message=\"need A\"\n"},
 		{"nested is optional", "x: ${A:-${B}}\n", "A optional mandatory=false default=\"${B}\" message=\"\"\nB optional mandatory=false default=- message=\"\"\n"},
 		{"required anywhere wins", "x: ${A:-1}\ny: ${A}\n", "A required mandatory=false default=\"1\" message=\"\"\n"},
