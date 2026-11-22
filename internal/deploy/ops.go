@@ -324,6 +324,9 @@ type ServiceStatus struct {
 	// CPUPercent is as docker stats reports it (one core is 100%); nil
 	// when unknown, like the memory figures.
 	CPUPercent *float64 `json:"cpu_percent"`
+	// MemoryReservationBytes is what the running release reserves for the
+	// service (ARCHITECTURE 6.2); nil when it reserves nothing.
+	MemoryReservationBytes *int64 `json:"memory_reservation_bytes"`
 
 	container string
 }
@@ -354,6 +357,17 @@ func (e *Engine) Services(ctx context.Context, app store.App) ([]ServiceStatus, 
 			services[i].MemoryBytes, services[i].MemoryLimitBytes = &u.memory, &u.limit
 			if u.hasCPU {
 				services[i].CPUPercent = &u.cpu
+			}
+		}
+	}
+	if app.CurrentDeploymentID != nil {
+		recorded, err := e.opts.Store.DeploymentMemoryReservations(ctx, *app.CurrentDeploymentID)
+		if err != nil {
+			return nil, err
+		}
+		for i := range services {
+			if r, ok := recorded[*app.CurrentDeploymentID][services[i].Name]; ok {
+				services[i].MemoryReservationBytes = &r
 			}
 		}
 	}

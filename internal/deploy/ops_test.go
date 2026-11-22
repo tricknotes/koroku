@@ -354,6 +354,22 @@ func TestParseComposePS(t *testing.T) {
 func TestServicesAndPrune(t *testing.T) {
 	h := newHarness(t, nil)
 	app := h.createApp("blog")
+	// The running release reserves memory for web (ARCHITECTURE 6.2).
+	ctx := context.Background()
+	release, _, err := h.store.EnqueueDeployment(ctx, app.ID, "main", shaA, "", h.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.StartDeployment(ctx, release.ID, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.SetDeploymentMemoryReservations(ctx, release.ID, map[string]int64{"web": 256 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.FinishDeployment(ctx, release.ID, store.StatusSucceeded, "", h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	app = h.reload("blog")
 	h.runner.Handler = func(_ context.Context, cmd runner.Cmd) (string, error) {
 		joined := strings.Join(cmd.Args, " ")
 		switch {
@@ -394,6 +410,9 @@ func TestServicesAndPrune(t *testing.T) {
 	}
 	if job.MemoryBytes != nil || job.MemoryLimitBytes != nil || job.CPUPercent != nil {
 		t.Errorf("a stopped container has no figures: %+v", job)
+	}
+	if web.MemoryReservationBytes == nil || *web.MemoryReservationBytes != 256<<20 || job.MemoryReservationBytes != nil {
+		t.Errorf("reservations come from the running release: web %v, job %v", web.MemoryReservationBytes, job.MemoryReservationBytes)
 	}
 
 	usage, err := h.engine.DockerDiskUsage(context.Background())
