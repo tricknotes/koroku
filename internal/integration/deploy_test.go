@@ -84,13 +84,14 @@ func newEnv(t *testing.T) *env {
 	prober := system.Host{DataDir: dir, Runner: run}
 	fetcher := gitrepo.Fetcher{Runner: run, AllowFileURLs: true}
 	engine := deploy.New(deploy.Options{
-		Store:   st,
-		Runner:  run,
-		Clock:   clock.System{},
-		Box:     box,
-		System:  prober,
-		Fetcher: fetcher,
-		AppsDir: cfg.AppsDir(),
+		Store:      st,
+		Runner:     run,
+		Clock:      clock.System{},
+		Box:        box,
+		System:     prober,
+		Fetcher:    fetcher,
+		AppsDir:    cfg.AppsDir(),
+		BaseDomain: cfg.BaseDomain,
 		// Never fail on this machine's disk usage and never prune images
 		// that belong to someone else's work.
 		DiskLimitPercent: 100,
