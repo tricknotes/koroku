@@ -24,7 +24,11 @@ import {
   type AttentionItem,
 } from 'koroku-console/utils/attention';
 import { firstLine, hostOf, shortSha } from 'koroku-console/utils/format';
-import { groupReviewApps, isChildRow } from 'koroku-console/utils/review';
+import {
+  reviewCount,
+  reviewDeploying,
+  reviewFailed,
+} from 'koroku-console/utils/review';
 import Loadable from 'koroku-console/utils/loadable';
 import {
   APP_STATE_HINTS,
@@ -87,6 +91,19 @@ function pendingOrFailed(app: App): Deployment | null {
   const latest = app.latest_deployment;
   if (!latest || latest.id === app.current_deployment?.id) return null;
   return latest;
+}
+
+/**
+ * Review apps are not rows of their own: their parent's row counts them
+ * (ARCHITECTURE 9.9).
+ */
+function withoutReviewApps(apps: App[]): App[] {
+  return apps.filter((app) => !app.review);
+}
+
+/** The count has notes when some review apps failed or are deploying. */
+function hasReviewNotes(app: App): boolean {
+  return !!(reviewFailed(app.review_apps) || reviewDeploying(app.review_apps));
 }
 
 function when(deployment: Deployment): string | null {
@@ -211,11 +228,8 @@ export default class IndexTemplate extends Component {
               <span>直近のデプロイ</span>
             </:header>
             <:rows as |Row|>
-              {{#each (groupReviewApps apps) key="slug" as |app|}}
-                <Row
-                  class={{if (isChildRow app apps) "app-row-review"}}
-                  data-test-app={{app.slug}}
-                >
+              {{#each (withoutReviewApps apps) key="slug" as |app|}}
+                <Row data-test-app={{app.slug}}>
                   <div class="app-cell-state">
                     <StatusIndicator
                       @kind={{stateKind app}}
@@ -242,10 +256,30 @@ export default class IndexTemplate extends Component {
                       {{/if}}
                       <RoleBadge @role={{app.role}} />
                     </span>
-                    {{#if app.review}}
-                      <span class="app-review-line" data-test-review-of>
-                        PR #{{app.review.pr_number}}
-                        {{app.review.pr_title}}
+                    {{#if (reviewCount app.review_apps)}}
+                      <span class="app-review-count" data-test-review-count>
+                        <LinkTo
+                          @route="app.review-apps"
+                          @model={{app.slug}}
+                          class="app-review-link"
+                          data-test-review-count-link
+                        >レビューアプリ
+                          {{reviewCount app.review_apps}}</LinkTo>
+                        {{#if (hasReviewNotes app)}}
+                          <span class="app-review-notes">
+                            {{#if (reviewFailed app.review_apps)}}
+                              <span
+                                class="app-review-failed"
+                                data-test-review-count-failed
+                              >{{reviewFailed app.review_apps}}</span>
+                            {{/if}}
+                            {{#if (reviewDeploying app.review_apps)}}
+                              <span data-test-review-count-deploying>
+                                {{reviewDeploying app.review_apps}}
+                              </span>
+                            {{/if}}
+                          </span>
+                        {{/if}}
                       </span>
                     {{/if}}
                     {{#if (openUrl app)}}

@@ -95,6 +95,8 @@ const MESSAGES: Record<string, string> = {
     'GitHub が pull request の読み取りを断りました。GitHub App の Repository permissions に「Pull requests: Read-only」を足し、インストール先で新しい権限を承認してください。',
   not_review_parent:
     'このアプリにはレビューアプリを作れません。staging で、GitHub App で取得するアプリだけが親になれます。',
+  review_apps_not_allowed:
+    'このアプリではレビューアプリが許可されていません。オーナーがレビューアプリのタブで許可すると作れます。',
   review_app_exists: 'この pull request のレビューアプリはすでにあります。',
   pull_request_not_found: 'pull request が見つかりません。',
   pull_request_not_open: 'この pull request は閉じられています。',

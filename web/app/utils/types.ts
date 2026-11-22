@@ -375,6 +375,18 @@ export interface App {
   sleeping_since?: string | null;
   /** Set on a review app of a pull request (ARCHITECTURE 9.9). */
   review?: ReviewInfo | null;
+  /** The owner lets review apps be created from this app (ARCHITECTURE 9.9). */
+  review_apps_allowed?: boolean;
+  /** How many review apps the app has; null on a review app. */
+  review_apps?: ReviewSummary | null;
+}
+
+export interface ReviewSummary {
+  count: number;
+  /** Review apps whose latest deployment or copy of the data failed. */
+  failed: number;
+  /** Review apps with a deployment queued or running. */
+  deploying: number;
 }
 
 export type PullRequestState = 'open' | 'closed' | 'merged';
@@ -395,6 +407,8 @@ export interface ReviewInfo {
   head_branch: string;
   data_copy: ReviewDataCopy;
   data_copy_detail: string;
+  /** Status of the newest copy from the parent; '' when none. */
+  data_copy_status?: '' | 'running' | 'succeeded' | 'failed';
 }
 
 /** An open pull request of a review parent's repository. */
@@ -449,6 +463,8 @@ export interface AppPatch {
   auto_deploy_workflow?: string;
   idle_sleep?: boolean;
   idle_sleep_minutes?: number;
+  /** Only the owner changes it (ARCHITECTURE 9.9). */
+  review_apps_allowed?: boolean;
 }
 
 export interface NewApp {

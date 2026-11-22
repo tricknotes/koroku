@@ -265,6 +265,35 @@ route('GET', '/api/apps/:slug', appOf);
 route('PATCH', '/api/apps/:slug', (context) => {
   const target = appOf(context);
   const { body } = context;
+  // Only the owner allows review apps (ARCHITECTURE 9.9); turning them on
+  // needs a recent login, and an app they can be made from.
+  if (
+    body.review_apps_allowed !== undefined &&
+    body.review_apps_allowed !== (target.review_apps_allowed ?? false)
+  ) {
+    if (isMember(context.scenario)) {
+      throw new HttpError(403, 'forbidden_role', {
+        required: 'owner',
+        fields: ['review_apps_allowed'],
+      });
+    }
+    if (body.review_apps_allowed) {
+      if (context.scenario === 'stale-login') {
+        throw new HttpError(403, 'reauth_required');
+      }
+      if (
+        target.review ||
+        target.environment !== 'staging' ||
+        !target.repo_full_name ||
+        target.repo_url
+      ) {
+        throw new HttpError(422, 'validation_failed', {
+          review_apps_allowed:
+            'needs a staging app that is fetched through the GitHub App and is not a review app itself',
+        });
+      }
+    }
+  }
   // Making a production app deploy pushes needs a recent login (10.3).
   if (
     context.scenario === 'stale-login' &&
@@ -351,6 +380,9 @@ route('GET', '/api/apps/:slug/pull-requests', async (context) => {
 });
 route('POST', '/api/apps/:slug/review-apps', async (context) => {
   const parent = reviewParentOf(context);
+  if (!parent.review_apps_allowed) {
+    throw new HttpError(409, 'review_apps_not_allowed');
+  }
   if (context.scenario === 'stale-login') {
     throw new HttpError(403, 'reauth_required');
   }
@@ -1278,9 +1310,16 @@ async function readBody(request) {
 
 const RANK = { view: 1, deploy: 2, manage: 3, owner: 4 };
 
+/** The scenarios that log in as MEMBER. */
+function isMember(scenario) {
+  return scenario === 'member' || scenario === 'review-member';
+}
+
+/** A review app's roles are its parent's (ARCHITECTURE 9.9). */
 function roleOf(scenario, slug) {
-  if (scenario !== 'member') return 'owner';
-  return MEMBER_ROLES[slug] ?? null;
+  if (!isMember(scenario)) return 'owner';
+  const parent = stateOf(scenario).apps.get(slug)?.review?.parent;
+  return MEMBER_ROLES[parent ?? slug] ?? null;
 }
 
 function atLeast(role, needed) {
@@ -1288,7 +1327,7 @@ function atLeast(role, needed) {
 }
 
 function userOf(scenario) {
-  return scenario === 'member' ? MEMBER : OWNER;
+  return isMember(scenario) ? MEMBER : OWNER;
 }
 
 /**
@@ -1329,7 +1368,7 @@ const ACCESS = [
 
 /** Refuses what the member scenario's roles do not allow. */
 function checkAccess(scenario, method, path) {
-  if (scenario !== 'member') return;
+  if (!isMember(scenario)) return;
   for (const [needed, m, pattern] of ACCESS) {
     if (m !== '*' && m !== method) continue;
     const match = pattern.exec(path);
@@ -1346,9 +1385,53 @@ function checkAccess(scenario, method, path) {
   }
 }
 
+/** Status of the newest copy of the parent's data into a review app. */
+function reviewCopyStatus(state, app) {
+  const copies = state.dbCopies?.get(app.slug) ?? [];
+  return copies.find((c) => c.source_app === app.review.parent)?.status ?? '';
+}
+
+/**
+ * The review apps of an app, counted as the server does (ARCHITECTURE 9.9):
+ * failed deployments or copies, and deployments in progress.
+ */
+function reviewSummary(state, parent) {
+  const summary = { count: 0, failed: 0, deploying: 0 };
+  for (const app of state.apps.values()) {
+    if (app.review?.parent !== parent.slug) continue;
+    summary.count++;
+    const status = app.latest_deployment?.status;
+    if (
+      status === 'failed' ||
+      app.review.data_copy === 'failed' ||
+      reviewCopyStatus(state, app) === 'failed'
+    ) {
+      summary.failed++;
+    }
+    if (status === 'queued' || status === 'running') summary.deploying++;
+  }
+  return summary;
+}
+
+/** What the server derives for review apps and their parents. */
+function withReview(state, app) {
+  if (app.review) {
+    return {
+      ...app,
+      review: { ...app.review, data_copy_status: reviewCopyStatus(state, app) },
+      review_apps: null,
+    };
+  }
+  return { ...app, review_apps: reviewSummary(state, app) };
+}
+
 /** Adds `role` to app JSON and leaves out the apps a member has none on. */
 function withRoles(scenario, result) {
-  const decorate = (app) => ({ ...app, role: roleOf(scenario, app.slug) });
+  const state = stateOf(scenario);
+  const decorate = (app) => ({
+    ...withReview(state, app),
+    role: roleOf(scenario, app.slug),
+  });
   if (Array.isArray(result?.apps)) {
     return {
       ...result,
@@ -1356,6 +1439,9 @@ function withRoles(scenario, result) {
         .filter((app) => roleOf(scenario, app.slug))
         .map(decorate),
     };
+  }
+  if (Array.isArray(result?.review_apps)) {
+    return { ...result, review_apps: result.review_apps.map(decorate) };
   }
   if (result && typeof result.slug === 'string' && 'environment' in result) {
     return decorate(result);
@@ -1478,7 +1564,7 @@ function sessionsOf(state, scenario) {
   ].map((s) => ({ ...s, user: me }));
   // The owner also sees the members' sessions (ARCHITECTURE 10.7).
   const others =
-    scenario === 'member' || scenario === 'empty'
+    isMember(scenario) || scenario === 'empty'
       ? []
       : [
           {
@@ -1550,7 +1636,7 @@ route('GET', '/api/login-events', (context) => ({
       user_agent: SAFARI_IPHONE,
     },
   ].filter(
-    (ev) => context.scenario !== 'member' || ev.github_user_id === MEMBER.id,
+    (ev) => !isMember(context.scenario) || ev.github_user_id === MEMBER.id,
   ),
 }));
 
@@ -1646,7 +1732,7 @@ async function handleApi(request, response, url, scenario) {
     const user = {
       ...userOf(scenario),
       avatar_url: '',
-      owner: scenario !== 'member',
+      owner: !isMember(scenario),
     };
     const reauthUntil =
       scenario === 'stale-login'

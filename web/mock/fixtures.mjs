@@ -59,9 +59,13 @@ export const SCENARIOS = {
   'copy-failed':
     'everything fine, but the last copy into blog-staging failed while loading and left its services stopped',
   'review-apps':
-    'blog-staging and shop-staging have review apps of pull requests: one running, one whose pull request was merged (sleeping), one whose first deployment failed',
+    'blog-staging and shop-staging allow review apps and have some: one running, one whose pull request was merged (sleeping), one deploying, one whose first deployment failed',
   'review-permission':
     'review apps as in review-apps, but the GitHub App lacks Pull requests: Read-only, so no pull request can be listed',
+  'review-allowed':
+    'everything fine; the owner allowed review apps of blog-staging, which has none yet',
+  'review-member':
+    'review apps as in review-apps, logged in as the member mia (manage on blog-staging, no role on shop-staging); review apps are not allowed on blog-staging any more',
   'promote-unpaired':
     'everything fine, but blog has no promotion source (shop still promotes from shop-staging)',
   member:
@@ -240,6 +244,8 @@ function app(slug, overrides = {}) {
     idle_sleep_minutes: 30,
     sleeping_since: null,
     review: null,
+    // Only the owner allows review apps of an app (ARCHITECTURE 9.9).
+    review_apps_allowed: false,
     url,
     primary_url: url,
     pending_domains: 0,
@@ -505,6 +511,13 @@ function reviewApps() {
     5 * DAY,
     { ref: 'dark-mode' },
   );
+  const feed = deployment('blog-staging-pr-44', 'Add an RSS feed', 0, {
+    ref: 'rss-feed',
+    status: 'running',
+    queued_at: ago(70 * 1000),
+    started_at: ago(64 * 1000),
+    finished_at: null,
+  });
   const checkout = deployment(
     'shop-staging-pr-7',
     'Split the checkout form into steps',
@@ -559,6 +572,21 @@ function reviewApps() {
       }),
     },
     {
+      app: reviewApp('blog-staging-pr-44', 'octo/blog', 'rss-feed', {
+        host_port: 20013,
+        latest_deployment: feed,
+        created_at: ago(2 * MINUTE),
+        review: review(
+          'blog-staging',
+          44,
+          'Add an RSS feed',
+          'rss-feed',
+          'open',
+          'waiting',
+        ),
+      }),
+    },
+    {
       app: reviewApp('shop-staging-pr-7', 'octo/shop', 'checkout-steps', {
         host_port: 20012,
         protection_exempt_paths: ['/webhooks/', '/api/payments/callback'],
@@ -594,6 +622,13 @@ export const PULL_REQUESTS = {
       author: 'drive-by',
       updatedAgo: 3 * HOUR,
       from_fork: true,
+    },
+    {
+      number: 44,
+      title: 'Add an RSS feed',
+      head_branch: 'rss-feed',
+      author: 'octo',
+      updatedAgo: 4 * MINUTE,
     },
     {
       number: 42,
@@ -861,9 +896,19 @@ export function buildScenario(name) {
       return state;
     }
     case 'review-apps':
-    case 'review-permission': {
+    case 'review-permission':
+    case 'review-member': {
       const state = scenario([...healthyApps(), ...reviewApps()]);
       state.pullRequestsDenied = name === 'review-permission';
+      // The parents that have review apps were allowed them.
+      state.apps.get('blog-staging').review_apps_allowed =
+        name !== 'review-member';
+      state.apps.get('shop-staging').review_apps_allowed = true;
+      return state;
+    }
+    case 'review-allowed': {
+      const state = scenario(healthyApps());
+      state.apps.get('blog-staging').review_apps_allowed = true;
       return state;
     }
     case 'sleeping': {

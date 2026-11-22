@@ -44,6 +44,7 @@ const SETTING_LABELS: Record<string, string> = {
   auto_deploy_workflow: '先に待つワークフロー',
   idle_sleep: 'アクセスがない間は止める',
   idle_sleep_minutes: '止めるまでの時間（分）',
+  review_apps_allowed: 'レビューアプリの許可',
   promote_from: '昇格元のステージングアプリ',
 };
 

@@ -91,6 +91,7 @@ module('Acceptance | app detail', function (hooks) {
     assert.deepEqual(tabs, [
       '概要',
       'デプロイ',
+      'レビューアプリ',
       'ログ',
       'リソース',
       '構成',
