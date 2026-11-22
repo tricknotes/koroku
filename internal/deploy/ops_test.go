@@ -74,7 +74,7 @@ func TestStopAndStart(t *testing.T) {
 	release := h.engine.ReleaseDir("blog", *app.CurrentDeploymentID)
 	want := []string{"compose", "-p", "koroku-blog",
 		"-f", filepath.Join(release, "compose.yaml"), "-f", filepath.Join(release, compose.OverrideFileName),
-		"--env-file", h.engine.EnvFile("blog"), "up", "-d", "--remove-orphans", "--wait", "--wait-timeout", "300"}
+		"--env-file", h.engine.EnvFile("blog"), "up", "-d", "--pull", "missing", "--remove-orphans", "--wait", "--wait-timeout", "300"}
 	if !slices.Equal(up.Args, want) {
 		t.Errorf("up args = %v", up.Args)
 	}

@@ -60,6 +60,10 @@ func TestRollbackStartsTheKeptRelease(t *testing.T) {
 	if up.Dir != h.engine.ReleaseDir("blog", first.ID) {
 		t.Errorf("up ran in %s, want the first release", up.Dir)
 	}
+	// A pull_policy in the Compose file must not make the rollback pull.
+	if !slices.Contains(up.Args, "--pull") || up.Args[slices.Index(up.Args, "--pull")+1] != "missing" {
+		t.Errorf("rollback up args = %v, want --pull missing", up.Args)
+	}
 	env, _ := os.ReadFile(h.engine.EnvFile("blog"))
 	if !strings.Contains(string(env), "GREETING=first") {
 		t.Errorf("env file after the rollback:\n%s", env)

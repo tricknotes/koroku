@@ -296,7 +296,7 @@ services:
 **ビルドと pull の判定**
 
 1. `docker compose -p koroku-<slug> -f compose.yaml -f koroku.override.yaml config --format json` で正規化する。
-2. `build` を持つサービスがあれば `docker compose build`、`image` のみのサービスは `docker compose pull`。
+2. `build` を持つサービスがあれば `docker compose build`、`image` のみのサービスは `docker compose pull`。起動の `up` は、ホストにないイメージだけを取得する（7 章の手順 6）。
 3. private レジストリ（GHCR など）のイメージは、アプリのコンテナレジストリの認証で取得する（6.1）。設定していないアプリは、ホストの root の Docker の設定（`sudo docker login` したもの）を使う。
 
 **ポリシー検査（正規化した JSON に対して実施、違反はデプロイ拒否）**
@@ -414,7 +414,7 @@ private なイメージ（CI がビルドして `ghcr.io/<owner>/<repo>:sha-...`
 3. **生成**: env ファイル（0600）と `koroku.override.yaml` を書き出す。
 4. **検証**: `docker compose config --format json` を実行し、6 章のポリシー検査をかける。
 5. **ビルド／pull**: 6 章の判定に従う。
-6. **起動**: `docker compose up -d --remove-orphans --wait --wait-timeout 300`。`--wait` はサービスが running または healthy になるまで待つ（[docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/)）。
+6. **起動**: `docker compose up -d --pull missing --remove-orphans --wait --wait-timeout 300`。`--wait` はサービスが running または healthy になるまで待つ（[docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/)）。`--pull missing` は、ホストにないイメージだけを取得する。Compose ファイルの `pull_policy`（`always` など）より優先されることを、手元の Compose で確かめている。pull は手順 5 で済んでいるので、起動では取得しない。ロールバック（下の「失敗時」と 7.1）と起動（10 章「起動制御と削除」）も同じ `up` を使う。リリースが持っているイメージで動かすので、レジストリに届かなくても、レジストリからタグが消えていても戻せる。ホストから消えたイメージだけは、アプリのレジストリの認証（6.1）で取得し直す。
 7. **経路**: Caddy 設定を再生成し、内容が変わっていれば投入する（8 章）。
 8. **確認**: `http://127.0.0.1:<port><ヘルスチェックパス>` が 5xx 以外を返すまで最大 60 秒リトライする。
 9. **完了**: `succeeded` にして `current_deployment_id` を更新。リリースディレクトリは直近 3 件を残し、`docker image prune -f` を実行する。
