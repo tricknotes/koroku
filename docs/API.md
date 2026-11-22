@@ -309,6 +309,8 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   "idle_sleep_minutes": 30,
   "sleeping_since": null,
   "review": null,
+  "review_apps_allowed": false,
+  "review_apps": { "count": 0, "failed": 0, "deploying": 0 },
   "url": "https://blog.dev.example.com",
   "primary_url": "https://www.example.org",
   "pending_domains": 0,
@@ -937,18 +939,26 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
   "pr_state": "open",
   "head_branch": "search",
   "data_copy": "started",
-  "data_copy_detail": ""
+  "data_copy_detail": "",
+  "data_copy_status": "succeeded"
 }
 ```
 
 - `pr_state` は `open` / `closed` / `merged`（koroku が 10 分ごとに読み直す）。
 - `data_copy` は親のデータのコピー: `""`（作成時にコピーしないと選んだ）/ `waiting`（最初のデプロイの成功を待っている）/ `started`（始めた。状態は `GET /api/apps/{slug}/db-copies`）/ `skipped`（`data_copy_detail` が `no_dump_hook` か `no_load_hook`）/ `failed`（`data_copy_detail` が `source_not_running`、`target_not_running`、`target_not_staging`、`parent_missing`、`error`）。
+- `data_copy_status` は親からの直近の DB のコピー（やり直しを含む）の状態: `running` / `succeeded` / `failed`、なければ `""`。
+
+アプリの形の `review_apps_allowed` と `review_apps`（2026-11-23）:
+
+- `review_apps_allowed` は、この親でレビューアプリを作れるか（既定 `false`）。`PATCH /api/apps/{slug}` で変えられるのはオーナーだけ（管理のメンバーが今と違う値を送ると `403 forbidden_role`、`details.fields` に `review_apps_allowed`）。`true` にするのは直近 10 分以内のログインが要り（`403 reauth_required`）、親になれないアプリ（下の `not_review_parent` の条件）では `422 validation_failed`（`details.review_apps_allowed`）。`false` にしても、作ってあるレビューアプリはそのまま使える。この項目ができる前からレビューアプリを持っていた親は `true` で始まる。
+- `review_apps` は、レビューアプリでないアプリなら `{"count", "failed", "deploying"}`（レビューアプリの数、そのうち直近のデプロイの失敗かデータのコピーの失敗があるもの、デプロイ中のもの）、レビューアプリなら `null`。コンテナの不調は数えない。
+- `GET /api/apps` はレビューアプリも返す（管理 UI の一覧は行にせず、親の行に数を出す）。
 
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/pull-requests` | 親のリポジトリの開いている pull request（新しく更新された順、100 件まで）。`{"pull_requests": [{"number", "title", "head_branch", "head_sha", "author", "url", "updated_at", "from_fork", "review_app"}]}`。`review_app` はその pull request のレビューアプリの slug か `null`。ロールは親の管理 |
 | `GET /api/apps/{slug}/review-apps` | 親のレビューアプリ。`{"review_apps": [アプリ, ...]}`（番号の大きい順）。ロールは親の閲覧 |
-| `POST /api/apps/{slug}/review-apps` | ボディ `{"pr_number": 42, "copy_data": true}`（`copy_data` は省略時 `true`）。201 でアプリに `dns_warning`（ホスト名がこのホストに解決されない）と、最初のデプロイを積めなかったときの `deploy_error` を足したもの。ロールは親の管理で、直近 10 分以内のログインが要る |
+| `POST /api/apps/{slug}/review-apps` | ボディ `{"pr_number": 42, "copy_data": true}`（`copy_data` は省略時 `true`）。201 でアプリに `dns_warning`（ホスト名がこのホストに解決されない）と、最初のデプロイを積めなかったときの `deploy_error` を足したもの。ロールは親の管理で、直近 10 分以内のログインと、親の `review_apps_allowed` が要る |
 
 断り方:
 
@@ -956,6 +966,7 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
 | --- | --- | --- |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る（作成） |
 | 404 | `pull_request_not_found` | pull request がない |
+| 409 | `review_apps_not_allowed` | 親でレビューアプリが許可されていない（`review_apps_allowed` が `false`。オーナーが許可する） |
 | 409 | `review_app_exists` | その pull request のレビューアプリがある |
 | 409 | `slug_taken`、`no_free_port` | slug（`-2` から `-9` まで試す）かホストのポートが空いていない |
 | 422 | `not_review_parent` | 親になれない（`details.reason` が `not_staging`、`no_github_app`、`review_app`） |

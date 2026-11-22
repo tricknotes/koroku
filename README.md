@@ -110,7 +110,7 @@ CI がビルドして private なレジストリに置いたイメージ（`ghcr
 
 ### pull request ごとのレビューアプリ
 
-staging のアプリの概要タブの「レビューアプリを作成」で、そのリポジトリの開いている pull request を 1 つ選ぶと、その pull request のブランチを動かす別のアプリ（`<staging の slug>-pr-<番号>`）ができます。設定と環境変数は staging の写しで、作るときに選べば、最初のデプロイのあとで staging の DB をコピーし（コピー後のコマンドも実行し）ます。pull request に push すると自動でデプロイし直し、GitHub の pull request の画面にも URL が出ます。数の上限や期限はなく、pull request が閉じても自動では消えないので、不要になったら設定タブから削除します（volume も消えます）。アプリには `KOROKU_APP_URL`、`KOROKU_APP_HOST`、`KOROKU_PR_NUMBER` が渡ります。GitHub App に Pull requests の Read-only が要り、DNS はワイルドカードのレコードがあればそのまま開けます（[SETUP 4.7](docs/SETUP.md)）。
+staging のアプリの「レビューアプリ」タブで、オーナーが「レビューアプリを許可する」を有効にしておくと（pull request のコードが staging の環境変数とデータを受け取るようになるので、既定は無効です）、管理のロールを持つ人が「レビューアプリを作成」で、そのリポジトリの開いている pull request を 1 つ選ぶと、その pull request のブランチを動かす別のアプリ（`<staging の slug>-pr-<番号>`）ができます。設定と環境変数は staging の写しで、作るときに選べば、最初のデプロイのあとで staging の DB をコピーし（コピー後のコマンドも実行し）ます。pull request に push すると自動でデプロイし直し、GitHub の pull request の画面にも URL が出ます。数の上限や期限はなく、pull request が閉じても自動では消えないので、不要になったら設定タブから削除します（volume も消えます）。許可を無効に戻しても、作ってあるレビューアプリはそのまま使えます。アプリ一覧にはレビューアプリの行は出ず、親の行に数（失敗しているものがあればその数も）が出ます。アプリには `KOROKU_APP_URL`、`KOROKU_APP_HOST`、`KOROKU_PR_NUMBER` が渡ります。GitHub App に Pull requests の Read-only が要り、DNS はワイルドカードのレコードがあればそのまま開けます（[SETUP 4.7](docs/SETUP.md)）。
 
 ### staging と本番
 
