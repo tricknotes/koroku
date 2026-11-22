@@ -155,6 +155,38 @@ func TestRefusedPullExplainsTheRegistryCredential(t *testing.T) {
 	}
 }
 
+func TestMissingTagExplainsTheCIImage(t *testing.T) {
+	tests := map[string]string{
+		"Docker Hub": " web Error manifest for octo/web:sha-0123abc not found: manifest unknown: manifest unknown\n",
+		"GHCR":       " web Error manifest unknown\nError response from daemon: manifest unknown\n",
+	}
+	for name, output := range tests {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, nil)
+			h.createApp("blog")
+			h.onCompose = func(_ context.Context, sub string, cmd runner.Cmd) error {
+				if sub == "pull" {
+					_, _ = io.WriteString(cmd.Stderr, output)
+					return &runner.ExitError{Cmd: "docker", Code: 1}
+				}
+				return nil
+			}
+			h.start()
+			d := h.deploy("blog", shaA)
+			if d.Status != store.StatusFailed || !strings.Contains(d.Error, "no image with that tag yet") {
+				t.Fatalf("deployment = %+v", d)
+			}
+			log := h.log("blog", d.ID)
+			if !strings.Contains(log, "The registry has no image with that tag") || strings.Contains(log, "The registry refused access") {
+				t.Errorf("log hint:\n%s", log)
+			}
+			if slices.Contains(h.dockerCalls(), "up") {
+				t.Errorf("calls = %v", h.dockerCalls())
+			}
+		})
+	}
+}
+
 func TestBuildFailureWithoutRegistryWordsHasNoHint(t *testing.T) {
 	h := newHarness(t, nil)
 	h.createApp("blog")
@@ -242,7 +274,7 @@ func TestLooksLikeRegistryAuthFailure(t *testing.T) {
 
 func TestRegistryAuthWatcherAcrossWrites(t *testing.T) {
 	var sink strings.Builder
-	w := &registryAuthWatcher{dst: &sink}
+	w := &lineWatcher{dst: &sink, match: looksLikeRegistryAuthFailure}
 	_, _ = io.WriteString(w, "Pulling\nError: unauth")
 	if w.seen {
 		t.Fatal("seen too early")

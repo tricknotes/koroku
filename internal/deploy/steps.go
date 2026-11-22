@@ -380,14 +380,23 @@ func (e *Engine) composeTo(ctx context.Context, inv compose.Invocation, dir stri
 // composePulling runs a compose command that may pull images (build, pull,
 // up). When it fails and the output says the registry refused access, the
 // log gets a hint about the app's registry credential and the error is a
-// *RegistryAuthError.
+// *RegistryAuthError. When the output says the registry has no image for a
+// tag, the log says so and the error wraps ErrImageNotFound.
 func (e *Engine) composePulling(ctx context.Context, inv compose.Invocation, dir string, log *deployLog, sub ...string) error {
-	watcher := &registryAuthWatcher{dst: log.Writer()}
-	err := e.composeTo(ctx, inv, dir, watcher, sub...)
-	if err != nil && ctx.Err() == nil && watcher.Seen() {
+	auth := &lineWatcher{dst: log.Writer(), match: looksLikeRegistryAuthFailure}
+	missing := &lineWatcher{dst: auth, match: looksLikeMissingImage}
+	err := e.composeTo(ctx, inv, dir, missing, sub...)
+	if err == nil || ctx.Err() != nil {
+		return err
+	}
+	switch {
+	case auth.Seen():
 		configured := inv.DockerConfig != ""
 		logRegistryHint(log, configured)
 		return &RegistryAuthError{Configured: configured, Err: err}
+	case missing.Seen():
+		logMissingImageHint(log)
+		return fmt.Errorf("%w: %w", ErrImageNotFound, err)
 	}
 	return err
 }
