@@ -46,6 +46,7 @@ import type {
   Snapshot,
   SystemInfo,
   Task,
+  TaskList,
   TaskRun,
   TokenLifetime,
 } from 'koroku-console/utils/types';
@@ -73,6 +74,14 @@ export function buildUrl(path: string, query?: Query): string {
 }
 
 const seg = encodeURIComponent;
+
+/** The task list of a response; older servers send no time zone. */
+function taskList(response: Partial<TaskList> | null): TaskList {
+  return {
+    tasks: response?.tasks ?? [],
+    time_zone: response?.time_zone ?? 'Asia/Tokyo',
+  };
+}
 
 /** `/api/repos/{owner}/{repo}` from `owner/repo`. */
 export function repoPath(fullName: string): string {
@@ -515,30 +524,31 @@ export default class ApiService extends Service {
 
   // One-off commands and registered tasks (ARCHITECTURE 9.6)
 
-  async listTasks(slug: string): Promise<Task[]> {
-    const { tasks } = await this.request<{ tasks: Task[] | null }>(
+  async listTasks(slug: string): Promise<TaskList> {
+    const response = await this.request<Partial<TaskList> | null>(
       'GET',
       `/api/apps/${seg(slug)}/tasks`,
     );
-    return tasks ?? [];
+    return taskList(response);
   }
 
   /** Replaces every registered task. */
-  async putTasks(slug: string, tasks: Task[]): Promise<Task[]> {
-    const response = await this.request<{ tasks: Task[] | null }>(
+  async putTasks(slug: string, tasks: Task[]): Promise<TaskList> {
+    const response = await this.request<Partial<TaskList> | null>(
       'PUT',
       `/api/apps/${seg(slug)}/tasks`,
       {
         body: {
-          tasks: tasks.map(({ name, service, command }) => ({
+          tasks: tasks.map(({ name, service, command, schedule }) => ({
             name,
             service,
             command,
+            schedule: schedule ?? '',
           })),
         },
       },
     );
-    return response.tasks ?? [];
+    return taskList(response);
   }
 
   async listTaskRuns(slug: string, limit = 50): Promise<TaskRun[]> {

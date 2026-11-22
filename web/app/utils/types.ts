@@ -238,6 +238,24 @@ export interface Task {
   name: string;
   service: string;
   command: string;
+  /** A five-field cron expression; '' (or absent) runs only by hand. */
+  schedule?: string;
+  /** Read-only: the next scheduled time. */
+  next_run_at?: string | null;
+  /** Read-only: the latest scheduled time that was not run, and why. */
+  last_skipped_at?: string | null;
+  last_skip_reason?: TaskSkipReason | '';
+  last_skip_detail?: string;
+}
+
+/** Why a scheduled time was not run (ARCHITECTURE 9.6). */
+export type TaskSkipReason =
+  'stopped' | 'not_deployed' | 'overlap' | 'busy' | 'error';
+
+/** The registered tasks, with the time zone their schedules are read in. */
+export interface TaskList {
+  tasks: Task[];
+  time_zone: string;
 }
 
 /** Runs are never queued: they start at once or are refused. */
@@ -259,8 +277,10 @@ export interface TaskRun {
   error: string;
   started_at: string;
   finished_at: string | null;
-  /** Who started it. */
+  /** Who started it; nobody for a scheduled run. */
   actor?: Actor | null;
+  /** What started it. */
+  trigger?: 'manual' | 'scheduled';
 }
 
 export type Environment = 'production' | 'staging';
