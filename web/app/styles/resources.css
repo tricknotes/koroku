@@ -19,6 +19,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+.resource-reservation {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: var(--text-xs);
+}
+
 .resource-memory.is-high .overview-memory-value {
   color: var(--color-pending);
   font-weight: var(--weight-medium);

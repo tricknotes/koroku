@@ -5,6 +5,7 @@ import SettingsForm, {
   MAX_EXEMPT_PATHS,
   exemptPathProblem,
   isValidMemoryLimit,
+  isValidReservation,
 } from 'koroku-console/utils/settings-form';
 import { makeApp } from 'koroku-console/tests/helpers/fakes';
 
@@ -147,5 +148,40 @@ module('Unit | Utility | settings-form', function () {
     assert.false(form.accessProtection);
     assert.deepEqual(form.exemptPaths, []);
     assert.deepEqual(form.patch(app), {});
+  });
+
+  test('memory reservations are edited like the limits, 0 meaning none', function (assert) {
+    const app = makeApp({
+      environment: 'production',
+      service_memory_reservations: { worker: '0' },
+    });
+    const form = new SettingsForm(app);
+    assert.deepEqual(form.patch(app), {}, 'untouched');
+
+    form.memoryReservation = ' 256m ';
+    form.reservations = [
+      ...form.reservations,
+      new LimitRow('db', '1g'),
+      new LimitRow(),
+    ];
+    assert.deepEqual(form.validate(), {});
+    assert.deepEqual(form.patch(app), {
+      memory_reservation: '256m',
+      service_memory_reservations: { worker: '0', db: '1g' },
+    });
+
+    form.memoryReservation = 'lots';
+    form.reservations = [new LimitRow('db', '')];
+    const errors = form.validate();
+    assert.ok(errors['memory_reservation'], 'not a size');
+    assert.ok(
+      errors['service_memory_reservations'],
+      'a named row needs a value',
+    );
+
+    assert.true(isValidReservation(''));
+    assert.true(isValidReservation('0'));
+    assert.true(isValidReservation('512m'));
+    assert.false(isValidReservation('-1m'));
   });
 });

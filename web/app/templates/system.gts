@@ -36,6 +36,7 @@ import {
   formatPercent,
 } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import { reservationView } from 'koroku-console/utils/memory-reservation';
 import {
   BACKUP_STATUS_LABELS,
   BACKUP_TRIGGER_LABELS,
@@ -622,6 +623,117 @@ export default class SystemTemplate extends Component {
         </:default>
       </AsyncView>
     </section>
+
+    {{#if this.system.value}}
+      {{#let (reservationView this.system.value) as |reservation|}}
+        {{#if reservation}}
+          <section
+            class="pane"
+            aria-labelledby="reservation-title"
+            data-test-reservation
+          >
+            <div class="pane-header">
+              <h2
+                class="pane-title"
+                id="reservation-title"
+              >本番アプリのメモリの予約</h2>
+            </div>
+            {{#if reservation.warning}}
+              <div class="pane-notices">
+                <Banner
+                  @tone="warning"
+                  @title="予約がホストのメモリに対して多すぎます"
+                  data-test-reservation-warning
+                >
+                  本番アプリの予約の合計
+                  {{reservation.total}}
+                  に余白
+                  {{reservation.margin}}
+                  を足すと、ホストのメモリ
+                  {{reservation.host}}
+                  を超えます。予約どうしで回収を押し付け合い、本番を守る効き目が薄れます。アプリの設定タブで予約を減らしてください。
+                </Banner>
+              </div>
+            {{/if}}
+            <ul class="box resource-rows" data-test-reservation-total>
+              <li
+                class="resource"
+                data-tone={{if reservation.warning "warn" "ok"}}
+              >
+                <span class="resource-name">予約の合計</span>
+                {{#if reservation.host}}
+                  <span class="resource-value">
+                    {{formatPercent reservation.percent}}
+                  </span>
+                  <Meter
+                    class="resource-meter"
+                    @label="本番アプリのメモリの予約（ホストのメモリに対する割合）"
+                    @percent={{reservation.percent}}
+                    @mark={{reservation.mark}}
+                    @tone={{if reservation.warning "warn" "ok"}}
+                  />
+                  <span class="resource-detail">
+                    {{reservation.total}}
+                    /
+                    {{reservation.host}}{{#if reservation.room}}、あと
+                      {{reservation.room}}
+                      まで{{/if}}
+                  </span>
+                  <span class="resource-flag">
+                    {{#if reservation.warning}}
+                      <StatusIndicator
+                        @kind="pending"
+                        @label="余白不足"
+                        data-test-reservation-flag
+                      />
+                    {{/if}}
+                  </span>
+                {{else}}
+                  <span class="resource-missing">
+                    {{reservation.total}}（ホストのメモリを取得できません）
+                  </span>
+                {{/if}}
+              </li>
+            </ul>
+            {{#if reservation.apps.length}}
+              <ul class="box reservation-apps" data-test-reservation-apps>
+                {{#each reservation.apps key="slug" as |app|}}
+                  <li
+                    class="reservation-app"
+                    data-test-reservation-app={{app.slug}}
+                  >
+                    <span class="usage-app">
+                      <LinkTo
+                        @route="app.settings"
+                        @model={{app.slug}}
+                        class="row-link usage-name"
+                      >{{app.slug}}</LinkTo>
+                      <span class="usage-breakdown">{{app.breakdown}}</span>
+                      {{#if app.switched}}
+                        <span
+                          class="usage-breakdown"
+                          data-test-reservation-switched
+                        >ステージングに切り替え済み。次のデプロイで外れます。</span>
+                      {{/if}}
+                    </span>
+                    <span class="usage-value">{{app.total}}</span>
+                  </li>
+                {{/each}}
+              </ul>
+            {{/if}}
+            <p class="system-note" data-test-reservation-note>
+              {{#if reservation.apps.length}}
+                停止していない本番アプリが、稼働中のリリースで予約している量です。ホストのメモリが足りなくなったとき、カーネルは予約した量までを後回しにして、ステージングのアプリから先に回収します。合計にホストやビルド、ステージングのための余白
+                {{reservation.margin}}
+                を足して、ホストのメモリに収まるようにします。
+              {{else}}
+                予約している本番アプリはありません。本番のアプリをデプロイすると、各サービスのメモリ上限の半分（設定タブで変えられます）を予約します。
+              {{/if}}
+            </p>
+          </section>
+        {{/if}}
+      {{/let}}
+    {{/if}}
 
     <section class="pane" aria-labelledby="docker-title">
       <div class="pane-header">
