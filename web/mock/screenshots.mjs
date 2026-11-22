@@ -2053,6 +2053,81 @@ SHOTS.push(
   },
 );
 
+// Production memory protection (ARCHITECTURE 6.2): the reservations on the
+// system screen (fine, and above what the host can keep), per service on
+// the resources tab, and the settings of a production and a staging app.
+const RESERVATION = '[data-test-reservation]';
+const RESERVATION_SETTINGS = '[data-test-reservation-group]';
+const BAD_RESERVATION = `(() => {
+  const input = document.querySelector('[data-test-field="memory_reservation"]');
+  input.value = 'たくさん';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  document.querySelector('[data-test-settings-save]').click();
+  setTimeout(() => document.querySelector('${RESERVATION_SETTINGS}').scrollIntoView(), 300);
+})()`;
+SHOTS.push(
+  {
+    name: 'reservation-system',
+    path: '/system?scenario=healthy',
+    wait: RESERVATION,
+    script: scrollTo(RESERVATION),
+  },
+  {
+    name: 'reservation-system-tight',
+    path: '/system?scenario=reservations-tight',
+    wait: '[data-test-reservation-warning]',
+    script: scrollTo(RESERVATION),
+  },
+  {
+    name: 'reservation-system-tight-phone',
+    path: '/system?scenario=reservations-tight',
+    wait: '[data-test-reservation-warning]',
+    script: scrollTo(RESERVATION),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'reservation-resources',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: '[data-test-resource-reservation]',
+  },
+  {
+    name: 'reservation-resources-phone',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: '[data-test-resource-reservation]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'reservation-settings',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: RESERVATION_SETTINGS,
+    script: scrollTo(RESERVATION_SETTINGS),
+  },
+  {
+    name: 'reservation-settings-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: RESERVATION_SETTINGS,
+    script: scrollTo(RESERVATION_SETTINGS),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'reservation-settings-staging',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: '[data-test-reservation-staging-note]',
+    script: scrollTo(RESERVATION_SETTINGS),
+  },
+  {
+    name: 'reservation-settings-error',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: RESERVATION_SETTINGS,
+    script: BAD_RESERVATION,
+    then: '[data-test-field-group="memory_reservation"] [data-test-field-error], [data-test-field-group="memory_reservation"] .field-error',
+    settle: 600,
+  },
+);
+
 function tabs(count) {
   return Array.from({ length: count }, () => 'Tab');
 }

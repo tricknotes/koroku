@@ -72,6 +72,11 @@ export function isValidMemoryLimit(value: string): boolean {
   return value === '' || MEMORY_PATTERN.test(value);
 }
 
+/** Empty (the default), 0 (none) or a size like a memory limit. */
+export function isValidReservation(value: string): boolean {
+  return value === '0' || isValidMemoryLimit(value);
+}
+
 function sameRecord(
   a: Record<string, string>,
   b: Record<string, string>,
@@ -97,6 +102,9 @@ export default class SettingsForm {
   @tracked relaxPolicy: boolean;
   @tracked memoryLimit: string;
   @tracked limits: LimitRow[];
+  /** Memory reserved by a production app (ARCHITECTURE 6.2). */
+  @tracked memoryReservation: string;
+  @tracked reservations: LimitRow[];
   @tracked envSource: EnvSource;
   @tracked envExamplePath: string;
   @tracked accessProtection: boolean;
@@ -124,6 +132,10 @@ export default class SettingsForm {
     this.limits = Object.entries(app.service_memory_limits ?? {}).map(
       ([service, limit]) => new LimitRow(service, limit),
     );
+    this.memoryReservation = app.memory_reservation ?? '';
+    this.reservations = Object.entries(
+      app.service_memory_reservations ?? {},
+    ).map(([service, value]) => new LimitRow(service, value));
     this.envSource = app.env_source ?? 'compose';
     this.envExamplePath = app.env_example_path ?? '';
     this.accessProtection = app.access_protection ?? false;
@@ -162,6 +174,15 @@ export default class SettingsForm {
     return limits;
   }
 
+  get serviceReservations(): Record<string, string> {
+    const values: Record<string, string> = {};
+    for (const row of this.reservations) {
+      const service = row.service.trim();
+      if (service) values[service] = row.limit.trim();
+    }
+    return values;
+  }
+
   /** Field name (as in the API) → problem found before sending. */
   validate(): Record<string, string> {
     const errors: Record<string, string> = {};
@@ -178,6 +199,17 @@ export default class SettingsForm {
       const limit = row.limit.trim();
       if (row.service.trim() && (limit === '' || !isValidMemoryLimit(limit))) {
         errors['service_memory_limits'] = memoryHint;
+      }
+    }
+    const reservationHint =
+      '0（予約しない）か、数字と単位 b / k / m / g で入力してください（例 256m）。';
+    if (!isValidReservation(this.memoryReservation.trim())) {
+      errors['memory_reservation'] = reservationHint;
+    }
+    for (const row of this.reservations) {
+      const value = row.limit.trim();
+      if (row.service.trim() && (value === '' || !isValidReservation(value))) {
+        errors['service_memory_reservations'] = reservationHint;
       }
     }
     const exempt = this.exemptList;
@@ -222,6 +254,14 @@ export default class SettingsForm {
     const limits = this.serviceLimits;
     if (!sameRecord(limits, app.service_memory_limits ?? {})) {
       patch.service_memory_limits = limits;
+    }
+    const memoryReservation = this.memoryReservation.trim();
+    if (memoryReservation !== (app.memory_reservation ?? '')) {
+      patch.memory_reservation = memoryReservation;
+    }
+    const reservations = this.serviceReservations;
+    if (!sameRecord(reservations, app.service_memory_reservations ?? {})) {
+      patch.service_memory_reservations = reservations;
     }
     if (this.envSource !== (app.env_source ?? 'compose')) {
       patch.env_source = this.envSource;
