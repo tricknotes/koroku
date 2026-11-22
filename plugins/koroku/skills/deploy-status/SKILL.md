@@ -44,6 +44,8 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 | `koroku-status.sh log <id> [--lines N]` | デプロイログ（既定は全文） |
 | `koroku-status.sh runtime <slug> [--service web] [--lines N]` | 実行ログの最後の N 行（既定 100） |
 | `koroku-status.sh env <slug> [--ref <branch>\|--sha <sha>]` | 必要な環境変数と設定済みかどうか（値は出ない） |
+| `koroku-status.sh containers <slug>` | コンテナの状態、メモリ上限、`oom_score_adj` と、稼働中のリリースとの違いの印 |
+| `koroku-status.sh compose <slug> [--deployment <id>]` | koroku の override と、重ねた結果の Compose（`${VAR}` は補間しない。環境変数の値は伏せてある） |
 
 エラーの意味: `the token was refused` はトークンの期限切れ・失効・打ち間違い（作り直してもらう）。`not available with a read-only token` はトークンで読めない API。`rate limited` は 1 分あたりの回数の上限（1 分待つ）。
 
@@ -62,6 +64,7 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 
 - `rollback` の行があれば、koroku は直前の成功リリースに戻している（`Rolled back: deployment #N is running again.`）。本番が止まっているとは限らないので、そう伝える。
 - 実行ログ（`runtime`）は、起動はしたが動かない場合（エラーを出して再起動を繰り返す、DB に繋がらない）の手がかりになる。
+- デプロイは成功したのに動かないとき（落ちる、遅い、メモリが足りない）は、`containers` の印を見る。`oom_killed`（メモリ上限に当たって止められた）と `restarted` は、アプリのメモリの使い方か、koroku の設定タブのメモリ上限の問題。`outdated` はコンテナが稼働中のリリースと違う設定のまま残っている状態で、管理画面から再起動か再デプロイすると揃う。`memory_limit` などの違いも同じ。リポジトリの Compose に書いた値が効いているかは `compose` の重ねた結果で確かめる（`mem_limit`、`oom_score_adj`、予約は koroku が上書きする）。`status` は印のあるコンテナを自動で出す。
 
 koroku 側の前提（ポートの扱い、環境変数の注入、volume、ワンショットのサービス、ポリシー検査）は、同じプラグインの prepare-app の [requirements.md](../prepare-app/references/requirements.md) に書いてある。直す前に該当する項目を読む。
 
