@@ -433,10 +433,17 @@ func (e *Engine) Run(ctx context.Context) error {
 	now := e.opts.Clock.Now()
 	e.failInterruptedCopies(ctx, now)
 	if err := e.failInterruptedTaskRuns(ctx, now); err != nil {
+		if ctx.Err() != nil {
+			// Stopped while starting: not a failure of the worker.
+			return nil
+		}
 		return err
 	}
 	interrupted, err := e.opts.Store.FailInterruptedDeployments(ctx, now)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return fmt.Errorf("recover interrupted deployments: %w", err)
 	}
 	for _, id := range interrupted {
