@@ -31,6 +31,7 @@ import Loadable from 'koroku-console/utils/loadable';
 import { can } from 'koroku-console/utils/roles';
 import SettingsForm, {
   ExemptRow,
+  IDLE_MINUTES_CHOICES,
   LimitRow,
   MAX_EXEMPT_PATHS,
   exemptPathProblem,
@@ -77,7 +78,14 @@ const KNOWN_FIELDS = new Set([
   'auto_deploy',
   'auto_deploy_branch',
   'auto_deploy_workflow',
+  'idle_sleep',
+  'idle_sleep_minutes',
 ]);
+
+/** "30 分", "3 時間": an idle time as the settings show it. */
+function minutesLabel(minutes: number): string {
+  return minutes % 60 === 0 ? `${minutes / 60} 時間` : `${minutes} 分`;
+}
 
 type ControlAction = 'start' | 'stop' | 'restart';
 
@@ -146,6 +154,8 @@ export default class AppSettingsTemplate extends Component<Signature> {
   @tracked pendingProtection: AppPatch | null = null;
   /** A save that makes a production app deploy pushes, held for confirmation. */
   @tracked pendingAutoDeploy: AppPatch | null = null;
+  /** A save that lets a production app sleep while idle, held for confirmation. */
+  @tracked pendingIdleSleep: AppPatch | null = null;
 
   @tracked controlling: ControlAction | null = null;
   @tracked controlNotice = '';
@@ -217,7 +227,11 @@ export default class AppSettingsTemplate extends Component<Signature> {
     await this.save();
     // A production protection or auto-deploy change asks once more; the
     // move then waits for that confirmation (see confirmProtection).
-    if (!this.pendingProtection && !this.pendingAutoDeploy)
+    if (
+      !this.pendingProtection &&
+      !this.pendingAutoDeploy &&
+      !this.pendingIdleSleep
+    )
       this.continueLeave();
   };
 
@@ -431,8 +445,21 @@ export default class AppSettingsTemplate extends Component<Signature> {
       this.pendingAutoDeploy = patch;
       return;
     }
+    if (this.startsProductionIdleSleep(patch)) {
+      this.pendingIdleSleep = patch;
+      return;
+    }
     await this.commit(patch);
   };
+
+  /**
+   * Whether a save lets a production app sleep while idle: its first
+   * visitor after a sleep waits for it to start (ARCHITECTURE 8.4).
+   */
+  startsProductionIdleSleep(patch: AppPatch): boolean {
+    if (!this.isProductionForm || !this.form.idleSleep) return false;
+    return patch.idle_sleep === true || patch.environment === 'production';
+  }
 
   /**
    * Whether a save makes a production app deploy pushes, or pushes of
@@ -459,6 +486,11 @@ export default class AppSettingsTemplate extends Component<Signature> {
       this.pendingAutoDeploy = patch;
       return;
     }
+    if (this.startsProductionIdleSleep(patch)) {
+      this.pendingProtection = null;
+      this.pendingIdleSleep = patch;
+      return;
+    }
     await this.commit(patch);
     this.pendingProtection = null;
     this.continueLeave();
@@ -472,10 +504,55 @@ export default class AppSettingsTemplate extends Component<Signature> {
   confirmAutoDeploy = async () => {
     const patch = this.pendingAutoDeploy;
     if (!patch) return;
+    if (this.startsProductionIdleSleep(patch)) {
+      this.pendingAutoDeploy = null;
+      this.pendingIdleSleep = patch;
+      return;
+    }
     await this.commit(patch);
     this.pendingAutoDeploy = null;
     this.continueLeave();
   };
+
+  confirmIdleSleep = async () => {
+    const patch = this.pendingIdleSleep;
+    if (!patch) return;
+    await this.commit(patch);
+    this.pendingIdleSleep = null;
+    this.continueLeave();
+  };
+
+  cancelIdleSleep = () => {
+    this.pendingIdleSleep = null;
+    this.leaveAfterSave = null;
+  };
+
+  /**
+   * Requests cannot be counted without Caddy's per-app access logs; the
+   * setting can then only be turned off.
+   */
+  get idleSleepUnavailable(): boolean {
+    return this.system.value?.idle_sleep?.available === false;
+  }
+
+  get idleSleepDisabled(): boolean {
+    return this.idleSleepUnavailable && !this.form.idleSleep;
+  }
+
+  setIdleMinutes = (event: Event) => {
+    this.form.idleSleepMinutes = Number(inputValue(event));
+    this.touch();
+  };
+
+  /** The saved idle time, offered even when it is not one of the choices. */
+  get idleMinutesChoices(): number[] {
+    const choices = [...IDLE_MINUTES_CHOICES];
+    if (!choices.includes(this.form.idleSleepMinutes)) {
+      choices.push(this.form.idleSleepMinutes);
+      choices.sort((a, b) => a - b);
+    }
+    return choices;
+  }
 
   cancelAutoDeploy = () => {
     this.pendingAutoDeploy = null;
@@ -1038,6 +1115,73 @@ export default class AppSettingsTemplate extends Component<Signature> {
                 <code>X-Robots-Tag: noindex</code>
                 を付けます。
               </Banner>
+            {{/if}}
+          </div>
+        </div>
+
+        <div class="form-group" data-test-idle-sleep-group>
+          <div>
+            <h2 class="form-group-title">アクセスがない間の休止</h2>
+            <p class="form-group-description">
+              決めた時間アクセスがなければアプリのコンテナを止め、ホストのメモリを空けます。次のアクセスで起動して応答します。たまにしか開かないステージングのアプリ向けです。
+            </p>
+          </div>
+          <div class="form-group-body">
+            <label class="option">
+              <input
+                type="checkbox"
+                checked={{this.form.idleSleep}}
+                disabled={{this.idleSleepDisabled}}
+                aria-describedby="settings-idle-sleep-hint"
+                data-test-field="idle_sleep"
+                {{on "change" (setChecked this.form "idleSleep")}}
+              />
+              <span class="option-body">
+                <span class="option-label">アクセスがない間は止める</span>
+                <span class="option-hint" id="settings-idle-sleep-hint">
+                  休止のあとの最初のアクセスは、アプリの起動を待ちます（Rails
+                  なら 5〜15
+                  秒ほど）。クローラーや外部の死活監視が定期的にアクセスしていると休止しません。
+                </span>
+              </span>
+            </label>
+            {{#if this.idleSleepUnavailable}}
+              <p
+                class="field-hint idle-sleep-unavailable"
+                data-test-idle-sleep-unavailable
+              >
+                このホストでは使えません。アクセスを数えるために、Caddy
+                のアプリ別のアクセスログ（<code>[caddy] access_log_dir</code>）が要ります。
+              </p>
+            {{/if}}
+            {{#if this.form.idleSleep}}
+              <FormField
+                class="idle-sleep-minutes"
+                @label="止めるまでの時間"
+                @error={{this.errors.idle_sleep_minutes}}
+                data-test-field-group="idle_sleep_minutes"
+                as |field|
+              >
+                <select
+                  id={{field.id}}
+                  aria-describedby={{field.describedBy}}
+                  aria-invalid={{field.invalid}}
+                  data-test-field="idle_sleep_minutes"
+                  {{on "change" this.setIdleMinutes}}
+                >
+                  {{#each this.idleMinutesChoices as |minutes|}}
+                    <option
+                      value={{minutes}}
+                      selected={{eq minutes this.form.idleSleepMinutes}}
+                    >{{minutesLabel minutes}}</option>
+                  {{/each}}
+                </select>
+              </FormField>
+            {{/if}}
+            {{#if this.errors.idle_sleep}}
+              <p class="field-error" data-test-field-error>
+                {{this.errors.idle_sleep}}
+              </p>
             {{/if}}
           </div>
         </div>
@@ -1607,6 +1751,24 @@ export default class AppSettingsTemplate extends Component<Signature> {
           <strong>{{this.app.slug}}</strong>
           にデプロイされます。そのブランチに push
           できる人は、本番を更新できるようになります。
+        </p>
+      </ConfirmDialog>
+    {{/if}}
+
+    {{#if this.pendingIdleSleep}}
+      <ConfirmDialog
+        @title="本番アプリをアクセスがない間に止めますか？"
+        @confirmLabel="保存する"
+        @busy={{this.saving}}
+        @onConfirm={{this.confirmIdleSleep}}
+        @onCancel={{this.cancelIdleSleep}}
+      >
+        <p data-test-idle-sleep-confirm>
+          保存すると、本番アプリ
+          <strong>{{this.app.slug}}</strong>
+          は{{minutesLabel
+            this.form.idleSleepMinutes
+          }}アクセスがなければ止まります。休止のあとの最初の利用者は、アプリの起動を待つことになります。外部の死活監視を当てていると休止しません。
         </p>
       </ConfirmDialog>
     {{/if}}

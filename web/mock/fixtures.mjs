@@ -63,6 +63,8 @@ export const SCENARIOS = {
     'everything fine, but blog-staging deploys on push while the webhook secret is not set in config.toml',
   'workflow-gated':
     'everything fine; blog-staging deploys after its image workflow succeeds, and the last run failed',
+  sleeping:
+    'everything fine; shop-staging is asleep after 30 minutes without requests, blog-staging sleeps after an hour',
 };
 
 /** The owner of every scenario, and the members it let in (ARCHITECTURE 10.7). */
@@ -223,6 +225,9 @@ function app(slug, overrides = {}) {
     auto_deploy: false,
     auto_deploy_branch: '',
     auto_deploy_workflow: '',
+    idle_sleep: false,
+    idle_sleep_minutes: 30,
+    sleeping_since: null,
     url,
     primary_url: url,
     pending_domains: 0,
@@ -274,6 +279,7 @@ function system(overrides = {}) {
       url: `https://console.${BASE_DOMAIN}/webhooks/github`,
       secret_configured: true,
     },
+    idle_sleep: { available: true },
     ...overrides,
   };
 }
@@ -599,6 +605,21 @@ export function buildScenario(name) {
       state.system.webhook.secret_configured = false;
       return state;
     }
+    case 'sleeping': {
+      // shop-staging went to sleep while idle; blog-staging sleeps after an
+      // hour without requests but is awake (ARCHITECTURE 8.4).
+      const state = scenario(healthyApps());
+      Object.assign(state.apps.get('shop-staging'), {
+        idle_sleep: true,
+        idle_sleep_minutes: 30,
+        sleeping_since: ago(2 * HOUR + 14 * MINUTE),
+      });
+      Object.assign(state.apps.get('blog-staging'), {
+        idle_sleep: true,
+        idle_sleep_minutes: 60,
+      });
+      return state;
+    }
     case 'workflow-gated': {
       const state = scenario(healthyApps());
       state.apps.get('blog-staging').auto_deploy_workflow =
@@ -625,6 +646,7 @@ export function buildScenario(name) {
             url: `https://console.${BASE_DOMAIN}/webhooks/github`,
             secret_configured: false,
           },
+          idle_sleep: { available: false },
         }),
         backups: {
           configured: false,
@@ -927,6 +949,18 @@ export function settle(state) {
 export function services(target) {
   if (target.desired_state === 'stopped' || !target.current_deployment) {
     return [];
+  }
+  if (target.sleeping_since) {
+    // Asleep: the containers are kept, stopped (ARCHITECTURE 8.4).
+    return ['web', 'db', 'worker'].map((name) => ({
+      name,
+      state: 'exited',
+      status: 'Exited (0) 2 hours ago',
+      health: '',
+      memory_bytes: null,
+      memory_limit_bytes: null,
+      cpu_percent: null,
+    }));
   }
   // Staging sees little traffic and holds little data.
   const scale = target.environment === 'production' ? 1 : 0.35;

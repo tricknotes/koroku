@@ -2197,6 +2197,78 @@ const TASK_SHOTS = [
   },
 ];
 
+// Sleeping while idle (ARCHITECTURE 8.4): the state in the list and the
+// header, the overview with its wake button, the stopped services, the
+// setting, where it cannot be used, and the production confirmation.
+const IDLE_SLEEP = '[data-test-idle-sleep-group]';
+SHOTS.push(
+  { name: 'sleep-list', path: '/?scenario=sleeping', wait: LIST },
+  {
+    name: 'sleep-list-phone',
+    path: '/?scenario=sleeping',
+    wait: LIST,
+    ...PHONE,
+  },
+  {
+    name: 'sleep-overview',
+    path: '/apps/shop-staging?scenario=sleeping',
+    wait: '[data-test-sleeping]',
+  },
+  {
+    name: 'sleep-overview-phone',
+    path: '/apps/shop-staging?scenario=sleeping',
+    wait: '[data-test-sleeping]',
+    ...PHONE,
+  },
+  {
+    name: 'sleep-resources',
+    path: '/apps/shop-staging/resources?scenario=sleeping',
+    wait: '[data-test-resources-sleeping]',
+  },
+  {
+    name: 'sleep-settings',
+    path: '/apps/blog-staging/settings?scenario=sleeping',
+    wait: '[data-test-field="idle_sleep_minutes"]',
+    script: scrollTo(IDLE_SLEEP),
+  },
+  {
+    name: 'sleep-settings-phone',
+    path: '/apps/blog-staging/settings?scenario=sleeping',
+    wait: '[data-test-field="idle_sleep_minutes"]',
+    script: scrollTo(IDLE_SLEEP),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'sleep-settings-unavailable',
+    path: '/apps/blog-staging/settings?scenario=unconfigured',
+    wait: '[data-test-idle-sleep-unavailable]',
+    script: scrollTo(IDLE_SLEEP),
+  },
+  {
+    name: 'sleep-production-confirm',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-field="idle_sleep"]',
+    script: `(() => {
+      document.querySelector('[data-test-field="idle_sleep"]').click();
+      setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 300);
+    })()`,
+    then: '[data-test-idle-sleep-confirm]',
+  },
+  {
+    name: 'sleep-production-confirm-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-field="idle_sleep"]',
+    script: `(() => {
+      document.querySelector('[data-test-field="idle_sleep"]').click();
+      setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 300);
+    })()`,
+    then: '[data-test-idle-sleep-confirm]',
+    ...PHONE,
+    fullPage: false,
+  },
+);
+
 const LOGS = '/apps/blog/logs';
 const LOG_ROW = '[data-test-log-row]';
 const PHONE_SCREEN = { ...PHONE, fullPage: false };

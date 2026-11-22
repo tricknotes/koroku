@@ -305,10 +305,19 @@ for (const [action, desired, done] of [
     const app = appOf(context);
     if (!app.current_deployment) throw new HttpError(409, 'not_deployed');
     app.desired_state = desired;
+    app.sleeping_since = null;
     record(context, app.slug, done);
     return app;
   });
 }
+route('POST', '/api/apps/:slug/wake', (context) => {
+  const app = appOf(context);
+  if (app.sleeping_since) {
+    app.sleeping_since = null;
+    record(context, app.slug, 'app.woken');
+  }
+  return app;
+});
 
 /** Adds an activity entry by the scenario's user (ARCHITECTURE 10.7). */
 function record(context, slug, action, details) {
@@ -1180,7 +1189,7 @@ const ACCESS = [
   [
     'deploy',
     'POST',
-    /^\/api\/apps\/([^/]+)\/(start|stop|restart|deployments)$/,
+    /^\/api\/apps\/([^/]+)\/(start|stop|restart|wake|deployments)$/,
   ],
   ['deploy', 'GET', /^\/api\/apps\/([^/]+)\/promotion$/],
   ['manage', 'PATCH', /^\/api\/apps\/([^/]+)$/],
