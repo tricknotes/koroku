@@ -262,14 +262,16 @@ func (e *Engine) Delete(ctx context.Context, app store.App, removeVolumes bool) 
 		}
 	}
 
-	// Images of every release still on disk.
+	// Images of every release still on disk. Pulled images go only when
+	// no other app uses them.
 	stateDir := filepath.Join(e.appDir(app.Slug), "release-state")
 	if entries, err := os.ReadDir(stateDir); err == nil {
-		var images []string
+		var images, pulled []string
 		for _, entry := range entries {
 			if id, err := strconv.ParseInt(entry.Name(), 10, 64); err == nil {
 				if meta, err := e.readMeta(app.Slug, id); err == nil {
 					images = append(images, meta.Images...)
+					pulled = append(pulled, meta.PulledImages...)
 				}
 			}
 		}
@@ -279,6 +281,7 @@ func (e *Engine) Delete(ctx context.Context, app store.App, removeVolumes bool) 
 				e.opts.Logger.Warn("removing the app's images failed", "app", app.Slug, "error", err)
 			}
 		}
+		e.removeUnusedPulledImages(ctx, pulled, app.Slug)
 	}
 
 	if err := e.opts.Store.DeleteApp(ctx, app.ID); err != nil {

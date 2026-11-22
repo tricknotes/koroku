@@ -236,6 +236,23 @@ func (p Project) NeedsBuild() bool {
 	return false
 }
 
+// PulledImages lists, sorted and without duplicates, the images of the
+// services without a build section: the ones `pull` fetches. In a merged
+// and interpolated project they are the references as Docker stores them
+// (such as ghcr.io/octo/app:sha-0123abc).
+func (p Project) PulledImages() []string {
+	seen := map[string]bool{}
+	var images []string
+	for _, s := range p.Services {
+		if !s.HasBuild() && s.Image != "" && !seen[s.Image] {
+			seen[s.Image] = true
+			images = append(images, s.Image)
+		}
+	}
+	sort.Strings(images)
+	return images
+}
+
 // NeedsPull reports whether any service runs a prebuilt image.
 func (p Project) NeedsPull() bool {
 	for _, s := range p.Services {

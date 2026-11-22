@@ -3,6 +3,7 @@
 package deploy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,7 +12,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -259,6 +262,11 @@ type releaseMeta struct {
 	// Images are the per-release images built for this release. They are
 	// removed together with the release.
 	Images []string `json:"images,omitempty"`
+	// PulledImages are the images of the services without a build section,
+	// as interpolated for this release (per-commit tags of CI images, for
+	// example). They are removed with the release when nothing else uses
+	// them (removeUnusedPulledImages).
+	PulledImages []string `json:"pulled_images,omitempty"`
 }
 
 func (e *Engine) writeMeta(slug string, id int64, meta releaseMeta) error {
@@ -624,7 +632,8 @@ func (e *Engine) classify(parent, job context.Context, err error, masker *secret
 
 // removeRelease deletes the checkout, the state and the images of a release.
 func (e *Engine) removeRelease(ctx context.Context, slug string, id int64) {
-	if meta, err := e.readMeta(slug, id); err == nil && len(meta.Images) > 0 {
+	meta, metaErr := e.readMeta(slug, id)
+	if metaErr == nil && len(meta.Images) > 0 {
 		args := append([]string{"image", "rm"}, meta.Images...)
 		// Best effort: an image may never have been built.
 		if err := e.opts.Runner.Run(ctx, runner.Cmd{Name: "docker", Args: args}); err != nil {
@@ -633,6 +642,89 @@ func (e *Engine) removeRelease(ctx context.Context, slug string, id int64) {
 	}
 	_ = os.RemoveAll(e.ReleaseDir(slug, id))
 	_ = os.RemoveAll(e.stateDir(slug, id))
+	if metaErr == nil {
+		// The state is gone, so this release no longer counts as a user.
+		e.removeUnusedPulledImages(ctx, meta.PulledImages, "")
+	}
+}
+
+// removeUnusedPulledImages removes the pulled images (releaseMeta
+// PulledImages) that no release left on disk refers to, in any app, and that
+// no container was created from (ARCHITECTURE 7). Without this, every
+// per-commit tag of a CI image would stay on the host: `image prune` only
+// removes untagged images. The releases of skipSlug are not counted (an app
+// being deleted).
+func (e *Engine) removeUnusedPulledImages(ctx context.Context, candidates []string, skipSlug string) {
+	if len(candidates) == 0 {
+		return
+	}
+	used, err := e.imagesInUse(ctx, skipSlug)
+	if err != nil {
+		// Without knowing what is in use, keep everything.
+		e.opts.Logger.Warn("listing images in use failed; pulled images are kept", "error", err)
+		return
+	}
+	var unused []string
+	for _, image := range candidates {
+		if !used[image] && !slices.Contains(unused, image) {
+			unused = append(unused, image)
+		}
+	}
+	if len(unused) == 0 {
+		return
+	}
+	// Without -f, Docker also refuses an image that a container uses.
+	args := append([]string{"image", "rm"}, unused...)
+	if err := e.opts.Runner.Run(ctx, runner.Cmd{Name: "docker", Args: args}); err != nil {
+		// Best effort: an image may never have been pulled, or be in use.
+		e.opts.Logger.Debug("removing pulled images failed", "images", unused, "error", err)
+	}
+}
+
+// imagesInUse is the set of image references that a release on disk (except
+// those of skipSlug) pulls or that a container on the host, running or not,
+// was created from.
+func (e *Engine) imagesInUse(ctx context.Context, skipSlug string) (map[string]bool, error) {
+	used := map[string]bool{}
+	apps, err := os.ReadDir(e.opts.AppsDir)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	for _, app := range apps {
+		if !app.IsDir() || app.Name() == skipSlug {
+			continue
+		}
+		releases, err := os.ReadDir(filepath.Join(e.appDir(app.Name()), "release-state"))
+		if err != nil {
+			continue
+		}
+		for _, release := range releases {
+			id, err := strconv.ParseInt(release.Name(), 10, 64)
+			if err != nil {
+				continue
+			}
+			meta, err := e.readMeta(app.Name(), id)
+			if err != nil {
+				// An unreadable release may use anything.
+				return nil, fmt.Errorf("read release %s/%d: %w", app.Name(), id, err)
+			}
+			for _, image := range meta.PulledImages {
+				used[image] = true
+			}
+		}
+	}
+	var out bytes.Buffer
+	if err := e.opts.Runner.Run(ctx, runner.Cmd{
+		Name: "docker", Args: []string{"ps", "--all", "--no-trunc", "--format", "{{.Image}}"}, Stdout: &out,
+	}); err != nil {
+		return nil, fmt.Errorf("list containers: %w", err)
+	}
+	for _, line := range strings.Split(out.String(), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			used[line] = true
+		}
+	}
+	return used, nil
 }
 
 // cleanupAfterSuccess keeps the newest successful releases and drops the

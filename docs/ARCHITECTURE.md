@@ -286,6 +286,7 @@ services:
 
 - `restart: unless-stopped` は、リポジトリ側が `restart` を指定していないサービスにだけ付ける。全サービスに付けると、マイグレーション用のワンショットサービス（`restart: "no"`）が終了後に再起動し続けてしまうため。
 - `build:` を持つサービスには、リリースごとのイメージ名 `koroku-<slug>-<service>:r<deploy_id>` を override の `image:` で与える。Compose の既定では毎回 `<project>-<service>:latest` に上書きされ、起動に失敗した新版のイメージで旧版のタグが置き換わり、旧リリースのディレクトリで `up` し直しても壊れたイメージが起動してしまう。リリース固有のタグにしておくと、ロールバックは旧版のイメージそのものを起動できる。イメージはリリースディレクトリと一緒に削除する。
+- `build:` を持たないサービスのイメージ（補間した後の `image:`。CI がコミットごとに作る `ghcr.io/<owner>/<repo>:sha-<commit>` など）は、検証の手順で正規化した結果から、リリースの記録（`release-state/<id>/release.json` の `pulled_images`）に残す。pull の前に書くので、失敗したデプロイの分も残る。リリースを消すとき（成功後の整理、失敗したデプロイの後始末、アプリの削除）に、残っているどのリリース（ほかのアプリも含む）も記録しておらず、ホストのどのコンテナ（止まっているものも含む。`docker ps --all` の `Image`）も使っていないものだけを `docker image rm` する。`docker image prune -f` はタグのないイメージしか消さないので、これがないとコミットごとのタグがデプロイのたびに溜まる。`postgres:17` のように複数のアプリが使うイメージは、どれかのリリースが記録している限り残る。コンテナの一覧が取れないとき、読めないリリースの記録があるときは、何も消さない。`-f` は付けないので、使っているコンテナがあれば Docker も削除を断る。
 - メモリ上限の決まり方は、優先度の高い順に「アプリ設定のサービス別の値」「アプリ設定の全体値」「リポジトリの Compose が自分で指定した値（`config.toml` の既定値以下のときだけ）」「`config.toml` の既定値（512m）」。既定値は、リポジトリが自分で名乗れる上限でもある。それより大きくしたいときはアプリ設定で指定する（Compose に `mem_limit: 64g` と書くだけで上限を外せてしまうのを防ぐため）。リポジトリ側が `deploy.resources.limits.memory` で書いている場合は override も同じ形式で書く。`mem_limit` と値が食い違うと Compose が `can't set distinct values` で設定全体を拒否するため。
 - リポジトリが `memswap_limit` を書いていて、その値が override で付けるメモリ上限より小さくなる場合は、`memswap_limit` も同じ値に上げる。swap を禁じるために `memswap_limit` を `mem_limit` と同じにしておく書き方はよくあり、そのままアプリ設定で上限を上げると、Docker が「memory+swap が memory より小さい」として起動を拒否するため。上限より大きい値（swap を許す書き方）はそのまま残す。
 - `oom_score_adj` と、メモリの予約（`mem_reservation`、または `deploy.resources.reservations.memory`）は koroku が決めて全サービスに書く。アプリの `environment` で値が変わる（6.2）。
@@ -417,7 +418,7 @@ private なイメージ（CI がビルドして `ghcr.io/<owner>/<repo>:sha-...`
 6. **起動**: `docker compose up -d --remove-orphans --wait --wait-timeout 300`。`--wait` はサービスが running または healthy になるまで待つ（[docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/)）。
 7. **経路**: Caddy 設定を再生成し、内容が変わっていれば投入する（8 章）。
 8. **確認**: `http://127.0.0.1:<port><ヘルスチェックパス>` が 5xx 以外を返すまで最大 60 秒リトライする。
-9. **完了**: `succeeded` にして `current_deployment_id` を更新。リリースディレクトリは直近 3 件を残し、`docker image prune -f` を実行する。
+9. **完了**: `succeeded` にして `current_deployment_id` を更新。リリースディレクトリは直近 3 件を残し（消すリリースのイメージも消す。6 章）、`docker image prune -f` を実行する。
 
 **失敗時**
 
@@ -1351,7 +1352,7 @@ Heroku の Review Apps に当たるもの。staging アプリ（8.2）を親に�
 - **起動制御と削除**
   - 停止は `docker compose stop`、起動は稼働中リリースのファイルで `up -d --wait`（設定を確実に揃えるため。リリースのファイルが残っていなければ `docker compose start`）、再起動は `docker compose restart`。停止・起動のたびに Caddy 設定を再投入し、停止中は 503 の固定ページになる。停止と起動はアクセスがない間の休止（8.4）を解き、休止中のアプリの再起動は起こす処理と同じになる。
   - デプロイと手動操作はアプリ単位で直列化する。デプロイが `queued` か `running` のアプリへの操作は 409（`busy`）で断り、操作の実行中に始まったデプロイは操作の完了を待つ。同じアプリに対して `docker compose` を同時に走らせないため。
-  - 削除は `docker compose down`（`?volumes=true` なら `--volumes` に加え、プロジェクトのラベルが付いた volume を明示的に消す）→ リリース用イメージの削除 → DB の行とアプリのディレクトリの削除 → Caddy 設定の再投入、の順。`down` に失敗したら DB には触れない。volume を残して削除したあとに同じ slug でアプリを作り直すと、プロジェクト名が同じなので残した volume がそのまま使われる。
+  - 削除は `docker compose down`（`?volumes=true` なら `--volumes` に加え、プロジェクトのラベルが付いた volume を明示的に消す）→ リリース用イメージの削除（pull したイメージは、ほかのアプリが使っていないものだけ。6 章）→ DB の行とアプリのディレクトリの削除 → Caddy 設定の再投入、の順。`down` に失敗したら DB には触れない。volume を残して削除したあとに同じ slug でアプリを作り直すと、プロジェクト名が同じなので残した volume がそのまま使われる。
   - `docker builder prune --all --filter until=168h` は毎日実行する。対象は「1 週間使われていないビルドキャッシュ」なので効果は週 1 回と同じで、`koroku` を再起動しても実行の機会を逃さない。
   - `--all` を付ける。付けないと、Docker に組み込みの BuildKit は、層がイメージと共有されているキャッシュの記録を消さない。キャッシュは手前の記録から順にしか消えないので、ビルドの連なりの末端がたいていイメージの層である以上、その手前の古いキャッシュも残る。`--all` でもイメージが使う層は消えない（キャッシュの記録が外れるだけ）。
   - システム画面の「削除で空く」量は、`docker system df` の回収可能（Reclaimable）ではなく、koroku の削除が実際に消す分を koroku が見積もる。Docker の値は、タグ付きでも使われていないイメージ（ロールバック用に残した直近のリリース、停止中のアプリのイメージ）と、まだ 1 週間たっていないキャッシュを含み、ボタンを押しても減らない量になるため。`docker system df -v` の明細から、どのコンテナにも使われていないタグのないイメージの固有サイズと、自身もその先も 1 週間使われておらず使用中でもない、イメージと共有していないキャッシュの合計を求める。volume とコンテナは消さないので 0 とする。
