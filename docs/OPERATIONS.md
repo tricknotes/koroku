@@ -357,7 +357,7 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 
 ## 検証済みの範囲
 
-実機がないので、次の方法で確かめた（2026-11-18。SSH の手順は 2026-11-20、Ubuntu 26.04 は 2026-11-21）。
+実機を使わずに、次の方法で確かめている。
 
 | 確認 | 方法 | 結果 |
 | --- | --- | --- |
@@ -378,7 +378,7 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 - SSH の keepalive は 1 回目から入り（鍵の有無に関係なく）、2 回目以降は書き換えない。
 - root に鍵がない 1 回目は パスワードログインの設定に触れず、鍵を置いた 2 回目に drop-in を入れて reload し、3 回目は reload しない。
 
-コンテナには systemd もカーネルも本物のネットワークもないので、zswap はその場では反映できず（「zswap がない」と知らせる経路を通る）、`systemctl`、`swapon`、`ufw`、`sshd`、`docker info` は呼び出しを記録するだけの代役に差し替えた。つまり、これらが実際に何をするかは確かめていない。
+コンテナには systemd もカーネルも本物のネットワークもないので、zswap はその場では反映できず（「zswap がない」と知らせる経路を通る）、`systemctl`、`swapon`、`ufw`、`sshd`、`docker info` は呼び出しを記録するだけの代役に差し替えている。つまり、これらが実際に何をするかは確かめていない。
 
 ## 未検証（実機で確認が必要）
 
@@ -386,7 +386,7 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 
 - [ ] **レビューアプリ**: 実際の GitHub App で pull request の一覧が読めること（Pull requests の権限の承認の前後）、作ったレビューアプリの GitHub Deployments が pull request の画面に URL 付きで出ること、head のブランチへの push で自動デプロイされること、親からのデータのコピーが最初のデプロイのあとに始まること。ユニットテストと API のテストは偽の GitHub と偽のコピーで確かめている。
 
-- [ ] **スクリプトの通し実行**: 事業者の Ubuntu 24.04 と 26.04 のイメージで最後まで通るか（26.04 は、対応に加える前に `--force` を付けて最後まで通ることを確かめた。2026-11-21）。特に、初回起動直後の `unattended-upgrades` と apt のロックが競合したときの待ち合わせ、`full-upgrade` 中に対話プロンプトで止まらないこと。
+- [ ] **スクリプトの通し実行**: 事業者の Ubuntu 24.04 と 26.04 のイメージで最後まで通るか。特に、初回起動直後の `unattended-upgrades` と apt のロックが競合したときの待ち合わせ、`full-upgrade` 中に対話プロンプトで止まらないこと。
 - [ ] **カーネル更新**: `REBOOT REQUIRED` が表示されるか。再起動後に Docker、Caddy、`koroku`、アプリのコンテナ、swap が自動で戻るか。
 - [ ] **`koroku.service`**: systemd の下で起動するか。hardening を付けた状態で、`docker compose` の `build` / `pull` / `up` / `logs` / `exec`、`git fetch`、`restic` の `backup` / `restore`（volume への書き戻しを含む）が通るか。
 - [ ] **停止動作**: デプロイ中に `systemctl restart koroku` したとき、8.4 節のとおりになるか（デプロイは `failed (interrupted)`、子プロセスは残らない、アプリのコンテナは動き続ける）。

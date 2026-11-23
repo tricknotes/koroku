@@ -2,8 +2,6 @@
 
 管理 UI（`web/`）と `koroku` の間の取り決め。ARCHITECTURE 9 章の一覧を、リクエストとレスポンスの形まで具体化したもの。食い違いがあれば実装（`internal/api`）とこのファイルを同時に直す。
 
-各節の見出しにある **M1** などは、その API を実装するマイルストーン。
-
 ## 共通
 
 - JSON は `Content-Type: application/json`。時刻は RFC 3339（UTC）。未設定の時刻は `null`。
@@ -22,9 +20,9 @@
 | ステータス | `code` | 意味 |
 | --- | --- | --- |
 | 400 | `invalid_json`、`invalid_limit` など | リクエストの形が不正 |
-| 401 | `unauthenticated` | 未ログイン（M3 以降、`/auth/*` と `GET /api/session` 以外のすべて） |
+| 401 | `unauthenticated` | 未ログイン（`/auth/*` と `GET /api/session` 以外のすべて） |
 | 401 | `invalid_token` | `Authorization: Bearer` の API トークンが期限切れ・失効・形式違い（API トークンの節） |
-| 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない（M3） |
+| 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない |
 | 403 | `token_not_allowed` | API トークンでは使えない API（API トークンの節） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
 | 403 | `forbidden_role` | ユーザーのロールではできない操作（ARCHITECTURE 10.7）。`details.required` は要るもの（`view` / `deploy` / `manage` / `owner`）。設定の `PATCH` でオーナー専用の項目を変えようとしたときは `details.fields` に項目名（`relax_policy`、`repository`、`promote_from`） |
@@ -36,7 +34,7 @@
 | 500 | `internal` | サーバー側の失敗（詳細はサーバーログ） |
 | 503 | `not_configured` | その機能に必要な設定（GitHub App、オブジェクトストレージなど）がない |
 
-## 権限（2026-11-21）
+## 権限
 
 ログインできるのは、オーナー（`config.toml` の `[github] allowed_user_id`）と、アプリのロールを 1 つ以上持つメンバー（ARCHITECTURE 10.7）。各エンドポイントの要件は次のとおりで、ロールは `view` < `deploy` < `manage` の順に上のものが下のものを含む。オーナーはすべてを使える。
 
@@ -52,7 +50,7 @@
 - `PATCH /api/apps/{slug}` で `environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。本番アプリの `auto_deploy` を有効にすること（と、有効なまま追うブランチや `auto_deploy_workflow` を変えること）もオーナーだけ（`details.fields` に `auto_deploy`）。今と同じ値を送るのはかまわない。
 - API トークンも、トークンのユーザーとして同じ要件で判定する。
 
-## メンバー（2026-11-21）
+## メンバー
 
 オーナーだけが使える。メンバーの形:
 
@@ -76,7 +74,7 @@
 
 `{id}` は GitHub のユーザー ID（数値）。
 
-## セッション（M3、強化は 2026-11-19）
+## セッション
 
 | メソッドとパス | 内容 |
 | --- | --- |
@@ -93,7 +91,7 @@
 
 再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）か `auto_deploy_workflow` を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
-## API トークン（2026-11-21）
+## API トークン
 
 手元の Claude Code などが koroku の状態を読むための、読み取り専用のトークン（ARCHITECTURE 10.5）。管理 UI の「セキュリティ」画面で発行する。
 
@@ -133,7 +131,7 @@ curl -fsS -H "Authorization: Bearer $KOROKU_TOKEN" "$KOROKU_URL/api/apps"
 - トークンごとに 1 分あたり 120 回まで。超えたら `429 rate_limited`（`Retry-After` は秒数）。
 - トークンのリクエストでは Cookie を見ない（両方を付けてもトークンとしてだけ扱う）。`Origin` は要らない（`GET` だけのため）。`Sec-Fetch-Site` の検査はそのまま掛かる。
 
-## アクセスの保護（2026-11-21）
+## アクセスの保護
 
 ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーのページ遷移と Caddy の `forward_auth` だけが使う。
 
@@ -147,7 +145,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 - アプリのホスト名で `koroku` に届くリクエストは、上の 3 つ（`/auth/gate/check` と `/.koroku/auth/*`）以外は 404。
 - `/.koroku/` で始まるその他のパスは Caddy が 404 を返し、アプリには届かない。
 
-## システム（M0、prune は M5）
+## システム
 
 `GET /api/system`
 
@@ -163,7 +161,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 
 `disk`、`memory` は取得できなければ `null`、`docker_version` は空文字。
 
-UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
+管理 UI のために、次のフィールドも返す（ARCHITECTURE 9.1）:
 
 ```json
 {
@@ -191,7 +189,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - `swap` はホストの swap の大きさと使用量。swap がない、または取得できなければ `null`。
 - `log_archive.next_run_at` は次にログ退避が走る予定の時刻。オブジェクトストレージが未設定なら `null`。
 
-アクセスがない間の休止（ARCHITECTURE 8.4、2026-11-22）のために、次が加わる:
+アクセスがない間の休止（ARCHITECTURE 8.4）のために、次が加わる:
 
 ```json
 {
@@ -277,9 +275,9 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - `project`、`service` は Compose のラベル。Compose で作られていなければ空文字。
 - Docker に問い合わせられなければ `500 internal`。
 
-`POST /api/system/prune`（M5）: ボディ `{"images": true, "builder": true}`（省略時は両方）。200 で `{"output": "...", "reclaimed_bytes": 1073741824}`（コマンド出力の要約と、Docker が空けたと報告した量の合計）。コマンドが失敗したら `500 prune_failed`（`details.output` にそこまでの出力）。
+`POST /api/system/prune`: ボディ `{"images": true, "builder": true}`（省略時は両方）。200 で `{"output": "...", "reclaimed_bytes": 1073741824}`（コマンド出力の要約と、Docker が空けたと報告した量の合計）。コマンドが失敗したら `500 prune_failed`（`details.output` にそこまでの出力）。
 
-## アプリ（M1、起動制御と削除は M5）
+## アプリ
 
 アプリの形:
 
@@ -328,17 +326,17 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 
 `role` は、リクエストしたユーザーがこのアプリでできること（オーナーなら `owner`、メンバーならそのロール `view` / `deploy` / `manage`。ARCHITECTURE 10.7）。
 
-- `primary_url` はプライマリドメインがあればその URL、なければ `url` と同じ。`pending_domains` は検証待ちの独自ドメインの数（どちらも UI 再設計で追加）。
+- `primary_url` はプライマリドメインがあればその URL、なければ `url` と同じ。`pending_domains` は検証待ちの独自ドメインの数。
 - `desired_state` は `running` / `stopped`、`environment` は `production` / `staging`。
 - `current_deployment` は稼働中の（最後に成功した）デプロイ、`latest_deployment` は最新のデプロイ。どちらも「デプロイ」の形か `null`。
 - `compose_path` が空なら自動検出（`compose.yaml`、`compose.yml`、`docker-compose.yml`、`docker-compose.yaml` の順）。
 - `memory_limit` が空なら基盤の既定値。書式は数字 + 単位 `b` `k` `m` `g`（例 `512m`）。
 - メモリの予約（ARCHITECTURE 6.2）: `memory_reservation`（全体）と `service_memory_reservations`（サービスごと）は、`environment` が `production` のアプリにだけ効く。空なら各サービスのメモリ上限の半分、`0` なら予約しない。書式はメモリ上限と同じで、`0` 以外は 6 MiB 以上。保存の時点で分かる上限（サービスごとの上限、なければ `memory_limit`、なければ基盤の既定値）を超えると `422 validation_failed`（`details.memory_reservation` か `details.service_memory_reservations`）。サービスごとの値に空文字は使えない（既定に戻すにはキーを消す）。どちらも、環境の切り替えと同じく次のデプロイから反映される。
 - 必要な環境変数の読み取り方（ARCHITECTURE 9.4）: `env_source` は `compose`（既定。Compose ファイルの `${VAR}`）/ `dotenv`（`.env.example`）/ `off`。`env_example_path` は `dotenv` で読むファイルのパスで、空なら `.env.example`。
-- アクセスの保護（ARCHITECTURE 8.3、2026-11-21）: `access_protection` が `true` なら、アプリのホスト名（自動割当と有効な独自ドメイン）を開けるのは管理 UI にログインした本人だけになる。`POST` で省略すると `environment` が `staging` なら `true`、`production` なら `false`。`protection_exempt_paths` は保護を外すパスの前方一致の一覧（既定は空）。各要素は `/` で始まり、英数字と `. _ ~ - / @ : +` だけからなる 200 文字以内で、20 件まで。`/` そのもの、`/.koroku` で始まるもの、`.` や `..` の区切り、`//` は `422 validation_failed`（`details.protection_exempt_paths`）。重複は 1 つにまとめる。どちらも変えると Caddy の設定を投入し直す。
+- アクセスの保護（ARCHITECTURE 8.3）: `access_protection` が `true` なら、アプリのホスト名（自動割当と有効な独自ドメイン）を開けるのは管理 UI にログインした本人だけになる。`POST` で省略すると `environment` が `staging` なら `true`、`production` なら `false`。`protection_exempt_paths` は保護を外すパスの前方一致の一覧（既定は空）。各要素は `/` で始まり、英数字と `. _ ~ - / @ : +` だけからなる 200 文字以内で、20 件まで。`/` そのもの、`/.koroku` で始まるもの、`.` や `..` の区切り、`//` は `422 validation_failed`（`details.protection_exempt_paths`）。重複は 1 つにまとめる。どちらも変えると Caddy の設定を投入し直す。
 - `promote_from` は昇格元の staging アプリの slug（ARCHITECTURE 9.7）。空なら組み合わせなし。`PATCH` で設定できるのは、自分が `production`（同じリクエストで変える値を含む）で、相手が同じリポジトリの `staging` アプリのときだけ。違えば 422 `validation_failed`（`details.promote_from`）。空文字で外す。
-- 自動デプロイ（ARCHITECTURE 5.2、2026-11-21）: `auto_deploy` が `true` なら、GitHub に `auto_deploy_branch`（空なら `default_branch`）が push されたとき、そのコミットをデプロイする。既定は `false` と空。`true` にできるのは GitHub App で取得するアプリ（`repo_full_name` があり `repo_url` が空）だけで、ほかは `422 validation_failed`（`details.auto_deploy`）。`repo_url` に切り替えるときは先に `false` にする。`auto_deploy_branch` の書式は `default_branch` と同じ（違えば `details.auto_deploy_branch`）。
-- アクセスがない間の休止（ARCHITECTURE 8.4、2026-11-22）: `idle_sleep` が `true` なら、`idle_sleep_minutes` 分のあいだ Caddy を通るリクエストがなければ koroku がアプリのコンテナを止め（休止）、次のリクエストで起こす。既定は `false` と `30`。`idle_sleep_minutes` は 10〜1440 で、外れると `422 validation_failed`（`details.idle_sleep_minutes`）。`GET /api/system` の `idle_sleep.available` が `false` のホストで `false` から `true` にすると `422 validation_failed`（`details.idle_sleep`）。変えられるのは管理以上のロールで、再ログインは要らない。`sleeping_since` は休止した時刻で、起きていれば `null`（読み取り専用。`desired_state` は `running` のまま）。起動・停止は休止を解く。休止中のアプリの再起動は、起こすのと同じ。
+- 自動デプロイ（ARCHITECTURE 5.2）: `auto_deploy` が `true` なら、GitHub に `auto_deploy_branch`（空なら `default_branch`）が push されたとき、そのコミットをデプロイする。既定は `false` と空。`true` にできるのは GitHub App で取得するアプリ（`repo_full_name` があり `repo_url` が空）だけで、ほかは `422 validation_failed`（`details.auto_deploy`）。`repo_url` に切り替えるときは先に `false` にする。`auto_deploy_branch` の書式は `default_branch` と同じ（違えば `details.auto_deploy_branch`）。
+- アクセスがない間の休止（ARCHITECTURE 8.4）: `idle_sleep` が `true` なら、`idle_sleep_minutes` 分のあいだ Caddy を通るリクエストがなければ koroku がアプリのコンテナを止め（休止）、次のリクエストで起こす。既定は `false` と `30`。`idle_sleep_minutes` は 10〜1440 で、外れると `422 validation_failed`（`details.idle_sleep_minutes`）。`GET /api/system` の `idle_sleep.available` が `false` のホストで `false` から `true` にすると `422 validation_failed`（`details.idle_sleep`）。変えられるのは管理以上のロールで、再ログインは要らない。`sleeping_since` は休止した時刻で、起きていれば `null`（読み取り専用。`desired_state` は `running` のまま）。起動・停止は休止を解く。休止中のアプリの再起動は、起こすのと同じ。
 - 先に待つワークフロー（ARCHITECTURE 5.2）: `auto_deploy_workflow` はワークフローのファイルのパス（例 `.github/workflows/image.yml`）。空（既定）なら push の直後にデプロイする。設定すると push ではデプロイせず、そのワークフローの実行がこのブランチの最新のコミットで成功したとき（Webhook の `workflow_run`）にデプロイする。`.github/workflows/` の直下の `.yml` か `.yaml`（255 文字まで）でなければ `422 validation_failed`（`details.auto_deploy_workflow`）。前後の空白は除く。
 - バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。
 
@@ -348,14 +346,14 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `POST /api/apps` | 作成。必須は `slug`、`web_port`、リポジトリ（`repo_full_name` か `repo_url`）。ほかは既定値あり。201 でアプリ。`slug` は英小文字で始まる英小文字・数字・ハイフン 40 文字以内で、作成後は変えられない。`env`（`[{"key": "...", "value": "..."}]`）を付けると、環境変数もアプリと同じトランザクションで保存する（下記） |
 | `GET /api/apps/{slug}` | アプリ |
 | `PATCH /api/apps/{slug}` | 送ったフィールドだけ更新。200 でアプリ |
-| `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204。オーナーだけ（レビューアプリは管理以上で、volume は常に消す）。レビューアプリが残っていれば `409 has_review_apps` |
-| `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る）。起動でイメージの取得がレジストリに拒否されたら `502 registry_denied`（アプリのコンテナレジストリの認証を確かめる） |
+| `DELETE /api/apps/{slug}?volumes=true` | コンテナを止めて削除。`volumes=true` なら named volume も消す。204。オーナーだけ（レビューアプリは管理以上で、volume は常に消す）。レビューアプリが残っていれば `409 has_review_apps` |
+| `POST /api/apps/{slug}/start`、`/stop`、`/restart` | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る）。起動でイメージの取得がレジストリに拒否されたら `502 registry_denied`（アプリのコンテナレジストリの認証を確かめる） |
 | `POST /api/apps/{slug}/wake` | 休止中のアプリを起こす（ARCHITECTURE 8.4）。起きるまで（コンテナの起動と HTTP の確認、最長 10 分）待って 200 でアプリ。休止中でなければ何もせず 200 でアプリ。起こせなければ `502 wake_failed`（理由はサーバーログ）。ロールはデプロイ以上 |
-| `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）、`memory_limit_bytes`（上限。無制限なら 0）、`cpu_percent`（`docker stats` の CPU。1 コアを 100% とする値）も付く。止まっているサービスや、取得できないときは `null`。`memory_reservation_bytes` は稼働中のリリースがそのサービスに付けたメモリの予約（ARCHITECTURE 6.2。予約がなければ `null`。止まっていても出る）。`next_memory_reservation_bytes` は保存済みの設定で次のデプロイが付ける予約（予約しないなら `0`。稼働中のリリースが形を記録していないか、そのリリースにないサービスなら `null`） |
+| `GET /api/apps/{slug}/services` | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）、`memory_limit_bytes`（上限。無制限なら 0）、`cpu_percent`（`docker stats` の CPU。1 コアを 100% とする値）も付く。止まっているサービスや、取得できないときは `null`。`memory_reservation_bytes` は稼働中のリリースがそのサービスに付けたメモリの予約（ARCHITECTURE 6.2。予約がなければ `null`。止まっていても出る）。`next_memory_reservation_bytes` は保存済みの設定で次のデプロイが付ける予約（予約しないなら `0`。稼働中のリリースが形を記録していないか、そのリリースにないサービスなら `null`） |
 
-- 作成時の環境変数（ARCHITECTURE 9.8、2026-11-21）: `POST /api/apps` の `env` は `PUT /api/apps/{slug}/env` の `vars` と同じ形と検査（key の形式、`KOROKU_` で始まらない、重複なし、500 件まで、値は 64 KiB まで）。不正なら `422 validation_failed`（`details.env`）で、アプリも作らない。空でない `env` は環境変数の保存なので、直近 10 分以内のログインでなければ `403 reauth_required`（アプリは作らない）。`PATCH` では受け付けない（`400 invalid_json`）。
+- 作成時の環境変数（ARCHITECTURE 9.8）: `POST /api/apps` の `env` は `PUT /api/apps/{slug}/env` の `vars` と同じ形と検査（key の形式、`KOROKU_` で始まらない、重複なし、500 件まで、値は 64 KiB まで）。不正なら `422 validation_failed`（`details.env`）で、アプリも作らない。空でない `env` は環境変数の保存なので、直近 10 分以内のログインでなければ `403 reauth_required`（アプリは作らない）。`PATCH` では受け付けない（`400 invalid_json`）。
 
-### メモリ使用量の履歴（2026-11-21）
+### メモリ使用量の履歴
 
 `GET /api/apps/{slug}/memory?range=24h`: サービスごとのメモリ使用量の推移と、上限の目安（ARCHITECTURE 9.5）。`range` は `24h`（既定）/ `7d` / `14d`。ほかの値は `400 invalid_range`。
 
@@ -398,7 +396,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
   - `limit_bytes` は根拠のピーク × 1.5 を 64MiB 単位に切り上げた値（128MiB 以上）。`limit` は同じ値を設定に書ける形にしたもの（`m` 単位）。
   - `flag` は `near_limit`（根拠のピークが上限の 90% 以上。`ready` によらず出す）、`generous`（根拠が 7 日分以上あり、ピークが上限の 30% 未満）、どちらでもなければ `null`。上限がなければ常に `null`。
 
-### Compose の構成とコンテナ（2026-11-22）
+### Compose の構成とコンテナ
 
 管理 UI の「構成」タブの API（ARCHITECTURE 9.10）。読み取り専用で、呼ばれたときに Docker に問い合わせる。`view` 以上と API トークンで使える。環境変数の値はどの応答にも入らない。
 
@@ -471,7 +469,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 - `mismatches` の値: `outdated`（設定が稼働中のリリースと違う）、`orphan`（リリースにないサービス）、`memory_limit`、`memory_reservation`、`oom_score_adj`（`expected` と違う）、`oom_killed`、`restarting`、`restarted`（`restart_count` が 1 以上）、`unhealthy`、`exited`（0 以外の終了コードで停止）。
 - 環境変数（`Config.Env`）とラベルは返さない。
 
-### 操作の記録（2026-11-21）
+### 操作の記録
 
 `GET /api/apps/{slug}/activity?limit=20&before=<id>`: アプリへの操作を誰がいつしたか（ARCHITECTURE 10.7）。新しい順。`view` 以上。`limit` は 1〜100（既定 20、外れたら `400 invalid_limit`）、`before` は前のページの `next_before`（正の整数でなければ `400 invalid_before`）。アプリごとに新しい 500 件だけが残る。
 
@@ -519,7 +517,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 
 UI は知らない `action` をそのまま表示する。
 
-## 環境変数（M1）
+## 環境変数
 
 | メソッドとパス | 内容 |
 | --- | --- |
@@ -548,7 +546,7 @@ UI は知らない `action` をそのまま表示する。
 
 key は英字かアンダースコアで始まる英数字とアンダースコア。重複は 422。
 
-### コンテナレジストリの認証（2026-11-21）
+### コンテナレジストリの認証
 
 アプリが private なイメージを取得するためのログイン（ARCHITECTURE 6.1）。アプリごとに 1 つ。
 
@@ -572,7 +570,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 - `PUT` と `DELETE` は、直近 10 分以内のログインでなければ `403 reauth_required`。
 - 保存しただけでは何も起きず、次のデプロイ・ロールバック・起動から使う。
 
-### 必要な環境変数との照合（2026-11-20）
+### 必要な環境変数との照合
 
 `GET /api/apps/{slug}/env/requirements?ref=main` か `?sha=<40 桁>`: リポジトリがそのコミットで必要とする変数と、保存済みの変数との照合（ARCHITECTURE 9.4）。どちらも省くとアプリの `default_branch`。値は扱わないので、再ログインから 10 分を過ぎていても応答する。
 
@@ -600,7 +598,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 - `unlisted` は保存済みだが一覧にない key（key 順）。`compose` ではアプリのコードが直接読む変数も入るので、UI は `dotenv` のときだけ表示する。
 - `ref` と `sha` の検証に失敗したら 422。アプリがなければ `404 app_not_found`。
 
-## デプロイ（M1）
+## デプロイ
 
 デプロイの形:
 
@@ -683,7 +681,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 
 最初の見出しより前の行（`Queued deployment of <sha>.` など）は受付の記録。`koroku` の再起動で中断されたデプロイには `failed` の見出しがなく、末尾に `Failed: ...` の行だけが付く。
 
-### 昇格（2026-11-21）
+### 昇格
 
 staging アプリの稼働中のリリースを、組み合わせた本番アプリ（`promote_from`）へ出す（ARCHITECTURE 9.7）。
 
@@ -727,7 +725,7 @@ staging アプリの稼働中のリリースを、組み合わせた本番アプ
 
 **デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。
 
-## ワンオフのコマンドと登録タスク（2026-11-21）
+## ワンオフのコマンドと登録タスク
 
 ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose run --rm --no-deps -T <service> sh -c '<command>'` を実行する。
 
@@ -784,7 +782,7 @@ ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose ru
 
 アプリの実行中（`running` の記録がある間）は、そのアプリへの `POST /api/apps/{slug}/deployments` も `409 busy` になる。push での自動デプロイだけは断らずに預かり、実行が終わってから積む（`pending_auto_deploy`、ARCHITECTURE 5.2）。起動・停止・再起動・削除・リストアも同じ。
 
-### 定期タスク（2026-11-22）
+### 定期タスク
 
 ARCHITECTURE 9.6「定期実行」。登録タスクに予定を書くと、koroku がその時刻に実行する。
 
@@ -810,7 +808,7 @@ ARCHITECTURE 9.6「定期実行」。登録タスクに予定を書くと、koro
 - 休止中のアプリの定期実行では、ログに `The app is asleep and stays asleep; starting only <サービス>.` と、終わりに `Stopped <サービス> again.` が入る。依存先を起動できなければ `failed`（`error` は `start <サービス> of the sleeping app: ...`、`exit_code` は `null`）。
 - 定期実行は操作の記録（`activity`）に残らない。予定の変更は `tasks.changed` の `changed` に入る。
 
-## GitHub の Webhook（2026-11-21）
+## GitHub の Webhook
 
 `POST /webhooks/github` は GitHub App の Webhook の受け口で、push での自動デプロイと、ワークフローの成功を待つ自動デプロイ（ARCHITECTURE 5.2）に使う。管理 UI からは呼ばない。セッション、`Origin`、`Sec-Fetch-Site` の規則は適用せず、`[github] webhook_secret` による署名で認証する。
 
@@ -830,7 +828,7 @@ ARCHITECTURE 9.6「定期実行」。登録タスクに予定を書くと、koro
 
 `GET` などほかのメソッドと、`/webhooks/` の下のほかのパスは 404。
 
-## GitHub リポジトリ（M3）
+## GitHub リポジトリ
 
 | メソッドとパス | 内容 |
 | --- | --- |
@@ -842,7 +840,7 @@ ARCHITECTURE 9.6「定期実行」。登録タスクに予定を書くと、koro
 
 GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイルがない、または GitHub App が未インストール）、`503 github_rate_limited`、`502 github_error`、GitHub App が未設定なら `503 not_configured`。
 
-### 環境変数の初期値（2026-11-21）
+### 環境変数の初期値
 
 `GET /api/repos/{owner}/{repo}/env-presets?ref=main&path=compose.yaml`: アプリの作成画面に並べる環境変数の初期値（ARCHITECTURE 9.8）。`ref` はブランチ（省くとリポジトリの既定のブランチ）、`path` は Compose ファイル（省くと直下から自動検出）。
 
@@ -869,7 +867,7 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 - `status` は `ok` / `unavailable`。`unavailable` のとき `reason` は `repo_unavailable`（GitHub App からも認証なしでも読めない。ブランチがない場合も）、`rate_limited`、`github_error`、`not_configured`（GitHub App も認証なしの読み取りもない）のいずれかで、ほかは空。読めなくても 200 で返す（作成画面は欄を出さない）。1 MiB を超えるファイルは読まずに、ないものとして判定する。
 - `ref` か `path` の形が不正なら 422。
 
-## 独自ドメイン（M2）
+## 独自ドメイン
 
 ドメインの形:
 
@@ -899,7 +897,7 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 | `PATCH /api/apps/{slug}/domains/{id}` | ボディ `{"is_primary": true}` や `{"force_active": true}`。200 でドメイン。プライマリはアプリに 1 つで、`active` のドメインだけがなれる |
 | `DELETE /api/apps/{slug}/domains/{id}` | 204 |
 
-## 実行ログ（M5）
+## 実行ログ
 
 ログ行の形: `{"service": "web", "time": "2026-11-18T03:00:00.123Z", "line": "Listening on 0.0.0.0:3000"}`
 
@@ -912,9 +910,9 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 
 `tail` は 1〜2000（既定 200）、`limit` は 1〜5000（既定 1000）。オブジェクトストレージが未設定なら、退避済みログの 2 つの API は `503 not_configured`。`key` がそのアプリのログでなければ 422。
 
-ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させていたが、SSE と JSON を同じパスで出し分けると扱いにくいので `/logs/history` に分けた。
+過去ログの検索は、ライブ tail の `/logs` と別の `/logs/history` に置く。SSE と JSON を同じパスで出し分けると扱いにくいため。
 
-## バックアップ（M5）
+## バックアップ
 
 | メソッドとパス | 内容 |
 | --- | --- |
@@ -945,7 +943,7 @@ ARCHITECTURE 10.1 では過去ログの検索も `/logs` に同居させてい�
 
 バックアップが未設定（`[storage]` か restic のパスワードファイルがない）のとき、`GET /api/backups` は `configured: false` で応答し、`GET /api/apps/{slug}/volumes` と `GET /api/apps/{slug}/backups/status` は通常どおり応答し、それ以外は `503 not_configured`。そのアプリのものでないスナップショットや、種別が合わないスナップショット（volume のリストアにダンプを指定するなど）は `404 snapshot_not_found`。リストアはアプリを停止・起動するので、デプロイ中は `409 busy`。
 
-## レビューアプリ（2026-11-22）
+## レビューアプリ
 
 staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9）。パスの `{slug}` は親。
 
@@ -969,7 +967,7 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
 - `data_copy` は親のデータのコピー: `""`（作成時にコピーしないと選んだ）/ `waiting`（最初のデプロイの成功を待っている）/ `started`（始めた。状態は `GET /api/apps/{slug}/db-copies`）/ `skipped`（`data_copy_detail` が `no_dump_hook` か `no_load_hook`）/ `failed`（`data_copy_detail` が `source_not_running`、`target_not_running`、`target_not_staging`、`parent_missing`、`error`）。
 - `data_copy_status` は親からの直近の DB のコピー（やり直しを含む）の状態: `running` / `succeeded` / `failed`、なければ `""`。
 
-アプリの形の `review_apps_allowed` と `review_apps`（2026-11-23）:
+アプリの形の `review_apps_allowed` と `review_apps`:
 
 - `review_apps_allowed` は、この親でレビューアプリを作れるか（既定 `false`）。`PATCH /api/apps/{slug}` で変えられるのはオーナーだけ（管理のメンバーが今と違う値を送ると `403 forbidden_role`、`details.fields` に `review_apps_allowed`）。`true` にするのは直近 10 分以内のログインが要り（`403 reauth_required`）、親になれないアプリ（下の `not_review_parent` の条件）では `422 validation_failed`（`details.review_apps_allowed`）。`false` にしても、作ってあるレビューアプリはそのまま使える。この項目ができる前からレビューアプリを持っていた親は `true` で始まる。
 - `review_apps` は、レビューアプリでないアプリなら `{"count", "failed", "deploying"}`（レビューアプリの数、そのうち直近のデプロイの失敗かデータのコピーの失敗があるもの、デプロイ中のもの）、レビューアプリなら `null`。コンテナの不調は数えない。
@@ -999,7 +997,7 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
 
 レビューアプリのロールは親のロールに従うので、`PUT /api/members/{id}/roles/{slug}` でレビューアプリを指すと `422 role_follows_parent`。
 
-## DB のコピー（2026-11-21）
+## DB のコピー
 
 本番アプリの DB を staging アプリへ流し込む（ARCHITECTURE 10.6）。パスの `{slug}` は受け側（staging）のアプリ。
 

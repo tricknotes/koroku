@@ -1428,7 +1428,7 @@ Heroku の Review Apps に当たるもの。staging アプリ（8.2）を親に�
 | オブジェクトストレージ側の保持 | プレフィックス `logs/` に 90 日で削除するライフサイクルルールを設定（[S3: Lifecycle configuration](https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html) と同等の機能。koroku からは設定しない） |
 | 閲覧 | ライブ tail（SSE）。過去 14 日は日付・サービス・キーワードで絞り込み。それ以前は presigned URL でダウンロード（[S3: Presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)） |
 
-- API: `GET /api/apps/{slug}/logs?service=&from=&to=&q=`、`GET /api/apps/{slug}/logs/archives`、`GET /api/apps/{slug}/logs/archives/url?key=`。
+- API: `GET /api/apps/{slug}/logs?service=&tail=`（ライブ tail）、`GET /api/apps/{slug}/logs/history?service=&from=&to=&q=`（過去ログの検索）、`GET /api/apps/{slug}/logs/archives`、`GET /api/apps/{slug}/logs/archives/url?key=`。
 
 **ログ収集の細則**
 
@@ -1442,7 +1442,7 @@ Heroku の Review Apps に当たるもの。staging アプリ（8.2）を親に�
 - 退避は「日ごとのファイルのどこまで送ったか」をバイト位置で記録し、送る範囲を保存してからアップロードする。失敗や再起動のあとは同じ範囲を同じキーへ送り直すので、重複も欠落も起きない。失敗した時間枠は次回（および 10 分後の再試行）にその時間枠のキーで送る。空の時間枠は何も送らない。
 - デプロイログは、30 分間更新がなければ完了とみなして `logs/<slug>/_deploy/<id>.log.gz` に 1 回だけ退避する。
 - オブジェクトストレージが未設定でもログの収集・検索・ライブ表示は動く。退避と、退避済みログの一覧・ダウンロードだけが無効になる。
-- 過去ログの検索は `/logs/history` に分けた（`docs/API.md`）。SSE と JSON を同じパスで出し分けると扱いにくいため。
+- 過去ログの検索はライブ tail と別のパス（`/logs/history`、`docs/API.md`）に置く。SSE と JSON を同じパスで出し分けると扱いにくいため。
 - 制約: 直近の区間は VPS 上にしかない。ホストを失うと最大 4 時間分のログが消える。間隔は設定値（既定 4 時間、最短 1 時間）。1 回の処理はサービスごとに差分テキストの圧縮と 1 オブジェクトのアップロードだけで、常駐負荷は増えない。
 
 ### 10.2 バックアップ
