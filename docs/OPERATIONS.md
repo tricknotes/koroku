@@ -51,7 +51,7 @@ sudo ./deploy/provision.sh ./koroku
 | 5 | Docker と Caddy の公式 apt リポジトリを追加 |
 | 6 | `apt-get full-upgrade`（カーネルを含む） |
 | 7 | Docker Engine と Compose プラグイン。Compose が 2.30 未満なら止まる |
-| 8 | Caddy。2.7 未満なら止まる。アクセスログ用の `/var/log/caddy/apps`（`caddy` 所有、0750）を作る |
+| 8 | Caddy。2.8 未満なら止まる。アクセスログ用の `/var/log/caddy/apps`（`caddy` 所有、0750）を作る |
 | 9 | restic 0.19.1（公式リリースのバイナリ、SHA-256 を照合）を `/usr/local/bin/restic` に置く |
 | 10 | 2GB の swap ファイル `/swapfile` と `/etc/fstab` への登録。有効な swap が合計 2GB 以上あれば何もしない。続けて zswap を有効にする（`/etc/tmpfiles.d/koroku-zswap.conf` に置き、その場でも反映する） |
 | 11 | `/etc/koroku` と `/var/lib/koroku`（どちらも 0700）、`/etc/koroku/config.toml`（なければ例から作成、0600）、`/usr/local/bin/koroku`、`koroku.service` |
@@ -103,7 +103,9 @@ sudo ./deploy/provision.sh ./koroku
 | `[storage] endpoint`、`region`、`bucket`、`access_key_id`、`secret_access_key` | S3 互換のオブジェクトストレージ。endpoint と region は事業者の S3 互換 API のもの（region の概念がなければ `auto`）。パス形式（`https://<endpoint>/<bucket>/<key>`）で接続する。バケットは先に作っておく（`koroku` も restic もバケットは作らない）。このセクションがないと、ログは VPS 内にだけ残り、バックアップは無効になる |
 | `[backup] restic_password_file` | `/etc/koroku/restic.key`（0600）。中身は自分で決めたパスワード 1 行。ファイルがない、または他人が読める権限だとバックアップは無効になる |
 | `[backup] hour`、`timezone` | 日次バックアップの時刻（既定は `Asia/Tokyo` の 3 時）。`timezone` は定期タスクの予定（ARCHITECTURE 9.6）とログの日付の区切りにも使う |
+| `[deploy] disk_usage_limit_percent` | データディスク（`data_dir` のあるファイルシステム）の使用率がこの値（既定 85）を超えている間、新しいデプロイを断る。この値に 5 を足した使用率（既定では 90%）以上の間は、ログの収集も行を捨てる。ログには `[koroku] The disk of the host is 90% full or more. ...` という行が入り、`journalctl -u koroku` に `the disk is almost full; log lines are dropped until space is freed` が出る。空きを作れば（システム画面の削除、不要な volume やアプリの削除）、10 秒以内に自動で再開する |
 | `[logs] retention_days`、`archive_interval_hours` | ログのローカル保持日数（既定 14）と退避の間隔（既定 4 時間） |
+| `[logs] daily_limit_mb` | 1 つのサービス（コンテナの出力、またはアプリのアクセスログ）が 1 日に残せるログの量（MiB。既定 100、1〜2048）。届くと、そのサービスの行は日付が変わるまで捨てられ、ログには `[koroku] The log of this service reached 100 MiB for this day. ...` という行が 1 行入る。捨てた行数は `journalctl -u koroku` に `dropping log lines` / `log lines were dropped`（アプリ、サービス、行数）として出る。上げて `koroku` を再起動すれば、その日のうちにまた残り始める。全サービスが毎日上限に届いたときのディスクの目安は ARCHITECTURE 10.1 |
 | `[tasks] timeout_minutes` | 管理 UI から実行するワンオフのコマンドと定期タスクの制限時間（既定 30 分、1〜1440） |
 
 `[github]` を書かないと誰もログインできない（API は 401 を返す）。`koroku serve --insecure-no-auth` は開発機専用で、unit ファイルには書かない。

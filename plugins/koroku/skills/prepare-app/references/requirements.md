@@ -220,6 +220,7 @@ koroku は、Compose に読ませる前に、Compose ファイルと、そこか
 | ホスト名やドメインの直書き | 同じリポジトリが `<slug>-staging` と `<slug>` の両方で動き、独自ドメインも足せる。ホスト名は環境変数にする |
 | 開発モード | koroku にアプリの開発モードはない。本番の設定で起動する Compose にする。開発用の設定（ソースの bind mount、ホットリロード、デバッグ用のポート）は `compose.override.yaml` に分けると、手元の `docker compose up` では自動で重なり、koroku では使われない（koroku は `-f` を明示するため）。`compose.override.yaml` を `.gitignore` するかコミットするかは利用者の流儀に合わせる |
 | ログをファイルに書く | koroku は `docker compose logs` を集める。標準出力と標準エラーに出す（Rails なら `RAILS_LOG_TO_STDOUT=1`、Rails 7.1 以降は既定で標準出力） |
+| 大量のログ | koroku が残すのは、1 サービスにつき 1 日 100 MiB まで（ホストの設定で変わる）。超えた分は日付が変わるまで残らず、ログに `[koroku] The log of this service reached ...` の行が 1 行入る。本番ではログレベルを `info` 以上にし、リクエストごとの本文やデバッグ出力を標準出力に流さない。1 行は 16 KiB で切られる |
 | アセットの実行時生成 | ソースを bind mount できないので、アセットのビルドはイメージのビルド時に行う |
 | ヘルスチェックパスが重い・5xx を返す | 起動直後に DB などへ依存せず、すぐ 200 を返すパスを用意する（Rails 7.1 以降の `/up` など）。認証が要るパスでも、3xx や 401 は 5xx でないので通る |
 | 起動に時間がかかる | `up --wait` は 300 秒、HTTP 確認は 60 秒で打ち切る。公開サービスに `healthcheck` を書いておくと、`up --wait` がそれを待つ。`healthcheck` がないと、起動直後に落ちて再起動を繰り返していても `up --wait` は成功し、HTTP 確認で初めて失敗が分かる |

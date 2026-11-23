@@ -37,6 +37,30 @@
             {
               "handle": [
                 {
+                  "handler": "log_append",
+                  "key": "user_agent",
+                  "value": "{http.request.header.User-Agent}"
+                },
+                {
+                  "handler": "log_append",
+                  "key": "location",
+                  "value": "{http.response.header.Location}"
+                }
+              ],
+              "match": [
+                {
+                  "host": [
+                    "blog.dev.example.com",
+                    "shop-staging.dev.example.com",
+                    "shop.dev.example.com",
+                    "staging.example.org"
+                  ]
+                }
+              ]
+            },
+            {
+              "handle": [
+                {
                   "flush_interval": -1,
                   "handler": "reverse_proxy",
                   "headers": {
@@ -170,7 +194,46 @@
     "logs": {
       "access-blog": {
         "encoder": {
-          "format": "json"
+          "fields": {
+            "location": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{500}).+|([ !#-\\[\\]-~]{0,499})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "request>headers": {
+              "filter": "delete"
+            },
+            "request>host": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{300}).+|([ !#-\\[\\]-~]{0,299})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "request>method": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{32}).+|([ !#-\\[\\]-~]{0,31})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "request>tls": {
+              "filter": "delete"
+            },
+            "request>uri": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{1000}).+|([ !#-\\[\\]-~]{0,999})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "resp_headers": {
+              "filter": "delete"
+            },
+            "user_agent": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{200}).+|([ !#-\\[\\]-~]{0,199})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            }
+          },
+          "format": "filter",
+          "wrap": {
+            "format": "json"
+          }
         },
         "include": [
           "http.log.access.blog.app"
@@ -185,7 +248,46 @@
       },
       "access-shop": {
         "encoder": {
-          "format": "json"
+          "fields": {
+            "location": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{500}).+|([ !#-\\[\\]-~]{0,499})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "request>headers": {
+              "filter": "delete"
+            },
+            "request>host": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{300}).+|([ !#-\\[\\]-~]{0,299})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "request>method": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{32}).+|([ !#-\\[\\]-~]{0,31})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "request>tls": {
+              "filter": "delete"
+            },
+            "request>uri": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{1000}).+|([ !#-\\[\\]-~]{0,999})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "resp_headers": {
+              "filter": "delete"
+            },
+            "user_agent": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{200}).+|([ !#-\\[\\]-~]{0,199})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            }
+          },
+          "format": "filter",
+          "wrap": {
+            "format": "json"
+          }
         },
         "include": [
           "http.log.access.shop.app"
@@ -200,7 +302,46 @@
       },
       "access-shop-staging": {
         "encoder": {
-          "format": "json"
+          "fields": {
+            "location": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{500}).+|([ !#-\\[\\]-~]{0,499})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "request>headers": {
+              "filter": "delete"
+            },
+            "request>host": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{300}).+|([ !#-\\[\\]-~]{0,299})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "request>method": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{32}).+|([ !#-\\[\\]-~]{0,31})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "request>tls": {
+              "filter": "delete"
+            },
+            "request>uri": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{1000}).+|([ !#-\\[\\]-~]{0,999})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            },
+            "resp_headers": {
+              "filter": "delete"
+            },
+            "user_agent": {
+              "filter": "regexp",
+              "regexp": "(?s)^(?:([ !#-\\[\\]-~]{200}).+|([ !#-\\[\\]-~]{0,199})[^ !#-\\[\\]-~].*)$",
+              "value": "${1}${2}..."
+            }
+          },
+          "format": "filter",
+          "wrap": {
+            "format": "json"
+          }
         },
         "include": [
           "http.log.access.shop-staging.app"

@@ -208,7 +208,8 @@ func openGzipOnly(d dayFiles) (*gzipFile, error) {
 
 // gzipContentSize returns the uncompressed size recorded in the trailer of a
 // gzip file. The files are written by compressDay as a single member; the
-// field wraps at 4 GiB, which a day of one service is assumed not to reach.
+// field wraps at 4 GiB, which a day of one service does not reach: the
+// collector stops writing a day at Options.MaxDayBytes.
 func gzipContentSize(f *os.File) (int64, error) {
 	info, err := f.Stat()
 	if err != nil {
@@ -331,6 +332,8 @@ func scanEntriesReverse(path string, fn func(ts time.Time, text []byte) bool) er
 type appState struct {
 	mu      sync.Mutex
 	writers map[string]*dayWriter // by service
+	// drops holds, by service, the lines being dropped at the moment.
+	drops map[string]*dropRun
 }
 
 // dayWriter appends to the plain file of one service for one day.
@@ -339,6 +342,34 @@ type dayWriter struct {
 	file  *os.File
 	buf   *bufio.Writer
 	dirty bool
+	// size is the length of the day's content, the gzip part included.
+	size int64
+	// full says that the day reached Options.MaxDayBytes: nothing more is
+	// written to it. fullMarked says that the file tells its readers so.
+	full       bool
+	fullMarked bool
+	// diskMarked says that the last entry of the file is the marker of
+	// the lines being dropped because of the disk.
+	diskMarked bool
+}
+
+// Why a line was dropped instead of written, as koroku's own log names it.
+const (
+	dropDailyLimit = "daily_limit"
+	dropDiskUsage  = "disk_usage"
+)
+
+// dropReportEvery is how often koroku's own log repeats how many lines of a
+// service were dropped, while it goes on.
+const dropReportEvery = 10 * time.Minute
+
+// dropRun counts the lines of one service that are dropped in a row for the
+// same reason and day.
+type dropRun struct {
+	reason     string
+	date       string
+	lines      int64
+	reportedAt time.Time
 }
 
 func (c *Collector) state(slug string) *appState {
@@ -346,33 +377,47 @@ func (c *Collector) state(slug string) *appState {
 	defer c.mu.Unlock()
 	st := c.states[slug]
 	if st == nil {
-		st = &appState{writers: map[string]*dayWriter{}}
+		st = &appState{writers: map[string]*dayWriter{}, drops: map[string]*dropRun{}}
 		c.states[slug] = st
 	}
 	return st
 }
 
 // write appends lines to the day files of slug, in order, and then hands
-// them to the live subscribers. The lines are on disk when it returns.
+// what it wrote to the live subscribers. The lines are on disk when it
+// returns, except those that were dropped (see writeLocked).
 func (c *Collector) write(slug string, lines []Line) error {
 	if len(lines) == 0 {
 		return nil
 	}
+	diskFull := c.diskIsFull()
 	st := c.state(slug)
 	st.mu.Lock()
-	err := c.writeLocked(st, slug, lines)
+	written, err := c.writeLocked(st, slug, lines, diskFull)
 	st.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	c.publish(slug, lines)
+	c.publish(slug, written)
 	return nil
 }
 
-func (c *Collector) writeLocked(st *appState, slug string, lines []Line) error {
+// writeLocked appends lines to their day files and returns what it wrote.
+//
+// A line that would take its day file beyond Options.MaxDayBytes is dropped,
+// and so is everything that comes for that service and day afterwards. While
+// diskFull is set, every line is dropped. Where the dropping starts, one
+// marker entry is written in place of the lines, so that a reader of the
+// file, of the live stream or of the archive sees the gap. The marker
+// carries the time of the first dropped line. Dropped lines are counted in
+// koroku's own log, without their content.
+func (c *Collector) writeLocked(st *appState, slug string, lines []Line, diskFull bool) ([]Line, error) {
 	var scratch []byte
 	var firstErr error
-	for _, line := range lines {
+	now := c.clk.Now()
+	// written is lines itself until a line is dropped.
+	written, copied := lines, false
+	for i, line := range lines {
 		date := c.day(line.Time)
 		w := st.writers[line.Service]
 		if w == nil || w.date != date {
@@ -383,17 +428,45 @@ func (c *Collector) writeLocked(st *appState, slug string, lines []Line) error {
 				}
 			}
 			var err error
-			w, err = openDayWriter(c.serviceDir(slug, line.Service), date)
+			w, err = c.openDayWriter(c.serviceDir(slug, line.Service), date)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			st.writers[line.Service] = w
 		}
 		scratch = appendEntry(scratch[:0], line.Time, line.Text)
-		if _, err := w.buf.Write(scratch); err != nil {
-			return fmt.Errorf("write log file: %w", err)
+		if !w.full && w.size+int64(len(scratch)) > c.maxDayBytes {
+			w.full = true
 		}
-		w.dirty = true
+		if !w.full && !diskFull {
+			if err := w.append(scratch); err != nil {
+				return nil, err
+			}
+			w.diskMarked = false
+			c.endDrop(st, slug, line.Service)
+			if copied {
+				written = append(written, line)
+			}
+			continue
+		}
+
+		if !copied {
+			written, copied = append(make([]Line, 0, len(lines)), lines[:i]...), true
+		}
+		// A full day wins: its marker stays the last entry of the file.
+		reason, text, marked := dropDailyLimit, c.fullMarker, &w.fullMarked
+		if !w.full {
+			reason, text, marked = dropDiskUsage, c.diskMarker, &w.diskMarked
+		}
+		if !*marked {
+			marker := Line{Service: line.Service, Time: line.Time, Text: text}
+			if err := w.append(appendEntry(scratch[:0], marker.Time, marker.Text)); err != nil {
+				return nil, err
+			}
+			*marked = true
+			written = append(written, marker)
+		}
+		c.countDrop(st, slug, line.Service, reason, date, now)
 	}
 	for _, w := range st.writers {
 		if !w.dirty {
@@ -404,10 +477,45 @@ func (c *Collector) writeLocked(st *appState, slug string, lines []Line) error {
 			firstErr = fmt.Errorf("write log file: %w", err)
 		}
 	}
-	return firstErr
+	return written, firstErr
 }
 
-func openDayWriter(dir, date string) (*dayWriter, error) {
+// countDrop notes one dropped line of service in koroku's own log: when the
+// dropping starts, and then how many lines it was so far every
+// dropReportEvery. The caller holds st.mu.
+func (c *Collector) countDrop(st *appState, slug, service, reason, date string, now time.Time) {
+	run := st.drops[service]
+	if run != nil && (run.reason != reason || run.date != date) {
+		c.endDrop(st, slug, service)
+		run = nil
+	}
+	if run == nil {
+		run = &dropRun{reason: reason, date: date, reportedAt: now}
+		st.drops[service] = run
+		c.log.Warn("dropping log lines", "app", slug, "service", service, "reason", reason, "day", date)
+	}
+	run.lines++
+	if now.Sub(run.reportedAt) >= dropReportEvery {
+		run.reportedAt = now
+		c.log.Warn("still dropping log lines", "app", slug, "service", service, "reason", reason, "day", date, "dropped_lines", run.lines)
+	}
+}
+
+// endDrop notes in koroku's own log how many lines of service were dropped,
+// once its lines are written again or its collection ends. The caller holds
+// st.mu.
+func (c *Collector) endDrop(st *appState, slug, service string) {
+	run := st.drops[service]
+	if run == nil {
+		return
+	}
+	delete(st.drops, service)
+	c.log.Info("log lines were dropped", "app", slug, "service", service, "reason", run.reason, "day", run.date, "dropped_lines", run.lines)
+}
+
+// openDayWriter opens the plain file of a day for appending and finds out
+// how much the day holds already.
+func (c *Collector) openDayWriter(dir, date string) (*dayWriter, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create log directory: %w", err)
 	}
@@ -416,15 +524,70 @@ func openDayWriter(dir, date string) (*dayWriter, error) {
 		return nil, fmt.Errorf("open log file: %w", err)
 	}
 	w := &dayWriter{date: date, file: f, buf: bufio.NewWriterSize(f, 64<<10)}
-	// A process that died in the middle of a write leaves half a line.
-	// End it, so the next entry starts on a line of its own.
 	if info, err := f.Stat(); err == nil && info.Size() > 0 {
+		w.size = info.Size()
+		// A process that died in the middle of a write leaves half a line.
+		// End it, so the next entry starts on a line of its own.
 		var last [1]byte
 		if _, err := f.ReadAt(last[:], info.Size()-1); err == nil && last[0] != '\n' {
 			_ = w.buf.WriteByte('\n')
+			w.size++
+		}
+		// A day that ends with the marker was full when the file was
+		// closed, and stays full. The marker names the limit, so a day
+		// that filled up under a lower limit takes lines again.
+		switch string(lastShortEntry(f, info.Size())) {
+		case c.fullMarker:
+			w.full, w.fullMarked = true, true
+		case c.diskMarker:
+			// Still the same gap, if the disk is still full.
+			w.diskMarked = true
 		}
 	}
+	// Lines that arrive for a day that is compressed already count on top
+	// of the compressed part. Whether that part ends with the marker is
+	// not looked up: such a day gets one more marker with its late lines.
+	if zr, err := openGzipOnly(dayFiles{dir: dir, date: date}); err == nil && zr != nil {
+		if size, err := gzipContentSize(zr.file); err == nil {
+			w.size += size
+		}
+		zr.Close()
+	}
 	return w, nil
+}
+
+// lastShortEntry returns the text of the last entry of a plain day file of
+// size bytes, or nil when the file does not end with a complete entry or
+// that entry is longer than a marker ever is.
+func lastShortEntry(f *os.File, size int64) []byte {
+	const window = 1024
+	n := min(size, window)
+	buf := make([]byte, n)
+	if _, err := f.ReadAt(buf, size-n); err != nil || n == 0 || buf[n-1] != '\n' {
+		return nil
+	}
+	buf = buf[:n-1]
+	switch i := bytes.LastIndexByte(buf, '\n'); {
+	case i >= 0:
+		buf = buf[i+1:]
+	case size > n:
+		return nil // the entry starts before the window
+	}
+	_, text, ok := parseEntry(buf)
+	if !ok {
+		return nil
+	}
+	return text
+}
+
+// append writes one entry, in its file representation, to the buffer.
+func (w *dayWriter) append(entry []byte) error {
+	if _, err := w.buf.Write(entry); err != nil {
+		return fmt.Errorf("write log file: %w", err)
+	}
+	w.size += int64(len(entry))
+	w.dirty = true
+	return nil
 }
 
 func (w *dayWriter) close() error {
@@ -447,6 +610,9 @@ func (c *Collector) closeWriters(slug string) {
 	for service, w := range st.writers {
 		_ = w.close()
 		delete(st.writers, service)
+	}
+	for service := range st.drops {
+		c.endDrop(st, slug, service)
 	}
 }
 

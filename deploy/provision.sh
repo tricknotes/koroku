@@ -21,8 +21,9 @@ set -Eeuo pipefail
 
 # Compose merges the generated override with !override and !reset.
 readonly MIN_COMPOSE_VERSION=2.30.0
-# The generated Caddy configuration uses stream_close_delay.
-readonly MIN_CADDY_VERSION=2.7.0
+# The generated Caddy configuration uses stream_close_delay (2.7) and the
+# log_append handler (2.8).
+readonly MIN_CADDY_VERSION=2.8.0
 # restic comes from the official release, pinned by checksum (the reason is in
 # docs/OPERATIONS.md). To move to another release, change both values; the
 # checksum is in the SHA256SUMS file of that release.
@@ -363,7 +364,7 @@ install_caddy() {
   CADDY_VERSION=${CADDY_VERSION#v}
   info "Caddy $CADDY_VERSION"
   if ! version_ge "$CADDY_VERSION" "$MIN_CADDY_VERSION"; then
-    die "Caddy $CADDY_VERSION is older than $MIN_CADDY_VERSION, which koroku needs for stream_close_delay"
+    die "Caddy $CADDY_VERSION is older than $MIN_CADDY_VERSION, which the configuration koroku generates needs (log_append)"
   fi
 
   # One access log per app is written here by Caddy and read by koroku (root).

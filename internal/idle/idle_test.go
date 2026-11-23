@@ -112,11 +112,13 @@ func (f *fixture) pass(d time.Duration) {
 	f.tracker.Check(context.Background())
 }
 
+// entry is an access log entry as the generated proxy configuration writes
+// it: no headers, the Location of the response as a field of its own.
 func entry(status int, location string) []byte {
-	if location == "" {
-		return []byte(`{"msg":"handled request","status":` + strconv.Itoa(status) + `}`)
-	}
-	return []byte(`{"msg":"handled request","status":` + strconv.Itoa(status) + `,"resp_headers":{"Location":["` + location + `"]}}`)
+	return []byte(`{"level":"info","ts":1795457699.7890637,"logger":"http.log.access.blog.app","msg":"handled request",` +
+		`"request":{"remote_ip":"203.0.113.5","remote_port":"59528","client_ip":"203.0.113.5","proto":"HTTP/2.0","method":"GET","host":"blog.dev.example.com","uri":"/"},` +
+		`"bytes_read":0,"user_id":"","duration":0.000584597,"size":0,"status":` + strconv.Itoa(status) +
+		`,"location":"` + location + `","user_agent":"Mozilla/5.0"}`)
 }
 
 func TestIdleAppGoesToSleep(t *testing.T) {
@@ -198,9 +200,17 @@ func TestGateAnswersDoNotKeepAProtectedAppAwake(t *testing.T) {
 	}
 	// A request that passed the gate counts, and so does an app's own redirect.
 	if !counts(entry(200, ""), true, f.tracker.ConsoleURL) ||
-		!counts(entry(302, "https://staging.example.org/login"), true, f.tracker.ConsoleURL) ||
-		!counts([]byte("not json"), true, f.tracker.ConsoleURL) {
+		!counts(entry(302, "https://staging.example.org/login"), true, f.tracker.ConsoleURL) {
 		t.Error("requests that reached the app must count")
+	}
+	// An entry that cannot be read is not known to have passed the gate.
+	// Without a gate, every entry is a request.
+	cut := entry(200, "")[:40]
+	if counts(cut, true, f.tracker.ConsoleURL) || counts([]byte("not json"), true, f.tracker.ConsoleURL) {
+		t.Error("an unreadable entry must not keep a protected app awake")
+	}
+	if !counts(cut, false, f.tracker.ConsoleURL) {
+		t.Error("every entry of an unprotected app must count")
 	}
 }
 

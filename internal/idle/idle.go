@@ -113,31 +113,30 @@ func (t *Tracker) Observe(slug string, entry []byte) {
 // app awake. For a protected app, what the gate answered without letting
 // the request through (the redirect to the console's login, 401) does not:
 // a crawler that cannot log in must not keep the app awake.
+//
+// The entry is the JSON the generated proxy configuration writes (package
+// caddy): the status and, in the field "location", the Location header of
+// the response. Such an entry is always short enough to be collected whole,
+// so one that cannot be read is not something the proxy wrote for a request
+// that got through, and it does not keep a protected app awake either.
 func counts(entry []byte, protected bool, consoleURL string) bool {
 	if !protected {
 		return true
 	}
 	var e struct {
-		Status      int                 `json:"status"`
-		RespHeaders map[string][]string `json:"resp_headers"`
+		Status   int    `json:"status"`
+		Location string `json:"location"`
 	}
 	if json.Unmarshal(entry, &e) != nil {
-		return true
+		return false
 	}
 	switch e.Status {
 	case 401:
 		return false
 	case 302:
 		gate := strings.TrimSuffix(consoleURL, "/") + "/auth/gate"
-		for name, values := range e.RespHeaders {
-			if !strings.EqualFold(name, "Location") {
-				continue
-			}
-			for _, v := range values {
-				if consoleURL != "" && strings.HasPrefix(v, gate) {
-					return false
-				}
-			}
+		if consoleURL != "" && strings.HasPrefix(e.Location, gate) {
+			return false
 		}
 	}
 	return true
