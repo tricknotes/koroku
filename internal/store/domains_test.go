@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -148,6 +149,35 @@ func TestForceActiveDomain(t *testing.T) {
 	}
 	if err := s.SetDomainForceActive(ctx, app.ID, 999, false); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown domain err = %v", err)
+	}
+}
+
+func TestAddDomainStopsAtTheLimit(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	app := mustCreateApp(t, s, "blog")
+	other := mustCreateApp(t, s, "shop")
+	for i := range MaxDomainsPerApp {
+		if _, err := s.AddDomain(ctx, app.ID, fmt.Sprintf("h%d.example.org", i), testNow); err != nil {
+			t.Fatalf("domain %d: %v", i, err)
+		}
+	}
+	if _, err := s.AddDomain(ctx, app.ID, "more.example.org", testNow); !errors.Is(err, ErrTooManyDomains) {
+		t.Errorf("one over the limit: err = %v", err)
+	}
+	// The limit is per app, and a deleted domain makes room again.
+	if _, err := s.AddDomain(ctx, other.ID, "more.example.org", testNow); err != nil {
+		t.Errorf("another app: %v", err)
+	}
+	list, err := s.ListDomains(ctx, app.ID)
+	if err != nil || len(list) != MaxDomainsPerApp {
+		t.Fatalf("list = %d domains, %v", len(list), err)
+	}
+	if err := s.DeleteDomain(ctx, app.ID, list[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddDomain(ctx, app.ID, "again.example.org", testNow); err != nil {
+		t.Errorf("after deleting one: %v", err)
 	}
 }
 

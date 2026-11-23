@@ -617,6 +617,19 @@ function appTabShots() {
   const ENV = '[data-test-env-row]';
   const DOMAIN = '[data-test-domain-default]';
   const PENDING = '[data-test-domain-pending]';
+  // Adds a domain to an app that has as many as it can have, and brings the
+  // refusal under the form into view.
+  const ADD_ONE_DOMAIN_MORE = `(async () => {
+    const field = document.querySelector('[data-test-domain-hostname]');
+    field.value = 'www.example.net';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('[data-test-domain-add]').click();
+    const error = '[data-test-domain-add-section] [data-test-error]';
+    while (!document.querySelector(error)) {
+      await new Promise((done) => setTimeout(done, 50));
+    }
+    document.querySelector(error).scrollIntoView({ block: 'center' });
+  })()`;
   // Types into the bulk editor the way a paste would.
   const badDotenv = [
     '# pasted from a local file',
@@ -931,6 +944,22 @@ function appTabShots() {
       wait: DOMAIN,
       clicks: ['[data-test-domain-add]'],
       themes: ['light'],
+    },
+    {
+      name: 'domains-limit',
+      path: '/apps/blog/settings?section=domains&scenario=domains-full',
+      wait: DOMAIN,
+      script: ADD_ONE_DOMAIN_MORE,
+      then: '[data-test-domain-add-section] [data-test-error]',
+    },
+    {
+      name: 'domains-limit-phone',
+      path: '/apps/blog/settings?section=domains&scenario=domains-full',
+      wait: DOMAIN,
+      script: ADD_ONE_DOMAIN_MORE,
+      then: '[data-test-domain-add-section] [data-test-error]',
+      ...PHONE,
+      fullPage: false,
     },
     {
       name: 'domains-delete',

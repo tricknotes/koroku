@@ -89,6 +89,14 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "hostname_taken", "this hostname is already registered")
 		return
 	}
+	if errors.Is(err, store.ErrTooManyDomains) {
+		writeJSON(w, http.StatusUnprocessableEntity, errorBody{Error: errorDetail{
+			Code:    "too_many_domains",
+			Message: "this app has as many custom domains as it can have; delete one before adding another",
+			Details: map[string]any{"limit": store.MaxDomainsPerApp},
+		}})
+		return
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return

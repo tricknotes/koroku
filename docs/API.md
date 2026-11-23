@@ -29,6 +29,7 @@
 | 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found`、`db_copy_not_found` | 対象がない。メンバーがロールを持たないアプリ（とそのデプロイ・実行・コピー）も、存在しないものとして同じ 404 になる（`code` も `message` も、存在しないときと同じ） |
 | 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens`、`not_deployed`、`promotion_unavailable`、`promotion_stale` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
+| 422 | `too_many_domains`（`details.limit`） | アプリの独自ドメインが上限（20 個）に達している（独自ドメインの節） |
 | 429 | `rate_limited` | API トークンの利用回数の上限（1 分あたり 120 回）を超えた。`Retry-After` あり |
 | 507 | `disk_full`（`details.used_percent`、`details.limit_percent`） | ディスク使用率が上限超過でデプロイ拒否 |
 | 500 | `internal` | サーバー側の失敗（詳細はサーバーログ） |
@@ -915,7 +916,7 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/domains` | `{"default_hostname": "blog.dev.example.com", "domains": [ドメイン, ...]}` |
-| `POST /api/apps/{slug}/domains` | ボディ `{"hostname": "www.example.org"}`。201 でドメイン（直後に 1 回検証する）。重複は `409 hostname_taken`、ベースドメイン配下や不正な名前は 422 |
+| `POST /api/apps/{slug}/domains` | ボディ `{"hostname": "www.example.org"}`。201 でドメイン（直後に 1 回検証する）。重複は `409 hostname_taken`、ベースドメイン配下や不正な名前は 422。独自ドメインはアプリごとに 20 個まで（`pending` のものを含む）で、すでに 20 個あれば `422 too_many_domains`（`details.limit` が `20`）。削除すれば、また追加できる |
 | `POST /api/apps/{slug}/domains/{id}/verify` | 再検証。200 でドメイン |
 | `PATCH /api/apps/{slug}/domains/{id}` | ボディ `{"is_primary": true}` や `{"force_active": true}`。200 でドメイン。プライマリはアプリに 1 つで、`active` のドメインだけがなれる。`force_active`（DNS の検証を飛ばして `active` にする）を今と違う値にできるのはオーナーだけで、メンバーには `403 forbidden_role`（`details.required` が `owner`、`details.fields` が `["force_active"]`）を返し、同じリクエストの `is_primary` も適用しない |
 | `DELETE /api/apps/{slug}/domains/{id}` | 204 |

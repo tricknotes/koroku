@@ -68,6 +68,8 @@ export const SCENARIOS = {
     'review apps as in review-apps, logged in as the member mia (manage on blog-staging, no role on shop-staging); review apps are not allowed on blog-staging any more',
   'promote-unpaired':
     'everything fine, but blog has no promotion source (shop still promotes from shop-staging)',
+  'domains-full':
+    'everything fine; blog has 20 custom domains, as many as an app can have',
   member:
     'logged in as the member mia, not the owner: deploy on blog, manage on blog-staging (with a custom domain waiting for DNS and one the owner forced active), view on shop, no role on shop-staging',
   'webhook-unset':
@@ -1151,6 +1153,17 @@ export function buildScenario(name) {
           last_error: 'lookup preview.example.org: no such host',
         }),
       );
+      return state;
+    }
+    case 'domains-full': {
+      // blog has as many custom domains as an app can have (ARCHITECTURE
+      // 8.1): the next one is refused.
+      const state = scenario(healthyApps());
+      const list = state.domains.get('blog');
+      for (let n = 1; list.length < 20; n++) {
+        const hostname = `site-${String(n).padStart(2, '0')}.example.org`;
+        list.push(domain(10 + n, hostname, 'blog'));
+      }
       return state;
     }
     case 'review-allowed': {
