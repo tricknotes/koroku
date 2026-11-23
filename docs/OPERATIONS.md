@@ -51,7 +51,7 @@ sudo ./deploy/provision.sh ./koroku
 | 5 | Docker と Caddy の公式 apt リポジトリを追加 |
 | 6 | `apt-get full-upgrade`（カーネルを含む） |
 | 7 | Docker Engine と Compose プラグイン。Compose が 2.30 未満なら止まる |
-| 8 | Caddy。2.7 未満なら止まる。アクセスログ用の `/var/log/caddy/apps`（`caddy` 所有、0750）を作る |
+| 8 | Caddy。2.8 未満なら止まる。アクセスログ用の `/var/log/caddy/apps`（`caddy` 所有、0750）を作る |
 | 9 | restic 0.19.1（公式リリースのバイナリ、SHA-256 を照合）を `/usr/local/bin/restic` に置く |
 | 10 | 2GB の swap ファイル `/swapfile` と `/etc/fstab` への登録。有効な swap が合計 2GB 以上あれば何もしない。続けて zswap を有効にする（`/etc/tmpfiles.d/koroku-zswap.conf` に置き、その場でも反映する） |
 | 11 | `/etc/koroku` と `/var/lib/koroku`（どちらも 0700）、`/etc/koroku/config.toml`（なければ例から作成、0600）、`/usr/local/bin/koroku`、`koroku.service` |

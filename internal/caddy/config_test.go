@@ -259,6 +259,11 @@ func TestGenerateServesOnlyKnownHosts(t *testing.T) {
 			}
 			var got []string
 			for i, route := range https.Routes {
+				// The route that adds fields to the access log answers
+				// nothing; it is checked by TestGenerateAccessLogFields.
+				if i == 0 && len(route.Handle) > 0 && route.Handle[0].Handler == "log_append" {
+					continue
+				}
 				last := i == len(https.Routes)-1
 				if last {
 					if len(route.Match) != 0 || len(route.Handle) != 1 || route.Handle[0].StatusCode != 404 {
@@ -344,6 +349,145 @@ func TestGenerateAccessLoggersArePrefixFree(t *testing.T) {
 	}
 	if got := cfg.Logging.Logs["access-shop-staging"].Writer.Filename; got != "/var/log/caddy/apps/shop-staging.log" {
 		t.Errorf("filename = %q", got)
+	}
+}
+
+// The access log holds no headers: they are what a client can make large,
+// and they carry cookies and credentials. The User-Agent and the Location
+// are added as fields of their own for the requests to app hostnames, and
+// what a client chooses is cut.
+func TestGenerateAccessLogFields(t *testing.T) {
+	type config struct {
+		Apps struct {
+			HTTP struct {
+				Servers map[string]struct {
+					Routes []struct {
+						Match []struct {
+							Host []string `json:"host"`
+						} `json:"match"`
+						Handle []struct {
+							Handler string `json:"handler"`
+							Key     string `json:"key"`
+							Value   string `json:"value"`
+						} `json:"handle"`
+						Terminal bool `json:"terminal"`
+					} `json:"routes"`
+				} `json:"servers"`
+			} `json:"http"`
+		} `json:"apps"`
+		Logging struct {
+			Logs map[string]struct {
+				Encoder struct {
+					Format string `json:"format"`
+					Wrap   struct {
+						Format string `json:"format"`
+					} `json:"wrap"`
+					Fields map[string]struct {
+						Filter string `json:"filter"`
+						Regexp string `json:"regexp"`
+						Value  string `json:"value"`
+					} `json:"fields"`
+				} `json:"encoder"`
+			} `json:"logs"`
+		} `json:"logging"`
+	}
+	for name, in := range goldenInputs() {
+		t.Run(name, func(t *testing.T) {
+			out, err := Generate(in)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			var cfg config
+			if err := json.Unmarshal(out, &cfg); err != nil {
+				t.Fatal(err)
+			}
+			first := cfg.Apps.HTTP.Servers["https"].Routes[0]
+			adds := len(first.Handle) > 0 && first.Handle[0].Handler == "log_append"
+			if in.AccessLogDir == "" {
+				if adds || len(cfg.Logging.Logs) != 0 {
+					t.Fatalf("access log settings without an access log: %s", out)
+				}
+				return
+			}
+			if !adds {
+				t.Fatalf("the first route does not add the access log fields: %+v", first)
+			}
+			var hosts []string
+			for _, app := range in.Apps {
+				hosts = append(hosts, app.Hostnames...)
+			}
+			slices.Sort(hosts)
+			if len(first.Match) != 1 || !slices.Equal(first.Match[0].Host, hosts) || first.Terminal {
+				t.Errorf("the route must match the app hostnames %v and go on: %+v", hosts, first)
+			}
+			added := map[string]string{}
+			for _, h := range first.Handle {
+				if h.Handler != "log_append" {
+					t.Errorf("unexpected handler %q", h.Handler)
+				}
+				added[h.Key] = h.Value
+			}
+			wantAdded := map[string]string{
+				"user_agent": "{http.request.header.User-Agent}",
+				"location":   "{http.response.header.Location}",
+			}
+			if !reflect.DeepEqual(added, wantAdded) {
+				t.Errorf("added fields = %v, want %v", added, wantAdded)
+			}
+
+			for _, app := range in.Apps {
+				enc := cfg.Logging.Logs["access-"+app.Slug].Encoder
+				if enc.Format != "filter" || enc.Wrap.Format != "json" {
+					t.Fatalf("%s: encoder = %+v", app.Slug, enc)
+				}
+				for _, field := range []string{"request>headers", "request>tls", "resp_headers"} {
+					if enc.Fields[field].Filter != "delete" {
+						t.Errorf("%s: %s is not deleted", app.Slug, field)
+					}
+				}
+				for field, max := range map[string]int{
+					"request>method": 32, "request>host": 300, "request>uri": 1000,
+					"user_agent": 200, "location": 500,
+				} {
+					f := enc.Fields[field]
+					if f.Filter != "regexp" {
+						t.Errorf("%s: %s is not cut", app.Slug, field)
+						continue
+					}
+					// Caddy compiles the expression with Go's regexp package
+					// and replaces with ReplaceAllString.
+					re, err := regexp.Compile(f.Regexp)
+					if err != nil {
+						t.Errorf("%s: %s: %v", app.Slug, field, err)
+						continue
+					}
+					full := strings.Repeat("a", max-1) + "~"
+					for in, want := range map[string]string{
+						"":                                  "",
+						"/posts?q=a%20b#[x]":                "/posts?q=a%20b#[x]",
+						full:                                full,
+						full + "b":                          full + "...",
+						full + "\xff":                       full + "...",
+						full + "\n" + full:                  full + "...",
+						"/a\xffb":                           "/a...",
+						"/caf\u00e9/" + full:                "/caf...",
+						`say "hi"`:                          "say ...",
+						`C:\path`:                           "C:...",
+						"\x00\x01":                          "...",
+						strings.Repeat("\xff", 5000) + full: "...",
+					} {
+						got := re.ReplaceAllString(in, f.Value)
+						if got != want {
+							t.Errorf("%s: %s: %d bytes were turned into %q", app.Slug, field, len(in), got)
+						}
+						// Every kept character takes one byte in JSON.
+						if enc, _ := json.Marshal(got); len(enc) != len(got)+2 || len(got) > max+3 {
+							t.Errorf("%s: %s: the cut value takes %d bytes in JSON", app.Slug, field, len(enc))
+						}
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -555,7 +699,9 @@ func TestGenerateProtectedRoutes(t *testing.T) {
 	find := func(host string) testRoute {
 		t.Helper()
 		for _, r := range cfg.Apps.HTTP.Servers["https"].Routes {
-			if len(r.Match) == 1 && strings.Contains(string(r.Match[0]["host"]), `"`+host+`"`) {
+			// The route that answers is terminal; the one that adds the
+			// access log fields is not.
+			if r.Terminal && len(r.Match) == 1 && strings.Contains(string(r.Match[0]["host"]), `"`+host+`"`) {
 				return r
 			}
 		}
@@ -649,7 +795,9 @@ func TestGenerateSleepingRoutes(t *testing.T) {
 	find := func(host string) testRoute {
 		t.Helper()
 		for _, r := range cfg.Apps.HTTP.Servers["https"].Routes {
-			if len(r.Match) == 1 && strings.Contains(string(r.Match[0]["host"]), `"`+host+`"`) {
+			// The route that answers is terminal; the one that adds the
+			// access log fields is not.
+			if r.Terminal && len(r.Match) == 1 && strings.Contains(string(r.Match[0]["host"]), `"`+host+`"`) {
 				return r
 			}
 		}

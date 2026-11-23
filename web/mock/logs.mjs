@@ -47,19 +47,24 @@ function accessLine(seed, at) {
   return JSON.stringify({
     level: 'info',
     ts: at / 1000,
-    logger: 'http.log.access',
+    logger: 'http.log.access.blog.app',
     msg: 'handled request',
     request: {
       remote_ip: pick(CLIENTS, seed >>> 5),
+      remote_port: String(40000 + (seed % 20000)),
+      client_ip: pick(CLIENTS, seed >>> 5),
       proto: 'HTTP/2.0',
       method: 'GET',
       host: 'blog.dev.example.com',
       uri: path,
-      headers: { 'User-Agent': [AGENT], Accept: ['text/html'] },
     },
+    bytes_read: 0,
+    user_id: '',
     duration: (5 + (seed % 90)) / 1000,
     size: 2048 + (seed % 30000),
     status: 200,
+    location: '',
+    user_agent: AGENT,
   });
 }
 

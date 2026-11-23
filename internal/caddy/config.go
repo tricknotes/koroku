@@ -46,6 +46,23 @@ const (
 	accessLogRollSizeMB   = 50
 	accessLogRollKeep     = 5
 	accessLogRollKeepDays = 14
+
+	// What a client chooses is cut in the access log to this many bytes
+	// (see cutField), so that an entry stays small however the request is
+	// made: about 2.5 KiB at most, far below the line length the log
+	// collector keeps (16 KiB).
+	accessLogMaxMethod    = 32
+	accessLogMaxHost      = 300
+	accessLogMaxURI       = 1000
+	accessLogMaxUserAgent = 200
+	accessLogMaxLocation  = 500
+)
+
+// Fields added to an access log entry in place of the headers, which are not
+// logged. internal/idle reads accessLogLocationField.
+const (
+	accessLogUserAgentField = "user_agent"
+	accessLogLocationField  = "location"
 )
 
 // stoppedPage is served with status 503 for apps that are stopped. Caddy
@@ -139,7 +156,11 @@ func Generate(in Input) ([]byte, error) {
 		return nil, fmt.Errorf("generate caddy config: %w", err)
 	}
 
-	routes := []obj{consoleRoute(in)}
+	var routes []obj
+	if fields := accessLogFieldsRoute(in); fields != nil {
+		routes = append(routes, fields)
+	}
+	routes = append(routes, consoleRoute(in))
 	for _, app := range in.Apps {
 		routes = append(routes, appRoutes(app, in.ConsoleUpstream)...)
 	}
@@ -696,11 +717,82 @@ func logging(in Input) obj {
 				"roll_keep":      accessLogRollKeep,
 				"roll_keep_days": accessLogRollKeepDays,
 			},
-			"encoder": obj{"format": "json"},
+			"encoder": accessLogEncoder(),
 			"include": []string{logger},
 		}
 	}
 	return obj{"logs": logs}
+}
+
+// accessLogFieldsRoute adds the User-Agent of the request and the Location
+// of the response to the access log entry of every request for an app
+// hostname. It sits in front of the routes that answer and is not terminal;
+// the values are read once the rest of the chain has answered. It is nil
+// when no access log is written.
+func accessLogFieldsRoute(in Input) obj {
+	if in.AccessLogDir == "" {
+		return nil
+	}
+	var hosts []string
+	for _, app := range in.Apps {
+		hosts = append(hosts, app.Hostnames...)
+	}
+	if len(hosts) == 0 {
+		return nil
+	}
+	slices.Sort(hosts)
+	return obj{
+		"match": []obj{{"host": hosts}},
+		"handle": []obj{
+			{"handler": "log_append", "key": accessLogUserAgentField, "value": "{http.request.header.User-Agent}"},
+			{"handler": "log_append", "key": accessLogLocationField, "value": "{http.response.header.Location}"},
+		},
+	}
+}
+
+// accessLogEncoder writes an access log entry as JSON without the request
+// and response headers and the TLS details, and with everything a client
+// chooses cut to a fixed length.
+//
+// The headers are what makes an entry large (a client can send many, up to
+// the server's limit) and they carry cookies and credentials. The two values
+// worth keeping are added by accessLogFieldsRoute.
+func accessLogEncoder() obj {
+	return obj{
+		"format": "filter",
+		"wrap":   obj{"format": "json"},
+		"fields": obj{
+			"request>headers":       obj{"filter": "delete"},
+			"request>tls":           obj{"filter": "delete"},
+			"resp_headers":          obj{"filter": "delete"},
+			"request>method":        cutField(accessLogMaxMethod),
+			"request>host":          cutField(accessLogMaxHost),
+			"request>uri":           cutField(accessLogMaxURI),
+			accessLogUserAgentField: cutField(accessLogMaxUserAgent),
+			accessLogLocationField:  cutField(accessLogMaxLocation),
+		},
+	}
+}
+
+// plainLogChar matches one character that takes one byte in a JSON log
+// entry: printable ASCII other than the double quote and the backslash.
+// Anything else is written as an escape of up to six bytes.
+const plainLogChar = `[ !#-\[\]-~]`
+
+// cutField is a log field filter that keeps a value up to its first max
+// plain characters, or up to the first character that is not plain (URLs and
+// well-formed header values have none), and marks the cut with "...". A value
+// of at most max plain characters stays as it is. So the field takes at most
+// max+3 bytes of an entry. max is between 1 and 1000, the largest repeat
+// count a Go regular expression takes.
+func cutField(max int) obj {
+	long := "(" + plainLogChar + "{" + strconv.Itoa(max) + "}).+"
+	other := "(" + plainLogChar + "{0," + strconv.Itoa(max-1) + "})[^" + plainLogChar[1:] + ".*"
+	return obj{
+		"filter": "regexp",
+		"regexp": "(?s)^(?:" + long + "|" + other + ")$",
+		"value":  "${1}${2}...",
+	}
 }
 
 // checkHostname accepts a lowercase fully qualified hostname: no wildcard, no
