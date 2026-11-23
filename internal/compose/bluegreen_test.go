@@ -14,11 +14,11 @@ func blueGreenParams(p Project) OverrideParams {
 		DefaultMemory: "512m",
 		ProjectName:   "koroku-blog",
 		ReleaseTag:    "r43",
-		Production:    true,
+		Production:     true,
+		ReleaseEnvFile: "/var/lib/koroku/apps/blog/env.release",
 		BlueGreen: &BlueGreenParams{
-			ComposeFile:    "compose.yaml",
-			AltHostPort:    20002,
-			ReleaseEnvFile: "/var/lib/koroku/apps/blog/env.release",
+			ComposeFile: "compose.yaml",
+			AltHostPort: 20002,
 		},
 	}
 }
@@ -47,7 +47,7 @@ func TestBlueGreenOverrideGolden(t *testing.T) {
 	image.WebPort = 80
 	image.ReleaseTag = ""
 	image.Production = false
-	image.BlueGreen.CommitImages = []string{"cache"}
+	image.CommitServices = []string{"cache"}
 	got, err = Override(image)
 	if err != nil {
 		t.Fatal(err)
@@ -58,22 +58,6 @@ func TestBlueGreenOverrideGolden(t *testing.T) {
 	bad.BlueGreen.AltHostPort = bad.HostPort
 	if _, err := Override(bad); err == nil {
 		t.Error("the same port for both colours was accepted")
-	}
-}
-
-func TestCommitImageServices(t *testing.T) {
-	actual := Project{Services: map[string]Service{
-		"web":    {Build: &Build{}},
-		"worker": {Image: "ghcr.io/octo/app:sha-aaaaaaa"},
-		"db":     {Image: "postgres:17"},
-	}}
-	probe := Project{Services: map[string]Service{
-		"web":    {Build: &Build{}},
-		"worker": {Image: "ghcr.io/octo/app:sha-0000000"},
-		"db":     {Image: "postgres:17"},
-	}}
-	if got := CommitImageServices(actual, probe); !slices.Equal(got, []string{"worker"}) {
-		t.Errorf("CommitImageServices = %v", got)
 	}
 }
 

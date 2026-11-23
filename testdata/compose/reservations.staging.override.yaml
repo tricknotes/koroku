@@ -27,6 +27,7 @@ services:
     ports: !reset []
     env_file:
       - "/var/lib/koroku/apps/shop/env"
+      - "/var/lib/koroku/apps/shop/env.release"
     mem_limit: "512m"
     oom_score_adj: 500
     mem_reservation: !reset null
@@ -41,6 +42,7 @@ services:
       - "127.0.0.1:20003:3000"
     env_file:
       - "/var/lib/koroku/apps/shop/env"
+      - "/var/lib/koroku/apps/shop/env.release"
     restart: unless-stopped
     oom_score_adj: 500
     mem_reservation: !reset null

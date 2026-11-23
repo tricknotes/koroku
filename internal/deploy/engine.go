@@ -269,8 +269,8 @@ type releaseMeta struct {
 	PulledImages []string `json:"pulled_images,omitempty"`
 	// BlueGreen marks a release in the blue/green form (ARCHITECTURE 7.2);
 	// Services are the services of its merged project, the public service
-	// and its coloured copies included, and ReleaseEnvServices the ones
-	// that read the release env file.
+	// and its coloured copies included. ReleaseEnvServices are the ones
+	// that read the release env file (ARCHITECTURE 6).
 	BlueGreen          bool     `json:"blue_green,omitempty"`
 	Services           []string `json:"services,omitempty"`
 	ReleaseEnvServices []string `json:"release_env_services,omitempty"`
@@ -309,10 +309,11 @@ func (e *Engine) invocation(app store.App, id int64, composeFile string, withOve
 		files = append(files, filepath.Join(dir, compose.OverrideFileName))
 	}
 	inv := compose.Invocation{ProjectName: app.ProjectName(), Files: files, EnvFile: e.EnvFile(app.Slug)}
-	if e.releaseIsBlueGreen(app.Slug, id) {
-		// Interpolation also sees the commit variables (ARCHITECTURE 7.2).
+	if e.hasReleaseEnv(app.Slug, id) {
+		// Interpolation also sees the commit variables (ARCHITECTURE 6).
 		inv.ReleaseEnvFile = e.ReleaseEnvFile(app.Slug)
 	}
+	inv.BlueGreen = withOverride && e.releaseIsBlueGreen(app.Slug, id)
 	return inv
 }
 

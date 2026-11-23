@@ -413,7 +413,7 @@ func TestDeploySucceeds(t *testing.T) {
 	}
 
 	// The steps ran in the documented order.
-	want := []string{"config", "config", "build", "pull", psGraces, "up", "image prune -f"}
+	want := []string{"config", "config", "config", "build", "pull", psGraces, "up", "image prune -f"}
 	if got := h.dockerCalls(); !slices.Equal(got, want) {
 		t.Errorf("docker calls = %v, want %v", got, want)
 	}
@@ -422,7 +422,7 @@ func TestDeploySucceeds(t *testing.T) {
 	wantUp := []string{"compose", "-p", "koroku-blog",
 		"-f", filepath.Join(release, "compose.yaml"),
 		"-f", filepath.Join(release, compose.OverrideFileName),
-		"--env-file", h.engine.EnvFile("blog"),
+		"--env-file", h.engine.EnvFile("blog"), "--env-file", h.engine.ReleaseEnvFile("blog"),
 		"up", "-d", "--pull", "missing", "--remove-orphans", "--wait", "--wait-timeout", "300"}
 	if !slices.Equal(up.Args, wantUp) {
 		t.Errorf("up args = %v\nwant      %v", up.Args, wantUp)
@@ -441,7 +441,7 @@ func TestDeploySucceeds(t *testing.T) {
 		t.Errorf("env file mode = %04o, want 0600", info.Mode().Perm())
 	}
 	env, _ := os.ReadFile(envPath)
-	if string(env) != "DATABASE_URL=postgres://app:s3cr3t-password@db/app\nKOROKU_COMMIT_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nKOROKU_COMMIT_SHORT=aaaaaaa\nRAILS_ENV=production\n" {
+	if string(env) != "DATABASE_URL=postgres://app:s3cr3t-password@db/app\nRAILS_ENV=production\n" {
 		t.Errorf("env file = %q", env)
 	}
 
@@ -565,7 +565,7 @@ func TestDeployImageOnlySkipsBuild(t *testing.T) {
 	if d.Status != store.StatusSucceeded {
 		t.Fatalf("deployment = %+v\n%s", d, h.log("blog", d.ID))
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "pull", psGraces, "up"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "config", "pull", psGraces, "up"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 }
@@ -581,7 +581,7 @@ func TestPolicyViolationFailsBeforeTouchingContainers(t *testing.T) {
 	if d.Status != store.StatusFailed || !strings.Contains(d.Error, "privileged") {
 		t.Fatalf("deployment = %+v", d)
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "config"}) {
 		t.Errorf("no build, up or rollback may run: %v", got)
 	}
 	if !strings.Contains(h.log("blog", d.ID), "Policy violation: [privileged]") {
@@ -658,7 +658,7 @@ func TestFailedStartRollsBackToPreviousRelease(t *testing.T) {
 	// The output of the failed containers is read, then the previous
 	// release is validated again and started, and the failed release's
 	// image is removed.
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", psGraces, "up", "logs", "config", "up", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "config", "build", "pull", psGraces, "up", "logs", "config", "up", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	rollback := h.lastCall("up")
@@ -668,7 +668,7 @@ func TestFailedStartRollsBackToPreviousRelease(t *testing.T) {
 		t.Errorf("rollback args = %v", rollback.Args)
 	}
 	env, _ := os.ReadFile(h.engine.EnvFile("blog"))
-	if string(env) != "GREETING=version-one\nKOROKU_COMMIT_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nKOROKU_COMMIT_SHORT=aaaaaaa\n" {
+	if string(env) != "GREETING=version-one\n" {
 		t.Errorf("env file after rollback = %q, want the previous release's environment", env)
 	}
 	got, _ := h.store.GetApp(context.Background(), "blog")
@@ -704,7 +704,7 @@ func TestFailedHealthCheckRollsBack(t *testing.T) {
 	// The output of the failed containers is read, then the previous
 	// release is validated again and started, and the failed release's
 	// image is removed.
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", psGraces, "up", "logs", "config", "up", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "config", "build", "pull", psGraces, "up", "logs", "config", "up", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	if !strings.Contains(h.log("blog", second.ID), fmt.Sprintf("Rolling back to deployment #%d", first.ID)) {
@@ -734,7 +734,7 @@ func TestFailedFirstDeployRemovesContainers(t *testing.T) {
 	if d.Status != store.StatusFailed {
 		t.Fatalf("deployment = %+v", d)
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", psGraces, "up", "logs", "down", "image rm koroku-blog-web:r1", "ps --all --no-trunc --format {{.Image}}", "image rm postgres:17"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "config", "build", "pull", psGraces, "up", "logs", "down", "image rm koroku-blog-web:r1", "ps --all --no-trunc --format {{.Image}}", "image rm postgres:17"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	down := h.lastCall("down")
@@ -765,7 +765,7 @@ func TestBuildFailureDoesNotRollBack(t *testing.T) {
 	if second.Status != store.StatusFailed || !strings.Contains(second.Error, "build") {
 		t.Fatalf("deployment = %+v", second)
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "config", "build", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
 		t.Errorf("a build failure must not touch running containers: %v", got)
 	}
 	if second.ContainersReplaced == nil || *second.ContainersReplaced {
@@ -773,7 +773,7 @@ func TestBuildFailureDoesNotRollBack(t *testing.T) {
 	}
 	// The running release keeps its environment until a start is attempted.
 	env, _ := os.ReadFile(h.engine.EnvFile("blog"))
-	if string(env) != "GREETING=version-one\nKOROKU_COMMIT_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nKOROKU_COMMIT_SHORT=aaaaaaa\n" {
+	if string(env) != "GREETING=version-one\n" {
 		t.Errorf("env file = %q", env)
 	}
 	got, _ := h.store.GetApp(context.Background(), "blog")
@@ -1339,7 +1339,7 @@ func TestBackupBeforeDeploy(t *testing.T) {
 	if second.Status != store.StatusSucceeded {
 		t.Fatalf("second deployment = %+v", second)
 	}
-	want := []string{"config(backups=0)", "config(backups=0)", "build(backups=0)", "pull(backups=0)", psGraces + "(backups=1)", "up(backups=1)"}
+	want := []string{"config(backups=0)", "config(backups=0)", "config(backups=0)", "build(backups=0)", "pull(backups=0)", psGraces + "(backups=1)", "up(backups=1)"}
 	if !slices.Equal(order, want) {
 		t.Errorf("order = %v", order)
 	}

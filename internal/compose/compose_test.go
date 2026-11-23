@@ -186,6 +186,8 @@ func TestOverrideGolden(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.golden, func(t *testing.T) {
 			tc.params.Project = loadProject(t, tc.name)
+			// Every release has the release env file next to the env file.
+			tc.params.ReleaseEnvFile = tc.params.EnvFile + ".release"
 			got, err := Override(tc.params)
 			if err != nil {
 				t.Fatalf("Override: %v", err)

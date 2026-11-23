@@ -66,10 +66,9 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if err != nil {
 		return false, err
 	}
-	envVars, releaseVars := vars, map[string]string(nil)
-	if blueGreen {
-		envVars, releaseVars = splitCommitVars(vars)
-	}
+	// The commit variables go to the services every deployment recreates
+	// anyway (ARCHITECTURE 6).
+	envVars, releaseVars := splitCommitVars(vars)
 	envContent, err := RenderEnvFile(envVars)
 	if err != nil {
 		return false, err
@@ -86,15 +85,13 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if err := writeFileAtomic(snapshot, []byte(envContent), 0o600); err != nil {
 		return false, fmt.Errorf("write env snapshot: %w", err)
 	}
-	snapshotRelease, releaseContent := "", ""
-	if blueGreen {
-		if releaseContent, err = RenderEnvFile(releaseVars); err != nil {
-			return false, err
-		}
-		snapshotRelease = e.releaseEnvSnapshot(app.Slug, d.ID)
-		if err := writeFileAtomic(snapshotRelease, []byte(releaseContent), 0o600); err != nil {
-			return false, fmt.Errorf("write env snapshot: %w", err)
-		}
+	releaseContent, err := RenderEnvFile(releaseVars)
+	if err != nil {
+		return false, err
+	}
+	snapshotRelease := e.releaseEnvSnapshot(app.Slug, d.ID)
+	if err := writeFileAtomic(snapshotRelease, []byte(releaseContent), 0o600); err != nil {
+		return false, fmt.Errorf("write env snapshot: %w", err)
 	}
 	meta := releaseMeta{ComposeFile: composeFile, BlueGreen: blueGreen}
 	if err := e.writeMeta(app.Slug, d.ID, meta); err != nil {
@@ -135,6 +132,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	overrideParams.WebPort = app.WebPort
 	overrideParams.HostPort = app.HostPort
 	overrideParams.EnvFile = e.EnvFile(app.Slug)
+	overrideParams.ReleaseEnvFile = e.ReleaseEnvFile(app.Slug)
 	overrideParams.ProjectName = app.ProjectName()
 	overrideParams.ReleaseTag = "r" + strconv.FormatInt(d.ID, 10)
 	if blueGreen {
@@ -144,18 +142,17 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 			}
 			return false, &compose.PolicyError{Violations: problems}
 		}
-		commitImages, err := e.commitImages(ctx, app, d.ID, base, releaseDir, releaseVars, repoProject, log)
-		if err != nil {
-			return false, err
-		}
 		overrideParams.BlueGreen = &compose.BlueGreenParams{
-			ComposeFile:    composeFile,
-			AltHostPort:    app.AltHostPort,
-			ReleaseEnvFile: e.ReleaseEnvFile(app.Slug),
-			CommitImages:   commitImages,
+			ComposeFile: composeFile,
+			AltHostPort: app.AltHostPort,
 		}
-		meta.ReleaseEnvServices = overrideParams.ReleaseEnvServices()
 	}
+	commitServices, err := e.commitServices(ctx, app, d.ID, base, releaseDir, releaseVars, repoProject, log)
+	if err != nil {
+		return false, err
+	}
+	overrideParams.CommitServices = commitServices
+	meta.ReleaseEnvServices = overrideParams.ReleaseEnvServices()
 	override, err := compose.Override(overrideParams)
 	if err != nil {
 		return false, err
@@ -188,11 +185,8 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	// 4. Validate the merged project. The override points every service at
 	// the live env file, which may not exist before the first deploy.
 	log.Step(StepValidate, "Validating the Compose project")
-	if err := ensureFile(e.EnvFile(app.Slug)); err != nil {
-		return false, fmt.Errorf("prepare env file: %w", err)
-	}
-	if blueGreen {
-		if err := ensureFile(e.ReleaseEnvFile(app.Slug)); err != nil {
+	for _, path := range []string{e.EnvFile(app.Slug), e.ReleaseEnvFile(app.Slug)} {
+		if err := ensureFile(path); err != nil {
 			return false, fmt.Errorf("prepare env file: %w", err)
 		}
 	}
@@ -203,6 +197,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if blueGreen {
 		// Build and pull see the public service the override disables.
 		merged.Profiles = []string{compose.DisabledProfile}
+		merged.BlueGreen = true
 	}
 	var configOutput strings.Builder
 	project, err := e.composeConfigTo(ctx, merged, releaseDir, io.MultiWriter(log.Writer(), &configOutput))
@@ -289,7 +284,8 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if err := e.endSleep(ctx, app, log); err != nil {
 		return false, err
 	}
-	if err := writeFileAtomic(e.EnvFile(app.Slug), []byte(envContent), 0o600); err != nil {
+	e.noteEnvChange(app, []byte(envContent), e.keptServices(app, project), meta.ReleaseEnvServices, log)
+	if err := e.writeLiveEnv(app.Slug, []byte(envContent), []byte(releaseContent)); err != nil {
 		return false, fmt.Errorf("write env file: %w", err)
 	}
 	if err := e.upRelease(ctx, app, d.ID, dockerConfig, e.deployRun(log)); err != nil {
@@ -398,7 +394,7 @@ func (e *Engine) composeConfig(ctx context.Context, inv compose.Invocation, dir 
 }
 
 func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, dir string, stderr io.Writer) (compose.Project, error) {
-	if inv.ReleaseEnvFile != "" && !slices.Contains(inv.Profiles, compose.DisabledProfile) {
+	if inv.BlueGreen && !slices.Contains(inv.Profiles, compose.DisabledProfile) {
 		// A blue/green release: the public service the override disables
 		// is part of the project to check (ARCHITECTURE 7.2).
 		inv.Profiles = append(slices.Clone(inv.Profiles), compose.DisabledProfile)

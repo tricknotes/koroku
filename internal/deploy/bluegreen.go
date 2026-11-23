@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -27,70 +25,11 @@ const (
 	StepDrain    = "drain"
 )
 
-// commitVars are the variables a blue/green release keeps in its release
-// env file: they change with every deployment.
-var commitVars = []string{"KOROKU_COMMIT_SHA", "KOROKU_COMMIT_SHORT"}
-
-// probeCommit stands in for the commit when telling which images follow it.
-const probeCommit = "0000000000000000000000000000000000000000"
-
-// ReleaseEnvFile is the env file with the commit variables of a blue/green
-// app, read only by the services every deployment recreates.
-func (e *Engine) ReleaseEnvFile(slug string) string {
-	return filepath.Join(e.appDir(slug), "env.release")
-}
-
-// releaseEnvSnapshot is the release env file as a blue/green release had
-// it. Its presence marks a release in the blue/green form.
-func (e *Engine) releaseEnvSnapshot(slug string, id int64) string {
-	return filepath.Join(e.stateDir(slug, id), "env.release")
-}
-
 // releaseIsBlueGreen reports whether the release of deployment id has the
 // blue/green form (coloured copies of the public service).
 func (e *Engine) releaseIsBlueGreen(slug string, id int64) bool {
-	_, err := os.Stat(e.releaseEnvSnapshot(slug, id))
-	return err == nil
-}
-
-// splitCommitVars separates the commit variables from the others.
-func splitCommitVars(vars map[string]string) (env, release map[string]string) {
-	env, release = map[string]string{}, map[string]string{}
-	for k, v := range vars {
-		if slices.Contains(commitVars, k) {
-			release[k] = v
-		} else {
-			env[k] = v
-		}
-	}
-	return env, release
-}
-
-// readEnvSnapshots reads the env snapshot of a release, and its release
-// env snapshot when it has the blue/green form (nil otherwise).
-func (e *Engine) readEnvSnapshots(slug string, id int64) (env, release []byte, err error) {
-	env, err = os.ReadFile(filepath.Join(e.stateDir(slug, id), "env"))
-	if err != nil {
-		return nil, nil, err
-	}
-	release, err = os.ReadFile(e.releaseEnvSnapshot(slug, id))
-	if errors.Is(err, os.ErrNotExist) {
-		return env, nil, nil
-	}
-	return env, release, err
-}
-
-// writeLiveEnv replaces the app's env files with a release's. release is
-// nil for a release without the release env file, which is left as it is:
-// nothing of that release reads it.
-func (e *Engine) writeLiveEnv(slug string, env, release []byte) error {
-	if err := writeFileAtomic(e.EnvFile(slug), env, 0o600); err != nil {
-		return err
-	}
-	if release != nil {
-		return writeFileAtomic(e.ReleaseEnvFile(slug), release, 0o600)
-	}
-	return nil
+	meta, err := e.readMeta(slug, id)
+	return err == nil && meta.BlueGreen
 }
 
 // policyParams are the policy parameters of a release of the app.
@@ -103,45 +42,14 @@ func (e *Engine) policyParams(app store.App, releaseDir string, blueGreen bool) 
 		WebPort:     app.WebPort,
 		HostPort:    app.HostPort,
 		Relax:       app.RelaxPolicy,
+		// Injected into the services that read the commit variables.
+		ReleaseEnvFile: e.ReleaseEnvFile(app.Slug),
 	}
 	if blueGreen {
 		params.BlueGreen = true
 		params.AltHostPort = app.AltHostPort
-		params.ReleaseEnvFile = e.ReleaseEnvFile(app.Slug)
 	}
 	return params
-}
-
-// commitImages normalizes the repository's project once more with a probe
-// commit and lists the services whose image follows the commit.
-func (e *Engine) commitImages(ctx context.Context, app store.App, id int64, base compose.Invocation,
-	releaseDir string, releaseVars map[string]string, actual compose.Project, log *deployLog,
-) ([]string, error) {
-	probeVars := map[string]string{}
-	for k := range releaseVars {
-		probeVars[k] = probeCommit
-	}
-	probeVars["KOROKU_COMMIT_SHORT"] = probeCommit[:7]
-	content, err := RenderEnvFile(probeVars)
-	if err != nil {
-		return nil, err
-	}
-	path := filepath.Join(e.stateDir(app.Slug, id), "env.probe")
-	if err := writeFileAtomic(path, []byte(content), 0o600); err != nil {
-		return nil, fmt.Errorf("write env probe: %w", err)
-	}
-	defer func() { _ = os.Remove(path) }()
-	probe := base
-	probe.ReleaseEnvFile = path
-	probed, err := e.composeConfig(ctx, probe, releaseDir, log)
-	if err != nil {
-		return nil, err
-	}
-	services := compose.CommitImageServices(actual, probed)
-	if len(services) > 0 {
-		log.Printf("Images that follow the commit: %s", strings.Join(services, ", "))
-	}
-	return services, nil
 }
 
 // BlueGreenProblems returns what keeps the app's running release from
@@ -444,7 +352,7 @@ func (e *Engine) deployBlueGreen(ctx context.Context, d store.Deployment, app st
 	if len(otherNames) == 0 {
 		log.Printf("No other service.")
 	} else {
-		e.noteEnvChange(app, rel, otherNames, log)
+		e.noteEnvChange(app, rel.env, otherNames, rel.releaseEnvServices, log)
 		args := append([]string{"up", "-d", "--pull", "missing", "--no-deps", "--wait", "--wait-timeout", e.waitSeconds()}, otherNames...)
 		if err := run(ctx, inv, dir, args...); err != nil {
 			e.logContainerOutput(ctx, app, log, otherNames...)
@@ -639,24 +547,6 @@ func (e *Engine) restoreOldRelease(app store.App, id int64, oldColor, newService
 		log.Printf("Removing %s failed: %v", newService, err)
 	}
 	return restored
-}
-
-// noteEnvChange warns when the app's own variables changed since the
-// running release: the services that do not read the commit variables are
-// recreated then, and requests may fail while, say, the database restarts.
-func (e *Engine) noteEnvChange(app store.App, rel blueGreenRelease, names []string, log *deployLog) {
-	if app.CurrentDeploymentID == nil {
-		return
-	}
-	previous, _, err := e.readEnvSnapshots(app.Slug, *app.CurrentDeploymentID)
-	if err == nil && string(previous) == string(rel.env) {
-		return
-	}
-	for _, name := range names {
-		if !slices.Contains(rel.releaseEnvServices, name) {
-			log.Printf("Recreating %s because the app's environment changed; requests may fail while it restarts.", name)
-		}
-	}
 }
 
 // drain waits the app's drain time after the switch, then stops and

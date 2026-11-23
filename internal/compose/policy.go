@@ -74,13 +74,15 @@ type PolicyParams struct {
 	WebService string
 	WebPort    int
 	HostPort   int
+	// ReleaseEnvFile is the second env file koroku injects, with the
+	// commit variables (ARCHITECTURE 6).
+	ReleaseEnvFile string
 	// BlueGreen checks a release in the blue/green form (ARCHITECTURE
 	// 7.2): the coloured copies of the public service publish on HostPort
-	// (blue) and AltHostPort (green), the public service itself publishes
-	// nothing, and ReleaseEnvFile is the second env file koroku injects.
-	BlueGreen      bool
-	AltHostPort    int
-	ReleaseEnvFile string
+	// (blue) and AltHostPort (green), and the public service itself
+	// publishes nothing.
+	BlueGreen   bool
+	AltHostPort int
 	// Relax waives the relaxable rules for this app.
 	Relax bool
 }

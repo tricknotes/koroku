@@ -15,6 +15,7 @@ services:
     ports: !reset []
     env_file:
       - "/var/lib/koroku/apps/blog/env"
+      - "/var/lib/koroku/apps/blog/env.release"
     mem_limit: "512m"
     oom_score_adj: 500
   "web":
@@ -23,6 +24,7 @@ services:
       - "127.0.0.1:20001:3000"
     env_file:
       - "/var/lib/koroku/apps/blog/env"
+      - "/var/lib/koroku/apps/blog/env.release"
     restart: unless-stopped
     mem_limit: "512m"
     oom_score_adj: 500
@@ -31,5 +33,6 @@ services:
     ports: !reset []
     env_file:
       - "/var/lib/koroku/apps/blog/env"
+      - "/var/lib/koroku/apps/blog/env.release"
     mem_limit: "512m"
     oom_score_adj: 500
