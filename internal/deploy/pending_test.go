@@ -74,6 +74,21 @@ func (h *harness) deploymentsAfter(appID, id int64) []store.Deployment {
 	return out
 }
 
+// waitDeploymentsAfter waits until the app has n deployments newer than id.
+// A run ends by unregistering itself and then queueing the deferred push,
+// so the deployment can appear just after waitTask returns.
+func (h *harness) waitDeploymentsAfter(appID, id int64, n int) []store.Deployment {
+	h.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got := h.deploymentsAfter(appID, id)
+		if len(got) >= n || time.Now().After(deadline) {
+			return got
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 func (h *harness) activity(appID int64) []store.Activity {
 	h.t.Helper()
 	list, err := h.store.ListActivity(context.Background(), appID, 0, 50)
@@ -100,7 +115,7 @@ func TestPushDuringACommandIsDeferredUntilItEnds(t *testing.T) {
 	}
 
 	finish()
-	got := h.deploymentsAfter(app.ID, before)
+	got := h.waitDeploymentsAfter(app.ID, before, 1)
 	if len(got) != 1 {
 		t.Fatalf("deployments after the command = %+v", got)
 	}
@@ -134,7 +149,7 @@ func TestWorkflowRunDuringACommandIsDeferred(t *testing.T) {
 		t.Fatalf("EnqueueWorkflowRun = %v", err)
 	}
 	finish()
-	got := h.deploymentsAfter(app.ID, before)
+	got := h.waitDeploymentsAfter(app.ID, before, 1)
 	if len(got) != 1 {
 		t.Fatalf("deployments = %+v", got)
 	}
@@ -157,7 +172,7 @@ func TestLaterPushReplacesTheDeferredOne(t *testing.T) {
 		t.Fatalf("pending = %+v, want the later push", p)
 	}
 	finish()
-	got := h.deploymentsAfter(app.ID, before)
+	got := h.waitDeploymentsAfter(app.ID, before, 1)
 	if len(got) != 1 || got[0].CommitSHA != shaC {
 		t.Fatalf("deployments = %+v, want only the later push", got)
 	}
