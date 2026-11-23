@@ -17,6 +17,7 @@ import (
 	"github.com/tricknotes/koroku/internal/config"
 	"github.com/tricknotes/koroku/internal/deploy"
 	"github.com/tricknotes/koroku/internal/runner"
+	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
 )
 
@@ -86,21 +87,27 @@ func toBackupApp(app store.App) backup.App {
 	return out
 }
 
-// dumpRunner makes sure an app's dump service runs while a dump is taken:
-// a sleeping app starts only that service (ARCHITECTURE 8.4).
-// *deploy.Engine implements it.
+// dumpRunner is what taking a dump needs from the deploy engine. It makes
+// sure an app's dump service runs while a dump is taken: a sleeping app
+// starts only that service (ARCHITECTURE 8.4). And it knows the secret
+// values the dump command can print, so that the message of a failed dump
+// does not show them (ARCHITECTURE 10.2).
 type dumpRunner interface {
 	WithServiceRunning(ctx context.Context, appID int64, service string, fn func(context.Context) error) error
+	OutputMasker(ctx context.Context, app store.App) (*secrets.Masker, error)
 }
 
 // toDumpingApp is toBackupApp for a backup that takes the dump: the dump
-// runs through dumps.
+// runs through dumps, and its output is masked with the app's values.
 func toDumpingApp(app store.App, dumps dumpRunner) backup.App {
 	out := toBackupApp(app)
 	if out.DumpService != "" && dumps != nil {
 		id, service := app.ID, out.DumpService
 		out.WithDumpService = func(ctx context.Context, run func(context.Context) error) error {
 			return dumps.WithServiceRunning(ctx, id, service, run)
+		}
+		out.OutputMasker = func(ctx context.Context) (*secrets.Masker, error) {
+			return dumps.OutputMasker(ctx, app)
 		}
 	}
 	return out
@@ -182,6 +189,15 @@ func (c *appController) WithServiceRunning(ctx context.Context, appID int64, ser
 		return fn(ctx)
 	}
 	return c.engine.WithServiceRunning(ctx, appID, service, fn)
+}
+
+// OutputMasker implements dumpRunner with the engine. Without an engine
+// the values are unknown, and the backup keeps nothing of the output.
+func (c *appController) OutputMasker(ctx context.Context, app store.App) (*secrets.Masker, error) {
+	if c.engine == nil {
+		return nil, errors.New("the deploy engine is not available")
+	}
+	return c.engine.OutputMasker(ctx, app)
 }
 
 // appVolumes lists the named volumes of an app for the API. It goes through

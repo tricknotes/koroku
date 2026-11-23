@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tricknotes/koroku/internal/runner"
+	"github.com/tricknotes/koroku/internal/secrets"
 )
 
 var blogWithHook = App{Slug: "blog", Project: "koroku-blog", DumpService: "db", DumpCommand: "pg_dump -U postgres app"}
@@ -93,6 +94,122 @@ func TestFailingDumpHookStopsResticBeforeEndOfStream(t *testing.T) {
 	// The hook's command line may hold a password; it is not in the error.
 	if strings.Contains(res.Error, "pg_dump -U") {
 		t.Errorf("the error repeats the hook's command line: %s", res.Error)
+	}
+}
+
+// failingDump makes the dump hook fail after writing stderr, and restic wait
+// for input that never ends.
+func failingDump(e *env, stderr string) {
+	reading := make(chan struct{})
+	e.host.set("docker compose", func(_ context.Context, cmd runner.Cmd) (string, error) {
+		<-reading
+		io.WriteString(cmd.Stderr, stderr)
+		return "", exit("docker", 1)
+	})
+	e.host.set("restic backup", func(ctx context.Context, cmd runner.Cmd) (string, error) {
+		close(reading)
+		_, err := readStdin(ctx, cmd.Stdin)
+		return "", err
+	})
+}
+
+// The message of a failed dump is read by everyone who may view the app, and
+// pg_dump prints the connection string it failed with: the values of the
+// app's variables are masked in it, like the storage keys.
+func TestFailedDumpMasksTheSecretsOfTheApp(t *testing.T) {
+	const password = "s3cret-db-passw0rd"
+	e := newEnv(t)
+	failingDump(e, "pg_dump: error: connection to \"postgres://app:"+password+"@db/app\" failed\n"+
+		"hint: the storage key is "+testSecretKey+"\n")
+	app := blogWithHook
+	asked := 0
+	app.OutputMasker = func(context.Context) (*secrets.Masker, error) {
+		asked++
+		return secrets.NewMasker(password), nil
+	}
+
+	res, err := e.m.BackupApp(context.Background(), app)
+	if !errors.Is(err, ErrRunFailed) {
+		t.Fatalf("err = %v, want ErrRunFailed", err)
+	}
+	if asked != 1 {
+		t.Errorf("the masker was asked for %d times, want once for the dump", asked)
+	}
+	want := `dump command: exit status 1: pg_dump: error: connection to "postgres://app:[MASKED]@db/app" failed; hint: the storage key is [MASKED]`
+	if tr := dumpTarget(t, res); tr.Err == nil || tr.Err.Error() != want {
+		t.Errorf("target error = %v, want %q", tr.Err, want)
+	}
+	recorded := e.rec.targets[len(e.rec.targets)-1]
+	if len(recorded) != 1 || recorded[0].Error != want {
+		t.Errorf("recorded targets = %+v", recorded)
+	}
+	for name, text := range map[string]string{
+		"run error": res.Error, "returned error": err.Error(),
+		"recorded run": strings.Join(e.rec.finished, "\n"), "log": e.logs.String(),
+	} {
+		if strings.Contains(text, password) || strings.Contains(text, testSecretKey) {
+			t.Errorf("the %s holds a secret: %s", name, text)
+		}
+	}
+}
+
+// The dump taken before a database copy goes through the same masking.
+func TestBackupDumpMasksTheSecretsOfTheApp(t *testing.T) {
+	const password = "s3cret-db-passw0rd"
+	e := newEnv(t)
+	failingDump(e, "pg_dump: error: password authentication failed for "+password+"\n")
+	app := blogWithHook
+	app.OutputMasker = func(context.Context) (*secrets.Masker, error) { return secrets.NewMasker(password), nil }
+
+	_, err := e.m.BackupDump(context.Background(), app)
+	want := "dump command: exit status 1: pg_dump: error: password authentication failed for [MASKED]"
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+	if strings.Contains(e.logs.String(), password) {
+		t.Errorf("the log holds the secret: %s", e.logs.String())
+	}
+}
+
+// When the values to mask cannot be loaded, the dump still runs (a backup
+// matters more than its error message), but nothing the command printed is
+// kept.
+func TestFailedDumpKeepsNoOutputWithoutTheSecretsOfTheApp(t *testing.T) {
+	const password = "s3cret-db-passw0rd"
+	e := newEnv(t)
+	failingDump(e, "pg_dump: error: password authentication failed for "+password+"\n")
+	app := blogWithHook
+	app.OutputMasker = func(context.Context) (*secrets.Masker, error) {
+		return nil, errors.New("environment variable DATABASE_URL: cannot be decrypted")
+	}
+
+	res, err := e.m.BackupApp(context.Background(), app)
+	if !errors.Is(err, ErrRunFailed) {
+		t.Fatalf("err = %v, want ErrRunFailed", err)
+	}
+	want := "dump command: exit status 1: " + outputWithheld
+	if tr := dumpTarget(t, res); tr.Err == nil || tr.Err.Error() != want {
+		t.Errorf("target error = %v, want %q", tr.Err, want)
+	}
+	if text := res.Error + e.logs.String(); strings.Contains(text, password) || strings.Contains(text, "pg_dump: error") {
+		t.Errorf("output of the command was kept: %s", text)
+	}
+	if !strings.Contains(e.logs.String(), "cannot be decrypted") {
+		t.Errorf("the log does not say why: %s", e.logs.String())
+	}
+
+	// A dump that succeeds is stored all the same.
+	e.host.set("docker compose", func(context.Context, runner.Cmd) (string, error) { return "-- dump\n", nil })
+	e.host.set("restic backup", func(ctx context.Context, cmd runner.Cmd) (string, error) {
+		data, err := readStdin(ctx, cmd.Stdin)
+		return summaryLine(e.host.newID(), len(data)), err
+	})
+	res, err = e.m.BackupApp(context.Background(), app)
+	if err != nil {
+		t.Fatalf("BackupApp with a working hook: %v", err)
+	}
+	if tr := dumpTarget(t, res); tr.SnapshotID == "" {
+		t.Errorf("target = %+v", tr)
 	}
 }
 
