@@ -619,7 +619,8 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
   "promoted_from": null,
   "actor": {"id": 1, "login": "octo"},
   "trigger": "manual",
-  "pusher": ""
+  "pusher": "",
+  "containers_replaced": true
 }
 ```
 
@@ -628,6 +629,8 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 `status` は `queued` / `running` / `succeeded` / `failed` / `canceled`。`source_deployment_id` は、ロールバック（ARCHITECTURE 7.1）の記録なら戻す先のデプロイの ID（`ref` は `rollback`）、通常のデプロイなら `null`。`rollback_available` は、そのデプロイのリリースへ再ビルドなしで戻せるか（成功していて、ファイルが残っている。ロールバックの記録なら戻す先について）。
 
 `trigger` は何がデプロイを始めたか（ARCHITECTURE 5.2）。`manual`（管理 UI か API。ロールバックと昇格を含む）か `push`（GitHub への push による自動デプロイ。待つワークフローの成功で始まったものも `push`）。`pusher` は `push` のとき push した GitHub の login（ワークフローを待ったものは実行の `actor`）、それ以外は空文字。`push` のデプロイの `ref` は push されたブランチ名。
+
+`containers_replaced` は、デプロイの実行が稼働中のコンテナに触れたか（起動の手順に入ったか。ARCHITECTURE 9.5）。成功したデプロイは `true`、起動より前に失敗したものは `false`。まだ終わっていないもの、実行の前に取り消されたもの、実行の途中で koroku が止まったもの、記録する前の古いデプロイは `null`。`true` の `failed` と `canceled` は、新しい版を一度起動してから直前のリリースへ戻している。
 
 `promoted_from` は昇格（ARCHITECTURE 9.7）で積んだデプロイのとき `{"deployment_id": 12, "app_slug": "blog-staging"}`、それ以外（ロールバックの記録を含む）と、昇格元のアプリを削除したあとは `null`。
 
@@ -648,7 +651,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/apps/{slug}/deployments?limit=50` | `{"deployments": [デプロイ, ...], "pending_auto_deploy": 預かっている自動デプロイ}`（新しい順、`limit` は 1〜200）。`pending_auto_deploy` はコマンドの実行中に届いた push を預かっているときだけ（下記）、なければ `null` |
+| `GET /api/apps/{slug}/deployments?limit=50&finished_since=<RFC 3339>` | `{"deployments": [デプロイ, ...], "pending_auto_deploy": 預かっている自動デプロイ}`（新しい順、`limit` は 1〜200）。`finished_since` を付けると、その時刻以降に終わったデプロイだけを返す（終わっていないものは含まない。形が違えば `400 invalid_finished_since`）。メモリの履歴の期間内のデプロイを読むため（ARCHITECTURE 9.5）。`pending_auto_deploy` はコマンドの実行中に届いた push を預かっているときだけ（下記）、なければ `null` |
 | `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}` か `{"sha": "<40 桁>"}`（両方あれば `sha` をデプロイし `ref` は表示用）。202 でデプロイ。保持しているリリースへ再ビルドなしで戻すときは `{"rollback_to": <デプロイの ID>}`（ほかのフィールドと同時には指定できない）。戻せなければ `422 release_unavailable`、別のアプリのデプロイなら `422 validation_failed`（`details.rollback_to`）。保持していない古い版へは、過去の `sha` を指定して再デプロイする。そのアプリでコマンドを実行中なら `409 busy`。昇格は `{"promote_from_deployment": <昇格元のデプロイ ID>}`（下記） |
 | `GET /api/apps/{slug}/promotion` | 昇格の確認に出す差分（下記） |
 | `GET /api/deployments/{id}` | デプロイ |
