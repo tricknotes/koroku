@@ -200,7 +200,9 @@ module('Acceptance | automatic deployment on push', function (hooks) {
     await visit('/apps/blog/deploy');
 
     assert.dom('[data-test-field="auto_deploy"]').isDisabled();
-    assert.dom('#auto-deploy-hint').includesText('GitHub App');
+    assert
+      .dom('#auto-deploy-hint')
+      .includesText('作成画面の一覧から選んだリポジトリだけ');
   });
 
   test('the deploy history marks deployments started by a push', async function (assert) {
