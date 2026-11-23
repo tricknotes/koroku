@@ -292,7 +292,12 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		Logger:        logger,
 		RetentionDays: cfg.Logs.RetentionDays,
 		MaxDayBytes:   int64(cfg.Logs.DailyLimitMB) << 20,
-		OnAccess:      tracker.Observe,
+		DiskUsedPercent: func() (float64, error) {
+			disk, err := prober.DiskUsage()
+			return disk.UsedPercent, err
+		},
+		DiskStopPercent: cfg.LogDiskStopPercent(),
+		OnAccess:        tracker.Observe,
 	})
 	if err != nil {
 		return err

@@ -348,10 +348,16 @@ type dayWriter struct {
 	// written to it. fullMarked says that the file tells its readers so.
 	full       bool
 	fullMarked bool
+	// diskMarked says that the last entry of the file is the marker of
+	// the lines being dropped because of the disk.
+	diskMarked bool
 }
 
 // Why a line was dropped instead of written, as koroku's own log names it.
-const dropDailyLimit = "daily_limit"
+const (
+	dropDailyLimit = "daily_limit"
+	dropDiskUsage  = "disk_usage"
+)
 
 // dropReportEvery is how often koroku's own log repeats how many lines of a
 // service were dropped, while it goes on.
@@ -384,9 +390,10 @@ func (c *Collector) write(slug string, lines []Line) error {
 	if len(lines) == 0 {
 		return nil
 	}
+	diskFull := c.diskIsFull()
 	st := c.state(slug)
 	st.mu.Lock()
-	written, err := c.writeLocked(st, slug, lines)
+	written, err := c.writeLocked(st, slug, lines, diskFull)
 	st.mu.Unlock()
 	if err != nil {
 		return err
@@ -398,12 +405,13 @@ func (c *Collector) write(slug string, lines []Line) error {
 // writeLocked appends lines to their day files and returns what it wrote.
 //
 // A line that would take its day file beyond Options.MaxDayBytes is dropped,
-// and so is everything that comes for that service and day afterwards. Where
-// the dropping starts, one marker entry is written in place of the lines, so
-// that a reader of the file, of the live stream or of the archive sees the
-// gap. The marker carries the time of the first dropped line. Dropped lines
-// are counted in koroku's own log, without their content.
-func (c *Collector) writeLocked(st *appState, slug string, lines []Line) ([]Line, error) {
+// and so is everything that comes for that service and day afterwards. While
+// diskFull is set, every line is dropped. Where the dropping starts, one
+// marker entry is written in place of the lines, so that a reader of the
+// file, of the live stream or of the archive sees the gap. The marker
+// carries the time of the first dropped line. Dropped lines are counted in
+// koroku's own log, without their content.
+func (c *Collector) writeLocked(st *appState, slug string, lines []Line, diskFull bool) ([]Line, error) {
 	var scratch []byte
 	var firstErr error
 	now := c.clk.Now()
@@ -430,10 +438,11 @@ func (c *Collector) writeLocked(st *appState, slug string, lines []Line) ([]Line
 		if !w.full && w.size+int64(len(scratch)) > c.maxDayBytes {
 			w.full = true
 		}
-		if !w.full {
+		if !w.full && !diskFull {
 			if err := w.append(scratch); err != nil {
 				return nil, err
 			}
+			w.diskMarked = false
 			c.endDrop(st, slug, line.Service)
 			if copied {
 				written = append(written, line)
@@ -444,15 +453,20 @@ func (c *Collector) writeLocked(st *appState, slug string, lines []Line) ([]Line
 		if !copied {
 			written, copied = append(make([]Line, 0, len(lines)), lines[:i]...), true
 		}
-		if !w.fullMarked {
-			marker := Line{Service: line.Service, Time: line.Time, Text: c.fullMarker}
+		// A full day wins: its marker stays the last entry of the file.
+		reason, text, marked := dropDailyLimit, c.fullMarker, &w.fullMarked
+		if !w.full {
+			reason, text, marked = dropDiskUsage, c.diskMarker, &w.diskMarked
+		}
+		if !*marked {
+			marker := Line{Service: line.Service, Time: line.Time, Text: text}
 			if err := w.append(appendEntry(scratch[:0], marker.Time, marker.Text)); err != nil {
 				return nil, err
 			}
-			w.fullMarked = true
+			*marked = true
 			written = append(written, marker)
 		}
-		c.countDrop(st, slug, line.Service, dropDailyLimit, date, now)
+		c.countDrop(st, slug, line.Service, reason, date, now)
 	}
 	for _, w := range st.writers {
 		if !w.dirty {
@@ -522,8 +536,12 @@ func (c *Collector) openDayWriter(dir, date string) (*dayWriter, error) {
 		// A day that ends with the marker was full when the file was
 		// closed, and stays full. The marker names the limit, so a day
 		// that filled up under a lower limit takes lines again.
-		if string(lastShortEntry(f, info.Size())) == c.fullMarker {
+		switch string(lastShortEntry(f, info.Size())) {
+		case c.fullMarker:
 			w.full, w.fullMarked = true, true
+		case c.diskMarker:
+			// Still the same gap, if the disk is still full.
+			w.diskMarked = true
 		}
 	}
 	// Lines that arrive for a day that is compressed already count on top

@@ -13,9 +13,11 @@
 // text. The day of a file is the day of the entry's timestamp in
 // Options.Location.
 //
-// What one service writes into one day is bounded (Options.MaxDayBytes).
-// Lines beyond that are dropped, and an entry written by the collector
-// itself, starting with MarkerPrefix, says so in their place.
+// What one service writes into one day is bounded (Options.MaxDayBytes),
+// and nothing is written while the disk is almost full
+// (Options.DiskStopPercent). The lines that are not written are dropped, and
+// an entry written by the collector itself, starting with MarkerPrefix, says
+// so in their place.
 //
 // Log lines are app output and may contain secrets. Nothing in this package
 // puts line content into errors or into koroku's own log.
@@ -136,6 +138,15 @@ type Options struct {
 	// exceed it are dropped until the day changes. Default
 	// DefaultMaxDayBytes, at most MaxDayBytesLimit.
 	MaxDayBytes int64
+	// DiskUsedPercent reports how full the disk is that must not fill up,
+	// in percent. While it is at or above DiskStopPercent, lines are
+	// dropped instead of written. Without it, or with DiskStopPercent 0,
+	// the disk is not looked at. An error counts as a disk with room.
+	DiskUsedPercent func() (float64, error)
+	DiskStopPercent int
+	// DiskCheckInterval is how long one answer of DiskUsedPercent is
+	// used. Default 10s.
+	DiskCheckInterval time.Duration
 	// SubscriberBuffer is the channel capacity of a live subscriber.
 	// Default 1024: a burst larger than that outruns the subscriber.
 	SubscriberBuffer int
@@ -177,7 +188,20 @@ type Collector struct {
 	maxLine       int
 	maxDayBytes   int64
 	// fullMarker is the text of the entry that ends a day at maxDayBytes.
-	fullMarker       string
+	fullMarker string
+
+	diskUsed       func() (float64, error)
+	diskStop       int
+	diskCheckEvery time.Duration
+	// diskMarker is the text of the entry written where lines are dropped
+	// because of the disk.
+	diskMarker string
+	// diskMu guards the last answer of diskUsed.
+	diskMu           sync.Mutex
+	diskCheckedAt    time.Time
+	diskChecked      bool
+	diskFull         bool
+	diskFailing      bool
 	subscriberBuffer int
 	reconcileEvery   time.Duration
 	restartDelay     time.Duration
@@ -208,6 +232,9 @@ func New(opts Options) (*Collector, error) {
 	if opts.RetentionDays < 0 {
 		return nil, errors.New("logs: RetentionDays must not be negative")
 	}
+	if opts.DiskStopPercent < 0 || opts.DiskStopPercent > 100 {
+		return nil, errors.New("logs: DiskStopPercent must be between 0 and 100")
+	}
 	if opts.MaxDayBytes < 0 || opts.MaxDayBytes > MaxDayBytesLimit {
 		return nil, fmt.Errorf("logs: MaxDayBytes must be between 1 and %d", int64(MaxDayBytesLimit))
 	}
@@ -223,6 +250,9 @@ func New(opts Options) (*Collector, error) {
 		retentionDays:    orDefault(opts.RetentionDays, 14),
 		maxLine:          orDefault(opts.MaxLineBytes, 16<<10),
 		maxDayBytes:      orDefault(opts.MaxDayBytes, DefaultMaxDayBytes),
+		diskUsed:         opts.DiskUsedPercent,
+		diskStop:         opts.DiskStopPercent,
+		diskCheckEvery:   orDefault(opts.DiskCheckInterval, 10*time.Second),
 		subscriberBuffer: orDefault(opts.SubscriberBuffer, 1024),
 		reconcileEvery:   orDefault(opts.ReconcileInterval, 15*time.Second),
 		restartDelay:     orDefault(opts.RestartDelay, 2*time.Second),
@@ -248,6 +278,8 @@ func New(opts Options) (*Collector, error) {
 	}
 	c.fullMarker = fmt.Sprintf("%sThe log of this service reached %s for this day. Further lines are dropped until the day changes ([logs] daily_limit_mb).",
 		MarkerPrefix, formatSize(c.maxDayBytes))
+	c.diskMarker = fmt.Sprintf("%sThe disk of the host is %d%% full or more. Log lines are dropped until space is freed.",
+		MarkerPrefix, c.diskStop)
 	if err := os.MkdirAll(c.dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create log directory: %w", err)
 	}
@@ -255,6 +287,44 @@ func New(opts Options) (*Collector, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// diskIsFull reports whether lines must be dropped because the disk is at
+// or above Options.DiskStopPercent. It asks Options.DiskUsedPercent at most
+// once per Options.DiskCheckInterval, so it can be called for every batch
+// of lines.
+func (c *Collector) diskIsFull() bool {
+	if c.diskUsed == nil || c.diskStop <= 0 {
+		return false
+	}
+	now := c.clk.Now()
+	c.diskMu.Lock()
+	defer c.diskMu.Unlock()
+	if since := now.Sub(c.diskCheckedAt); c.diskChecked && since >= 0 && since < c.diskCheckEvery {
+		return c.diskFull
+	}
+	c.diskChecked, c.diskCheckedAt = true, now
+	used, err := c.diskUsed()
+	if err != nil {
+		// Not knowing is no reason to lose logs.
+		if !c.diskFailing {
+			c.log.Warn("disk usage unavailable; log lines are written without looking at the disk", "error", err)
+		}
+		c.diskFailing, c.diskFull = true, false
+		return false
+	}
+	c.diskFailing = false
+	full := used >= float64(c.diskStop)
+	switch {
+	case full && !c.diskFull:
+		c.log.Warn("the disk is almost full; log lines are dropped until space is freed",
+			"used_percent", int(used), "stop_percent", c.diskStop)
+	case !full && c.diskFull:
+		c.log.Info("the disk has room again; log lines are written",
+			"used_percent", int(used), "stop_percent", c.diskStop)
+	}
+	c.diskFull = full
+	return full
 }
 
 // formatSize writes a number of bytes for a marker entry.

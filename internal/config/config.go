@@ -175,6 +175,18 @@ type Deploy struct {
 	AllowFileRepos bool `toml:"allow_file_repos"`
 }
 
+// logDiskStopMargin is how far above the deploy limit the disk usage is at
+// which the log collector stops writing.
+const logDiskStopMargin = 5
+
+// LogDiskStopPercent is the usage of the data disk at or above which the log
+// collector drops lines instead of writing them. It follows the limit that
+// rejects deployments: deployments are refused first, and logs, which are
+// what explains a full disk, are kept for a while longer.
+func (c Config) LogDiskStopPercent() int {
+	return min(c.Deploy.DiskUsageLimitPercent+logDiskStopMargin, 100)
+}
+
 // Default returns the configuration used for fields that are not set in the file.
 func Default() Config {
 	return Config{

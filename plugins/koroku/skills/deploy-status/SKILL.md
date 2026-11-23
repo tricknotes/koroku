@@ -42,7 +42,7 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 | `koroku-status.sh apps` | すべてのアプリ |
 | `koroku-status.sh deployments <slug>` | 直近 10 件のデプロイ（無停止デプロイは起動した色と切り替えの時刻も） |
 | `koroku-status.sh log <id> [--lines N]` | デプロイログ（既定は全文） |
-| `koroku-status.sh runtime <slug> [--service web] [--lines N]` | 実行ログの最後の N 行（既定 100）。`--service _access` はアクセスログ（1 行 1 リクエストの JSON。ヘッダーは入らない）。`[koroku] The log of this service reached ...` の行は、そのサービスが 1 日のログの上限に届き、日付が変わるまで行が残らないことを示す |
+| `koroku-status.sh runtime <slug> [--service web] [--lines N]` | 実行ログの最後の N 行（既定 100）。`--service _access` はアクセスログ（1 行 1 リクエストの JSON。ヘッダーは入らない）。`[koroku] The log of this service reached ...` の行は、そのサービスが 1 日のログの上限に届き、日付が変わるまで行が残らないことを、`[koroku] The disk of the host is ...` の行は、ホストのディスクがほぼ埋まっていて行が残っていないことを示す（どちらもアプリの出力ではない） |
 | `koroku-status.sh env <slug> [--ref <branch>\|--sha <sha>]` | 必要な環境変数と設定済みかどうか（値は出ない） |
 | `koroku-status.sh containers <slug>` | コンテナの状態、メモリ上限、`oom_score_adj` と、稼働中のリリースとの違いの印 |
 | `koroku-status.sh compose <slug> [--deployment <id>]` | koroku の override と、重ねた結果の Compose（`${VAR}` は補間しない。環境変数の値は伏せてある） |

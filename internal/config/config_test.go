@@ -93,6 +93,18 @@ func TestParseRejectsInvalid(t *testing.T) {
 	}
 }
 
+// The log collector stops writing a little above the usage that rejects
+// deployments, and never above a full disk.
+func TestLogDiskStopPercentFollowsTheDeployLimit(t *testing.T) {
+	for limit, want := range map[int]int{85: 90, 70: 75, 95: 100, 100: 100} {
+		cfg := Default()
+		cfg.Deploy.DiskUsageLimitPercent = limit
+		if got := cfg.LogDiskStopPercent(); got != want {
+			t.Errorf("deploy limit %d%%: logs stop at %d%%, want %d%%", limit, got, want)
+		}
+	}
+}
+
 func TestCaddyDefaultsAndOptOut(t *testing.T) {
 	cfg, err := Parse(`base_domain = "dev.example.com"`)
 	if err != nil {

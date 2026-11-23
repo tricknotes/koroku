@@ -1,10 +1,12 @@
 package logs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -301,5 +303,188 @@ func TestMaxDayBytesIsValidated(t *testing.T) {
 	}
 	if c.maxDayBytes != 100<<20 || !strings.Contains(c.fullMarker, "100 MiB") {
 		t.Errorf("default limit = %d, marker = %q", c.maxDayBytes, c.fullMarker)
+	}
+}
+
+// fakeDisk answers Options.DiskUsedPercent.
+type fakeDisk struct {
+	mu    sync.Mutex
+	used  float64
+	err   error
+	calls int
+}
+
+func (d *fakeDisk) percent() (float64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.calls++
+	return d.used, d.err
+}
+
+func (d *fakeDisk) set(used float64, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.used, d.err = used, err
+}
+
+func (d *fakeDisk) asked() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+func watchingDisk(disk *fakeDisk) func(*Options) {
+	return func(o *Options) {
+		o.DiskUsedPercent = disk.percent
+		o.DiskStopPercent = 90
+		o.DiskCheckInterval = 10 * time.Second
+	}
+}
+
+func repeated(s string, n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = s
+	}
+	return out
+}
+
+func TestDiskUsageStopsAndResumesWriting(t *testing.T) {
+	disk := &fakeDisk{used: 50}
+	f := newFixture(t, watchingDisk(disk))
+	live, cancel := f.c.Subscribe("blog")
+	defer cancel()
+	web := func(date string) []string { return texts(dayContent(t, f.dir, "blog", "web", date)) }
+	marker := f.c.diskMarker
+	if !strings.HasPrefix(marker, MarkerPrefix) || !strings.Contains(marker, "90%") {
+		t.Fatalf("marker = %q", marker)
+	}
+
+	f.put("blog", "web", at(18, 10, 0), "line 0")
+	// The disk is asked once per interval, not for every line.
+	disk.set(90, nil)
+	for i := 0; i < 50; i++ {
+		f.put("blog", "web", at(18, 10, 1), "line 1")
+	}
+	if got := disk.asked(); got != 1 {
+		t.Fatalf("the disk was asked %d times within one interval", got)
+	}
+	kept := append([]string{"line 0"}, repeated("line 1", 50)...)
+	wantStrings(t, "before the next look", web("2026-11-18"), kept)
+	drain(live)
+
+	// At the threshold: every service stops, each with one marker.
+	f.clock.Advance(10 * time.Second)
+	f.put("blog", "web", at(18, 10, 2), "line 2")
+	f.put("blog", "web", at(18, 10, 3), "line 3")
+	f.put("blog", "db", at(18, 10, 4), "db 0")
+	kept = append(kept, marker)
+	stored := dayContent(t, f.dir, "blog", "web", "2026-11-18")
+	wantStrings(t, "disk full", texts(stored), kept)
+	if want := string(appendEntry(nil, at(18, 10, 2), marker)); stored[len(stored)-1]+"\n" != want {
+		t.Errorf("marker entry = %q, want %q", stored[len(stored)-1], want)
+	}
+	wantStrings(t, "db", texts(serviceContent(t, f.dir, "blog", "db")), []string{marker})
+	wantStrings(t, "live", lineTexts(drain(live)), []string{marker, marker})
+
+	// Just below it again: writing resumes at the next look.
+	disk.set(89.9, nil)
+	f.put("blog", "web", at(18, 10, 5), "line 5")
+	wantStrings(t, "before the next look", web("2026-11-18"), kept)
+	f.clock.Advance(10 * time.Second)
+	f.put("blog", "web", at(18, 10, 6), "line 6")
+	kept = append(kept, "line 6")
+	wantStrings(t, "room again", web("2026-11-18"), kept)
+
+	// A second time gets a marker of its own, and so does a new day.
+	disk.set(99, nil)
+	f.clock.Advance(10 * time.Second)
+	f.put("blog", "web", at(18, 10, 7), "line 7")
+	f.put("blog", "web", at(19, 0, 0), "line 8")
+	wantStrings(t, "full again", web("2026-11-18"), append(kept, marker))
+	wantStrings(t, "the next day, still full", web("2026-11-19"), []string{marker})
+	disk.set(10, nil)
+	f.clock.Advance(10 * time.Second)
+	f.put("blog", "web", at(19, 0, 1), "line 9")
+	wantStrings(t, "the next day, room again", web("2026-11-19"), []string{marker, "line 9"})
+
+	own := f.logs.String()
+	for _, want := range []string{
+		`msg="the disk is almost full; log lines are dropped until space is freed" used_percent=90 stop_percent=90`,
+		`msg="dropping log lines" app=blog service=web reason=disk_usage day=2026-11-18`,
+		`msg="dropping log lines" app=blog service=db reason=disk_usage day=2026-11-18`,
+		`msg="log lines were dropped" app=blog service=web reason=disk_usage day=2026-11-18 dropped_lines=3`,
+		`msg="the disk has room again; log lines are written" used_percent=89 stop_percent=90`,
+		`msg="log lines were dropped" app=blog service=web reason=disk_usage day=2026-11-18 dropped_lines=1`,
+		`msg="log lines were dropped" app=blog service=web reason=disk_usage day=2026-11-19 dropped_lines=1`,
+	} {
+		if !strings.Contains(own, want) {
+			t.Errorf("koroku's log lacks %q:\n%s", want, own)
+		}
+	}
+	if strings.Contains(own, "line ") || strings.Contains(own, "db 0") {
+		t.Errorf("koroku's log shows line content:\n%s", own)
+	}
+}
+
+func TestDiskUsageStopAcrossRestartsAndWithAFullDay(t *testing.T) {
+	dir := t.TempDir()
+	disk := &fakeDisk{used: 95}
+	open := func() *fixture {
+		return newFixtureIn(t, dir, func(o *Options) {
+			watchingDisk(disk)(o)
+			o.MaxDayBytes = 2*entrySize("line 0") + 400
+		})
+	}
+	stored := func() []string { return texts(dayContent(t, dir, "blog", "web", "2026-11-18")) }
+
+	f1 := open()
+	f1.put("blog", "web", at(18, 10, 0), "line 0")
+	f1.c.closeWriters("blog")
+	wantStrings(t, "first process", stored(), []string{f1.c.diskMarker})
+
+	// A new process in the same state does not mark the gap again.
+	f2 := open()
+	f2.put("blog", "web", at(18, 10, 1), "line 1")
+	wantStrings(t, "second process", stored(), []string{f2.c.diskMarker})
+
+	// With room again the day fills up to its own limit. From there on
+	// the day is closed whatever the disk says, and marked once.
+	disk.set(20, nil)
+	f2.clock.Advance(10 * time.Second)
+	f2.put("blog", "web", at(18, 10, 2), "line 2")
+	f2.put("blog", "web", at(18, 10, 3), "line 3")
+	f2.put("blog", "web", at(18, 10, 4), strings.Repeat("x", 400))
+	want := []string{f2.c.diskMarker, "line 2", "line 3", f2.c.fullMarker}
+	wantStrings(t, "full day", stored(), want)
+	disk.set(95, nil)
+	f2.clock.Advance(10 * time.Second)
+	f2.put("blog", "web", at(18, 10, 5), "line 5")
+	wantStrings(t, "full day on a full disk", stored(), want)
+}
+
+func TestDiskUsageThatCannotBeReadKeepsWriting(t *testing.T) {
+	disk := &fakeDisk{used: 99}
+	f := newFixture(t, watchingDisk(disk))
+	f.put("blog", "web", at(18, 10, 0), "line 0")
+	disk.set(0, errors.New("statfs failed"))
+	for i := 1; i <= 3; i++ {
+		f.clock.Advance(10 * time.Second)
+		f.put("blog", "web", at(18, 10, i), fmt.Sprintf("line %d", i))
+	}
+	wantStrings(t, "web", texts(serviceContent(t, f.dir, "blog", "web")), []string{f.c.diskMarker, "line 1", "line 2", "line 3"})
+	if n := strings.Count(f.logs.String(), "disk usage unavailable"); n != 1 {
+		t.Errorf("the failure was logged %d times, want once:\n%s", n, f.logs.String())
+	}
+
+	// Without a threshold the disk is not looked at.
+	off := newFixture(t, func(o *Options) { o.DiskUsedPercent = disk.percent })
+	before := disk.asked()
+	off.put("blog", "web", at(18, 10, 0), "line 0")
+	if disk.asked() != before {
+		t.Error("the disk was asked although no threshold is set")
+	}
+	if _, err := New(Options{Dir: t.TempDir(), DiskStopPercent: 101}); err == nil {
+		t.Error("a threshold above 100% was accepted")
 	}
 }
