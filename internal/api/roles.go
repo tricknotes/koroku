@@ -140,6 +140,15 @@ func (s *Server) userAllowed(ctx context.Context, userID int64) (bool, error) {
 
 type levelKey struct{}
 
+// grant is what authorize let a member's request in for: the app the route
+// acts on and the level the route needs there.
+type grant struct {
+	appID int64
+	level level
+}
+
+type grantKey struct{}
+
 // appLevel is what the request's user may do on app.
 func (s *Server) appLevel(r *http.Request, app store.App) (level, error) {
 	a, ok := actorFrom(r)
@@ -247,8 +256,51 @@ func (s *Server) authorize(a access, next http.Handler) http.Handler {
 			writeForbiddenRole(w, a.level)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), levelKey{}, got)))
+		ctx := context.WithValue(r.Context(), levelKey{}, got)
+		ctx = context.WithValue(ctx, grantKey{}, grant{appID: appID, level: a.level})
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// stillAllowed re-runs, for a response that stays open (a log stream), the
+// checks the request passed when it came in: its session or API token is
+// still valid, its user may still use the console, and a member still holds
+// the level the route needs on the app. A stream asks at every heartbeat
+// and ends when the answer is no, so that access that was taken away does
+// not last as long as the connection does (ARCHITECTURE 10.3, 10.5, 10.7).
+// A failing check ends the stream too; the client's reconnect gets the
+// answer a new request gets.
+func (s *Server) stillAllowed(r *http.Request) bool {
+	ctx := r.Context()
+	if tok, ok := tokenFrom(r); ok {
+		_, _, valid, err := s.validToken(ctx, tok.TokenHash, s.clock.Now())
+		if err != nil && ctx.Err() == nil {
+			s.log.Error("checking the api token of an open stream failed", "error", err)
+		}
+		if err != nil || !valid {
+			return false
+		}
+	} else if sess, ok := sessionFrom(r); ok {
+		if _, valid := s.validSession(ctx, sess.TokenHash); !valid {
+			return false
+		}
+	} else if !s.auth.InsecureNoAuth {
+		return false
+	}
+	g, ok := ctx.Value(grantKey{}).(grant)
+	if !ok {
+		// The owner, or a route that asks for no role on an app.
+		return true
+	}
+	act, _ := actorFrom(r)
+	role, err := s.store.AppRole(ctx, g.appID, act.UserID)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Error("checking the role of an open stream failed", "error", err)
+		}
+		return false
+	}
+	return roleLevel(role) >= g.level
 }
 
 // routeApp finds the app a request acts on. It returns 0 when the record

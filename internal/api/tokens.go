@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -125,33 +126,18 @@ func (s *Server) serveWithToken(w http.ResponseWriter, r *http.Request, mux *htt
 		return
 	}
 	now := s.clock.Now()
-	tok, err := s.store.GetAPIToken(r.Context(), hashToken(value), now)
-	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			s.log.Error("loading api token failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal", "internal server error")
-			return
-		}
-		s.invalidToken(w)
-		return
-	}
-	if info := requestInfoFrom(r); info != nil {
+	tok, owner, valid, err := s.validToken(r.Context(), hashToken(value), now)
+	if info := requestInfoFrom(r); info != nil && tok.ID != "" {
 		info.tokenID = tok.ID
 	}
-	// A token acts as its user, who must still be allowed in: removing a
-	// member deletes its tokens, and this also covers a changed owner.
-	owner := s.auth.InsecureNoAuth || (s.auth.AllowedUserID != 0 && tok.GitHubUserID == s.auth.AllowedUserID)
-	if !owner {
-		allowed, err := s.store.HasAnyRole(r.Context(), tok.GitHubUserID)
-		if err != nil {
-			s.log.Error("checking the api token's user failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal", "internal server error")
-			return
-		}
-		if !allowed {
-			s.invalidToken(w)
-			return
-		}
+	if err != nil {
+		s.log.Error("checking the api token failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal", "internal server error")
+		return
+	}
+	if !valid {
+		s.invalidToken(w)
+		return
 	}
 	if !s.tokenLimiter.allow(tok.ID, now) {
 		w.Header().Set("Retry-After", strconv.Itoa(60))
@@ -176,6 +162,32 @@ func (s *Server) serveWithToken(w http.ResponseWriter, r *http.Request, mux *htt
 	r = withActor(r, actor{UserID: tok.GitHubUserID, Login: tok.Login, Owner: owner})
 	r.Header.Del("Cookie")
 	mux.ServeHTTP(w, r)
+}
+
+// validToken loads the API token with the given hash and reports whether
+// it can be used: it has not expired or been revoked, and its user may
+// still use the console. owner says whether it acts as the owner. The token
+// is returned whenever it was found, usable or not. A request asks once; a
+// response that stays open asks again while it lasts (stillAllowed).
+func (s *Server) validToken(ctx context.Context, tokenHash string, now time.Time) (tok store.APIToken, owner, valid bool, err error) {
+	tok, err = s.store.GetAPIToken(ctx, tokenHash, now)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.APIToken{}, false, false, nil
+	}
+	if err != nil {
+		return store.APIToken{}, false, false, fmt.Errorf("load the api token: %w", err)
+	}
+	// A token acts as its user, who must still be allowed in: removing a
+	// member deletes its tokens, and this also covers a changed owner.
+	owner = s.auth.InsecureNoAuth || (s.auth.AllowedUserID != 0 && tok.GitHubUserID == s.auth.AllowedUserID)
+	if owner {
+		return tok, true, true, nil
+	}
+	allowed, err := s.store.HasAnyRole(ctx, tok.GitHubUserID)
+	if err != nil {
+		return tok, false, false, fmt.Errorf("check the api token's user: %w", err)
+	}
+	return tok, false, allowed, nil
 }
 
 func (s *Server) invalidToken(w http.ResponseWriter) {

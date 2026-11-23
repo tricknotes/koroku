@@ -181,19 +181,8 @@ func (s *Server) lookupSession(r *http.Request) (store.Session, bool) {
 	if err != nil || cookie.Value == "" {
 		return store.Session{}, false
 	}
-	sess, err := s.store.GetSession(r.Context(), hashToken(cookie.Value), s.clock.Now())
-	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			s.log.Error("loading session failed", "error", err)
-		}
-		return store.Session{}, false
-	}
-	// The owner may have been changed in the configuration, and a
-	// member may have lost its last role.
-	if allowed, err := s.userAllowed(r.Context(), sess.GitHubUserID); err != nil || !allowed {
-		if err != nil {
-			s.log.Error("checking the session's user failed", "error", err)
-		}
+	sess, ok := s.validSession(r.Context(), hashToken(cookie.Value))
+	if !ok {
 		return store.Session{}, false
 	}
 	if now := s.clock.Now(); now.Sub(sess.LastSeenAt) >= touchInterval {
@@ -203,6 +192,29 @@ func (s *Server) lookupSession(r *http.Request) (store.Session, bool) {
 		} else {
 			sess.LastSeenAt, sess.IP, sess.UserAgent = now, ip, ua
 		}
+	}
+	return sess, true
+}
+
+// validSession loads the session with the given cookie hash, if it has not
+// expired or been ended and its user may still use the console. A request
+// asks once; a response that stays open asks again while it lasts
+// (stillAllowed).
+func (s *Server) validSession(ctx context.Context, tokenHash string) (store.Session, bool) {
+	sess, err := s.store.GetSession(ctx, tokenHash, s.clock.Now())
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
+			s.log.Error("loading session failed", "error", err)
+		}
+		return store.Session{}, false
+	}
+	// The owner may have been changed in the configuration, and a
+	// member may have lost its last role.
+	if allowed, err := s.userAllowed(ctx, sess.GitHubUserID); err != nil || !allowed {
+		if err != nil && ctx.Err() == nil {
+			s.log.Error("checking the session's user failed", "error", err)
+		}
+		return store.Session{}, false
 	}
 	return sess, true
 }

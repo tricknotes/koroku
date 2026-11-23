@@ -359,7 +359,10 @@ func (s *Server) handleCancelDeployment(w http.ResponseWriter, r *http.Request) 
 // logPollInterval is how often a live log stream checks for new output.
 var logPollInterval = 300 * time.Millisecond
 
-const logHeartbeatInterval = 15 * time.Second
+// logHeartbeatInterval is how often an idle log stream sends a comment to
+// keep the connection open, and how often every log stream asks whether
+// its user may still read it (stillAllowed).
+var logHeartbeatInterval = 15 * time.Second
 
 // handleDeploymentLogs streams the deploy log.
 //
@@ -373,7 +376,7 @@ func (s *Server) handleDeploymentLogs(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	serveJobLog(w, r, s.deployer.LogPath(app.Slug, d.ID), func(ctx context.Context) (string, bool, error) {
+	s.serveJobLog(w, r, s.deployer.LogPath(app.Slug, d.ID), func(ctx context.Context) (string, bool, error) {
 		current, err := s.store.GetDeployment(ctx, d.ID)
 		return current.Status, store.IsTerminal(current.Status), err
 	})
@@ -381,8 +384,10 @@ func (s *Server) handleDeploymentLogs(w http.ResponseWriter, r *http.Request) {
 
 // serveJobLog streams the log file of a job (a deployment, a database
 // copy) as Server-Sent Events, or as plain text with ?format=text. status
-// reports the job's status and whether it has ended.
-func serveJobLog(w http.ResponseWriter, r *http.Request, path string,
+// reports the job's status and whether it has ended. A stream whose user
+// lost access to the app ends at the next heartbeat interval, whether the
+// job has ended or not.
+func (s *Server) serveJobLog(w http.ResponseWriter, r *http.Request, path string,
 	status func(context.Context) (string, bool, error)) {
 	if r.URL.Query().Get("format") == "text" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -410,7 +415,14 @@ func serveJobLog(w http.ResponseWriter, r *http.Request, path string,
 
 	ctx := r.Context()
 	lastWrite := time.Now()
+	lastCheck := lastWrite
 	for {
+		if time.Since(lastCheck) >= logHeartbeatInterval {
+			if !s.stillAllowed(r) {
+				return
+			}
+			lastCheck = time.Now()
+		}
 		// Read the status before draining: a job that finishes between
 		// the two is caught by the next round.
 		current, ended, err := status(ctx)

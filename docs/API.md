@@ -743,7 +743,7 @@ staging アプリの稼働中のリリースを、組み合わせた本番アプ
 - `images.status` は `checked` か `unavailable`（Docker で判定できなかったか、staging のリリースのファイルがもう残っていない。デプロイ時にもう一度判定する）。`services` は `build:` を持つサービスだけ（サービス名順。`image:` だけのサービスは常に pull）。`reason` は `args_differ`（`differing_args` に補間後の値が違った `build.args` のキー）、`build_differs`（引数以外のビルド定義が違う）、`not_built_in_source`、`image_missing`（staging のイメージがもうない）。`source_missing`（staging のリリースのファイルがもうない）はデプロイログの判定にだけ現れる。
 - 昇格のデプロイログは、手順 5 で `==> <時刻> reuse Reusing images of <slug> deployment #<id>` の見出しのあと、サービスごとに `<service>: reusing <image>` か `<service>: building (<理由>)` の行を書く（理由の例 `build args differ: ASSET_HOST`）。ビルドに回ったサービスがあれば、続く `build` の手順でそれだけをビルドする。
 
-**デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。
+**デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。SSE は開いている間も 15 秒ごとに権限を確かめ直し、セッションや API トークンが無効になるか、アプリのロールが足りなくなると、`end` を送らずに接続を閉じる（ARCHITECTURE 10.7）。再接続は、新しいリクエストと同じ `401` か `404` になる。コマンドの出力と DB のコピーのログの SSE も同じ。
 
 ## ワンオフのコマンドと登録タスク
 
@@ -925,7 +925,7 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/apps/{slug}/logs?service=&tail=200` | ライブ tail の SSE。1 メッセージの `data:` がログ行の JSON。`service` 省略で全サービス。接続はクライアントが閉じるまで続く |
+| `GET /api/apps/{slug}/logs?service=&tail=200` | ライブ tail の SSE。1 メッセージの `data:` がログ行の JSON。`service` 省略で全サービス。接続はクライアントが閉じるまで続く。ただし 15 秒ごとに権限を確かめ直し、セッションや API トークンが無効になるか、アプリのロールがなくなると、サーバーが接続を閉じる（再接続は `401` か `404`。ARCHITECTURE 10.7） |
 | `GET /api/apps/{slug}/logs/history?service=&from=&to=&q=&limit=1000` | ローカルに残る過去 14 日分の検索。`{"lines": [ログ行, ...], "truncated": false}`（古い順）。`from` / `to` は RFC 3339、`q` は部分一致 |
 | `GET /api/apps/{slug}/logs/archives?service=` | 退避済みログの一覧。`{"archives": [{"key": "logs/blog/web/2026/11/18/04.log.gz", "service": "web", "hour": "2026-11-18T04:00:00+09:00", "size": 12345}]}`（新しい順） |
 | `GET /api/apps/{slug}/logs/archives/url?key=` | ダウンロード用の presigned URL。`{"url": "https://..."}`（有効 15 分） |

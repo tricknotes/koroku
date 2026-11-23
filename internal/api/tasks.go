@@ -429,7 +429,7 @@ func (s *Server) handleTaskRunLogs(w http.ResponseWriter, r *http.Request) {
 	if s.tasks != nil {
 		path = s.tasks.TaskLogPath(app.Slug, run.ID)
 	}
-	serveJobLog(w, r, path, func(ctx context.Context) (string, bool, error) {
+	s.serveJobLog(w, r, path, func(ctx context.Context) (string, bool, error) {
 		current, err := s.store.GetTaskRun(ctx, run.ID)
 		return current.Status, store.IsTerminal(current.Status), err
 	})

@@ -90,7 +90,8 @@ func parseBoundedInt(raw string, def, max int) (int, bool) {
 
 // handleLiveLogs streams the app's runtime log as Server-Sent Events: first
 // the last `tail` lines, then new lines as they are collected. Each message
-// carries one log line as JSON. The stream ends when the client disconnects.
+// carries one log line as JSON. The stream ends when the client disconnects,
+// or at a heartbeat after the user's access to the app ended.
 func (s *Server) handleLiveLogs(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.loadApp(w, r)
 	if !ok {
@@ -151,6 +152,10 @@ func (s *Server) handleLiveLogs(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-heartbeat.C:
+			// The stream lasts as long as the access it was opened with.
+			if !s.stillAllowed(r) {
+				return
+			}
 			if _, err := io.WriteString(w, ": keep-alive\n\n"); err != nil {
 				return
 			}

@@ -224,7 +224,7 @@ func (s *Server) handleDBCopyLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "not_configured", "database copies are not available")
 		return
 	}
-	serveJobLog(w, r, s.copier.CopyLogPath(app.Slug, c.ID), func(ctx context.Context) (string, bool, error) {
+	s.serveJobLog(w, r, s.copier.CopyLogPath(app.Slug, c.ID), func(ctx context.Context) (string, bool, error) {
 		current, err := s.store.GetDBCopy(ctx, c.ID)
 		return current.Status, current.Status != store.CopyRunning, err
 	})
