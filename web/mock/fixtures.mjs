@@ -69,7 +69,7 @@ export const SCENARIOS = {
   'promote-unpaired':
     'everything fine, but blog has no promotion source (shop still promotes from shop-staging)',
   member:
-    'logged in as the member mia, not the owner: deploy on blog, manage on blog-staging, view on shop, no role on shop-staging',
+    'logged in as the member mia, not the owner: deploy on blog, manage on blog-staging (with a custom domain waiting for DNS and one the owner forced active), view on shop, no role on shop-staging',
   'webhook-unset':
     'everything fine, but blog-staging deploys on push while the webhook secret is not set in config.toml',
   'workflow-gated':
@@ -1135,6 +1135,22 @@ export function buildScenario(name) {
       state.apps.get('blog-staging').review_apps_allowed =
         name !== 'review-member';
       state.apps.get('shop-staging').review_apps_allowed = true;
+      return state;
+    }
+    case 'member': {
+      // What the member manages has a domain that waits for DNS and one the
+      // owner forced active: skipping the check is the owner's.
+      const state = scenario(healthyApps());
+      state.apps.get('blog-staging').pending_domains = 1;
+      state.domains.get('blog-staging').push(
+        domain(5, 'staging.example.org', 'blog-staging', {
+          force_active: true,
+        }),
+        domain(6, 'preview.example.org', 'blog-staging', {
+          status: 'pending',
+          last_error: 'lookup preview.example.org: no such host',
+        }),
+      );
       return state;
     }
     case 'review-allowed': {

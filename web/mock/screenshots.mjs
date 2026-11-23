@@ -296,6 +296,17 @@ const SHOTS = [
     ...PHONE,
   },
   {
+    name: 'member-manage-domains',
+    path: '/apps/blog-staging/settings?section=domains&scenario=member',
+    wait: '[data-test-domain-force-owner-note]',
+  },
+  {
+    name: 'member-manage-domains-phone',
+    path: '/apps/blog-staging/settings?section=domains&scenario=member',
+    wait: '[data-test-domain-force-owner-note]',
+    ...PHONE,
+  },
+  {
     name: 'member-security',
     path: '/security?scenario=member',
     wait: '[data-test-sessions]',

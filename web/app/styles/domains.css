@@ -126,7 +126,8 @@
   background: transparent;
 }
 
-.domain-force > .domain-detail-note {
+.domain-force > .domain-detail-note,
+.domain-force > .role-note {
   margin: 0;
 }
 

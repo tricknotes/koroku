@@ -446,6 +446,74 @@ func TestProductionAutoDeployIsOwnerOnly(t *testing.T) {
 	}
 }
 
+// A manager adds, verifies, makes primary and deletes the app's domains,
+// but only the owner skips the DNS check for one, or ends that.
+func TestForcingADomainActiveIsOwnerOnly(t *testing.T) {
+	f := newRoleFixture(t)
+	manager := f.as[managerID]
+	rec := manager.do(http.MethodPost, "/api/apps/blog/domains", `{"hostname":"www.example.org"}`, originHeader)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("manager adds a domain: %d %s", rec.Code, rec.Body)
+	}
+	d := decode[domainBody](t, rec)
+	path := "/api/apps/blog/domains/" + strconv.FormatInt(d.ID, 10)
+
+	rec = manager.do(http.MethodPatch, path, `{"force_active":true}`, originHeader)
+	if rec.Code != http.StatusForbidden || errorCode(t, rec) != "forbidden_role" {
+		t.Fatalf("manager forces: %d %s", rec.Code, rec.Body)
+	}
+	var refusal struct {
+		Error struct {
+			Details struct {
+				Required string   `json:"required"`
+				Fields   []string `json:"fields"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &refusal); err != nil {
+		t.Fatal(err)
+	}
+	if got := refusal.Error.Details; got.Required != "owner" || len(got.Fields) != 1 || got.Fields[0] != "force_active" {
+		t.Errorf("details = %+v", got)
+	}
+	// Refused as a whole: the primary flag sent along is not applied either.
+	rec = manager.do(http.MethodPatch, path, `{"force_active":true,"is_primary":true}`, originHeader)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("manager forces and makes primary: %d %s", rec.Code, rec.Body)
+	}
+	if got, err := f.srv.store.GetDomain(context.Background(), f.app(t, "blog").ID, d.ID); err != nil || got.Status != store.DomainPending || got.ForceActive || got.IsPrimary {
+		t.Errorf("domain after the refusals = %+v, %v", got, err)
+	}
+	// Sending the present value is not a change.
+	if rec := manager.do(http.MethodPatch, path, `{"force_active":false}`, originHeader); rec.Code != http.StatusOK {
+		t.Errorf("manager sends the present value: %d %s", rec.Code, rec.Body)
+	}
+	if rec := manager.do(http.MethodPost, path+"/verify", `{}`, originHeader); rec.Code != http.StatusOK {
+		t.Errorf("manager verifies: %d %s", rec.Code, rec.Body)
+	}
+
+	rec = f.owner.do(http.MethodPatch, path, `{"force_active":true}`, originHeader)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("owner forces: %d %s", rec.Code, rec.Body)
+	}
+	if got := decode[domainBody](t, rec); got.Status != "active" || !got.ForceActive {
+		t.Errorf("forced domain = %+v", got)
+	}
+	// The manager works with the domain the owner forced, but does not end
+	// the force.
+	rec = manager.do(http.MethodPatch, path, `{"force_active":true,"is_primary":true}`, originHeader)
+	if rec.Code != http.StatusOK || !decode[domainBody](t, rec).IsPrimary {
+		t.Errorf("manager makes the forced domain primary: %d %s", rec.Code, rec.Body)
+	}
+	rec = manager.do(http.MethodPatch, path, `{"force_active":false}`, originHeader)
+	if rec.Code != http.StatusForbidden || errorCode(t, rec) != "forbidden_role" {
+		t.Errorf("manager ends the force: %d %s", rec.Code, rec.Body)
+	}
+	if rec := manager.do(http.MethodDelete, path, "", originHeader); rec.Code != http.StatusNoContent {
+		t.Errorf("manager deletes: %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestDeploymentsRecordTheActor(t *testing.T) {
 	f := newRoleFixture(t)
 	rec := f.as[deployerID].do(http.MethodPost, "/api/apps/blog/deployments", `{"ref":"main"}`, originHeader)

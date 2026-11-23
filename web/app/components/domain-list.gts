@@ -62,7 +62,10 @@ function showsForce(domain: Domain): boolean {
   return isPending(domain) || domain.force_active;
 }
 
-/** The force switch is an action: only for those who may manage. */
+/**
+ * The part on skipping the DNS check is for those who may manage. The
+ * switch in it is the owner's (ARCHITECTURE 8.1); a member reads who has it.
+ */
 function forceShown(domain: Domain, canManage: boolean): boolean {
   return canManage && showsForce(domain);
 }
@@ -124,6 +127,11 @@ export default class DomainsPanel extends Component<Signature> {
 
   get readOnly(): boolean {
     return !this.canManage;
+  }
+
+  /** Skipping the DNS check is the owner's decision (ARCHITECTURE 8.1). */
+  get isOwner(): boolean {
+    return can(this.args.context.app, 'owner');
   }
 
   get slug(): string {
@@ -504,17 +512,25 @@ export default class DomainsPanel extends Component<Signature> {
                         が一致しない構成では確認を省略できます。
                       {{/if}}
                     </p>
-                    <Button
-                      @size="small"
-                      @busy={{this.isRunning domain "force"}}
-                      @disabled={{this.busy}}
-                      data-test-domain-force-toggle
-                      {{on "click" (fn this.toggleForce domain)}}
-                    >{{if
-                        domain.force_active
-                        "強制有効化を解除"
-                        "強制有効化"
-                      }}</Button>
+                    {{#if this.isOwner}}
+                      <Button
+                        @size="small"
+                        @busy={{this.isRunning domain "force"}}
+                        @disabled={{this.busy}}
+                        data-test-domain-force-toggle
+                        {{on "click" (fn this.toggleForce domain)}}
+                      >{{if
+                          domain.force_active
+                          "強制有効化を解除"
+                          "強制有効化"
+                        }}</Button>
+                    {{else}}
+                      <RoleNote
+                        @needed="owner"
+                        @what="強制有効化"
+                        data-test-domain-force-owner-note
+                      />
+                    {{/if}}
                   </div>
                 {{/if}}
               </li>

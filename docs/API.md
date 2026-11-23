@@ -25,7 +25,7 @@
 | 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない |
 | 403 | `token_not_allowed` | API トークンでは使えない API（API トークンの節） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
-| 403 | `forbidden_role` | ユーザーのロールではできない操作（ARCHITECTURE 10.7）。`details.required` は要るもの（`view` / `deploy` / `manage` / `owner`）。設定の `PATCH` でオーナー専用の項目を変えようとしたときは `details.fields` に項目名（`relax_policy`、`repository`、`promote_from`） |
+| 403 | `forbidden_role` | ユーザーのロールではできない操作（ARCHITECTURE 10.7）。`details.required` は要るもの（`view` / `deploy` / `manage` / `owner`）。設定の `PATCH` でオーナー専用の項目を変えようとしたときは `details.fields` に項目名（`relax_policy`、`repository`、`promote_from`）、ドメインの `PATCH` で強制有効化を変えようとしたときは `force_active` |
 | 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found`、`db_copy_not_found` | 対象がない。メンバーがロールを持たないアプリ（とそのデプロイ・実行・コピー）も、存在しないものとして同じ 404 になる（`code` も `message` も、存在しないときと同じ） |
 | 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens`、`not_deployed`、`promotion_unavailable`、`promotion_stale` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
@@ -48,6 +48,7 @@
 
 - 要件を満たさなければ `403 forbidden_role`。ロールのないアプリに関わるものは `404`（共通の表）。判定は再ログイン（`reauth_required`）より先に行う。
 - `PATCH /api/apps/{slug}` で `environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。本番アプリの `auto_deploy` を有効にすること（と、有効なまま追うブランチや `auto_deploy_workflow` を変えること）もオーナーだけ（`details.fields` に `auto_deploy`）。今と同じ値を送るのはかまわない。
+- `PATCH /api/apps/{slug}/domains/{id}` で `force_active` を今と違う値にできるのはオーナーだけ（`details.fields` に `force_active`）。`is_primary` は `manage` で変えられる。
 - API トークンも、トークンのユーザーとして同じ要件で判定する。
 
 ## メンバー
@@ -916,7 +917,7 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 | `GET /api/apps/{slug}/domains` | `{"default_hostname": "blog.dev.example.com", "domains": [ドメイン, ...]}` |
 | `POST /api/apps/{slug}/domains` | ボディ `{"hostname": "www.example.org"}`。201 でドメイン（直後に 1 回検証する）。重複は `409 hostname_taken`、ベースドメイン配下や不正な名前は 422 |
 | `POST /api/apps/{slug}/domains/{id}/verify` | 再検証。200 でドメイン |
-| `PATCH /api/apps/{slug}/domains/{id}` | ボディ `{"is_primary": true}` や `{"force_active": true}`。200 でドメイン。プライマリはアプリに 1 つで、`active` のドメインだけがなれる |
+| `PATCH /api/apps/{slug}/domains/{id}` | ボディ `{"is_primary": true}` や `{"force_active": true}`。200 でドメイン。プライマリはアプリに 1 つで、`active` のドメインだけがなれる。`force_active`（DNS の検証を飛ばして `active` にする）を今と違う値にできるのはオーナーだけで、メンバーには `403 forbidden_role`（`details.required` が `owner`、`details.fields` が `["force_active"]`）を返し、同じリクエストの `is_primary` も適用しない |
 | `DELETE /api/apps/{slug}/domains/{id}` | 204 |
 
 ## 実行ログ

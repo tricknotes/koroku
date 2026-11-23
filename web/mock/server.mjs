@@ -1138,6 +1138,17 @@ route('PATCH', '/api/apps/:slug/domains/:id', (context) => {
   const { state, params, body } = context;
   const found = domainOf(context);
   const app = state.apps.get(params.slug);
+  // Skipping the DNS check is the owner's (ARCHITECTURE 8.1).
+  if (
+    body.force_active !== undefined &&
+    body.force_active !== found.force_active &&
+    isMember(context.scenario)
+  ) {
+    throw new HttpError(403, 'forbidden_role', {
+      required: 'owner',
+      fields: ['force_active'],
+    });
+  }
   if (body.force_active !== undefined) {
     found.force_active = body.force_active;
     if (body.force_active) found.status = 'active';

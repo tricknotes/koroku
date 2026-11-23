@@ -162,8 +162,20 @@ func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	forces := in.ForceActive != nil && *in.ForceActive != d.ForceActive
+	if forces && !isOwner(r) {
+		// Skipping the DNS check routes a hostname, and has a certificate
+		// ordered for it, with no proof that it points here: the owner's
+		// decision (ARCHITECTURE 8.1). Sending the present value is fine.
+		writeJSON(w, http.StatusForbidden, errorBody{Error: errorDetail{
+			Code:    "forbidden_role",
+			Message: "only the owner can force a domain active or end that",
+			Details: map[string]any{"required": levelOwner.String(), "fields": []string{"force_active"}},
+		}})
+		return
+	}
 	// Force first: a domain forced active in the same request may become primary.
-	if in.ForceActive != nil && *in.ForceActive != d.ForceActive {
+	if forces {
 		if err := s.store.SetDomainForceActive(ctx, app.ID, d.ID, *in.ForceActive); err != nil {
 			s.internalError(w, r, err)
 			return
