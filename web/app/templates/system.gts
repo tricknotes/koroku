@@ -678,6 +678,12 @@ export default class SystemTemplate extends Component {
                     {{reservation.host}}{{#if reservation.room}}、あと
                       {{reservation.room}}
                       まで{{/if}}
+                    {{#if reservation.next}}
+                      <span
+                        class="reservation-next"
+                        data-test-reservation-next-total
+                      >すべてデプロイすると {{reservation.next}}</span>
+                    {{/if}}
                   </span>
                   <span class="resource-flag">
                     {{#if reservation.warning}}
@@ -715,6 +721,12 @@ export default class SystemTemplate extends Component {
                           data-test-reservation-switched
                         >ステージングに切り替え済み。次のデプロイで外れます。</span>
                       {{/if}}
+                      {{#if app.next}}
+                        <span
+                          class="usage-breakdown reservation-next"
+                          data-test-reservation-next
+                        >設定を変更済み。次のデプロイから {{app.next}}</span>
+                      {{/if}}
                     </span>
                     <span class="usage-value">{{app.total}}</span>
                   </li>
@@ -723,7 +735,7 @@ export default class SystemTemplate extends Component {
             {{/if}}
             <p class="system-note" data-test-reservation-note>
               {{#if reservation.apps.length}}
-                停止していない本番アプリが、稼働中のリリースで予約している量です。ホストのメモリが足りなくなったとき、カーネルは予約した量までを後回しにして、ステージングのアプリから先に回収します。合計にホストやビルド、ステージングのための余白
+                停止していない本番アプリが、稼働中のリリースで予約している量です。保存した予約の設定は次のデプロイから反映され、それまでは「次のデプロイから」として並べます。ホストのメモリが足りなくなったとき、カーネルは予約した量までを後回しにして、ステージングのアプリから先に回収します。合計にホストやビルド、ステージングのための余白
                 {{reservation.margin}}
                 を足して、ホストのメモリに収まるようにします。
               {{else}}

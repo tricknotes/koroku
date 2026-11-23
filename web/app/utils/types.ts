@@ -168,6 +168,11 @@ export interface SystemInfo {
 
 export interface MemoryReservationSummary {
   total_bytes: number;
+  /**
+   * The total once every app is deployed with its saved settings; absent
+   * on older backends.
+   */
+  next_total_bytes?: number;
   /** Left free for the host, builds and staging apps. */
   margin_bytes: number;
   /** The reservations plus the margin exceed the host's memory. */
@@ -177,6 +182,12 @@ export interface MemoryReservationSummary {
     environment: Environment;
     total_bytes: number;
     services: Record<string, number>;
+    /**
+     * What the next deployment reserves with the saved settings; `null`
+     * when the running release did not record its services' shapes.
+     */
+    next_total_bytes?: number | null;
+    next_services?: Record<string, number> | null;
   }[];
 }
 
@@ -507,6 +518,11 @@ export interface ServiceStatus {
   cpu_percent?: number | null;
   /** What the running release reserves for it; `null` for none. */
   memory_reservation_bytes?: number | null;
+  /**
+   * What the next deployment reserves with the saved settings (0 for
+   * none); `null` when the running release did not record it.
+   */
+  next_memory_reservation_bytes?: number | null;
 }
 
 export type MemoryRange = '24h' | '7d' | '14d';

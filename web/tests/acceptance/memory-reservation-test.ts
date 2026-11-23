@@ -86,6 +86,53 @@ module('Acceptance | memory reservation', function (hooks) {
       assert.dom('[data-test-reservation-flag]').doesNotExist();
     });
 
+    test('saved settings show what the next deployment reserves', async function (assert) {
+      system = makeSystem({
+        memory: { total_bytes: 4 * GB, available_bytes: 2 * GB },
+        memory_reservation: {
+          total_bytes: 1.25 * GB,
+          next_total_bytes: 0.75 * GB,
+          margin_bytes: GB,
+          warning: false,
+          apps: [
+            {
+              slug: 'shop',
+              environment: 'production',
+              total_bytes: GB,
+              services: { web: 256 * MB, db: 768 * MB },
+              next_total_bytes: 512 * MB,
+              next_services: { web: 256 * MB, db: 256 * MB },
+            },
+            {
+              slug: 'blog',
+              environment: 'production',
+              total_bytes: 256 * MB,
+              services: { web: 256 * MB },
+              next_total_bytes: 256 * MB,
+              next_services: { web: 256 * MB },
+            },
+          ],
+        },
+      });
+
+      await visit('/system');
+
+      assert
+        .dom('[data-test-reservation-next-total]')
+        .hasText('すべてデプロイすると 768.0 MB');
+      assert
+        .dom('[data-test-reservation-app="shop"] [data-test-reservation-next]')
+        .hasText(
+          '設定を変更済み。次のデプロイから 512.0 MB（db 256.0 MB、web 256.0 MB）',
+        );
+      assert
+        .dom('[data-test-reservation-app="blog"] [data-test-reservation-next]')
+        .doesNotExist();
+      assert
+        .dom('[data-test-reservation-note]')
+        .includesText('次のデプロイから反映');
+    });
+
     test('reservations that leave no margin warn', async function (assert) {
       system = makeSystem({
         memory: { total_bytes: 4 * GB, available_bytes: GB },
@@ -235,11 +282,11 @@ module('Acceptance | memory reservation', function (hooks) {
       .dom(
         '[data-test-resource-service="web"] [data-test-resource-reservation]',
       )
-      .hasText('予約 256.0 MB');
+      .hasText('256.0 MB');
     assert
       .dom(
         '[data-test-resource-service="worker"] [data-test-resource-reservation]',
       )
-      .doesNotExist();
+      .hasText('なし');
   });
 });

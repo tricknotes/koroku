@@ -6,6 +6,12 @@
   --row-columns: minmax(0, 1fr) minmax(0, 0.6fr) minmax(0, 1.4fr);
 }
 
+/* Production apps add what each service reserves (ARCHITECTURE 9.5). */
+.resource-rows.has-reservations {
+  --row-columns: minmax(0, 0.9fr) minmax(0, 0.5fr) minmax(0, 1.3fr)
+    minmax(0, 1.3fr);
+}
+
 .resource-service-name {
   overflow: hidden;
   font-weight: var(--weight-medium);
@@ -14,15 +20,73 @@
 }
 
 .resource-cpu,
-.resource-memory {
+.resource-memory,
+.resource-reservation-cell {
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
-.resource-reservation {
-  display: block;
-  margin-top: var(--space-1);
+.resource-reservation-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: flex-start;
+}
+
+.resource-reservation-value {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.resource-reservation-next {
+  color: var(--color-pending);
   font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.resource-reservation-source {
+  font-size: var(--text-xs);
+}
+
+/* The reservation dialog: the facts it starts from, then the field. */
+.reservation-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-5);
+  margin: var(--space-3) 0 var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.reservation-facts > div {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.reservation-facts dt {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.reservation-facts dd {
+  margin: 0;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.reservation-suggestion {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+}
+
+.dialog-body .field-hint {
+  margin: var(--space-3) 0 0;
 }
 
 .resource-memory.is-high .overview-memory-value {
@@ -54,6 +118,17 @@
 
   .resource-memory {
     grid-area: memory;
+  }
+
+  .resource-rows.has-reservations .row {
+    grid-template:
+      "name name" auto
+      "cpu memory" auto
+      "reservation reservation" auto / minmax(0, 0.6fr) minmax(0, 1.4fr);
+  }
+
+  .resource-reservation-cell {
+    grid-area: reservation;
   }
 }
 

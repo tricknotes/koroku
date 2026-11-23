@@ -9,11 +9,12 @@ import Icon from 'koroku-console/components/icon';
 import MemoryHistory from 'koroku-console/components/memory-history';
 import Meter from 'koroku-console/components/meter';
 import RowList from 'koroku-console/components/row-list';
+import ServiceReservation from 'koroku-console/components/service-reservation';
 import TabSection from 'koroku-console/components/tab-section';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
-import { formatBytes, formatPercent } from 'koroku-console/utils/format';
+import { formatPercent } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
 import { memoryUsage, type MemoryUsage } from 'koroku-console/utils/services';
 import type { App, ServiceStatus } from 'koroku-console/utils/types';
@@ -35,10 +36,10 @@ function cpuText(service: ServiceStatus): string {
   return formatPercent(service.cpu_percent);
 }
 
-/** What the running release reserves (ARCHITECTURE 6.2), or ''. */
-function reservationText(service: ServiceStatus): string {
+/** The running release reserves memory for it (ARCHITECTURE 6.2). */
+function reserves(service: ServiceStatus): boolean {
   const bytes = service.memory_reservation_bytes;
-  return typeof bytes === 'number' && bytes > 0 ? formatBytes(bytes) : '';
+  return typeof bytes === 'number' && bytes > 0;
 }
 
 interface Signature {
@@ -70,8 +71,21 @@ export default class AppResourcesTemplate extends Component<Signature> {
     return this.args.model.app;
   }
 
+  get production(): boolean {
+    return this.app.environment === 'production';
+  }
+
+  /**
+   * Production apps show the reservation of each service (ARCHITECTURE
+   * 9.5); so does a staging app whose running release still reserves.
+   */
+  showsReservations = (services: ServiceStatus[]): boolean =>
+    this.production || services.some(reserves);
+
+  /** The next reservations come from the server: ask again. */
   saved = (app: App) => {
     this.args.model.set(app);
+    void this.services.load({ quiet: true });
   };
 
   <template>
@@ -80,8 +94,12 @@ export default class AppResourcesTemplate extends Component<Signature> {
       <TabSection @title="今の使用量" data-test-resources-now>
         <p class="pane-description">
           稼働中のコンテナを数秒ごとに測った値です。CPU は Docker と同じく 1
-          コアを 100%
-          とします。本番のアプリでは、稼働中のリリースが予約しているメモリも出します。
+          コアを 100% とします。
+          {{#if this.production}}
+            予約は、ホストのメモリが足りなくなっても後回しに回収される量です。変更は次のデプロイから反映されます。
+          {{else}}
+            ステージングのアプリにはメモリの予約は付きません。
+          {{/if}}
         </p>
         {{#if this.app.sleeping_since}}
           <Banner data-test-resources-sleeping>
@@ -113,75 +131,79 @@ export default class AppResourcesTemplate extends Component<Signature> {
           </:loading>
           <:default as |services|>
             {{#if services.length}}
-              <RowList
-                class="resource-rows"
-                @label="サービスごとの使用量"
-                data-test-resource-services
-              >
-                <:header>
-                  <span>サービス</span>
-                  <span>CPU</span>
-                  <span>メモリ</span>
-                </:header>
-                <:rows as |Row|>
-                  {{#each services key="name" as |svc|}}
-                    {{#let (memoryUsage svc) (cpuText svc) as |memory cpu|}}
-                      <Row data-test-resource-service={{svc.name}}>
-                        <div
-                          class="resource-service-name mono"
-                        >{{svc.name}}</div>
-                        <div class="resource-cpu" data-test-resource-cpu>
-                          <span class="cell-label">CPU</span>
-                          {{#if cpu}}
-                            {{cpu}}
-                          {{else}}
-                            <span
-                              class="overview-secondary"
-                              title="止まっているか、取得できませんでした。"
-                            >—</span>
-                          {{/if}}
-                        </div>
-                        <div
-                          class="resource-memory {{if memory.high 'is-high'}}"
-                          data-test-resource-memory
-                        >
-                          <span class="cell-label">メモリ</span>
-                          {{#if memory}}
-                            <span class="overview-memory-value">
-                              {{#if memory.high}}
-                                <Icon @name="warning" />
-                              {{/if}}
-                              {{memory.text}}
-                            </span>
-                            {{#if (hasLimit memory)}}
-                              <Meter
-                                class="overview-memory-meter"
-                                @label="{{svc.name}} のメモリ使用率"
-                                @percent={{percentOf memory}}
-                                @tone={{if memory.high "warn" "ok"}}
-                              />
-                            {{/if}}
-                          {{else}}
-                            <span
-                              class="overview-secondary"
-                              title="止まっているか、取得できませんでした。"
-                            >—</span>
-                          {{/if}}
-                          {{#let (reservationText svc) as |reserved|}}
-                            {{#if reserved}}
+              {{#let (this.showsReservations services) as |withReservations|}}
+                <RowList
+                  class="resource-rows
+                    {{if withReservations 'has-reservations'}}"
+                  @label="サービスごとの使用量"
+                  data-test-resource-services
+                >
+                  <:header>
+                    <span>サービス</span>
+                    <span>CPU</span>
+                    <span>メモリ</span>
+                    {{#if withReservations}}
+                      <span>予約</span>
+                    {{/if}}
+                  </:header>
+                  <:rows as |Row|>
+                    {{#each services key="name" as |svc|}}
+                      {{#let (memoryUsage svc) (cpuText svc) as |memory cpu|}}
+                        <Row data-test-resource-service={{svc.name}}>
+                          <div
+                            class="resource-service-name mono"
+                          >{{svc.name}}</div>
+                          <div class="resource-cpu" data-test-resource-cpu>
+                            <span class="cell-label">CPU</span>
+                            {{#if cpu}}
+                              {{cpu}}
+                            {{else}}
                               <span
-                                class="resource-reservation overview-secondary"
-                                title="ホストのメモリが足りなくなっても、この量までは後回しに回収されます。"
-                                data-test-resource-reservation
-                              >予約 {{reserved}}</span>
+                                class="overview-secondary"
+                                title="止まっているか、取得できませんでした。"
+                              >—</span>
                             {{/if}}
-                          {{/let}}
-                        </div>
-                      </Row>
-                    {{/let}}
-                  {{/each}}
-                </:rows>
-              </RowList>
+                          </div>
+                          <div
+                            class="resource-memory {{if memory.high 'is-high'}}"
+                            data-test-resource-memory
+                          >
+                            <span class="cell-label">メモリ</span>
+                            {{#if memory}}
+                              <span class="overview-memory-value">
+                                {{#if memory.high}}
+                                  <Icon @name="warning" />
+                                {{/if}}
+                                {{memory.text}}
+                              </span>
+                              {{#if (hasLimit memory)}}
+                                <Meter
+                                  class="overview-memory-meter"
+                                  @label="{{svc.name}} のメモリ使用率"
+                                  @percent={{percentOf memory}}
+                                  @tone={{if memory.high "warn" "ok"}}
+                                />
+                              {{/if}}
+                            {{else}}
+                              <span
+                                class="overview-secondary"
+                                title="止まっているか、取得できませんでした。"
+                              >—</span>
+                            {{/if}}
+                          </div>
+                          {{#if withReservations}}
+                            <ServiceReservation
+                              @app={{this.app}}
+                              @service={{svc}}
+                              @onSaved={{this.saved}}
+                            />
+                          {{/if}}
+                        </Row>
+                      {{/let}}
+                    {{/each}}
+                  </:rows>
+                </RowList>
+              {{/let}}
             {{else}}
               <EmptyState
                 @title="動いているサービスはありません"

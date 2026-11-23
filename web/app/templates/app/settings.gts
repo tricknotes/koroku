@@ -28,6 +28,8 @@ import {
 import { missingVariables } from 'koroku-console/utils/env-requirements';
 import { fieldErrors, policyViolations } from 'koroku-console/utils/errors';
 import Loadable from 'koroku-console/utils/loadable';
+import { formatBytes } from 'koroku-console/utils/format';
+import { reservationPlan } from 'koroku-console/utils/service-reservation';
 import { can } from 'koroku-console/utils/roles';
 import SettingsForm, {
   ExemptRow,
@@ -48,8 +50,20 @@ import type {
   EnvRequirements,
   EnvSource,
   Environment,
+  ServiceStatus,
   SystemInfo,
 } from 'koroku-console/utils/types';
+
+/** A service whose reservation the saved settings change (ARCHITECTURE 6.2). */
+interface ReservationChange {
+  name: string;
+  running: string;
+  next: string;
+}
+
+function bytesOrNone(bytes: number): string {
+  return bytes > 0 ? formatBytes(bytes) : 'なし';
+}
 
 /** Settings that change what the requirements check reads. */
 const REQUIREMENT_FIELDS: (keyof AppPatch)[] = [
@@ -176,6 +190,14 @@ export default class AppSettingsTemplate extends Component<Signature> {
   apps = new Loadable<App[]>(() => this.api.listApps());
 
   /**
+   * The services of the running release, for what it reserves against
+   * what the saved settings will (ARCHITECTURE 6.2).
+   */
+  services = new Loadable<ServiceStatus[]>(() =>
+    this.api.listServices(this.app.slug),
+  );
+
+  /**
    * What the requirements check finds with the saved settings (ARCHITECTURE
    * 9.4). Read again whenever a save changes where it reads from.
    */
@@ -198,6 +220,23 @@ export default class AppSettingsTemplate extends Component<Signature> {
     if (this.app.environment === 'production' || this.app.promote_from) {
       void this.apps.load();
     }
+    if (this.app.current_deployment) void this.services.load();
+  }
+
+  /** Services whose next deployment reserves something else than now. */
+  get reservationChanges(): ReservationChange[] {
+    const services = this.services.value ?? [];
+    return services.flatMap((svc) => {
+      const plan = reservationPlan(this.app, svc);
+      if (!plan.pending || plan.nextBytes === null) return [];
+      return [
+        {
+          name: svc.name,
+          running: bytesOrNone(plan.runningBytes),
+          next: bytesOrNone(plan.nextBytes),
+        },
+      ];
+    });
   }
 
   willDestroy(): void {
@@ -598,6 +637,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
       this.args.model.set(app);
       this.form = new SettingsForm(app);
       this.saved = true;
+      if (app.current_deployment) void this.services.load({ quiet: true });
       if (REQUIREMENT_FIELDS.some((field) => field in patch)) {
         void this.requirements.load();
       }
@@ -1506,6 +1546,24 @@ export default class AppSettingsTemplate extends Component<Signature> {
                 ステージングのアプリには付きません。本番に切り替えると、次のデプロイから付きます。
               </p>
             {{/unless}}
+            {{#if this.reservationChanges.length}}
+              <div class="reservation-changes" data-test-reservation-changes>
+                <p class="field-hint">
+                  保存した設定は次のデプロイから反映されます。稼働中のリリースとの違い:
+                </p>
+                <ul>
+                  {{#each this.reservationChanges key="name" as |change|}}
+                    <li data-test-reservation-change={{change.name}}>
+                      <span class="mono">{{change.name}}</span>
+                      稼働中
+                      {{change.running}}
+                      → 次のデプロイから
+                      <strong>{{change.next}}</strong>
+                    </li>
+                  {{/each}}
+                </ul>
+              </div>
+            {{/if}}
             <FormField
               class="field-narrow"
               @label="既定（全サービス共通）"

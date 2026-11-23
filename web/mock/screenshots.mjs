@@ -1675,6 +1675,94 @@ SHOTS.push(
   },
 );
 
+// One service's reservation from the resources tab (ARCHITECTURE 9.5). In
+// `healthy`, blog is production and reserves the defaults, except worker.
+const EDIT_RESERVATION = '[data-test-reservation-edit="web"]';
+const fillReservation = (value) => `(() => {
+  const input = document.querySelector('[data-test-reservation-input]');
+  input.value = '${value}';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  // The confirm button is enabled once the value renders.
+  setTimeout(() => document.querySelector('[data-test-dialog-confirm]').click(), 200);
+})()`;
+SHOTS.push(
+  {
+    name: 'reservation-dialog',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: EDIT_RESERVATION,
+    click: EDIT_RESERVATION,
+    then: '[data-test-reservation-suggestion]',
+  },
+  {
+    name: 'reservation-dialog-phone',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: EDIT_RESERVATION,
+    click: EDIT_RESERVATION,
+    then: '[data-test-reservation-suggestion]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'reservation-error',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: EDIT_RESERVATION,
+    click: EDIT_RESERVATION,
+    script: fillReservation('1g'),
+    then: '[data-test-field-group="reservation"] [data-test-field-error]',
+    themes: ['light'],
+  },
+  {
+    name: 'reservation-saved',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: EDIT_RESERVATION,
+    click: EDIT_RESERVATION,
+    script: fillReservation('192m'),
+    then: '[data-test-resource-service="web"] [data-test-reservation-next]',
+    mutates: true,
+    themes: ['light'],
+  },
+  {
+    name: 'reservation-pending',
+    path: '/apps/blog/resources?scenario=reservations-pending',
+    wait: '[data-test-reservation-next]',
+  },
+  {
+    name: 'reservation-pending-phone',
+    path: '/apps/blog/resources?scenario=reservations-pending',
+    wait: '[data-test-reservation-next]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'reservation-pending-system',
+    path: '/system?scenario=reservations-pending',
+    wait: '[data-test-reservation-next]',
+    script: `document.querySelector('[data-test-reservation]').scrollIntoView()`,
+  },
+  {
+    name: 'reservation-pending-system-phone',
+    path: '/system?scenario=reservations-pending',
+    wait: '[data-test-reservation-next]',
+    script: `document.querySelector('[data-test-reservation]').scrollIntoView()`,
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'reservation-pending-settings',
+    path: '/apps/blog/settings?scenario=reservations-pending',
+    wait: '[data-test-reservation-changes]',
+    script: `document.querySelector('[data-test-reservation-group]').scrollIntoView()`,
+  },
+  {
+    name: 'reservation-pending-settings-phone',
+    path: '/apps/blog/settings?scenario=reservations-pending',
+    wait: '[data-test-reservation-changes]',
+    script: `document.querySelector('[data-test-reservation-group]').scrollIntoView()`,
+    ...PHONE,
+    fullPage: false,
+  },
+);
+
 // Access protection (ARCHITECTURE 8.3), on the settings tab.
 const PROTECTION = '[data-test-protection-group]';
 const SHOW_PROTECTION = `document.querySelector('${PROTECTION}').scrollIntoView()`;
