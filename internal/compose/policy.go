@@ -74,8 +74,33 @@ type PolicyParams struct {
 	WebService string
 	WebPort    int
 	HostPort   int
+	// BlueGreen checks a release in the blue/green form (ARCHITECTURE
+	// 7.2): the coloured copies of the public service publish on HostPort
+	// (blue) and AltHostPort (green), the public service itself publishes
+	// nothing, and ReleaseEnvFile is the second env file koroku injects.
+	BlueGreen      bool
+	AltHostPort    int
+	ReleaseEnvFile string
 	// Relax waives the relaxable rules for this app.
 	Relax bool
+}
+
+// allowedBinding returns the host port a service of the merged project may
+// publish on loopback, or 0 when it may publish nothing.
+func (params PolicyParams) allowedBinding(service string) int {
+	if !params.BlueGreen {
+		if service == params.WebService {
+			return params.HostPort
+		}
+		return 0
+	}
+	switch service {
+	case ColoredName(params.WebService, ColorBlue):
+		return params.HostPort
+	case ColoredName(params.WebService, ColorGreen):
+		return params.AltHostPort
+	}
+	return 0
 }
 
 // PolicyResult separates findings that block the deploy from waived ones.
@@ -122,6 +147,17 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 	releaseDir := resolvePath(params.ReleaseDir)
 	for _, name := range p.ServiceNames() {
 		svc := p.Services[name]
+		for _, port := range svc.Ports {
+			if allowed := params.allowedBinding(name); allowed != 0 && isWebBinding(port, params.WebPort, allowed) {
+				continue
+			}
+			add(name, RulePortExposure,
+				fmt.Sprintf("unexpected published port %s (only the web service may publish, on loopback)", describePort(port)), false)
+		}
+		if params.BlueGreen && isColored(name, params.WebService) {
+			// A copy of the public service, which is checked itself.
+			continue
+		}
 		if svc.Privileged {
 			add(name, RulePrivileged, "privileged: true is not allowed", true)
 		}
@@ -151,17 +187,13 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 					fmt.Sprintf("bind mount of %s must be read-only (add :ro; keep data in a named volume)", m.Source), true)
 			}
 		}
-		for _, port := range svc.Ports {
-			if name == params.WebService && isWebBinding(port, params) {
-				continue
-			}
-			add(name, RulePortExposure,
-				fmt.Sprintf("unexpected published port %s (only the web service may publish, on loopback)", describePort(port)), false)
-		}
 	}
 
 	for _, name := range p.ServiceNames() {
 		svc := p.Services[name]
+		if params.BlueGreen && isColored(name, params.WebService) {
+			continue
+		}
 		for field, value := range map[string]string{"ipc": svc.Ipc, "uts": svc.Uts, "userns_mode": svc.UsernsMode, "cgroup": svc.Cgroup} {
 			if value == "host" {
 				add(name, RuleHostNamespace, fmt.Sprintf("%s: host is not allowed", field), true)
@@ -217,6 +249,9 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 			if envFile.Path == params.EnvFile && params.EnvFile != "" {
 				continue
 			}
+			if envFile.Path == params.ReleaseEnvFile && params.ReleaseEnvFile != "" {
+				continue
+			}
 			if !isInside(releaseDir, resolvePath(envFile.Path)) {
 				add(name, RuleFileOutside, fmt.Sprintf("env_file %s is outside the repository checkout", envFile.Path), true)
 			}
@@ -242,10 +277,16 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 		}
 	}
 
-	if total := p.TotalStopGracePeriod(); total > MaxStopGracePeriod {
+	// The old colour stops on its own after the switch, so the public
+	// service counts once.
+	graced := p
+	if params.BlueGreen {
+		graced = p.WithoutServices(ColoredNames(params.WebService)...)
+	}
+	if total := graced.TotalStopGracePeriod(); total > MaxStopGracePeriod {
 		var set []ServiceGrace
-		for _, name := range p.ServiceNames() {
-			if d, ok := p.Services[name].StopGracePeriod(); ok {
+		for _, name := range graced.ServiceNames() {
+			if d, ok := graced.Services[name].StopGracePeriod(); ok {
 				set = append(set, ServiceGrace{Service: name, Period: d})
 			}
 		}
@@ -296,10 +337,10 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 	return result
 }
 
-func isWebBinding(port Port, params PolicyParams) bool {
+func isWebBinding(port Port, webPort, hostPort int) bool {
 	return port.HostIP == "127.0.0.1" &&
-		port.Target == params.WebPort &&
-		port.Published == strconv.Itoa(params.HostPort) &&
+		port.Target == webPort &&
+		port.Published == strconv.Itoa(hostPort) &&
 		(port.Protocol == "" || port.Protocol == "tcp")
 }
 
