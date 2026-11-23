@@ -1,6 +1,6 @@
 # 開発ガイド
 
-koroku 自体を開発する人向けの文書。使い方は [README](../README.md)、設計は [ARCHITECTURE.md](ARCHITECTURE.md)、実装規約とマイルストーンは [CLAUDE.md](../CLAUDE.md) を参照。
+koroku 自体を開発する人向けの文書。使い方は [USAGE.md](USAGE.md)、設計は [ARCHITECTURE.md](ARCHITECTURE.md)、実装規約とマイルストーンは [CLAUDE.md](../CLAUDE.md) を参照。
 
 ## 道具
 
