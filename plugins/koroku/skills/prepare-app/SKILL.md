@@ -56,7 +56,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 
 アクセスがない間の休止を使うアプリ（たいていの staging）は `--sleep` を付ける。koroku が休止と起動でするのと同じく、`stop` してから `start --wait` し、もう一度 HTTP で確かめ、起きるまでの秒数（休止のあとの最初のリクエストが待つ時間）を出す。
 
-無停止デプロイ（blue/green）を使う、または使えるか確かめたいアプリは `--blue-green` を付ける。koroku が断る形（公開サービスの `container_name`、`deploy.replicas`、ほかのサービスからの依存、`<公開サービス>-blue` / `-green` という名前、`include:`）を先に調べ、色の付いた override を重ねて blue を起動したあと、もう一度デプロイして green への切り替えをなぞる（ワンショットと green を `up --no-deps --wait` → green の確認 → 切り替え → ほかのサービスの作り直し → `--drain` 秒（既定 10）待って blue を止める）。その間 0.2 秒ごとに「いまの転送先」のポートへリクエストを送り、接続エラーか 5xx が 1 件でもあれば失敗にする。green のポートは `--alt-host-port`（既定 28081）。DB が作り直されずに残ったかもサービスごとに出す。
+無停止デプロイ（blue/green）を使う、または使えるか確かめたいアプリは `--blue-green` を付ける。koroku が断る形（公開サービスの `container_name`、`deploy.replicas` と `scale`、ほかのサービスからの依存、`<公開サービス>-blue` / `-green` という名前、`include:`）を先に調べる。`image:` がコミットの変数（`KOROKU_COMMIT_SHA` / `KOROKU_COMMIT_SHORT`）に従うサービスを koroku と同じ方法で見つけて出し（`Images that follow the commit:`）、色の付いた override を重ねて blue を起動したあと、もう一度デプロイして green への切り替えをなぞる（ワンショットと green を `up --no-deps --wait` → green の確認 → 切り替え → ほかのサービスの作り直し → `--drain` 秒（既定 10）待って blue を止める）。その間 0.2 秒ごとに「いまの転送先」のポートへリクエストを送り、接続エラーか 5xx が 1 件でもあれば失敗にする。green のポートは `--alt-host-port`（既定 28081）。DB が作り直されずに残ったかもサービスごとに出す。
 
 ```sh
 <skill-dir>/scripts/rehearse.sh --service web --port 3000 --health /up --env-file /path/to/test.env --blue-green

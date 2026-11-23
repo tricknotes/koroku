@@ -13,8 +13,10 @@
 # without downtime: the override copies the public service to <service>-blue
 # and <service>-green (extends: { file: ... }), takes the original out of up
 # with a profile, and moves the commit variables to a second env file
-# (env.release) that only the services recreated on every deploy read. It
-# first fails on the Compose shapes koroku refuses for blue/green, starts
+# (env.release) that only the services recreated on every deploy read (the
+# colours, the original, one-shots, services with build: and services whose
+# interpolated image: follows the commit, found as koroku does by normalizing
+# again with an all-zero commit). It first fails on the Compose shapes koroku refuses for blue/green, starts
 # blue with the other services, and then deploys again as koroku does: the
 # one-shot services and green with up --no-deps, an HTTP check of green, the
 # switch, the other services recreated, a drain wait, and blue stopped and
@@ -114,6 +116,13 @@ case "$drain" in ''|*[!0-9]*) die "--drain must be a number of seconds" ;; esac
 case "$health" in /*) ;; *) die "--health must start with /" ;; esac
 case "$environment" in staging|production) ;; *) die "--environment must be staging or production" ;; esac
 if [ -n "$env_src" ] && [ ! -f "$env_src" ]; then die "$env_src does not exist"; fi
+if [ "$blue_green" = 1 ]; then
+  for task in ${tasks[@]+"${tasks[@]}"}; do
+    case "${task%%:*}" in
+      "$service-blue"|"$service-green") die "--task: koroku refuses the coloured services for tasks (422); name $service" ;;
+    esac
+  done
+fi
 
 # to_bytes 512m -> 536870912; Compose's own output is already in bytes.
 to_bytes() {
@@ -209,6 +218,11 @@ if [ "$blue_green" = 1 ]; then env_args+=(--env-file "$release_env"); fi
 base=(docker compose -p "$project" -f "$release/$file" "${env_args[@]}")
 override="$work/koroku.override.yaml"
 dc=("${base[@]}" -f "$override")
+# config, build and pull of a blue/green release activate the profile that
+# takes the original public service out of up, so that it is checked and
+# built; up, start and restart do not.
+dc_all=("${dc[@]}")
+if [ "$blue_green" = 1 ]; then dc_all+=(--profile koroku-disabled); fi
 
 # Blue/green: images the rehearsal tags per release (koroku-style names, so
 # down --rmi local leaves them), and the loop that requests the live port.
@@ -332,7 +346,7 @@ if [ "$blue_green" = 1 ]; then
   if printf '%s\n' "$web_yaml" | grep -q '^    container_name:'; then
     problems+=("$service sets container_name: two copies of it cannot share one name")
   fi
-  replicas="$(printf '%s\n' "$web_yaml" | sed -n 's/^      replicas: \([0-9]*\)$/\1/p')"
+  replicas="$(printf '%s\n' "$web_yaml" | sed -n 's/^      replicas: \([0-9]*\)$/\1/p; s/^    scale: \([0-9]*\)$/\1/p' | tail -n 1)"
   if [ "${replicas:-1}" -gt 1 ]; then
     problems+=("$service sets deploy.replicas to $replicas: blue/green swaps a single container")
   fi
@@ -386,6 +400,44 @@ EOF
   fi
   echo "    (all met)"
 fi
+
+# Blue/green: the services without build: whose interpolated image follows
+# the commit (image: ...:sha-${KOROKU_COMMIT_SHORT}). koroku normalizes the
+# project once more with only the commit variables changed (an all-zero
+# commit) and compares the images; those services read env.release.
+commit_images=""
+if [ "$blue_green" = 1 ]; then
+  probe_commit=0000000000000000000000000000000000000000
+  if [ "$commit" = "$probe_commit" ]; then probe_commit=ffffffffffffffffffffffffffffffffffffffff; fi
+  probe_env="$work/env.probe"
+  printf 'KOROKU_COMMIT_SHA=%s\nKOROKU_COMMIT_SHORT=%s\n' "$probe_commit" "${probe_commit:0:7}" > "$probe_env"
+  # images_of prints "<service> <image>" from a normalized Compose.
+  images_of() {
+    awk '
+      /^services:$/ { on = 1; next }
+      /^[^ ]/ { on = 0 }
+      !on { next }
+      /^  [^ ]/ { svc = $1; sub(/:$/, "", svc); gsub(/"/, "", svc); next }
+      /^    image: / { img = $0; sub(/^    image: /, "", img); print svc " " img }'
+  }
+  probed_config="$(docker compose -p "$project" -f "$release/$file" --env-file "$env_file" --env-file "$probe_env" \
+    config --no-env-resolution 2>/dev/null)" ||
+    die "docker compose config with a probe commit failed"
+  probed="$(printf '%s\n' "$probed_config" | images_of)"
+  actual_images="$(printf '%s\n' "$normalized" | images_of)"
+  for name in $services; do
+    if has_build "$name"; then continue; fi
+    a="$(printf '%s\n' "$actual_images" | awk -v s="$name" '$1 == s { sub(/^[^ ]+ /, ""); print; exit }')"
+    b="$(printf '%s\n' "$probed" | awk -v s="$name" '$1 == s { sub(/^[^ ]+ /, ""); print; exit }')"
+    if [ "$a" != "$b" ]; then commit_images="$commit_images $name"; fi
+  done
+  commit_images="${commit_images# }"
+  if [ -n "$commit_images" ]; then
+    echo "==> Images that follow the commit: ${commit_images// /, }"
+    echo "    (they read env.release and are recreated by every deploy, as on koroku)"
+  fi
+fi
+follows_commit() { case " $commit_images " in *" $1 "*) return 0 ;; esac; return 1; }
 
 # The aliases the coloured services carry: the public service's name on
 # each of its networks, so that http://web:3000 reaches whichever runs.
@@ -479,9 +531,12 @@ write_override() {
         continue
       fi
       # Blue/green: env.release goes to the services every deploy recreates
-      # (the colours, the original, one-shots, services with build:).
+      # (the colours, the original, one-shots, services with build:, images
+      # that follow the commit).
       env_kind=app
-      if [ "$name" = "$service" ] || is_oneshot "$name" || has_build "$name"; then env_kind=release; fi
+      if [ "$name" = "$service" ] || is_oneshot "$name" || has_build "$name" || follows_commit "$name"; then
+        env_kind=release
+      fi
       if [ "$name" = "$service" ]; then
         # Out of up and start; run (tasks) and build still name it.
         echo '    profiles: ["koroku-disabled"]'
@@ -527,17 +582,15 @@ echo "--- koroku.override.yaml"
 sed 's/^/    /' "$override"
 
 echo "==> Validating with the override"
-"${dc[@]}" config -q || die "the project does not validate with the override"
+"${dc_all[@]}" config -q || die "the project does not validate with the override"
 
 others=()
 recreated=()
 built=()
-pulled=()
 for name in $services; do
   if has_build "$name"; then built+=("$name"); fi
   [ "$name" != "$service" ] || continue
   others+=("$name")
-  if ! has_build "$name"; then pulled+=("$name"); fi
   if ! is_oneshot "$name"; then recreated+=("$name"); fi
 done
 oneshot_services=()
@@ -546,19 +599,13 @@ for name in $oneshots; do
 done
 
 echo "==> Building and pulling"
-if [ "$blue_green" = 0 ]; then
-  "${dc[@]}" build
-  "${dc[@]}" pull --ignore-buildable --quiet
-else
-  # The original is out of up, so it is built by name, as koroku does.
-  if [ "${#built[@]}" -gt 0 ]; then
-    "${dc[@]}" build "${built[@]}"
-    for name in "${built[@]}"; do release_images+=("$(release_image "$name" 1)"); done
-  fi
-  if ! has_build "$service"; then pulled+=("$service-blue"); fi
-  if [ "${#pulled[@]}" -gt 0 ]; then
-    "${dc[@]}" pull --quiet "${pulled[@]}"
-  fi
+# Blue/green: with the profile active the original builds the release
+# image; the colours (build: !reset null, pull_policy: never) are neither
+# built nor pulled.
+"${dc_all[@]}" build
+"${dc_all[@]}" pull --ignore-buildable --quiet
+if [ "$blue_green" = 1 ]; then
+  for name in ${built[@]+"${built[@]}"}; do release_images+=("$(release_image "$name" 1)"); done
 fi
 
 show_logs() {
@@ -571,7 +618,7 @@ code="000"
 # check_http <port> waits up to 60s for any status below 500, like koroku.
 check_http() {
   local url="http://127.0.0.1:$1$health"
-  echo "==> Checking $url (any status below 500, up to 60s)"
+  echo "==> ${2:+$2: }Checking $url (any status below 500, up to 60s)"
   local deadline=$(( $(date +%s) + 60 ))
   while :; do
     code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$url" || true)"
@@ -653,19 +700,7 @@ if [ "$blue_green" = 1 ]; then
     release_images+=("$(release_image "$name" 2)")
   done
   write_override 2
-  "${dc[@]}" config -q || die "the project does not validate with the override of r2"
-
-  # koroku fails the deployment, without starting the new colour, when the
-  # host could not hold a second copy of the public service.
-  memory_lines "$service" >/dev/null
-  if [ -r /proc/meminfo ]; then
-    available="$(awk '/^MemAvailable:/ { a = $2 } /^SwapFree:/ { s = $2 } END { printf "%d\n", (a + s) * 1024 }' /proc/meminfo)"
-    echo "    memory: $((available / 1048576))MiB available (MemAvailable + SwapFree), $((limit / 1048576))MiB needed for a second $service"
-    if [ "$available" -lt "$limit" ]; then
-      echo "FAILED: Not enough memory to run two $service containers ($((available / 1048576))MiB available, $((limit / 1048576))MiB needed)." >&2
-      exit 1
-    fi
-  fi
+  "${dc_all[@]}" config -q || die "the project does not validate with the override of r2"
 
   before="$(container_ids ${recreated[@]+"${recreated[@]}"})"
   printf '%s\n' "$live_port" > "$live_file"
@@ -691,6 +726,18 @@ if [ "$blue_green" = 1 ]; then
   }
 
   echo "==> start: Starting green on port $alt_host_port (up --no-deps --wait, up to 300s)"
+  # koroku fails the deployment, without starting the new colour, when the
+  # host could not hold a second copy of the public service.
+  memory_lines "$service" >/dev/null
+  if [ -r /proc/meminfo ]; then
+    available="$(awk '/^MemAvailable:/ { a = $2 } /^SwapFree:/ { s = $2 } END { printf "%d\n", (a + s) * 1024 }' /proc/meminfo)"
+    echo "    memory: $((available >> 20)) MiB available (MemAvailable + SwapFree), $((limit >> 20)) MiB needed for a second $service"
+    if [ "$available" -lt "$limit" ]; then
+      stop_traffic
+      echo "FAILED: Not enough memory to run two $service containers ($((available >> 20)) MiB available, $((limit >> 20)) MiB needed)." >&2
+      exit 1
+    fi
+  fi
   if [ "${#oneshot_services[@]}" -gt 0 ]; then
     echo "    with the one-shot services: ${oneshot_services[*]} (they run while blue still answers)"
   fi
@@ -701,7 +748,7 @@ if [ "$blue_green" = 1 ]; then
     echo "FAILED: green did not become ready" >&2
     exit 1
   fi
-  if ! check_http "$alt_host_port"; then
+  if ! check_http "$alt_host_port" check; then
     remove_green
     exit 1
   fi
@@ -710,7 +757,7 @@ if [ "$blue_green" = 1 ]; then
   printf '%s\n' "$alt_host_port" > "$live_file"
   live_colour=green
   live_port="$alt_host_port"
-  echo "    the live port is now $alt_host_port (koroku writes web_color and reloads Caddy here)"
+  echo "    Requests now reach green on port $alt_host_port (koroku writes web_color and reloads Caddy here)"
 
   if [ "${#recreated[@]}" -gt 0 ]; then
     echo "==> services: Recreating the other services (up --no-deps --wait, up to 300s)"
@@ -724,7 +771,11 @@ if [ "$blue_green" = 1 ]; then
     after="$(container_ids "${recreated[@]}")"
     while read -r name id; do
       if printf '%s\n' "$before" | grep -qx -- "$name $id"; then
-        echo "    $name: kept (same container)"
+        if follows_commit "$name"; then
+          echo "    $name: kept (same commit here; koroku recreates it for each new commit)"
+        else
+          echo "    $name: kept (same container)"
+        fi
       else
         echo "    $name: recreated"
       fi
