@@ -30,6 +30,9 @@ const FIELD_MESSAGES: Record<string, string> = {
   token: 'トークンを入力してください（空白は含められません）。',
 };
 
+/** The hint next to the field says why it is needed. */
+const TOKEN_AGAIN = 'トークンを入力してください。';
+
 interface RegistryCredentialSignature {
   Element: HTMLElement;
   Args: {
@@ -59,6 +62,8 @@ export default class RegistryCredentialPanel extends Component<RegistryCredentia
   @tracked saving = false;
   @tracked saved = false;
   @tracked formError: unknown = null;
+  /** A save was tried for another registry or user without the token. */
+  @tracked tokenMissing = false;
 
   @tracked confirmingRemove = false;
   @tracked removing = false;
@@ -79,7 +84,30 @@ export default class RegistryCredentialPanel extends Component<RegistryCredentia
     for (const name of Object.keys(fields)) {
       out[name] = FIELD_MESSAGES[name] ?? fields[name] ?? '';
     }
+    if (this.tokenMissing) out['token'] = TOKEN_AGAIN;
     return out;
+  }
+
+  /**
+   * The form names another registry or user than the saved credential.
+   * The saved token is only used where it was entered for, so the change
+   * needs the token again (ARCHITECTURE 6.1).
+   */
+  get targetChanged(): boolean {
+    const current = this.credential.value;
+    if (!current?.configured) return false;
+    return (
+      this.registry.trim().toLowerCase() !== current.registry ||
+      this.username.trim() !== current.username
+    );
+  }
+
+  get needsTokenAgain(): boolean {
+    return this.targetChanged && this.token.trim() === '';
+  }
+
+  get tokenRequired(): boolean {
+    return !this.configured || this.targetChanged;
   }
 
   /** An error that is not about one field. */
@@ -90,9 +118,16 @@ export default class RegistryCredentialPanel extends Component<RegistryCredentia
   }
 
   get tokenHint(): string {
+    if (this.targetChanged) {
+      return 'レジストリかユーザー名を変えるときは、トークンも入力します。保存済みのトークンは、ほかのレジストリやユーザー名には使いません。';
+    }
     return this.configured
       ? '変えないときは空のままにします。保存した値は二度と表示されません。'
       : '保存した値は暗号化して保管し、二度と表示されません。';
+  }
+
+  get tokenPlaceholder(): string | undefined {
+    return this.tokenRequired ? undefined : '（変更しない）';
   }
 
   startEdit = () => {
@@ -108,6 +143,7 @@ export default class RegistryCredentialPanel extends Component<RegistryCredentia
     this.username = current?.username ?? '';
     this.token = '';
     this.formError = null;
+    this.tokenMissing = false;
     this.editing = true;
   };
 
@@ -115,25 +151,31 @@ export default class RegistryCredentialPanel extends Component<RegistryCredentia
     if (this.saving) return;
     this.editing = false;
     this.formError = null;
+    this.tokenMissing = false;
   };
 
   setRegistry = (event: Event) => {
     this.registry = inputValue(event);
+    this.tokenMissing = false;
   };
 
   setUsername = (event: Event) => {
     this.username = inputValue(event);
+    this.tokenMissing = false;
   };
 
   setToken = (event: Event) => {
     this.token = inputValue(event);
+    this.tokenMissing = false;
   };
 
   save = async (event: Event) => {
     event.preventDefault();
     if (this.saving) return;
-    this.saving = true;
     this.formError = null;
+    this.tokenMissing = this.needsTokenAgain;
+    if (this.tokenMissing) return;
+    this.saving = true;
     try {
       const saved = await this.api.putRegistryCredential(this.args.slug, {
         registry: this.registry.trim(),
@@ -306,7 +348,8 @@ export default class RegistryCredentialPanel extends Component<RegistryCredentia
                     class="mono"
                     autocomplete="new-password"
                     spellcheck="false"
-                    placeholder={{if this.configured "（変更しない）"}}
+                    placeholder={{this.tokenPlaceholder}}
+                    required={{this.tokenRequired}}
                     value={{this.token}}
                     aria-describedby={{field.describedBy}}
                     data-test-registry-field="token"

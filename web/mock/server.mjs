@@ -793,7 +793,12 @@ route('PUT', '/api/apps/:slug/registry-credential', (context) => {
   }
   if (!username || /[:\s]/.test(username))
     errors.username = 'enter the username';
-  if (/\s/.test(token) || (!token && !saved)) errors.token = 'enter the token';
+  // The saved token stays with the registry and user it was entered for.
+  const moved =
+    saved && (saved.registry !== registry || saved.username !== username);
+  if (/\s/.test(token) || (!token && (!saved || moved))) {
+    errors.token = 'enter the token';
+  }
   if (Object.keys(errors).length) {
     throw new HttpError(422, 'validation_failed', errors);
   }
@@ -804,8 +809,6 @@ route('PUT', '/api/apps/:slug/registry-credential', (context) => {
     updated_at: new Date().toISOString(),
   };
   context.state.registry.set(app.slug, next);
-  const moved =
-    saved && (saved.registry !== registry || saved.username !== username);
   if (!saved || moved || token) {
     record(context, app.slug, 'registry.set', {
       registry,

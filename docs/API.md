@@ -559,7 +559,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/registry-credential` | 下の形。トークンは返さない。設定していなければ `configured: false`、`registry` は既定の `ghcr.io`、`username` は空文字、`updated_at` は `null` |
-| `PUT /api/apps/{slug}/registry-credential` | 本文 `{"registry": "ghcr.io", "username": "octo-bot", "token": "..."}` で設定する（前のものは置き換える）。`token` を空文字か省略にすると保存済みのトークンを残す（まだなければ 422）。200 で `GET` と同じ形 |
+| `PUT /api/apps/{slug}/registry-credential` | 本文 `{"registry": "ghcr.io", "username": "octo-bot", "token": "..."}` で設定する（前のものは置き換える）。`token` を空文字か省略にすると、`registry` と `username` が保存済みのものと同じときに限り、保存済みのトークンを残す。まだ保存していないときと、`registry` か `username` を保存済みのものから変えるときは `token` が要る（なければ `422 validation_failed`、`details.token`）。200 で `GET` と同じ形 |
 | `DELETE /api/apps/{slug}/registry-credential` | 削除し、koroku が書いた Docker の設定ファイルも消す。200 で `GET` と同じ形（`configured: false`）。なければ `404 registry_credential_not_found` |
 
 ```json

@@ -34,8 +34,9 @@ type registryCredentialJSON struct {
 }
 
 // registryCredentialInput is the body of PUT. An empty or missing token
-// keeps the saved one, so the registry or username can be corrected
-// without pasting the token again.
+// keeps the saved one, as long as the registry and the username stay the
+// same: the saved token is only ever sent to the registry, and as the user,
+// it was entered for.
 type registryCredentialInput struct {
 	Registry string `json:"registry"`
 	Username string `json:"username"`
@@ -109,10 +110,16 @@ func (s *Server) handlePutRegistryCredential(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if token == "" {
-		if found {
-			sealed = existing.TokenEncrypted
-		} else {
+		switch {
+		case !found:
 			errs.add("token", "enter the token")
+		case existing.Registry != registry || existing.Username != username:
+			// Docker sends the token to whatever host the credential names.
+			// Keeping it across such a change would let whoever can save
+			// the credential have it delivered to a host of their choosing.
+			errs.add("token", "enter the token again to change the registry or the username")
+		default:
+			sealed = existing.TokenEncrypted
 		}
 	}
 	if len(errs) > 0 {
