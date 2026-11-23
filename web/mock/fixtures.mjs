@@ -80,6 +80,10 @@ export const SCENARIOS = {
     'everything fine; shop-staging is asleep after 30 minutes without requests, blog-staging sleeps after an hour',
   'reservations-pending':
     'everything fine; blog saved smaller reservations for db and web after its last deployment, which still reserves the defaults',
+  'blue-green':
+    'blog deploys blue/green and serves from green; its history has switches, a deploy that failed for want of memory and one whose new colour failed its check; blog-staging has blue/green on but its Compose file breaks the conditions; shop has not been checked yet',
+  'blue-green-deploying':
+    'blog is in the middle of a blue/green deploy, stopping blue after the switch to green; shop-staging is at the switch',
   'reservations-tight':
     'production apps reserve more memory than a 4 GB host can keep with its 1 GB margin; docs was switched to staging but not redeployed',
 };
@@ -163,6 +167,8 @@ function deployment(slug, message, finishedAgo, overrides = {}) {
     pusher: '',
     // A failed one says itself whether it got as far as the start step.
     containers_replaced: overrides.status !== 'failed',
+    web_color: null,
+    switched_at: null,
     ...overrides,
   };
 }
@@ -252,6 +258,13 @@ function app(slug, overrides = {}) {
     review: null,
     // Only the owner allows review apps of an app (ARCHITECTURE 9.9).
     review_apps_allowed: false,
+    // Blue/green deploys of the public service (ARCHITECTURE 7.2).
+    blue_green: false,
+    blue_green_drain_seconds: 10,
+    alt_host_port: null,
+    web_color: null,
+    // Checked on every deployment; unknown before the first one.
+    blue_green_problems: overrides.current_deployment ? [] : null,
     url,
     primary_url: url,
     pending_domains: 0,
@@ -489,6 +502,133 @@ function deploysAcrossTwoWeeks(state, slug) {
   state.memorySteps = new Map([
     [slug, [{ at: Date.parse(cache.finished_at), service: 'web', mib: 45 }]],
   ]);
+}
+
+/** When a blue/green deployment switched: a few seconds before it ended. */
+function switchedAt(finishedAgo) {
+  return ago(finishedAgo + 14 * 1000);
+}
+
+/**
+ * blog deploys blue/green (ARCHITECTURE 7.2): the first deployment after
+ * turning it on moved the public service to green, then the colours took
+ * turns. Three failed: a worker after the switch (the requests went back),
+ * the new colour's check, and the memory for a second copy.
+ */
+function blueGreenHistory(state, slug) {
+  const target = state.apps.get(slug);
+  Object.assign(target, {
+    blue_green: true,
+    alt_host_port: 20010,
+    web_color: 'green',
+    blue_green_problems: [],
+  });
+  const initial = deployment(slug, 'Initial import', 6 * DAY);
+  const deps = deployment(slug, 'Update dependencies', 4 * DAY, {
+    web_color: 'green',
+    switched_at: switchedAt(4 * DAY),
+  });
+  const footer = deployment(slug, 'Tidy up the footer', 2 * DAY, {
+    web_color: 'blue',
+    switched_at: switchedAt(2 * DAY),
+  });
+  const job = deployment(slug, 'Move reading time to a job', 36 * HOUR, {
+    status: 'failed',
+    error:
+      'recreate the other services: docker compose up: exit status 1; the previous release was restored',
+    web_color: 'green',
+    containers_replaced: true,
+    mockFailure: 'services',
+  });
+  const rename = deployment(slug, 'Rename the reading column', 1 * DAY, {
+    status: 'failed',
+    error: 'health check did not pass within 1m0s (last result: HTTP 500)',
+    web_color: 'green',
+    containers_replaced: true,
+    mockFailure: 'check',
+  });
+  const cache = deployment(slug, 'Cache rendered Markdown', 5 * HOUR, {
+    status: 'failed',
+    error:
+      'Not enough memory to run two web containers (312 MiB available, 512 MiB needed).',
+    containers_replaced: false,
+    mockFailure: 'memory',
+    mockColor: 'green',
+  });
+  const current = deployment(slug, 'Add reading time to post pages', 3 * HOUR, {
+    web_color: 'green',
+    switched_at: switchedAt(3 * HOUR),
+  });
+  target.current_deployment = current;
+  target.latest_deployment = current;
+  state.deployments.set(slug, [
+    current,
+    cache,
+    rename,
+    job,
+    footer,
+    deps,
+    initial,
+  ]);
+  markKept(state, slug);
+}
+
+/** blog-staging turned blue/green on, but its Compose file breaks the rules. */
+function blueGreenProblems(state, slug) {
+  Object.assign(state.apps.get(slug), {
+    blue_green: true,
+    alt_host_port: 20011,
+    blue_green_problems: [
+      {
+        service: 'web',
+        rule: 'blue_green',
+        message:
+          'container_name blog-web would be used by both colours at once; remove it',
+        relaxable: false,
+      },
+      {
+        service: 'worker',
+        rule: 'blue_green',
+        message:
+          'refers to the public service web (depends_on), which blue/green deploys disable',
+        relaxable: false,
+      },
+    ],
+  });
+}
+
+/**
+ * A blue/green deployment that stays in `step` (it never ends): both
+ * colours run, the new one `color`.
+ */
+function blueGreenInProgress(state, slug, step, color, oldColor) {
+  const target = state.apps.get(slug);
+  const previous = target.current_deployment;
+  previous.web_color = oldColor;
+  previous.switched_at = switchedAt(
+    Date.now() - Date.parse(previous.finished_at),
+  );
+  const switched = step !== 'switch';
+  const running = deployment(slug, 'Show related posts', 0, {
+    status: 'running',
+    queued_at: ago(50 * 1000),
+    started_at: ago(48 * 1000),
+    finished_at: null,
+    containers_replaced: null,
+    web_color: color,
+    switched_at: switched ? ago(6 * 1000) : null,
+    mockStopAt: step,
+  });
+  Object.assign(target, {
+    blue_green: true,
+    alt_host_port: target.alt_host_port ?? 20010 + target.host_port - 20000,
+    web_color: switched ? color : oldColor,
+    blue_green_problems: [],
+    latest_deployment: running,
+    // Both copies of the public service run (services()).
+    mockColors: [oldColor, color],
+  });
+  state.deployments.get(slug).unshift(running);
 }
 
 function healthyApps() {
@@ -1178,6 +1318,20 @@ export function buildScenario(name) {
       deploysAcrossTwoWeeks(state, 'blog');
       return state;
     }
+    case 'blue-green': {
+      const state = scenario(healthyApps());
+      blueGreenHistory(state, 'blog');
+      blueGreenProblems(state, 'blog-staging');
+      // Deployed before koroku recorded the check.
+      state.apps.get('shop').blue_green_problems = null;
+      return state;
+    }
+    case 'blue-green-deploying': {
+      const state = scenario(healthyApps());
+      blueGreenInProgress(state, 'blog', 'drain', 'green', 'blue');
+      blueGreenInProgress(state, 'shop-staging', 'switch', 'blue', 'green');
+      return state;
+    }
     case 'rollback': {
       const state = scenario(healthyApps());
       rolledBack(state, 'blog');
@@ -1327,6 +1481,10 @@ export function startDeployment(
     started_at: ago(0),
     finished_at: null,
   });
+  if (target.blue_green) {
+    // The other colour starts next to the one serving (ARCHITECTURE 7.2).
+    started.web_color = target.web_color === 'green' ? 'blue' : 'green';
+  }
   if (wanted) started.commit_sha = wanted;
   started.mockFinishAt = Date.now() + 12 * 1000;
   state.deployments.get(slug).unshift(started);
@@ -1357,6 +1515,11 @@ export function settle(state) {
         entry.status = 'succeeded';
         entry.finished_at = new Date().toISOString();
         const target = state.apps.get(slug);
+        if (target && entry.web_color) {
+          entry.switched_at = ago(3 * 1000);
+          target.web_color = entry.web_color;
+          delete target.mockColors;
+        }
         // A rollback runs the release it started again.
         const release = list.find((older) => older.id === releaseOf(entry));
         if (target) target.current_deployment = release ?? entry;
@@ -1479,16 +1642,22 @@ export function services(target) {
         next_memory_reservation_bytes: next ?? 0,
       };
     });
+  // A blue/green app's public service runs as a colour; during a
+  // deployment both colours run (ARCHITECTURE 7.2).
+  const colors =
+    target.mockColors ?? (target.web_color ? [target.web_color] : [null]);
+  const webRows = colors.map((color, index) => ({
+    name: 'web',
+    state: 'running',
+    status: index === 0 ? 'Up 3 hours (healthy)' : 'Up 40 seconds (healthy)',
+    health: 'healthy',
+    memory_bytes: (index === 0 ? 0.31 : 0.22) * GB * scale,
+    memory_limit_bytes: 0.5 * GB,
+    cpu_percent: index === 0 ? 4.2 : 11.8,
+    ...(color ? { color } : {}),
+  }));
   return reserved([
-    {
-      name: 'web',
-      state: 'running',
-      status: 'Up 3 hours (healthy)',
-      health: 'healthy',
-      memory_bytes: 0.31 * GB * scale,
-      memory_limit_bytes: 0.5 * GB,
-      cpu_percent: 4.2,
-    },
+    ...webRows,
     {
       name: 'db',
       state: 'running',

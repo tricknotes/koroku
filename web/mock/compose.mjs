@@ -266,9 +266,14 @@ export function containerView(state, app, scenario) {
       memory_reservation_bytes: reserved,
       oom_score_adj: production ? -400 : 500,
     };
+    // A blue/green app runs its public service as a colour (7.2).
+    const service =
+      svc.web && app.web_color ? `${svc.name}-${app.web_color}` : svc.name;
+    const port =
+      svc.web && app.web_color === 'green' ? app.alt_host_port : app.host_port;
     const info = {
-      name: `koroku-${app.slug}-${svc.name}-1`,
-      service: svc.name,
+      name: `koroku-${app.slug}-${service}-1`,
+      service,
       image: svc.image ?? `koroku-${app.slug}-${svc.name}:r${current.id}`,
       image_id: `sha256:${hex(svc.name)}`,
       image_digest: svc.image
@@ -294,7 +299,7 @@ export function containerView(state, app, scenario) {
           ? [
               {
                 host_ip: '127.0.0.1',
-                host_port: String(app.host_port),
+                host_port: String(port),
                 container_port: `${app.web_port}/tcp`,
               },
             ]

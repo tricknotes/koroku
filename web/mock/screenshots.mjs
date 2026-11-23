@@ -2860,6 +2860,212 @@ SHOTS.push(
   },
 );
 
+// Blue/green deploys (ARCHITECTURE 7.2): the setting healthy and with
+// problems, the production confirmation, the history with switches and
+// failures, the steps while switching and draining, and the colours of
+// the public service.
+const BLUE_GREEN = '[data-test-blue-green-group]';
+const BG = '/apps/blog/deploy?scenario=blue-green';
+const BG_DEPLOYING = 'scenario=blue-green-deploying';
+const bgRow = (n) => `${DEPLOYMENT}:nth-child(${n}) [data-test-show-log]`;
+// Brings the opened detail of row n to the top once its log is in.
+const bgDetail = (n) =>
+  `setTimeout(() => document.querySelector('${DEPLOYMENT}:nth-child(${n})').scrollIntoView(), 600)`;
+const TURN_ON_BLUE_GREEN = `(() => {
+  document.querySelector('[data-test-field="blue_green"]').click();
+  setTimeout(() => document.querySelector('[data-test-deploy-settings-save]').click(), 300);
+})()`;
+SHOTS.push(
+  {
+    name: 'bluegreen-settings',
+    path: BG,
+    wait: '[data-test-blue-green-live]',
+    script: scrollTo(BLUE_GREEN),
+  },
+  {
+    name: 'bluegreen-settings-phone',
+    path: BG,
+    wait: '[data-test-blue-green-live]',
+    script: scrollTo(BLUE_GREEN),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'bluegreen-settings-problems',
+    path: '/apps/blog-staging/deploy?scenario=blue-green',
+    wait: '[data-test-blue-green-problems]',
+    script: scrollTo(BLUE_GREEN),
+  },
+  {
+    name: 'bluegreen-settings-problems-phone',
+    path: '/apps/blog-staging/deploy?scenario=blue-green',
+    wait: '[data-test-blue-green-problems]',
+    script: scrollTo(BLUE_GREEN),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'bluegreen-settings-unknown',
+    path: '/apps/shop/deploy?scenario=blue-green',
+    wait: '[data-test-blue-green-unknown]',
+    script: scrollTo(BLUE_GREEN),
+    themes: ['light'],
+  },
+  {
+    name: 'bluegreen-settings-member',
+    path: '/apps/blog/deploy?scenario=member',
+    wait: BLUE_GREEN,
+    script: scrollTo(BLUE_GREEN),
+    themes: ['light'],
+  },
+  {
+    name: 'bluegreen-production-confirm',
+    path: '/apps/shop/deploy?scenario=healthy',
+    wait: BLUE_GREEN,
+    script: TURN_ON_BLUE_GREEN,
+    then: '[data-test-blue-green-confirm]',
+  },
+  {
+    name: 'bluegreen-production-confirm-phone',
+    path: '/apps/shop/deploy?scenario=healthy',
+    wait: BLUE_GREEN,
+    script: TURN_ON_BLUE_GREEN,
+    then: '[data-test-blue-green-confirm]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'bluegreen-drain-invalid',
+    path: BG,
+    wait: '[data-test-field="blue_green_drain_seconds"]',
+    script: `(() => {
+      const field = document.querySelector('[data-test-field="blue_green_drain_seconds"]');
+      field.value = '600';
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+      setTimeout(() => document.querySelector('[data-test-deploy-settings-save]').click(), 300);
+      setTimeout(() => document.querySelector('${BLUE_GREEN}').scrollIntoView(), 800);
+    })()`,
+    then: '[data-test-field-group="blue_green_drain_seconds"] [data-test-field-error]',
+    themes: ['light'],
+  },
+  {
+    name: 'bluegreen-history',
+    path: BG,
+    wait: '[data-test-deployment-color]',
+  },
+  {
+    name: 'bluegreen-history-phone',
+    path: BG,
+    wait: '[data-test-deployment-color]',
+    ...PHONE,
+  },
+  {
+    name: 'bluegreen-detail-switched',
+    path: BG,
+    wait: DEPLOYMENT,
+    click: bgRow(1),
+    script: bgDetail(1),
+    settle: 1200,
+    then: '[data-test-step="drain"]',
+  },
+  {
+    name: 'bluegreen-detail-memory',
+    path: BG,
+    wait: DEPLOYMENT,
+    click: bgRow(2),
+    script: bgDetail(2),
+    settle: 1200,
+    then: '[data-test-memory-shortage]',
+  },
+  {
+    name: 'bluegreen-detail-memory-phone',
+    path: BG,
+    wait: DEPLOYMENT,
+    click: bgRow(2),
+    script: bgDetail(2),
+    settle: 1200,
+    then: '[data-test-memory-shortage]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'bluegreen-detail-check-failed',
+    path: BG,
+    wait: DEPLOYMENT,
+    click: bgRow(3),
+    script: bgDetail(3),
+    settle: 1200,
+    then: '[data-rollback="kept"]',
+    themes: ['light'],
+  },
+  {
+    name: 'bluegreen-detail-switched-back',
+    path: BG,
+    wait: DEPLOYMENT,
+    click: bgRow(4),
+    script: bgDetail(4),
+    settle: 1200,
+    then: '[data-rollback="switched-back"]',
+    themes: ['light'],
+  },
+  {
+    name: 'bluegreen-deploying-drain',
+    path: `/apps/blog/deploy?${BG_DEPLOYING}`,
+    wait: '[data-test-step="drain"]',
+    script: bgDetail(1),
+    settle: 1200,
+  },
+  {
+    name: 'bluegreen-deploying-drain-phone',
+    path: `/apps/blog/deploy?${BG_DEPLOYING}`,
+    wait: '[data-test-step="drain"]',
+    ...PHONE,
+  },
+  {
+    name: 'bluegreen-deploying-switch',
+    path: `/apps/shop-staging/deploy?${BG_DEPLOYING}`,
+    wait: '[data-test-step="switch"]',
+    script: bgDetail(1),
+    settle: 1200,
+  },
+  {
+    name: 'bluegreen-overview-deploying',
+    path: `/apps/blog?${BG_DEPLOYING}`,
+    wait: '[data-test-service-standby]',
+  },
+  {
+    name: 'bluegreen-overview-deploying-phone',
+    path: `/apps/blog?${BG_DEPLOYING}`,
+    wait: '[data-test-service-standby]',
+    ...PHONE,
+  },
+  {
+    name: 'bluegreen-overview',
+    path: '/apps/blog?scenario=blue-green',
+    wait: '[data-test-service-color]',
+    themes: ['light'],
+  },
+  {
+    name: 'bluegreen-resources-deploying',
+    path: `/apps/blog/resources?${BG_DEPLOYING}`,
+    wait: '[data-test-service-standby]',
+  },
+  {
+    name: 'bluegreen-compose',
+    path: '/apps/blog/resources?section=compose&scenario=blue-green',
+    wait: '[data-test-container-live]',
+    script: scrollTo('.compose-containers'),
+    themes: ['light'],
+  },
+  {
+    name: 'bluegreen-resources-deploying-phone',
+    path: `/apps/blog/resources?${BG_DEPLOYING}`,
+    wait: '[data-test-service-standby]',
+    ...PHONE,
+    fullPage: false,
+  },
+);
+
 const LOGS = '/apps/blog/logs';
 const LOG_ROW = '[data-test-log-row]';
 const PHONE_SCREEN = { ...PHONE, fullPage: false };

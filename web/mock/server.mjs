@@ -166,6 +166,22 @@ function logContext(state, entry) {
     healthPath: app?.healthcheck_path ?? '/',
     backup: Boolean(app?.backup_before_deploy),
     previousId: previous?.id ?? null,
+    drainSeconds: app?.blue_green_drain_seconds ?? 10,
+    blueGreen:
+      (entry.web_color ?? entry.mockColor)
+        ? {
+            webService: app?.web_service ?? 'web',
+            // What served before: the colour of the release that ran, or
+            // the public service itself (ARCHITECTURE 7.2).
+            oldName: previous
+              ? (previous.web_color ?? app?.web_service ?? 'web')
+              : null,
+            ports: {
+              blue: app?.host_port ?? 20000,
+              green: app?.alt_host_port ?? 20010,
+            },
+          }
+        : null,
   };
 }
 
@@ -376,6 +392,26 @@ route('PATCH', '/api/apps/:slug', (context) => {
       auto_deploy_workflow:
         'must be a .yml or .yaml file directly in .github/workflows/',
     });
+  }
+  // Blue/green deploys (ARCHITECTURE 7.2).
+  const drain = body.blue_green_drain_seconds;
+  if (
+    drain !== undefined &&
+    (!Number.isInteger(drain) || drain < 0 || drain > 300)
+  ) {
+    throw new HttpError(422, 'validation_failed', {
+      blue_green_drain_seconds: 'must be between 0 and 300',
+    });
+  }
+  if (body.blue_green === true && !target.alt_host_port) {
+    // The second port is kept from the first time on.
+    const ports = [...context.state.apps.values()].flatMap((a) => [
+      a.host_port,
+      a.alt_host_port,
+    ]);
+    let port = 20000;
+    while (ports.includes(port)) port++;
+    target.alt_host_port = port;
   }
   const reservationProblem = reservationProblemOf({ ...target, ...body });
   if (reservationProblem) {
