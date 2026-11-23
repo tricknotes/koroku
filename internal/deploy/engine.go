@@ -763,6 +763,11 @@ func (e *Engine) imagesInUse(ctx context.Context, skipSlug string) (map[string]b
 			for _, image := range meta.PulledImages {
 				used[image] = true
 			}
+			// The images built for the release: another app's failed pull
+			// of a name like them must not remove them.
+			for _, image := range meta.Images {
+				used[image] = true
+			}
 		}
 	}
 	var out bytes.Buffer

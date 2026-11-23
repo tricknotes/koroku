@@ -23,6 +23,11 @@ type Cmd struct {
 	Dir string
 	// Env holds extra KEY=VALUE entries added to the inherited environment.
 	Env []string
+	// CleanEnv limits the inherited environment to the variables a program
+	// needs to run (see inherited). For programs that put their environment
+	// into files they read on behalf of someone else: Compose interpolates
+	// ${VAR} in a repository's Compose file with it.
+	CleanEnv bool
 	// Stdin is fed to the program when set.
 	Stdin io.Reader
 	// Stdout and Stderr receive the program output when set.
@@ -57,7 +62,10 @@ type Exec struct{}
 func (Exec) Run(ctx context.Context, cmd Cmd) error {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	c.Dir = cmd.Dir
-	if len(cmd.Env) > 0 {
+	switch {
+	case cmd.CleanEnv:
+		c.Env = append(inherited(os.Environ()), cmd.Env...)
+	case len(cmd.Env) > 0:
 		c.Env = append(os.Environ(), cmd.Env...)
 	}
 	c.Stdin = cmd.Stdin
@@ -75,6 +83,39 @@ func (Exec) Run(ctx context.Context, cmd Cmd) error {
 		return &ExitError{Cmd: cmd.Name, Code: exitErr.ExitCode()}
 	}
 	return fmt.Errorf("%s: %w", cmd.Name, err)
+}
+
+// inheritedNames and inheritedPrefixes name what a CleanEnv command keeps
+// of koroku's environment: where programs and the user's files are, the
+// locale, temporary files, TLS roots, proxies, and the settings of the
+// Docker and Compose clients (the daemon to talk to, the client config, the
+// build options an operator sets for the whole host).
+var (
+	inheritedNames = []string{
+		"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR",
+		"SSL_CERT_FILE", "SSL_CERT_DIR", "XDG_RUNTIME_DIR", "XDG_CONFIG_HOME",
+		"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+	}
+	inheritedPrefixes = []string{"DOCKER_", "COMPOSE_", "BUILDKIT_", "BUILDX_"}
+)
+
+// inherited returns the entries of environ that a CleanEnv command keeps.
+func inherited(environ []string) []string {
+	var out []string
+	for _, entry := range environ {
+		name, _, _ := strings.Cut(entry, "=")
+		keep := false
+		for _, n := range inheritedNames {
+			keep = keep || name == n
+		}
+		for _, p := range inheritedPrefixes {
+			keep = keep || strings.HasPrefix(name, p)
+		}
+		if keep {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 // Output runs cmd and returns its standard output. Standard error is attached

@@ -1,0 +1,220 @@
+# Ordinary settings of ordinary apps: none of them may be reported as a
+# setting koroku does not allow.
+x-defaults: &defaults
+  restart: unless-stopped
+  init: true
+services:
+  web:
+    <<: *defaults
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: runtime
+      args:
+        RUBY_VERSION: "3.4"
+      labels:
+        org.opencontainers.image.source: "https://example.com/octo/app"
+      cache_from: ["ghcr.io/octo/app:cache"]
+      no_cache: false
+      pull: true
+      shm_size: 256m
+      platforms: ["linux/amd64"]
+      extra_hosts: ["build.internal:203.0.113.5"]
+      network: default
+      secrets: [buildsecret]
+      ulimits:
+        nofile: 4096
+      additional_contexts:
+        shared: ./shared
+    image: ghcr.io/octo/app:latest
+    pull_policy: build
+    command: ["bin/rails", "server", "-b", "0.0.0.0"]
+    entrypoint: ["/usr/bin/tini", "--"]
+    working_dir: /rails
+    user: "1000:1000"
+    group_add: ["2000"]
+    hostname: web
+    domainname: example.com
+    container_name: app-web
+    environment:
+      RAILS_ENV: production
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-x}
+    env_file:
+      - path: ./config/app.env
+        required: false
+    labels:
+      com.example.role: web
+    annotations:
+      com.example.note: hello
+    ports:
+      - "3000:3000"
+    expose: ["9394"]
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/up"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+      start_interval: 2s
+    networks:
+      default:
+        aliases: [app]
+      backend:
+        ipv4_address: 172.28.5.10
+    dns: ["9.9.9.9"]
+    dns_search: ["example.com"]
+    dns_opt: ["ndots:2"]
+    extra_hosts:
+      - "db.internal:203.0.113.7"
+    volumes:
+      - storage:/rails/storage
+      - ./config/puma.rb:/rails/config/puma.rb:ro
+      - type: tmpfs
+        target: /rails/tmp
+        tmpfs:
+          size: 64m
+          mode: 0o1777
+      - type: volume
+        source: storage
+        target: /rails/public/uploads
+        volume:
+          nocopy: true
+          subpath: uploads
+    tmpfs:
+      - /run
+    read_only: true
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    security_opt: ["no-new-privileges:true"]
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    mem_limit: 512m
+    mem_reservation: 128m
+    memswap_limit: 512m
+    mem_swappiness: 10
+    cpus: 1.5
+    cpu_shares: 512
+    cpuset: "0"
+    pids_limit: 200
+    shm_size: 128m
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+      nproc: 512
+    sysctls:
+      net.core.somaxconn: 1024
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+    oom_score_adj: 100
+    stdin_open: false
+    tty: false
+    platform: linux/amd64
+    profiles: []
+    secrets:
+      - source: appsecret
+        target: app_secret
+        mode: 0o440
+    configs:
+      - source: appconfig
+        target: /etc/app.conf
+    post_start:
+      - command: ["sh", "-c", "echo started"]
+        user: root
+        working_dir: /tmp
+        environment:
+          STAGE: post
+    pre_stop:
+      - command: ["sh", "-c", "echo stopping"]
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /rails/app
+    attach: true
+    scale: 1
+    links: ["db"]
+    storage_opt:
+      size: 1G
+    ipc: shareable
+  worker:
+    <<: *defaults
+    image: ghcr.io/octo/app:latest
+    command: ["bin/jobs"]
+    network_mode: "service:web"
+    pid: "service:web"
+    ipc: "service:web"
+    volumes_from: ["web:ro"]
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+          pids: 100
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+      labels:
+        com.example.tier: worker
+  migrate:
+    image: ghcr.io/octo/app:latest
+    command: ["bin/rails", "db:prepare"]
+    restart: "no"
+    network_mode: none
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - nfsdata:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+    networks: [backend]
+    cgroup: private
+volumes:
+  storage: {}
+  pgdata:
+    labels:
+      com.example.backup: daily
+  nfsdata:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=203.0.113.20,rw"
+      device: ":/exports/app"
+networks:
+  backend:
+    driver: bridge
+    internal: true
+    enable_ipv6: false
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+    labels:
+      com.example.net: backend
+secrets:
+  appsecret:
+    environment: SECRET_KEY_BASE
+  db_password:
+    file: ./secrets/db_password.txt
+  buildsecret:
+    file: ./secrets/build.txt
+configs:
+  appconfig:
+    content: |
+      key = value

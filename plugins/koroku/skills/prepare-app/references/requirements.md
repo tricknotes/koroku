@@ -6,7 +6,7 @@ koroku の設計（`docs/ARCHITECTURE.md` の 6〜8 章と 10 章）から、デ
 
 1. 指定したコミットを `git fetch --depth 1` で取得し、`.git` を消す。submodule と Git LFS のファイルは取得しない。
 2. 画面で設定した環境変数を env ファイルに、デプロイするコミット（`KOROKU_COMMIT_SHA`、`KOROKU_COMMIT_SHORT`）を別の env ファイル `env.release` に書き、override を生成する（下の「コミットの変数を受け取るサービス」）。
-3. `docker compose -p koroku-<slug> -f <Compose ファイル> -f koroku.override.yaml --env-file <env> --env-file <env.release> config` で正規化し、ポリシー検査をかける。
+3. Compose ファイルと、そこから `include` / `extends.file` でたどれるファイルを読んで調べたうえで、`docker compose -p koroku-<slug> -f <Compose ファイル> -f koroku.override.yaml --env-file <env> --env-file <env.release> config` で正規化し、ポリシー検査をかける。Compose ファイルの `${VAR}` が読めるのは、koroku で設定した環境変数とコミットの変数（と `PATH`、`HOME` など動かすのに要るもの）だけ。
 4. `build:` を持つサービスはホスト（x86_64）でビルドし、`image:` だけのサービスは pull する。
 5. `up -d --pull missing --remove-orphans --wait --wait-timeout 300` で起動する。Compose は設定かイメージが変わったサービスだけを作り直す。公開サービス、ワンショット、`build:` を持つサービス（ワーカーや cron がアプリのイメージをビルドするならそれも）、コミットの変数を参照するサービスはデプロイのたびに作り直され、DB のようなほかのサービスは、アプリの環境変数かそのサービスの定義を変えたデプロイでだけ作り直される。動いていたコンテナは `SIGTERM` を受け、`stop_grace_period`（既定 10 秒）を過ぎると強制終了される（下の「デプロイのたびに止まる長いジョブ」）。
 6. `http://127.0.0.1:<割当ポート><ヘルスチェックパス>` が 5xx 以外を返すまで最大 60 秒待つ。
@@ -157,22 +157,60 @@ staging と本番は同じリポジトリを別々の koroku アプリとして�
 | `privileged` | `privileged: true`、`build.privileged: true` | 外す | 可 |
 | `host_network` | `network_mode: host`、`build.network: host` | 外す。ビルド中にホストへ届く必要があるならビルドの設計を変える | 可 |
 | `host_pid` / `host_namespace` | `pid` / `ipc` / `uts` / `userns_mode` / `cgroup` の `host` | 外す | 可 |
-| `foreign_namespace` | `network_mode` / `pid` / `ipc` / `volumes_from` の `container:<名前>` | 同じアプリ内なら `service:<名前>` を使う | 可 |
+| `foreign_namespace` | `network_mode` / `pid` / `ipc` / `volumes_from` の `container:<名前>`。`pid` / `ipc` / `uts` / `userns_mode` / `cgroup` の、アプリの中で完結しない値（使えるのは `ipc` の `none`・`private`・`shareable`、`cgroup` の `private`、`pid` / `ipc` の `service:<名前>`） | 同じアプリ内なら `service:<名前>` を使う | 可 |
 | `docker_socket` | `/var/run/docker.sock` のマウント | 外す。Docker を操作するアプリは koroku に載せない | 可 |
 | `bind_outside_release` | リポジトリの外への bind mount（`../`、絶対パス、外を指すシンボリックリンク） | named volume にするか、リポジトリ内のファイルにする | 可 |
 | `bind_writable` | `:ro` のない bind mount | 設定ファイルを渡す bind には `:ro` を付ける。書き込むデータは named volume に置く | 可 |
-| `volume_host_path` | `driver_opts.device` にホストのパスを指定した named volume | 普通の named volume にする | 可 |
-| `foreign_volume` / `foreign_network` | `external: true`、`name:` で名前を固定した volume / ネットワーク | `external` と `name:` を外す（プロジェクト名が接頭辞に付く） | 可 |
+| `volume_host_path` | `driver_opts.device` にホストのパスを指定した named volume。`driver_opts.type` が `nfs`・`nfs4`・`tmpfs` 以外（`none` + `o: bind`、`overlay` など） | 普通の named volume にする | 可 |
+| `foreign_volume` / `foreign_network` | `external: true`、`name:` で名前を固定した volume / ネットワーク。`network_mode` に書いたネットワーク名や `bridge`（使えるのは `none` と `service:<名前>`） | `external` と `name:` を外す（プロジェクト名が接頭辞に付く）。ネットワークは `networks:` に書く | 可 |
 | `capability` | Docker の既定と `IPC_LOCK`・`SYS_NICE` 以外の `cap_add`（`SYS_ADMIN`、`NET_ADMIN` など） | 外す | 可 |
 | `device` | `devices`、`device_cgroup_rules` | 外す | 可 |
-| `security_opt` | `seccomp` / `apparmor` の `unconfined`、ラベルの無効化など | 外す | 可 |
+| `security_opt` | `no-new-privileges` 以外の `security_opt`（`seccomp` / `apparmor` の `unconfined`、ラベルの無効化、`seccomp=<ファイル>` など） | 外す | 可 |
 | `runtime` | `runc` 以外の `runtime` | 外す | 可 |
 | `memory_guard` | `oom_kill_disable: true`、`memswap_limit: -1` | 外す | 可 |
 | `stop_grace_period` | 全サービスの `stop_grace_period` の合計が 10 分を超える（Compose は依存の順に 1 サービスずつ止めるので、待ち時間が足し合わさる） | 長い猶予が要るサービスだけに付け、合計を 10 分以内にする。それより長いジョブは途中で止まっても続きからやり直せるようにする | **不可** |
-| `file_outside_release` | リポジトリ外の `env_file`、`secrets` / `configs` の `file`、ビルドコンテキスト、Dockerfile | リポジトリ内に置く。秘密は koroku の環境変数で渡す | 可 |
+| `file_outside_release` | リポジトリ外の `env_file`、`secrets` / `configs` の `file`、ビルドコンテキスト、Dockerfile（`dockerfile: ../../...` のように相対パスで外へ出るものを含む）、`include` と `extends.file` のファイル | リポジトリ内に置く。秘密は koroku の環境変数で渡す | 可 |
+| `foreign_image` | `build:` のないサービスの `image:` が `koroku-` で始まる（koroku がビルドしたイメージの名前）。同じアプリのサービスのイメージは除く | レジストリのイメージを指すか、`build:` を書く | 可 |
+| `unsupported_setting` | koroku が許可する設定の一覧にない設定と、許可していない値（下の「許可していない設定」） | 外す。開発用にだけ要るなら、手元用の別の Compose ファイルに移す | 可 |
 | `blue_green` | 無停止デプロイを有効にしたアプリだけ: 公開サービスの `container_name`、`deploy.replicas`（か `scale`）が 2 以上、公開サービスがワンショット、ほかのサービスから公開サービスへの `depends_on` や `network_mode` / `ipc` / `pid` / `volumes_from` の `service:<公開サービス>`、`<公開サービス>-blue` / `<公開サービス>-green` という名前のサービス、公開サービスが `include:` した別ファイルにある | 下の「無停止デプロイ」 | **不可** |
 
 「検査を緩める」は 1 つのフラグでアプリ単位にしか切り替えられず、立てると上の保護がまとめて効かなくなる。勧めない。
+
+### 許可していない設定（`unsupported_setting`）
+
+koroku は、正規化した結果を「許可する設定の一覧」と突き合わせ、一覧にない設定があるとデプロイを拒否する。危険な設定だけを拒否するのではなく、確かめた設定だけを通す。エラーは `service "web": build.tags is not a setting koroku allows` のように設定の名前を示す。
+
+普通のアプリが使う設定（`image`、`build` の `context`・`dockerfile`・`target`・`args`、`command`、`environment`、`env_file`、`depends_on`、`healthcheck`、`volumes`、`networks`、`ports`、`restart`、`user`、`tmpfs`、`cap_drop`、`ulimits`、`deploy.resources` の `cpus`・`memory` など）は一覧にある。次は一覧にない。
+
+| 場所 | 一覧にない設定 |
+| --- | --- |
+| サービス | `provider`、`use_api_socket`、`gpus`、`models`、`cgroup_parent`、`external_links`、`label_file`、`credential_spec`、`blkio_config`、`isolation` |
+| `build` | `tags`（イメージの名前は koroku が決める）、`ssh`、`entitlements`、`isolation` |
+| `post_start` / `pre_stop` | `privileged`（`command`、`user`、`working_dir`、`environment` は使える） |
+| `deploy.resources.reservations` | `devices`、`generic_resources` |
+| `volumes` の各項目 | `bind.propagation` |
+| ネットワークの定義 | `driver_opts` |
+| secret / config の定義 | `driver`、`template_driver` |
+| トップレベル | `models` |
+
+一覧にある設定でも、次の値は同じルールで拒否する。
+
+- `volumes` の `type` が `bind`・`volume`・`tmpfs` 以外（`image` など）。
+- volume の `driver` が `local` 以外、ネットワークの `driver` が `bridge` 以外。
+- `logging.driver` が `json-file`・`local`・`none` 以外（koroku は Docker からログを読む）。
+- `build.cache_from` / `build.cache_to` の `type=local`、`build.network` の `default`・`none` 以外。
+
+値が空の設定（`use_api_socket: false`、`tags: []` など）と、`x-` で始まる拡張の項目は拒否しない。
+
+### `include` と `extends.file`
+
+koroku は、Compose に読ませる前に、Compose ファイルと、そこから `include` / `extends.file` でたどれるファイルを自分で読んで調べる。
+
+- 使えるのは、リポジトリの中のファイルを指す、そのままのパス（`include: [infra/db.yaml]`、`extends: { file: common/base.yaml, service: base }`）。
+- `include` の `env_file` と `project_directory` は使えない（`unsupported_setting`）。`include` したファイルの `${VAR}` も、アプリの環境変数で補間される。
+- リポジトリの外のファイル（`../`、絶対パス、外を指すシンボリックリンク）は `file_outside_release`。
+- Git や OCI のアドレス（`https://...`、`git@...:`、`oci://...`）、`${VAR}` を含むパス、ディレクトリを指すパスは `unsupported_setting`。
+- YAML として読めないファイル（キーの重複など）は `unsupported_setting`。
 
 ## 検査ではないが動かなくなるもの
 

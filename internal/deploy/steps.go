@@ -113,6 +113,11 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	base.EnvFile = snapshot
 	base.ReleaseEnvFile = snapshotRelease
 	base.DockerConfig = dockerConfig
+	// Compose loads what the file includes while it reads it, so the files
+	// are checked before Compose sees them (ARCHITECTURE 6).
+	if err := e.checkFiles(app, releaseDir, composeFile, log); err != nil {
+		return false, err
+	}
 	repoProject, err := e.composeConfig(ctx, base, releaseDir, log)
 	if err != nil {
 		return false, err
@@ -401,12 +406,15 @@ func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, di
 	}
 	var stdout bytes.Buffer
 	err := e.opts.Runner.Run(ctx, runner.Cmd{
-		Name:   "docker",
-		Args:   inv.Args("config", "--format", "json", "--no-env-resolution"),
-		Env:    inv.Env(),
-		Dir:    dir,
-		Stdout: &stdout,
-		Stderr: stderr,
+		Name: "docker",
+		Args: inv.Args("config", "--format", "json", "--no-env-resolution"),
+		Env:  inv.Env(),
+		// The repository's file is interpolated with the app's variables,
+		// not with koroku's own environment.
+		CleanEnv: true,
+		Dir:      dir,
+		Stdout:   &stdout,
+		Stderr:   stderr,
 	})
 	if err != nil {
 		return compose.Project{}, fmt.Errorf("the Compose file is not valid: %w", err)
@@ -414,20 +422,59 @@ func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, di
 	return compose.ParseProject(stdout.Bytes())
 }
 
+// checkFiles applies compose.ScanFiles to a release with the app's relax
+// flag. log may be nil.
+func (e *Engine) checkFiles(app store.App, dir, composeFile string, log *deployLog) error {
+	var violations []compose.Violation
+	for _, v := range compose.ScanFiles(dir, composeFile) {
+		switch {
+		case !app.RelaxPolicy:
+			violations = append(violations, v)
+			if log != nil {
+				log.Printf("Policy violation: %s", v)
+			}
+		case log != nil:
+			log.Printf("Policy waived for this app: %s", v)
+		}
+	}
+	if len(violations) > 0 {
+		return &compose.PolicyError{Violations: violations}
+	}
+	return nil
+}
+
 // revalidate checks a stored release against the policy again right before
 // its files are used for another `up` (start, rollback). The files live in
 // the checkout; an app that was allowed a writable bind mount, or anything
 // else that got write access to the release directory, could have changed
 // them since the deploy that checked them.
-func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, composeFile string) error {
-	_, err := e.revalidatedProject(ctx, app, id, composeFile)
+//
+// dockerConfig is the Docker config directory of the Compose command that
+// follows ("" when it runs without one). Compose interpolates the files
+// with its environment and with the env files, so the project is only the
+// one that will run when it is normalized with the same ones: the check
+// uses the variables the release starts with (its env snapshot) and the
+// same DOCKER_CONFIG.
+func (e *Engine) revalidate(ctx context.Context, app store.App, id int64, composeFile, dockerConfig string) error {
+	_, err := e.revalidatedProject(ctx, app, id, composeFile, dockerConfig)
 	return err
 }
 
 // revalidatedProject is revalidate that also returns the merged project.
-func (e *Engine) revalidatedProject(ctx context.Context, app store.App, id int64, composeFile string) (compose.Project, error) {
+func (e *Engine) revalidatedProject(ctx context.Context, app store.App, id int64, composeFile, dockerConfig string) (compose.Project, error) {
 	dir := e.ReleaseDir(app.Slug, id)
-	project, err := e.composeConfigTo(ctx, e.invocation(app, id, composeFile, true), dir, io.Discard)
+	if err := e.checkFiles(app, dir, composeFile, nil); err != nil {
+		return compose.Project{}, err
+	}
+	inv := e.invocation(app, id, composeFile, true)
+	inv.DockerConfig = dockerConfig
+	if snapshot := filepath.Join(e.stateDir(app.Slug, id), "env"); fileExists(snapshot) {
+		inv.EnvFile = snapshot
+		if inv.ReleaseEnvFile != "" {
+			inv.ReleaseEnvFile = e.releaseEnvSnapshot(app.Slug, id)
+		}
+	}
+	project, err := e.composeConfigTo(ctx, inv, dir, io.Discard)
 	if err != nil {
 		return compose.Project{}, err
 	}
@@ -444,12 +491,13 @@ func (e *Engine) compose(ctx context.Context, inv compose.Invocation, dir string
 
 func (e *Engine) composeTo(ctx context.Context, inv compose.Invocation, dir string, out io.Writer, sub ...string) error {
 	return e.opts.Runner.Run(ctx, runner.Cmd{
-		Name:   "docker",
-		Args:   inv.Args(sub...),
-		Env:    inv.Env(),
-		Dir:    dir,
-		Stdout: out,
-		Stderr: out,
+		Name:     "docker",
+		Args:     inv.Args(sub...),
+		Env:      inv.Env(),
+		CleanEnv: true,
+		Dir:      dir,
+		Stdout:   out,
+		Stderr:   out,
 	})
 }
 
@@ -644,13 +692,13 @@ func (e *Engine) rollback(app store.App, log *deployLog) (restored bool) {
 		log.Printf("Rollback is not possible: the previous environment snapshot is missing.")
 		return false
 	}
-	if err := e.revalidate(ctx, app, prev, meta.ComposeFile); err != nil {
-		log.Printf("Rollback is not possible: the previous release no longer passes validation (%v).", err)
-		return false
-	}
 	dockerConfig, err := e.registryConfig(ctx, app, log.masker)
 	if err != nil {
 		log.Printf("Rollback failed: %v", err)
+		return false
+	}
+	if err := e.revalidate(ctx, app, prev, meta.ComposeFile, dockerConfig); err != nil {
+		log.Printf("Rollback is not possible: the previous release no longer passes validation (%v).", err)
 		return false
 	}
 	if err := e.writeLiveEnv(app.Slug, env, releaseEnv); err != nil {
@@ -728,4 +776,10 @@ func shortSHA(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// fileExists reports whether path names something that can be read.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

@@ -1,0 +1,19 @@
+violations:
+  [volume_host_path] volume "hostfs" uses driver options of type "overlay", which can mount host paths (only nfs, nfs4 and tmpfs are allowed)
+  [unsupported_setting] service "gpu": cgroup_parent is not a setting koroku allows
+  [unsupported_setting] service "gpu": deploy.resources.reservations.devices is not a setting koroku allows
+  [unsupported_setting] service "gpu": gpus is not a setting koroku allows
+  [unsupported_setting] service "runner": provider is not a setting koroku allows
+  [unsupported_setting] service "socket": use_api_socket is not a setting koroku allows
+  [foreign_network] service "spy": network_mode: koroku-blog_default joins a network that does not belong to this app (list the app's own networks under networks:)
+  [foreign_image] service "thief": image koroku-blog-web:r41 is one that koroku builds for an app; a service runs it only by building it (build:)
+  [file_outside_release] service "web": Dockerfile /var/etc/koroku/master.key is outside the repository checkout
+  [security_opt] service "web": security_opt: seccomp=./allow-all.json weakens the container sandbox
+  [unsupported_setting] service "web": build.cache_to: a local cache directory is not allowed
+  [unsupported_setting] service "web": build.entitlements is not a setting koroku allows
+  [unsupported_setting] service "web": build.ssh is not a setting koroku allows
+  [unsupported_setting] service "web": build.tags is not a setting koroku allows
+  [unsupported_setting] service "web": logging.driver: syslog is not allowed (json-file, local or none)
+  [unsupported_setting] service "web": post_start.privileged is not a setting koroku allows
+  [unsupported_setting] service "web": volumes: mount type "image" is not allowed (use a named volume, a read-only bind mount of a file in the repository, or tmpfs)
+waived:

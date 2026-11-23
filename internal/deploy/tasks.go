@@ -128,7 +128,9 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 		return store.TaskRun{}, ErrNotDeployed
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	project, err := e.revalidatedProject(checkCtx, app, deploymentID, meta.ComposeFile)
+	// The command runs without the app's registry login, and so does the
+	// check.
+	project, err := e.revalidatedProject(checkCtx, app, deploymentID, meta.ComposeFile, "")
 	cancel()
 	if err != nil {
 		return store.TaskRun{}, err
@@ -256,7 +258,7 @@ func (e *Engine) executeTask(lifetime, jobCtx context.Context, app store.App, ru
 	logger.Info("command started", "service", run.Service, "task", run.TaskName, "trigger", run.Trigger)
 	command := func(ctx context.Context) error {
 		return e.opts.Runner.Run(ctx, runner.Cmd{
-			Name: "docker", Args: args, Dir: dir, Stdout: log.Writer(), Stderr: log.Writer(),
+			Name: "docker", Args: args, CleanEnv: true, Dir: dir, Stdout: log.Writer(), Stderr: log.Writer(),
 		})
 	}
 	var err error
@@ -430,7 +432,7 @@ func (e *Engine) ConsoleCmd(ctx context.Context, app store.App, service string, 
 	if err != nil {
 		return runner.Cmd{}, ErrNotDeployed
 	}
-	project, err := e.revalidatedProject(ctx, app, *app.CurrentDeploymentID, meta.ComposeFile)
+	project, err := e.revalidatedProject(ctx, app, *app.CurrentDeploymentID, meta.ComposeFile, "")
 	if err != nil {
 		return runner.Cmd{}, err
 	}
@@ -446,5 +448,5 @@ func (e *Engine) ConsoleCmd(ctx context.Context, app store.App, service string, 
 	}
 	sub = append(sub, service)
 	sub = append(sub, command...)
-	return runner.Cmd{Name: "docker", Args: inv.Args(sub...), Env: inv.Env(), Dir: dir}, nil
+	return runner.Cmd{Name: "docker", Args: inv.Args(sub...), Env: inv.Env(), CleanEnv: true, Dir: dir}, nil
 }

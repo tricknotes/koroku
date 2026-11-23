@@ -27,6 +27,11 @@ type Project struct {
 	Networks map[string]Network    `json:"networks"`
 	Secrets  map[string]FileObject `json:"secrets"`
 	Configs  map[string]FileObject `json:"configs"`
+
+	// Raw is the whole normalized project as Compose printed it, for
+	// finding the settings koroku does not allow (unsupportedSettings). It
+	// may hold variable values and is never logged.
+	Raw json.RawMessage `json:"-"`
 }
 
 // Service is one Compose service in normalized form.
@@ -88,6 +93,13 @@ type Service struct {
 	// Networks are the networks the service joins, by key; the values
 	// (aliases and addresses) are not read.
 	Networks map[string]json.RawMessage `json:"networks"`
+
+	Logging *Logging `json:"logging"`
+}
+
+// Logging is the logging section of a service.
+type Logging struct {
+	Driver string `json:"driver"`
 }
 
 // Build is the build section of a service.
@@ -97,6 +109,8 @@ type Build struct {
 	AdditionalContexts map[string]string `json:"additional_contexts"`
 	Network            string            `json:"network"`
 	Privileged         bool              `json:"privileged"`
+	CacheFrom          []string          `json:"cache_from"`
+	CacheTo            []string          `json:"cache_to"`
 
 	// raw is the whole build section as Compose printed it, for comparing
 	// build definitions (see CompareBuilds). It may hold interpolated
@@ -133,6 +147,7 @@ func (e *EnvFile) UnmarshalJSON(data []byte) error {
 // Network is a top-level network.
 type Network struct {
 	Name     string `json:"name"`
+	Driver   string `json:"driver"`
 	External bool   `json:"external"`
 }
 
@@ -199,6 +214,7 @@ type Limits struct {
 // Volume is a top-level named volume.
 type Volume struct {
 	Name       string            `json:"name"`
+	Driver     string            `json:"driver"`
 	External   bool              `json:"external"`
 	DriverOpts map[string]string `json:"driver_opts"`
 }
@@ -223,6 +239,7 @@ func ParseProject(data []byte) (Project, error) {
 		svc.Raw = raw.Services[name]
 		p.Services[name] = svc
 	}
+	p.Raw = append(json.RawMessage(nil), data...)
 	return p, nil
 }
 

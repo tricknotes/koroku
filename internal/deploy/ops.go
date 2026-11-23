@@ -110,7 +110,7 @@ func (e *Engine) projectOnly(app store.App) compose.Invocation {
 func (e *Engine) runCompose(ctx context.Context, inv compose.Invocation, dir string, sub ...string) error {
 	var output bytes.Buffer
 	err := e.opts.Runner.Run(ctx, runner.Cmd{
-		Name: "docker", Args: inv.Args(sub...), Env: inv.Env(), Dir: dir, Stdout: &output, Stderr: &output,
+		Name: "docker", Args: inv.Args(sub...), Env: inv.Env(), CleanEnv: true, Dir: dir, Stdout: &output, Stderr: &output,
 	})
 	if err != nil {
 		err = fmt.Errorf("docker compose %s: %w: %s", sub[0], err, lastOutputLine(output.String()))
@@ -203,12 +203,12 @@ func (e *Engine) upCurrent(ctx context.Context, app store.App, services ...strin
 	if err != nil {
 		return err
 	}
-	if err := e.revalidate(ctx, app, *app.CurrentDeploymentID, meta.ComposeFile); err != nil {
-		return fmt.Errorf("the release cannot be started as it is (deploy the app again): %w", err)
-	}
 	// A missing image is pulled with the app's own registry login.
 	if inv.DockerConfig, err = e.registryConfig(ctx, app, secrets.NewMasker()); err != nil {
 		return err
+	}
+	if err := e.revalidate(ctx, app, *app.CurrentDeploymentID, meta.ComposeFile, inv.DockerConfig); err != nil {
+		return fmt.Errorf("the release cannot be started as it is (deploy the app again): %w", err)
 	}
 	if len(services) == 0 {
 		// The whole release, in the app's colour when it has the

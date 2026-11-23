@@ -504,7 +504,12 @@ func (e *Engine) restoreOldRelease(app store.App, id int64, oldColor, newService
 			log.Printf("Restoring is not possible: the previous release is no longer on disk.")
 			return false
 		}
-		project, err := e.revalidatedProject(ctx, app, prev, meta.ComposeFile)
+		dockerConfig, err := e.registryConfig(ctx, app, log.masker)
+		if err != nil {
+			log.Printf("Restoring failed: %v", err)
+			return false
+		}
+		project, err := e.revalidatedProject(ctx, app, prev, meta.ComposeFile, dockerConfig)
 		if err != nil {
 			log.Printf("Restoring is not possible: the previous release no longer passes validation (%v).", err)
 			return false
@@ -526,11 +531,6 @@ func (e *Engine) restoreOldRelease(app store.App, id int64, oldColor, newService
 		}
 		if len(names) == 0 {
 			return true
-		}
-		dockerConfig, err := e.registryConfig(ctx, app, log.masker)
-		if err != nil {
-			log.Printf("Restoring failed: %v", err)
-			return false
 		}
 		inv := e.invocation(app, prev, meta.ComposeFile, true)
 		inv.DockerConfig = dockerConfig

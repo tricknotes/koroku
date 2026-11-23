@@ -107,3 +107,33 @@ func TestFakeRecordsCalls(t *testing.T) {
 		t.Error("Reset did not clear calls")
 	}
 }
+
+func TestInheritedEnvironment(t *testing.T) {
+	got := inherited([]string{
+		"PATH=/usr/bin", "HOME=/root", "INVOCATION_ID=abc", "GH_TOKEN=secret", "DOCKER_HOST=unix:///x",
+		"COMPOSE_BAKE=false", "BUILDKIT_PROGRESS=plain", "HTTPS_PROXY=http://proxy.example.com:3128",
+		"PATHOLOGICAL=1", "MASTER_KEY=x", "=odd",
+	})
+	want := []string{
+		"PATH=/usr/bin", "HOME=/root", "DOCKER_HOST=unix:///x", "COMPOSE_BAKE=false",
+		"BUILDKIT_PROGRESS=plain", "HTTPS_PROXY=http://proxy.example.com:3128",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("inherited = %v, want %v", got, want)
+	}
+}
+
+func TestCleanEnvHidesTheRestOfTheEnvironment(t *testing.T) {
+	t.Setenv("KOROKU_TEST_SECRET", "hidden")
+	t.Setenv("DOCKER_TEST_SETTING", "kept")
+	out, err := Output(context.Background(), Exec{}, Cmd{
+		Name: "sh", Args: []string{"-c", `echo "${KOROKU_TEST_SECRET:-none} ${DOCKER_TEST_SETTING:-none} ${EXTRA:-none}"`},
+		Env: []string{"EXTRA=added"}, CleanEnv: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "none kept added" {
+		t.Errorf("environment = %q", got)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,7 +34,18 @@ const (
 	RuleBindWritable     = "bind_writable"
 	RuleRuntime          = "runtime"
 	RuleMemoryGuard      = "memory_guard"
+	// RuleForeignImage is an image koroku built for an app, named by a
+	// service that does not build it.
+	RuleForeignImage = "foreign_image"
+	// RuleUnsupported is a setting that is not on the list of the ones
+	// koroku allows (see schema.go), or a value of an allowed setting that
+	// no other rule names.
+	RuleUnsupported = "unsupported_setting"
 )
+
+// releaseImagePrefix starts the name of every image koroku builds
+// (ReleaseImage): the prefix of the Compose project names.
+const releaseImagePrefix = "koroku-"
 
 // allowedCapabilities are Docker's default capabilities plus two that
 // ordinary services ask for (memory locking, scheduling priority). Anything
@@ -170,7 +182,14 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 			add(name, RuleHostPID, "pid: host is not allowed", true)
 		}
 		for _, m := range svc.Volumes {
-			if m.Type != "bind" {
+			switch m.Type {
+			case "bind":
+			case "volume", "tmpfs":
+				continue
+			default:
+				// An image mount reads any image on the host, another
+				// app's included.
+				add(name, RuleUnsupported, fmt.Sprintf("volumes: mount type %q is not allowed (use a named volume, a read-only bind mount of a file in the repository, or tmpfs)", m.Type), true)
 				continue
 			}
 			source := resolvePath(m.Source)
@@ -208,6 +227,36 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 				add(name, RuleForeignNamespace, fmt.Sprintf("%s: %s joins a container outside the app", field, value), true)
 			}
 		}
+		// Every other value is either one of the few that stay inside the
+		// app or a name Docker resolves on the host: network_mode takes the
+		// name of any network there, another app's included.
+		for _, setting := range []struct {
+			field, value string
+			service      bool
+			allowed      []string
+		}{
+			{"network_mode", svc.NetworkMode, true, []string{"none"}},
+			{"pid", svc.Pid, true, nil},
+			{"ipc", svc.Ipc, true, []string{"none", "private", "shareable"}},
+			{"uts", svc.Uts, false, nil},
+			{"userns_mode", svc.UsernsMode, false, nil},
+			{"cgroup", svc.Cgroup, false, []string{"private"}},
+		} {
+			value := setting.value
+			if value == "" || value == "host" || strings.HasPrefix(value, "container:") || slices.Contains(setting.allowed, value) {
+				continue
+			}
+			if other, ok := strings.CutPrefix(value, "service:"); ok && setting.service {
+				if _, defined := p.Services[other]; defined {
+					continue
+				}
+			}
+			if setting.field == "network_mode" {
+				add(name, RuleForeignNetwork, fmt.Sprintf("network_mode: %s joins a network that does not belong to this app (list the app's own networks under networks:)", value), true)
+			} else {
+				add(name, RuleForeignNamespace, fmt.Sprintf("%s: %s is not allowed", setting.field, value), true)
+			}
+		}
 		for _, from := range svc.VolumesFrom {
 			if strings.HasPrefix(from, "container:") {
 				add(name, RuleForeignNamespace, fmt.Sprintf("volumes_from: %s takes volumes of a container outside the app", from), true)
@@ -237,13 +286,39 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 			if svc.Build.Privileged {
 				add(name, RulePrivileged, "build.privileged: true is not allowed", true)
 			}
+			if network := svc.Build.Network; network != "" && network != "host" && network != "default" && network != "none" {
+				add(name, RuleUnsupported, fmt.Sprintf("build.network: %s is not allowed", network), true)
+			}
+			// A local cache is a directory on the host that the build
+			// reads or fills as root.
+			for _, cache := range []struct {
+				field   string
+				entries []string
+			}{{"cache_from", svc.Build.CacheFrom}, {"cache_to", svc.Build.CacheTo}} {
+				for _, entry := range cache.entries {
+					if strings.Contains(strings.ToLower(strings.ReplaceAll(entry, " ", "")), "type=local") {
+						add(name, RuleUnsupported, fmt.Sprintf("build.%s: a local cache directory is not allowed", cache.field), true)
+					}
+				}
+			}
+		}
+		if svc.Logging != nil && !slices.Contains([]string{"", "json-file", "local", "none"}, svc.Logging.Driver) {
+			// Other drivers send the output elsewhere (the host's
+			// journal, a remote address); koroku reads it from Docker.
+			add(name, RuleUnsupported, fmt.Sprintf("logging.driver: %s is not allowed (json-file, local or none)", svc.Logging.Driver), true)
+		}
+		if !svc.HasBuild() && params.ProjectName != "" && isForeignReleaseImage(svc.Image, params.ProjectName, p) {
+			add(name, RuleForeignImage, fmt.Sprintf("image %s is one that koroku builds for an app; a service runs it only by building it (build:)", svc.Image), true)
 		}
 		if len(svc.Devices) > 0 || len(svc.DeviceCgroupRules) > 0 {
 			add(name, RuleDevice, "host devices are not allowed", true)
 		}
 		for _, opt := range svc.SecurityOpt {
-			lowered := strings.ToLower(opt)
-			if strings.Contains(lowered, "unconfined") || strings.Contains(lowered, "disable") || strings.Contains(lowered, "systempaths") {
+			// Only the option that tightens the sandbox is allowed.
+			// The others loosen it or replace a profile, and a profile
+			// read from a file of the repository allows whatever the
+			// repository says.
+			if !noNewPrivileges.MatchString(opt) {
 				add(name, RuleSecurityOpt, fmt.Sprintf("security_opt: %s weakens the container sandbox", opt), true)
 			}
 		}
@@ -260,8 +335,13 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 		}
 		if svc.Build != nil {
 			paths := map[string]string{"build context": svc.Build.Context}
-			if filepath.IsAbs(svc.Build.Dockerfile) {
-				paths["Dockerfile"] = svc.Build.Dockerfile
+			switch dockerfile := svc.Build.Dockerfile; {
+			case filepath.IsAbs(dockerfile):
+				paths["Dockerfile"] = dockerfile
+			case dockerfile != "" && filepath.IsAbs(svc.Build.Context):
+				// Relative to the context, and free to leave it with
+				// "..": the builder prints the lines it cannot parse.
+				paths["Dockerfile"] = filepath.Join(svc.Build.Context, dockerfile)
 			}
 			for key, value := range svc.Build.AdditionalContexts {
 				paths["additional context "+key] = value
@@ -298,8 +378,19 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 	}
 
 	for name, volume := range p.Volumes {
-		if device := volume.DriverOpts["device"]; strings.HasPrefix(device, "/") {
+		// The local driver hands its options to mount(2): a bind or an
+		// overlay names host directories in "o" as well as in "device", and
+		// a block device is the host's. Only the network and memory file
+		// systems keep the volume off the host's files.
+		kind := strings.ToLower(volume.DriverOpts["type"])
+		switch device := volume.DriverOpts["device"]; {
+		case strings.HasPrefix(device, "/"):
 			add("", RuleVolumeHostPath, fmt.Sprintf("volume %q mounts the host path %s through driver options", name, device), true)
+		case len(volume.DriverOpts) > 0 && kind != "nfs" && kind != "nfs4" && kind != "tmpfs":
+			add("", RuleVolumeHostPath, fmt.Sprintf("volume %q uses driver options of type %q, which can mount host paths (only nfs, nfs4 and tmpfs are allowed)", name, volume.DriverOpts["type"]), true)
+		}
+		if volume.Driver != "" && volume.Driver != "local" {
+			add("", RuleUnsupported, fmt.Sprintf("volume %q uses the driver %q (only the local driver is allowed)", name, volume.Driver), true)
 		}
 		if params.ProjectName != "" && (volume.External || !strings.HasPrefix(volume.Name, params.ProjectName+"_")) {
 			add("", RuleForeignVolume, fmt.Sprintf("volume %q refers to %q, which does not belong to this app", name, volume.Name), true)
@@ -309,6 +400,10 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 		if params.ProjectName != "" && (network.External || !strings.HasPrefix(network.Name, params.ProjectName+"_")) {
 			add("", RuleForeignNetwork, fmt.Sprintf("network %q refers to %q, which does not belong to this app", name, network.Name), true)
 		}
+		// macvlan and ipvlan put containers on the host's own network.
+		if network.Driver != "" && network.Driver != "bridge" {
+			add("", RuleUnsupported, fmt.Sprintf("network %q uses the driver %q (only bridge is allowed)", name, network.Driver), true)
+		}
 	}
 	for kind, objects := range map[string]map[string]FileObject{"secret": p.Secrets, "config": p.Configs} {
 		for name, object := range objects {
@@ -316,6 +411,12 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 				add("", RuleFileOutside, fmt.Sprintf("%s %q reads %s, which is outside the repository checkout", kind, name, object.File), true)
 			}
 		}
+	}
+
+	for _, u := range unsupportedSettings(p.Raw, func(service string) bool {
+		return params.BlueGreen && isColored(service, params.WebService)
+	}) {
+		add(u.Service, RuleUnsupported, fmt.Sprintf("%s is not a setting koroku allows", u.Path), true)
 	}
 
 	// Map iteration above is unordered; the report must not be.
@@ -356,6 +457,36 @@ func describePort(port Port) string {
 		published = "(random)"
 	}
 	return fmt.Sprintf("%s:%s->%d", host, published, port.Target)
+}
+
+// noNewPrivileges matches the security_opt forms of no-new-privileges.
+var noNewPrivileges = regexp.MustCompile(`(?i)^no-new-privileges([:=](true|false))?$`)
+
+// isForeignReleaseImage reports whether image names an image koroku builds
+// for an app (ReleaseImage) other than one of this project's services.
+// Every app's images live side by side in the host's Docker, so naming one
+// is enough to run or read another app's build. The coloured copies of a
+// blue/green release run the image of the service they copy.
+func isForeignReleaseImage(image, projectName string, p Project) bool {
+	repo := strings.ToLower(image)
+	if i := strings.Index(repo, "@"); i >= 0 {
+		repo = repo[:i]
+	}
+	if i := strings.LastIndex(repo, ":"); i > strings.LastIndex(repo, "/") {
+		repo = repo[:i]
+	}
+	for _, prefix := range []string{"docker.io/", "index.docker.io/", "library/"} {
+		repo = strings.TrimPrefix(repo, prefix)
+	}
+	if !strings.HasPrefix(repo, releaseImagePrefix) {
+		return false
+	}
+	for name := range p.Services {
+		if repo == strings.ToLower(projectName+"-"+name) {
+			return false
+		}
+	}
+	return true
 }
 
 var dockerSocketPattern = regexp.MustCompile(`(^|/)docker\.sock$`)
