@@ -7,6 +7,7 @@ import { htmlSafe } from '@ember/template';
 import type { SafeString } from '@ember/template';
 import { guidFor } from '@ember/object/internals';
 import { modifier } from 'ember-modifier';
+import { schedule } from '@ember/runloop';
 import Badge from 'koroku-console/components/badge';
 import onDismiss from 'koroku-console/modifiers/on-dismiss';
 import { firstLine, shortSha } from 'koroku-console/utils/format';
@@ -142,10 +143,16 @@ export default class DeployMarkers extends Component<Signature> {
     const holder = event.currentTarget as HTMLElement;
     const next = (event as FocusEvent).relatedTarget;
     if (next instanceof Node && holder.contains(next)) return;
-    if (this.open === index) {
-      this.open = null;
-      this.pinned = false;
-    }
+    // Hiding the popup while focus is inside it fires focusout during that
+    // render, where tracked state cannot change: close after it.
+    // eslint-disable-next-line ember/no-runloop
+    schedule('afterRender', () => {
+      if (this.isDestroying || this.isDestroyed) return;
+      if (this.open === index) {
+        this.open = null;
+        this.pinned = false;
+      }
+    });
   };
 
   toggle = (index: number) => {
