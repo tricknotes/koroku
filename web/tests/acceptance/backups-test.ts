@@ -746,6 +746,22 @@ module('Acceptance | backups', function (hooks) {
       assert.dom('[data-test-backup-saved]').doesNotExist();
     });
 
+    test('a production app with a stale login is asked to log in again for the dump hook', async function (assert) {
+      app = { ...app, environment: 'production' };
+      fakes.api.fail('PATCH', '/api/apps/blog', 403, 'reauth_required');
+
+      await visit('/apps/blog/backups');
+      await fillIn('[data-test-field="dump_hook_command"]', 'pg_dump app');
+      await click('[data-test-backup-save]');
+
+      assert.dom('[data-test-reauth-dialog]').exists();
+      assert.dom('[data-test-backup-saved]').doesNotExist();
+      // What was typed stays for the save after logging in again.
+      assert
+        .dom('[data-test-field="dump_hook_command"]')
+        .hasValue('pg_dump app');
+    });
+
     test('a backend that does not report the settings gets none', async function (assert) {
       app = makeApp();
 

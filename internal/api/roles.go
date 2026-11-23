@@ -140,6 +140,15 @@ func (s *Server) userAllowed(ctx context.Context, userID int64) (bool, error) {
 
 type levelKey struct{}
 
+// grant is what authorize let a member's request in for: the app the route
+// acts on and the level the route needs there.
+type grant struct {
+	appID int64
+	level level
+}
+
+type grantKey struct{}
+
 // appLevel is what the request's user may do on app.
 func (s *Server) appLevel(r *http.Request, app store.App) (level, error) {
 	a, ok := actorFrom(r)
@@ -163,6 +172,24 @@ func requestLevel(r *http.Request) level {
 	}
 	l, _ := r.Context().Value(levelKey{}).(level)
 	return l
+}
+
+// missing is the 404 for one kind of record. A record the user has no role
+// on and a record that does not exist get the same one, byte for byte: a
+// member must not be able to tell which apps, or which ids, exist
+// (ARCHITECTURE 10.7). authorize and the handlers both answer through
+// writeMissing.
+type missing struct{ code, message string }
+
+var (
+	missingApp        = missing{"app_not_found", "no such app"}
+	missingDeployment = missing{"deployment_not_found", "no such deployment"}
+	missingTaskRun    = missing{"task_run_not_found", "no such task run"}
+	missingDBCopy     = missing{"db_copy_not_found", "no such database copy"}
+)
+
+func writeMissing(w http.ResponseWriter, m missing) {
+	writeError(w, http.StatusNotFound, m.code, m.message)
 }
 
 // writeForbiddenRole refuses an operation the user's role does not allow.
@@ -203,7 +230,7 @@ func (s *Server) authorize(a access, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		appID, notFound, err := s.routeApp(r, a.scope)
+		appID, kind, err := s.routeApp(r, a.scope)
 		if err != nil {
 			s.internalError(w, r, err)
 			return
@@ -222,46 +249,89 @@ func (s *Server) authorize(a access, next http.Handler) http.Handler {
 		got := roleLevel(role)
 		if got == levelNone {
 			// An app the member has no role on does not exist for it.
-			writeError(w, http.StatusNotFound, notFound, "not found")
+			writeMissing(w, kind)
 			return
 		}
 		if got < a.level {
 			writeForbiddenRole(w, a.level)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), levelKey{}, got)))
+		ctx := context.WithValue(r.Context(), levelKey{}, got)
+		ctx = context.WithValue(ctx, grantKey{}, grant{appID: appID, level: a.level})
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
+// stillAllowed re-runs, for a response that stays open (a log stream), the
+// checks the request passed when it came in: its session or API token is
+// still valid, its user may still use the console, and a member still holds
+// the level the route needs on the app. A stream asks at every heartbeat
+// and ends when the answer is no, so that access that was taken away does
+// not last as long as the connection does (ARCHITECTURE 10.3, 10.5, 10.7).
+// A failing check ends the stream too; the client's reconnect gets the
+// answer a new request gets.
+func (s *Server) stillAllowed(r *http.Request) bool {
+	ctx := r.Context()
+	if tok, ok := tokenFrom(r); ok {
+		_, _, valid, err := s.validToken(ctx, tok.TokenHash, s.clock.Now())
+		if err != nil && ctx.Err() == nil {
+			s.log.Error("checking the api token of an open stream failed", "error", err)
+		}
+		if err != nil || !valid {
+			return false
+		}
+	} else if sess, ok := sessionFrom(r); ok {
+		if _, valid := s.validSession(ctx, sess.TokenHash); !valid {
+			return false
+		}
+	} else if !s.auth.InsecureNoAuth {
+		return false
+	}
+	g, ok := ctx.Value(grantKey{}).(grant)
+	if !ok {
+		// The owner, or a route that asks for no role on an app.
+		return true
+	}
+	act, _ := actorFrom(r)
+	role, err := s.store.AppRole(ctx, g.appID, act.UserID)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Error("checking the role of an open stream failed", "error", err)
+		}
+		return false
+	}
+	return roleLevel(role) >= g.level
+}
+
 // routeApp finds the app a request acts on. It returns 0 when the record
-// does not exist, along with the error code a member without a role gets.
-func (s *Server) routeApp(r *http.Request, sc scope) (appID int64, notFound string, err error) {
+// does not exist, along with the 404 a member without a role gets.
+func (s *Server) routeApp(r *http.Request, sc scope) (appID int64, kind missing, err error) {
 	ctx := r.Context()
 	if sc == scopeApp {
 		app, err := s.store.GetApp(ctx, r.PathValue("slug"))
 		if errors.Is(err, store.ErrNotFound) {
-			return 0, "app_not_found", nil
+			return 0, missingApp, nil
 		}
-		return app.ID, "app_not_found", err
+		return app.ID, missingApp, err
 	}
 	id, perr := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	switch sc {
 	case scopeDeployment:
-		notFound = "deployment_not_found"
+		kind = missingDeployment
 		if perr == nil {
 			var d store.Deployment
 			d, err = s.store.GetDeployment(ctx, id)
 			appID = d.AppID
 		}
 	case scopeTaskRun:
-		notFound = "task_run_not_found"
+		kind = missingTaskRun
 		if perr == nil {
 			var run store.TaskRun
 			run, err = s.store.GetTaskRun(ctx, id)
 			appID = run.AppID
 		}
 	case scopeDBCopy:
-		notFound = "db_copy_not_found"
+		kind = missingDBCopy
 		if perr == nil {
 			var c store.DBCopy
 			c, err = s.store.GetDBCopy(ctx, id)
@@ -269,9 +339,9 @@ func (s *Server) routeApp(r *http.Request, sc scope) (appID int64, notFound stri
 		}
 	}
 	if perr != nil || errors.Is(err, store.ErrNotFound) {
-		return 0, notFound, nil
+		return 0, kind, nil
 	}
-	return appID, notFound, err
+	return appID, kind, err
 }
 
 // memberReaches reports whether a member holds the level on an app that

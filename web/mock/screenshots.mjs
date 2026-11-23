@@ -1276,8 +1276,9 @@ SHOTS.push(
 );
 
 // The container registry credential on the settings tab (ARCHITECTURE
-// 6.1): set (blog), not set (blog-staging), the form, a refused value, the
-// removal, and a member who may only look.
+// 6.1): set (blog), not set (blog-staging), the form, a refused value,
+// another registry typed over the saved one (the token is asked for again),
+// the removal, and a member who may only look.
 const REGISTRY = '[data-test-registry]';
 const BAD_REGISTRY = `(() => {
   const input = document.querySelector('[data-test-registry-field="registry"]');
@@ -1287,6 +1288,13 @@ const BAD_REGISTRY = `(() => {
   user.value = 'octo-bot';
   user.dispatchEvent(new Event('input', { bubbles: true }));
   document.querySelector('[data-test-registry-save]').click();
+  setTimeout(() => document.querySelector('${REGISTRY}').scrollIntoView(), 200);
+})()`;
+const moveRegistry = (save) => `(() => {
+  const input = document.querySelector('[data-test-registry-field="registry"]');
+  input.value = 'registry.example.com';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  if (${save}) document.querySelector('[data-test-registry-save]').click();
   setTimeout(() => document.querySelector('${REGISTRY}').scrollIntoView(), 200);
 })()`;
 SHOTS.push(
@@ -1336,6 +1344,42 @@ SHOTS.push(
     script: scrollTo(REGISTRY),
     then: '[data-test-registry-form]',
     themes: ['light'],
+  },
+  {
+    name: 'registry-move',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-registry-readout]',
+    click: '[data-test-registry-edit]',
+    script: moveRegistry(false),
+    then: '[data-test-registry-field="token"][required]',
+  },
+  {
+    name: 'registry-move-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-registry-readout]',
+    click: '[data-test-registry-edit]',
+    script: moveRegistry(false),
+    then: '[data-test-registry-field="token"][required]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'registry-move-token-missing',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-registry-readout]',
+    click: '[data-test-registry-edit]',
+    script: moveRegistry(true),
+    then: `${REGISTRY} [data-test-field-error]`,
+  },
+  {
+    name: 'registry-move-token-missing-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-registry-readout]',
+    click: '[data-test-registry-edit]',
+    script: moveRegistry(true),
+    then: `${REGISTRY} [data-test-field-error]`,
+    ...PHONE,
+    fullPage: false,
   },
   {
     name: 'registry-error',

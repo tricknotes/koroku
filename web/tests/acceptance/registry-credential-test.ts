@@ -112,7 +112,7 @@ module('Acceptance | registry credential', function (hooks) {
   test('changing keeps the token when the field is left empty', async function (assert) {
     fakes.api.on('GET', PATH, SET).on('PUT', PATH, () => ({
       ...SET,
-      registry: 'registry.example.com',
+      updated_at: '2026-11-18T03:00:00Z',
     }));
     await visit('/apps/blog/settings');
 
@@ -120,17 +120,83 @@ module('Acceptance | registry credential', function (hooks) {
     assert.dom('[data-test-registry-field="username"]').hasValue('octo-bot');
     assert.dom('[data-test-registry-field="token"]').hasValue('');
     assert.dom('[data-test-field-group="token"]').includesText('空のまま');
-    await fillIn(
-      '[data-test-registry-field="registry"]',
-      'registry.example.com',
-    );
+    assert
+      .dom('[data-test-registry-field="token"]')
+      .doesNotHaveAttribute('required')
+      .hasAttribute('placeholder', '（変更しない）');
+    // The same registry, spelled differently.
+    await fillIn('[data-test-registry-field="registry"]', ' GHCR.io ');
     await click('[data-test-registry-save]');
 
     assert.deepEqual(
       fakes.api.callsTo('PUT', PATH).map((c) => c.body),
-      [{ registry: 'registry.example.com', username: 'octo-bot', token: '' }],
+      [{ registry: 'GHCR.io', username: 'octo-bot', token: '' }],
     );
-    assert.dom('[data-test-registry-host]').hasText('registry.example.com');
+    assert.dom('[data-test-registry-saved]').exists();
+  });
+
+  test('another registry or user name needs the token again', async function (assert) {
+    fakes.api.on('GET', PATH, SET).on('PUT', PATH, (call: FakeCall) => {
+      const body = call.body as RegistryCredentialInput;
+      return { ...SET, registry: body.registry, username: body.username };
+    });
+    await visit('/apps/blog/settings');
+
+    await click('[data-test-registry-edit]');
+    await fillIn(
+      '[data-test-registry-field="registry"]',
+      'registry.example.com',
+    );
+    assert
+      .dom('[data-test-field-group="token"]')
+      .includesText('トークンも入力します')
+      .doesNotIncludeText('空のまま');
+    assert
+      .dom('[data-test-registry-field="token"]')
+      .hasAttribute('required')
+      .doesNotHaveAttribute('placeholder');
+    await click('[data-test-registry-save]');
+
+    assert.deepEqual(fakes.api.callsTo('PUT', PATH), [], 'nothing is sent');
+    assert
+      .dom('[data-test-field-group="token"] [data-test-field-error]')
+      .hasText('トークンを入力してください。');
+    assert.dom('[data-test-registry-form]').exists('the form stays open');
+
+    // Back at the saved registry, the saved token is enough again.
+    await fillIn('[data-test-registry-field="registry"]', 'ghcr.io');
+    assert
+      .dom('[data-test-field-group="token"] [data-test-field-error]')
+      .doesNotExist();
+    assert.dom('[data-test-field-group="token"]').includesText('空のまま');
+
+    await fillIn('[data-test-registry-field="username"]', 'other-bot');
+    assert
+      .dom('[data-test-field-group="token"]')
+      .includesText('トークンも入力します');
+    await fillIn('[data-test-registry-field="token"]', 'ghp_other');
+    await click('[data-test-registry-save]');
+
+    assert.deepEqual(
+      fakes.api.callsTo('PUT', PATH).map((c) => c.body),
+      [{ registry: 'ghcr.io', username: 'other-bot', token: 'ghp_other' }],
+    );
+    assert.dom('[data-test-registry-username]').hasText('other-bot');
+  });
+
+  test('a token the server asks for is explained next to the field', async function (assert) {
+    // The saved credential changed elsewhere after this screen read it.
+    fakes.api.on('GET', PATH, SET).fail('PUT', PATH, 422, 'validation_failed', {
+      token: 'enter the token again to change the registry or the username',
+    });
+    await visit('/apps/blog/settings');
+
+    await click('[data-test-registry-edit]');
+    await click('[data-test-registry-save]');
+
+    assert
+      .dom('[data-test-field-group="token"] [data-test-field-error]')
+      .includesText('トークンを入力してください');
   });
 
   test('refused fields are explained next to them', async function (assert) {

@@ -132,28 +132,48 @@ func TestOAuthCallbackIsRateLimited(t *testing.T) {
 	gh := defaultGitHub()
 	srv, clk := newAuthServer(t, gh)
 	h := srv.Handler()
-	exchanges := 0
-	call := func() string {
-		req := localRequest(http.MethodGet, "/auth/github/callback?code=bogus&state=abc", nil)
-		req.AddCookie(&http.Cookie{Name: secureStateCookie, Value: "abc"})
-		before := gh.exchanges
-		rec := send(h, req)
-		if gh.exchanges > before {
-			exchanges++
+	call := func(target, stateCookie string) string {
+		req := localRequest(http.MethodGet, target, nil)
+		if stateCookie != "" {
+			req.AddCookie(&http.Cookie{Name: secureStateCookie, Value: stateCookie})
 		}
-		return rec.Header().Get("Location")
+		return send(h, req).Header().Get("Location")
 	}
+
+	// Requests that are refused before GitHub is asked do not count: no
+	// state cookie, another state than the cookie's, no state, no code.
+	for i := 0; i < 50; i++ {
+		for _, c := range []struct{ target, cookie, want string }{
+			{"/auth/github/callback?code=bogus&state=abc", "", "/?login_error=state_mismatch"},
+			{"/auth/github/callback?code=bogus&state=abc", "xyz", "/?login_error=state_mismatch"},
+			{"/auth/github/callback?code=bogus", "abc", "/?login_error=state_mismatch"},
+			{"/auth/github/callback?state=abc", "abc", "/?login_error=github_error"},
+		} {
+			if got := call(c.target, c.cookie); got != c.want {
+				t.Fatalf("round %d, %s with cookie %q: Location = %q, want %q", i, c.target, c.cookie, got, c.want)
+			}
+		}
+	}
+	if gh.exchanges != 0 {
+		t.Errorf("GitHub was asked %d times by requests without a matching state", gh.exchanges)
+	}
+	// So a real login in the same minute still goes through.
+	b := newBrowser(t, h)
+	if final := b.login("code-owner"); final.Header().Get("Location") != "/" {
+		t.Errorf("login after refused callbacks: Location = %q", final.Header().Get("Location"))
+	}
+
+	// Requests that would reach GitHub are bounded.
 	for i := 0; i < 25; i++ {
-		if got := call(); got != "/?login_error=github_error" {
+		if got := call("/auth/github/callback?code=bogus&state=abc", "abc"); got != "/?login_error=github_error" {
 			t.Fatalf("call %d: Location = %q", i, got)
 		}
 	}
-	if exchanges != 10 {
-		t.Errorf("GitHub was asked %d times in one minute, want 10", exchanges)
+	if gh.exchanges != 10 {
+		t.Errorf("GitHub was asked %d times in one minute, want 10", gh.exchanges)
 	}
 	// The window resets, so a real login is only delayed.
 	clk.Advance(time.Minute)
-	b := newBrowser(t, h)
 	if final := b.login("code-owner"); final.Header().Get("Location") != "/" {
 		t.Errorf("login after the window: Location = %q", final.Header().Get("Location"))
 	}

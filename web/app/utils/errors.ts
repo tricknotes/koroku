@@ -58,6 +58,7 @@ const MESSAGES: Record<string, string> = {
   task_not_found:
     'このタスクは見つかりません。ほかの画面で変更されたかもしれません。再読み込みしてください。',
   task_run_not_found: '実行の記録が見つかりません。',
+  db_copy_not_found: 'コピーの記録が見つかりません。',
   snapshot_not_found:
     'スナップショットが見つからないか、この操作には使えない種類です。',
   slug_taken: 'この slug はすでに使われています。',
@@ -185,6 +186,7 @@ export type Unavailability = 'not_configured' | 'unavailable';
 
 const SPECIFIC_NOT_FOUND = new Set([
   'app_not_found',
+  'db_copy_not_found',
   'deployment_not_found',
   'domain_not_found',
   'registry_credential_not_found',

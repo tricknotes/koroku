@@ -373,6 +373,24 @@ route('PATCH', '/api/apps/:slug', (context) => {
   ) {
     throw new HttpError(403, 'reauth_required');
   }
+  // So does changing a command that runs in a production app's containers.
+  if (
+    context.scenario === 'stale-login' &&
+    target.environment === 'production' &&
+    [
+      'dump_hook_service',
+      'dump_hook_command',
+      'load_hook_service',
+      'load_hook_command',
+      'post_load_service',
+      'post_load_command',
+    ].some(
+      (field) =>
+        body[field] !== undefined && body[field] !== (target[field] ?? ''),
+    )
+  ) {
+    throw new HttpError(403, 'reauth_required');
+  }
   if (
     body.auto_deploy === true &&
     (!target.repo_full_name || target.repo_url)
@@ -775,7 +793,12 @@ route('PUT', '/api/apps/:slug/registry-credential', (context) => {
   }
   if (!username || /[:\s]/.test(username))
     errors.username = 'enter the username';
-  if (/\s/.test(token) || (!token && !saved)) errors.token = 'enter the token';
+  // The saved token stays with the registry and user it was entered for.
+  const moved =
+    saved && (saved.registry !== registry || saved.username !== username);
+  if (/\s/.test(token) || (!token && (!saved || moved))) {
+    errors.token = 'enter the token';
+  }
   if (Object.keys(errors).length) {
     throw new HttpError(422, 'validation_failed', errors);
   }
@@ -786,8 +809,6 @@ route('PUT', '/api/apps/:slug/registry-credential', (context) => {
     updated_at: new Date().toISOString(),
   };
   context.state.registry.set(app.slug, next);
-  const moved =
-    saved && (saved.registry !== registry || saved.username !== username);
   if (!saved || moved || token) {
     record(context, app.slug, 'registry.set', {
       registry,
@@ -1229,7 +1250,7 @@ function findCopy(state, id) {
     const found = list.find((entry) => entry.id === Number(id));
     if (found) return found;
   }
-  throw notFound('copy_not_found');
+  throw notFound('db_copy_not_found');
 }
 
 function copyJson(entry) {

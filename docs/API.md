@@ -26,7 +26,7 @@
 | 403 | `token_not_allowed` | API トークンでは使えない API（API トークンの節） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
 | 403 | `forbidden_role` | ユーザーのロールではできない操作（ARCHITECTURE 10.7）。`details.required` は要るもの（`view` / `deploy` / `manage` / `owner`）。設定の `PATCH` でオーナー専用の項目を変えようとしたときは `details.fields` に項目名（`relax_policy`、`repository`、`promote_from`） |
-| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found`、`db_copy_not_found` | 対象がない。メンバーがロールを持たないアプリ（とそのデプロイ・実行・コピー）も、存在しないものとして同じ 404 になる |
+| 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found`、`db_copy_not_found` | 対象がない。メンバーがロールを持たないアプリ（とそのデプロイ・実行・コピー）も、存在しないものとして同じ 404 になる（`code` も `message` も、存在しないときと同じ） |
 | 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens`、`not_deployed`、`promotion_unavailable`、`promotion_stale` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
 | 429 | `rate_limited` | API トークンの利用回数の上限（1 分あたり 120 回）を超えた。`Retry-After` あり |
@@ -80,7 +80,7 @@
 | --- | --- |
 | `GET /api/session` | 常に 200。`{"authenticated": true, "user": {"id": 1, "login": "octo", "avatar_url": "https://...", "owner": true}, "reauth_until": "2026-11-19T03:10:00Z"}` か `{"authenticated": false}`。`reauth_until` は再ログインなしで危険な操作ができる期限（ログインから 10 分。`--insecure-no-auth` では `null`）。`owner` はオーナーなら `true`、メンバーなら `false`（`--insecure-no-auth` では `true`） |
 | `GET /auth/github/login?return_to=/apps/blog/env` | GitHub の認可画面へリダイレクト（ページ遷移で開く）。`return_to` はログイン後に戻るパス（省略時は `/`）。`/` で始まらないもの、`//` や `\` を含むものは無視して `/` に戻す |
-| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（オーナーでも、ロールを持つメンバーでもない）、`state_mismatch`、`github_error`、`not_configured`（GitHub App が未設定） |
+| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（オーナーでも、ロールを持つメンバーでもない）、`state_mismatch`（state の Cookie がないか、`state` と一致しない）、`github_error`（`code` がない、GitHub が断った、GitHub への問い合わせが 1 分あたり 10 回の上限に達している）、`not_configured`（GitHub App が未設定）。`state_mismatch` と `code` のないリクエストは上限に数えない（ARCHITECTURE 10 章） |
 | `POST /auth/logout` | 204。セッションを破棄 |
 | `GET /api/sessions` | 有効なセッションの一覧（新しい順）。メンバーには自分のもの、オーナーには全員のもの。`{"sessions": [{"id": "9f2c41d07a1b3e55", "created_at": "...", "last_seen_at": "...", "expires_at": "...", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ...", "current": true, "user": {"id": 1, "login": "octo"}}]}`。`last_seen_at` は 1 分単位の目安 |
 | `DELETE /api/sessions/{id}` | 204。そのセッションを終了する（自分のセッションを指定するとログアウトと同じ）。メンバーは自分のものだけ、オーナーは誰のものでも終了できる。なければ `404 session_not_found` |
@@ -89,7 +89,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）か `auto_deploy_workflow` を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）か `auto_deploy_workflow` を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。本番アプリで `dump_hook_service`・`dump_hook_command`・`load_hook_service`・`load_hook_command`・`post_load_service`・`post_load_command` のいずれかを今と違う値にするものも同じ（アプリのコンテナの中で動くコマンドの設定のため。staging アプリでは求めない）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## API トークン
 
@@ -344,7 +344,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 - アクセスがない間の休止（ARCHITECTURE 8.4）: `idle_sleep` が `true` なら、`idle_sleep_minutes` 分のあいだ Caddy を通るリクエストがなければ koroku がアプリのコンテナを止め（休止）、次のリクエストで起こす。既定は `false` と `30`。`idle_sleep_minutes` は 10〜1440 で、外れると `422 validation_failed`（`details.idle_sleep_minutes`）。`GET /api/system` の `idle_sleep.available` が `false` のホストで `false` から `true` にすると `422 validation_failed`（`details.idle_sleep`）。変えられるのは管理以上のロールで、再ログインは要らない。`sleeping_since` は休止した時刻で、起きていれば `null`（読み取り専用。`desired_state` は `running` のまま）。起動・停止は休止を解く。休止中のアプリの再起動は、起こすのと同じ。
 - 公開サービスの無停止デプロイ（blue/green。ARCHITECTURE 7.2）: `blue_green` が `true` なら、デプロイは新しい版の公開サービスを動いている版と並べて起動し、確認が通ってから Caddy の転送先を切り替える。既定は `false`。`blue_green_drain_seconds` は切り替えのあと旧色を止めるまでの待ち時間（0〜300 秒、既定 10）で、外れると `422 validation_failed`（`details.blue_green_drain_seconds`）。変えられるのは管理以上のロールで、再ログインは要らない（本番で有効にするときの確認は画面のダイアログで行う）。設定の変更は次のデプロイから効く。初めて `true` にしたときに 2 つ目のポートを割り当て、`alt_host_port` に返す（それまでは `null`。無効にしても返さない）。空きがなければ `422 validation_failed`（`details.blue_green`）。アプリの作成（`POST /api/apps`）では `true` にできない（`details.blue_green`）。`web_color` はいま利用者のリクエストを受けている色（`blue` は `host_port`、`green` は `alt_host_port`。公開サービスが 7 章の形で動いていれば `null`。読み取り専用）。`blue_green_problems` は稼働中のリリースの Compose ファイルが有効にする条件を満たさない理由（ポリシー検査の違反と同じ形 `{"service", "rule": "blue_green", "message", "relaxable": false}` の配列。満たしていれば空配列。未デプロイか、検査を記録する前のリリースなら `null`）。`include` した別ファイルにある公開サービスは、有効にしてデプロイするまで分からない。
 - 先に待つワークフロー（ARCHITECTURE 5.2）: `auto_deploy_workflow` はワークフローのファイルのパス（例 `.github/workflows/image.yml`）。空（既定）なら push の直後にデプロイする。設定すると push ではデプロイせず、そのワークフローの実行がこのブランチの最新のコミットで成功したとき（Webhook の `workflow_run`）にデプロイする。`.github/workflows/` の直下の `.yml` か `.yaml`（255 文字まで）でなければ `422 validation_failed`（`details.auto_deploy_workflow`）。前後の空白は除く。
-- バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。
+- バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。本番アプリでダンプフックを今と違う値にするには、直近 10 分以内のログインが要る（`403 reauth_required`）。
 
 | メソッドとパス | 内容 |
 | --- | --- |
@@ -559,7 +559,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/registry-credential` | 下の形。トークンは返さない。設定していなければ `configured: false`、`registry` は既定の `ghcr.io`、`username` は空文字、`updated_at` は `null` |
-| `PUT /api/apps/{slug}/registry-credential` | 本文 `{"registry": "ghcr.io", "username": "octo-bot", "token": "..."}` で設定する（前のものは置き換える）。`token` を空文字か省略にすると保存済みのトークンを残す（まだなければ 422）。200 で `GET` と同じ形 |
+| `PUT /api/apps/{slug}/registry-credential` | 本文 `{"registry": "ghcr.io", "username": "octo-bot", "token": "..."}` で設定する（前のものは置き換える）。`token` を空文字か省略にすると、`registry` と `username` が保存済みのものと同じときに限り、保存済みのトークンを残す。まだ保存していないときと、`registry` か `username` を保存済みのものから変えるときは `token` が要る（なければ `422 validation_failed`、`details.token`）。200 で `GET` と同じ形 |
 | `DELETE /api/apps/{slug}/registry-credential` | 削除し、koroku が書いた Docker の設定ファイルも消す。200 で `GET` と同じ形（`configured: false`）。なければ `404 registry_credential_not_found` |
 
 ```json
@@ -743,7 +743,7 @@ staging アプリの稼働中のリリースを、組み合わせた本番アプ
 - `images.status` は `checked` か `unavailable`（Docker で判定できなかったか、staging のリリースのファイルがもう残っていない。デプロイ時にもう一度判定する）。`services` は `build:` を持つサービスだけ（サービス名順。`image:` だけのサービスは常に pull）。`reason` は `args_differ`（`differing_args` に補間後の値が違った `build.args` のキー）、`build_differs`（引数以外のビルド定義が違う）、`not_built_in_source`、`image_missing`（staging のイメージがもうない）。`source_missing`（staging のリリースのファイルがもうない）はデプロイログの判定にだけ現れる。
 - 昇格のデプロイログは、手順 5 で `==> <時刻> reuse Reusing images of <slug> deployment #<id>` の見出しのあと、サービスごとに `<service>: reusing <image>` か `<service>: building (<理由>)` の行を書く（理由の例 `build args differ: ASSET_HOST`）。ビルドに回ったサービスがあれば、続く `build` の手順でそれだけをビルドする。
 
-**デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。
+**デプロイログの SSE**: ログ 1 行が 1 メッセージ（`data:` に行の文字列）。`id:` はその行までのバイト位置で、再接続時に `Last-Event-ID` として送ると続きから再開する。デプロイが終わりログを出し切ると `event: end`（`data:` は最終 `status`）を送って接続を閉じる。`EventSource` は自動で再接続するので、UI は `end` を受けたら `close()` する。SSE は開いている間も 15 秒ごとに権限を確かめ直し、セッションや API トークンが無効になるか、アプリのロールが足りなくなると、`end` を送らずに接続を閉じる（ARCHITECTURE 10.7）。再接続は、新しいリクエストと同じ `401` か `404` になる。コマンドの出力と DB のコピーのログの SSE も同じ。
 
 ## ワンオフのコマンドと登録タスク
 
@@ -925,7 +925,7 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/apps/{slug}/logs?service=&tail=200` | ライブ tail の SSE。1 メッセージの `data:` がログ行の JSON。`service` 省略で全サービス。接続はクライアントが閉じるまで続く |
+| `GET /api/apps/{slug}/logs?service=&tail=200` | ライブ tail の SSE。1 メッセージの `data:` がログ行の JSON。`service` 省略で全サービス。接続はクライアントが閉じるまで続く。ただし 15 秒ごとに権限を確かめ直し、セッションや API トークンが無効になるか、アプリのロールがなくなると、サーバーが接続を閉じる（再接続は `401` か `404`。ARCHITECTURE 10.7） |
 | `GET /api/apps/{slug}/logs/history?service=&from=&to=&q=&limit=1000` | ローカルに残る過去 14 日分の検索。`{"lines": [ログ行, ...], "truncated": false}`（古い順）。`from` / `to` は RFC 3339、`q` は部分一致 |
 | `GET /api/apps/{slug}/logs/archives?service=` | 退避済みログの一覧。`{"archives": [{"key": "logs/blog/web/2026/11/18/04.log.gz", "service": "web", "hour": "2026-11-18T04:00:00+09:00", "size": 12345}]}`（新しい順） |
 | `GET /api/apps/{slug}/logs/archives/url?key=` | ダウンロード用の presigned URL。`{"url": "https://..."}`（有効 15 分） |
@@ -1023,7 +1023,7 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
 
 本番アプリの DB を staging アプリへ流し込む（ARCHITECTURE 10.6）。パスの `{slug}` は受け側（staging）のアプリ。
 
-アプリの形に次の設定が加わる（`PATCH /api/apps/{slug}` で変える。ダンプフックと同じく、サービスとコマンドは両方を指定するか両方を空にする。コマンドは 1 行 1000 文字まで）。
+アプリの形に次の設定が加わる（`PATCH /api/apps/{slug}` で変える。ダンプフックと同じく、サービスとコマンドは両方を指定するか両方を空にする。コマンドは 1 行 1000 文字まで。本番アプリで今と違う値にするには、直近 10 分以内のログインが要る）。
 
 - `load_hook_service`、`load_hook_command`: ロードフック。コマンドは `sh -c` でそのサービスのコンテナの中で動き、標準入力からダンプを読む。
 - `post_load_service`、`post_load_command`: コピー後のコマンド（個人情報を消すなど）。ロードのあと、止めたサービスを起動する前に実行する。
@@ -1053,7 +1053,7 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
 | --- | --- |
 | `GET /api/apps/{slug}/db-copies?limit=20` | そのアプリへのコピーの履歴。`{"copies": [コピー, ...]}`（新しい順、`limit` は 1〜100） |
 | `POST /api/apps/{slug}/db-copies` | ボディ `{"source": "blog", "source_kind": "live", "confirm": "blog-staging"}`。202 でコピー（バックグラウンドで進む）。`source_kind` は省略時 `live` |
-| `GET /api/db-copies/{id}` | コピー。なければ `404 copy_not_found` |
+| `GET /api/db-copies/{id}` | コピー。なければ `404 db_copy_not_found` |
 | `GET /api/db-copies/{id}/logs` | コピーのログの SSE。形はデプロイログと同じ（`id:` はバイト位置、終わると `event: end` で最終 `status`）。`?format=text` で全文 |
 
 `POST` の断り方:
