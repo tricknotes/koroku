@@ -269,7 +269,7 @@ sudo koroku run blog db psql -U postgres app < dump.sql   # 端末でない入�
 
 ### 10.4 レビューアプリ
 
-staging アプリの pull request ごとのレビューアプリ（ARCHITECTURE 9.9、作る手順は README）は、アプリが増える機能なので、ホストの資源を見ながら使う。
+staging アプリの pull request ごとのレビューアプリ（ARCHITECTURE 9.9、作る手順は [USAGE.md](USAGE.md)）は、アプリが増える機能なので、ホストの資源を見ながら使う。
 
 - 数の上限も期限もない。pull request が閉じても消えないので、アプリ一覧（親の下に字下げして並ぶ）や親の概要タブで「マージ済み」「クローズ」のものを見つけて、設定タブから削除する。削除すると volume も消える。
 - 既定でアクセスがない間は休止するので、開いていないレビューアプリはメモリを使わない。ディスク（イメージとリリース、volume）は消すまで残る。

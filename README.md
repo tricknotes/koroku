@@ -2,203 +2,94 @@
 
 # koroku
 
-koroku は、自分の VPS 1 台を Heroku のように使うための、個人用のホスティング基盤です。GitHub にある Docker Compose のアプリを、ブラウザーの管理画面からデプロイできます。
+**The one-person PaaS** — *Platform as a Self-hosted application*
 
-- ブランチかコミットを選ぶと、取得・ビルド・起動・HTTP の確認まで自動で進みます。起動に失敗したら、直前に動いていた版へ自動で戻ります。
-- アプリごとに選べば、GitHub にブランチを push したときに自動でデプロイします。
-- アプリごとに `https://<アプリ名>.<ベースドメイン>` の URL と TLS 証明書が付きます。独自ドメインも足せます。
-- 環境変数、デプロイと実行のログ、起動・停止、バックアップとリストアを、同じ画面で扱えます。
-- アプリごとに選べば、公開サービス（リクエストを受けるサービス）を無停止で入れ替えます。新しい版を動いている版と並べて起動し、HTTP の確認が通ってから切り替えます。マイグレーションを古い版のコードと両立する形で書くことと、デプロイの間に公開サービスのメモリが一時的に 2 つ分要ることが条件です。
-- アプリごとに選べば、アクセスがない間はコンテナを止めてメモリを空け、次のアクセスで起動します。たまにしか開かない staging に向いています（休止のあとの最初のアクセスは、アプリの起動を待ちます）。
-- CI がレジストリ（GitHub Container Registry など）に置いた private なイメージも、アプリごとの認証で取得できます。認証はアプリ同士で混ざりません。
+Your compose.yaml, on one VPS you own, with guardrails.
 
-コントロールプレーンは Go 製のバイナリ 1 つ（`koroku`。管理画面と SQLite を内蔵）で、前段のリバースプロキシに Caddy を使います。特定のホスティング事業者、DNS サービス、オブジェクトストレージには依存しません。
+English | [日本語](README.ja.md)
 
-## 向いている使い方
+koroku deploys the Docker Compose apps in your GitHub repositories to a single VPS you own, from a web console. It gives you a Heroku-like workflow on your own server, at a scale one person can run.
 
-- 自分が書いた 3〜5 個程度のアプリ（Web アプリ + DB など）を、1 台のサーバーで動かしたい
-- アプリはすでに Docker Compose で動く（あるいは、動くように直せる）
-- staging と本番を同じサーバーに並べ、本番の操作には確認を挟みたい
+> [!NOTE]
+> v0.1.0 is an early, experimental release. Settings and the API may still change. The console and the detailed documents are in Japanese.
 
-次のことはしません。必要なら別の仕組みを選んでください。
+## The problem it solves
 
-- koroku のサーバーへの `git push` でのデプロイ、buildpack、Addons
-- 複数のサーバー、複数のユーザー、オートスケール
-- 公開サービス以外の無停止デプロイ（既定では、デプロイ中のアプリは数秒止まります。その間のページの表示は待たされるだけですみますが、フォームの送信などはエラーになることがあります。ほかのアプリは止まりません。公開サービスの無停止デプロイを選んだアプリでも、DB やワーカーは作り直し、再起動・起動・停止では数秒止まります）
-- サーバーの冗長化（サーバーが止まると全アプリが止まります）
-- 他人のコードを安全に動かすための隔離。デプロイするのは自分のリポジトリだけ、という前提です
+- **PaaS bills grow with every app.** Even small personal apps and staging environments cost a monthly fee per app and per database. With koroku, three to five apps share the cost of one server.
+- **Hand-run VPSes break easily.** Wiring up `docker compose up`, a reverse proxy, certificates, backup cron jobs and log storage yourself leaves room for a failed deploy to take production down, or for backups that were never actually taken. koroku puts these together and adds guardrails.
+- **Existing self-hosted PaaSes don't fit your Compose file, or are too big.** Many expect buildpacks or their own config format, or target multiple servers and use a lot of memory for the platform itself. koroku uses your repository's Compose file without rewriting it, and runs as a single Go binary with SQLite.
 
-## しくみ
+## What it does
+
+- **Deploys**: pick a branch or commit, or push to GitHub, and koroku fetches, builds, starts and checks the app over HTTP. If the new version fails to start, it goes back to the last working one. Optionally, it replaces the public service with zero downtime.
+- **Guardrails**: risky settings such as `privileged` or mounting the Docker socket are refused before deploying, app ports are never exposed, and apps cannot see each other. Production apps ask for confirmation before deploys and deletion.
+- **URLs and TLS**: every app gets `https://<app>.<base domain>` with a certificate. Custom domains can be added.
+- **Data protection**: named volumes, database dumps and koroku itself are backed up daily to object storage and restorable from the console. You can recover even after losing the whole server.
+- **Fits a small server**: per-service memory limits, production kept alive first when memory runs out, and sleeping apps that get no traffic.
+- **Heroku-like workflow**: staging and production, review apps per pull request, environment variables, logs and one-off commands in one console.
+- **Works with AI agents**: Claude Code Skills prepare your app's repository for koroku, and read and fix the cause of a failed deploy.
+
+## Who it is for
+
+- You want to run three to five apps you wrote (a web app plus a database, and so on) on one server
+- Your apps already run with Docker Compose, or can be made to
+- One person runs it (plus a few people you trust with specific apps)
+
+If you need multiple servers, autoscaling, `git push` and buildpack deploys, or ready-made app templates, another tool will fit better. See [docs/COMPARISON.md](docs/COMPARISON.md) (in Japanese).
+
+## How it works
 
 ```text
             Internet
                | 80 / 443
-+--------------v-------------------------------------- サーバー --+
-|  Caddy          console.<ベースドメイン> -> koroku（管理画面）   |
-|                 <アプリ>.<ベースドメイン> -> 各アプリ             |
-|  koroku         API・管理画面・デプロイ・ログ・バックアップ        |
-|                 docker compose を操作し、Caddy に経路を設定する   |
-|  アプリ          1 アプリ = 1 Compose プロジェクト               |
-+------------------------------------------------------------------+
++--------------v--------------------------------------- server --+
+|  Caddy          console.<base domain> -> koroku (console)       |
+|                 <app>.<base domain>   -> each app               |
+|  koroku         API, console, deploys, logs, backups            |
+|                 drives docker compose and routes Caddy          |
+|  apps           one app = one Compose project                   |
++-----------------------------------------------------------------+
        |                     |                          |
-     GitHub          オブジェクトストレージ         Let's Encrypt
- （ログイン・取得）   （ログの退避・バックアップ）    （TLS 証明書）
+     GitHub            object storage             Let's Encrypt
+ (login, fetch)     (log archive, backups)       (TLS certificates)
 ```
 
-- 管理画面には GitHub アカウントでログインします。運用するのは設定で決めた 1 人（オーナー）で、オーナーは管理画面でほかの GitHub ユーザーをメンバーに加え、アプリごとに「閲覧」「デプロイ」「管理」のロールを与えられます。
-- アプリのリポジトリの Compose ファイルは書き換えません。koroku が生成した設定を重ねて、ポートを `127.0.0.1` に閉じ込め、環境変数とメモリ上限を付けます。アプリ同士は互いに見えません。
-- ホスト全体でメモリが足りなくなったときは、staging のアプリから先に止まり、本番のアプリ（環境を「本番」にしたもの）は最後まで守られます。本番のアプリには、回収されにくくするメモリの予約も付きます（既定はメモリ上限の半分。リソースタブの「メモリの上限と予約」で変えられ、システムの「状態」タブで合計を確かめられます）。
-- 詳しくは [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+koroku does not depend on any particular hosting, DNS or object storage provider.
 
-## 必要なもの
+## Requirements
 
-| もの | 条件 |
+| What | Requirement |
 | --- | --- |
-| サーバー | Ubuntu 24.04 か 26.04（amd64）の VPS 1 台。目安は 2 vCPU、メモリ 4GB、ディスク 40GB。固定のグローバル IPv4 アドレスと、外から届く 80/443 番ポート |
-| ドメイン | `*.<ベースドメイン>`（または管理画面とアプリごとの名前）を、サーバーの IP に向けられること |
-| GitHub | ログイン、リポジトリの取得、デプロイの状態の反映（と、使うなら push での自動デプロイ）に使う GitHub App を、自分のアカウントに 1 つ登録する |
-| オブジェクトストレージ | S3 互換 API を持つもの（パス形式の URL に対応していること）。ログの退避とバックアップの置き場。なくても動きますが、バックアップが取れません |
-| 手元の環境 | `koroku` のバイナリをビルドするための Docker |
+| Server | One VPS with Ubuntu 24.04 or 26.04 (amd64). Around 2 vCPU, 4GB memory and 40GB disk. A static public IPv4 address with ports 80 and 443 reachable |
+| Domain | `*.<base domain>` (or the console and each app's name) pointed at the server's IP |
+| GitHub | One GitHub App registered on your account |
+| Object storage | Anything with an S3-compatible API, for log archives and backups (koroku runs without it, but cannot take backups) |
+| Local machine | Docker, to build the `koroku` binary |
 
-## はじめかた
+## Getting started
 
-1. **バイナリをビルドする。** 手元で次を実行すると、管理画面込みの `bin/koroku`（linux/amd64）ができます。必要なのは Docker だけです。
+1. Run `bin/dev make build` locally to build `bin/koroku` with the console embedded.
+2. Prepare the server, DNS, GitHub App and object storage.
+3. Copy the binary and `deploy/` to the server and run `deploy/provision.sh`.
+4. Write `/etc/koroku/config.toml`, start koroku, and check the setup with `sudo koroku check`.
+5. Open `https://console.<base domain>` and sign in with GitHub.
 
-   ```sh
-   bin/dev make build
-   ```
+Each step is described in [docs/SETUP.md](docs/SETUP.md) (in Japanese).
 
-2. **サーバー、DNS、GitHub App、オブジェクトストレージを用意する。** 外部サービス側で行う設定を、[docs/SETUP.md](docs/SETUP.md) に順番に書いてあります。
-3. **サーバーを構築する。** バイナリと `deploy/` ディレクトリをサーバーに送り、プロビジョニングスクリプトを実行します。Docker、Caddy、restic、swap、ファイアウォール、SSH の鍵認証化、`koroku` のサービス登録まで済みます。何度実行しても安全です。
+## Security
 
-   ```sh
-   scp -r deploy bin/koroku <ユーザー>@<サーバー>:
-   ssh -t <ユーザー>@<サーバー> sudo ./deploy/provision.sh ./koroku
-   ```
+koroku drives Docker, so it holds the same power as root on the server. The console login, matched by GitHub's numeric user ID, is the only gate. Deploy only repositories from yourself and people you trust. See [docs/USAGE.md](docs/USAGE.md#セキュリティについて) and chapter 10 of [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (in Japanese).
 
-4. **設定を書いて起動する。** `/etc/koroku/config.toml` に、ベースドメイン、公開 IP、GitHub App、オブジェクトストレージの値を書き、`sudo systemctl restart koroku` で起動します（[docs/SETUP.md](docs/SETUP.md) の 7 節）。
-5. **設定を確かめる。** 次のコマンドで、DNS、証明書、GitHub App、オブジェクトストレージ、バックアップまでを 1 つずつ確かめます。問題があれば、直し方と読むべき節を表示します。
+## Documents
 
-   ```sh
-   sudo koroku check
-   ```
+The documents below are in Japanese.
 
-6. `https://console.<ベースドメイン>` を開き、GitHub でログインします。
-
-最初は Let's Encrypt の staging（試験用）の証明書で動かし、一通り確かめてから本番の証明書に切り替えます（[docs/SETUP.md](docs/SETUP.md) の 9 節）。
-
-## 使い方
-
-アプリの画面は「概要」「デプロイ」「ログ」「リソース」「タスク」「環境変数」「バックアップ」「設定」のタブに分かれています。来る目的ごとに 1 つのタブで、設定もそれが効くタブにあります。自動デプロイ・昇格元・ポリシー検査はデプロイタブの「デプロイの設定」、レビューアプリはデプロイタブ、メモリの上限と予約・アクセスがない間の休止・構成はリソースタブ、必要な環境変数の照合元は環境変数タブ、ドメインは設定タブの「公開」にあります。設定タブは長いので、横（狭い画面では上）の目次から項目へ移れます。起動・停止・再起動は、どのタブでもヘッダーの「…」から行えます（止まっているときは「起動」、休止中は「起こす」のボタンがヘッダーに出ます）。
-
-### アプリを作ってデプロイする
-
-1. 管理画面で「アプリを作成」を押し、GitHub のリポジトリを選びます（public リポジトリは「URL を直接指定」でも指定できます）。
-2. Compose ファイルが自動で検出されるので、外に公開するサービスとそのポート、ヘルスチェックのパス（既定 `/`）を確かめます。
-3. 「環境変数」タブで、アプリに渡す変数を設定します。リポジトリが必要とする変数（Compose ファイルの `${VAR}` など）と照らし合わせ、足りないものを教えてくれます。
-4. 「デプロイ」タブでブランチかコミットを選んでデプロイします。進み具合とログがその場で流れます。
-5. デプロイが成功すると、`https://<アプリ名>.<ベースドメイン>` で開けます。GitHub App で取得するリポジトリでは、デプロイの状態がリポジトリの Deployments 欄にも環境（アプリ名）ごとに出ます。
-
-デプロイの流れは「取得 → 設定の生成 → 検証 → ビルドか pull → 起動 → 経路の設定 → HTTP の確認」です。起動か確認で失敗すると、直前の成功した版を当時の環境変数で起動し直します（DB のマイグレーションは戻しません）。過去のコミットは履歴の「このコミットを再デプロイ」で出し直せます。
-
-### private なイメージ
-
-CI がビルドして private なレジストリに置いたイメージ（`ghcr.io/<owner>/<repo>:sha-...` など）や、Dockerfile の `FROM` に書いた private なベースイメージを使うときは、設定タブの「コンテナレジストリの認証」にレジストリ（既定 `ghcr.io`）、ユーザー名、トークンを入れます。そのアプリのビルド・pull・起動にだけ使われ、ほかのアプリやサーバーの `docker login` とは混ざりません。トークンは読み取りだけができるもの（GHCR なら `read:packages` だけを付けた classic な Personal access token か、読み取り専用のボットアカウントのトークン）にしてください。保存したトークンは画面にも API にも二度と出ません。設定と変更には「管理」以上のロールと再ログインが要ります。取得が拒否されると、デプロイログにその旨と確かめる点が出ます。
-
-### push での自動デプロイ
-
-デプロイタブの「デプロイの設定」で「push されたら自動でデプロイする」を有効にすると、決めたブランチ（既定はアプリの既定のブランチ）に push されたコミットを自動でデプロイします。GitHub App の Webhook で push を受けるので、App の Webhook と secret の設定が要ります（[SETUP 4.6](docs/SETUP.md)）。続けて push すると、待っているデプロイは新しいコミットに置き換わります。本番のアプリで有効にするときは確認と再ログインが入ります。履歴には「push で自動デプロイ」と出ます。
-
-イメージを GitHub Actions でビルドして `image:` で pull するアプリは、「先に待つワークフロー」にそのワークフローのファイル（`.github/workflows/image.yml` など）を入れます。push ではなく、そのワークフローがブランチの最新のコミットで成功したときにデプロイするので、イメージができる前に pull して失敗することがありません。GitHub App に Actions の Read-only と Workflow run のイベントが要ります（[SETUP 4.6](docs/SETUP.md)）。
-
-### pull request ごとのレビューアプリ
-
-staging のアプリのデプロイタブにある「レビューアプリ」で、オーナーが「レビューアプリを許可する」を有効にしておくと（pull request のコードが staging の環境変数とデータを受け取るようになるので、既定は無効です）、管理のロールを持つ人が「レビューアプリを作成」で、そのリポジトリの開いている pull request を 1 つ選ぶと、その pull request のブランチを動かす別のアプリ（`<staging の slug>-pr-<番号>`）ができます。設定と環境変数は staging の写しで、作るときに選べば、最初のデプロイのあとで staging の DB をコピーし（コピー後のコマンドも実行し）ます。pull request に push すると自動でデプロイし直し、GitHub の pull request の画面にも URL が出ます。数の上限や期限はなく、pull request が閉じても自動では消えないので、不要になったら設定タブから削除します（volume も消えます）。許可を無効に戻しても、作ってあるレビューアプリはそのまま使えます。アプリ一覧にはレビューアプリの行は出ず、親の行に数（失敗しているものがあればその数も）が出ます。アプリには `KOROKU_APP_URL`、`KOROKU_APP_HOST`、`KOROKU_PR_NUMBER` が渡ります。GitHub App に Pull requests の Read-only が要り、DNS はワイルドカードのレコードがあればそのまま開けます（[SETUP 4.7](docs/SETUP.md)）。
-
-### staging と本番
-
-同じリポジトリを、複数のアプリに紐づけられます。`myapp-staging` と `myapp` のように別のアプリとして作り、設定で本番にしたアプリでは、デプロイと削除の前に確認が入ります。環境変数と volume はアプリごとに独立しています。
-
-### 独自ドメイン
-
-設定タブの「公開」にある「ドメイン」でホスト名を追加し、表示される DNS レコードを設定します。DNS がサーバーを向くと自動で有効になり、証明書が取られます。複数のホスト名を付けたときは、1 つをプライマリにすると、ほかはそこへリダイレクトされます。CDN を前段に置くなど DNS の確認が通らない構成では「強制有効化」が使えます。
-
-### ログ
-
-「ログ」タブで、サービスごとの出力と、アクセスログをライブで見られます。直近 14 日分はサーバー上で絞り込み検索でき、それより前のものはオブジェクトストレージに退避されたファイルをダウンロードできます。
-
-### 構成の確かめ
-
-リソースタブの「構成」で、koroku がリポジトリの Compose に重ねた設定（override）と、重ねた結果（`docker compose config`）と、いま動いているコンテナを読み取り専用で見られます。コンテナは稼働中のリリースと比べ、メモリ不足で止まった、再起動を繰り返している、古い設定のまま残っている、メモリ上限が違う、といったところに印が付きます。保持している直近 3 つのリリースの設定も選んで見られます。環境変数の値は出ません（キーだけです）。閲覧のロールと、読み取り専用の API トークンでも見られます。
-
-### コマンドの実行
-
-「タスク」タブで、稼働中のリリースと同じイメージと環境変数のコンテナで、コマンドを 1 回だけ実行できます（`bin/rails db:migrate:status` など）。よく使うコマンドは名前を付けて登録でき、cron の書式で予定を書けば koroku がその時刻に実行します（アクセスがない間に止めているアプリでも、アプリは起こさず DB など必要なサービスだけを起動して実行します）。`bin/rails console` のような対話的なコマンドは、ホストに SSH して `sudo koroku run <アプリ> <サービス> <コマンド>` で実行します。この 1 行は、同じタブからコピーできます（[docs/OPERATIONS.md](docs/OPERATIONS.md)）。
-
-### バックアップとリストア
-
-毎日 03:00（JST）に、アプリの named volume と、koroku 自身の設定と DB をオブジェクトストレージにバックアップします。アプリの DB は「ダンプフック」（例: `pg_dump` を実行するコマンド）を設定すると、整合した形で取れます。「バックアップ」タブから手動での実行、volume のリストア、DB ダンプのダウンロードができます。サーバーを丸ごと失ったときの復旧手順は [docs/OPERATIONS.md](docs/OPERATIONS.md) にあります。
-
-### メンバー
-
-手伝ってくれる人に、特定のアプリだけを任せられます。オーナーが「システム」の「管理」タブの「メンバー」で GitHub のユーザー名を入れて加え、アプリごとにロールを選びます。
-
-| ロール | できること |
+| Document | Contents |
 | --- | --- |
-| 閲覧 | アプリの状態、デプロイの履歴とログ、実行ログ、設定を見る。環境変数は名前だけ |
-| デプロイ | 閲覧に加えて、デプロイ、ロールバック、起動・停止・再起動、休止中のアプリを起こす |
-| 管理 | デプロイに加えて、環境変数、設定、ドメイン、バックアップとリストア、タスクの実行 |
-
-メンバーにはロールのあるアプリだけが見えます。アプリの作成と削除、ポリシー検査を緩める設定、リポジトリの変更、「システム」画面、メンバーの管理はオーナーだけができます。デプロイの履歴には、誰がデプロイしたかが残ります。
-
-### システム
-
-「システム」画面（オーナーだけ）は 3 つのタブに分かれています。「状態」でディスク、メモリ、アプリごとの CPU とメモリ、Docker のディスク使用量を確かめ、不要なイメージやビルドキャッシュを消せます。「定期処理」でバックアップとログ退避の状況と実行の履歴を、「管理」でメンバー、GitHub App、バージョンを扱います。ディスク使用率が一定（既定 85%）を超えると、新しいデプロイを断ります。
-
-## アプリのリポジトリを koroku 向けに整える
-
-koroku でデプロイするリポジトリには、いくつかの前提があります。
-
-- Compose ファイルがあり、HTTP を受けるサービスが 1 つあること。ヘルスチェックのパスが 5xx 以外をすぐ返すこと
-- 本番の設定で起動すること（開発用の設定は `compose.override.yaml` に分ける）
-- 権限の強い設定（`privileged`、ホストのネットワーク、Docker ソケットのマウント、書き込める bind mount など）を使わないこと。データは named volume に置くこと
-- ログは標準出力に出すこと。ワンショットのサービス（マイグレーションなど）は、ほかのサービスから `service_completed_successfully` で待たれていること
-
-詳しくは [plugins/koroku/skills/prepare-app/references/requirements.md](plugins/koroku/skills/prepare-app/references/requirements.md) にまとめてあります。
-
-このリポジトリは Claude Code のプラグインマーケットプレイスを兼ねていて、アプリのリポジトリをこの前提に合わせる Skill を配布しています。アプリのリポジトリで Claude Code を開き、次を実行します。
-
-```text
-/plugin marketplace add tricknotes/koroku
-/plugin install koroku@koroku
-```
-
-あとは「koroku で動くようにして」と頼むか、`/koroku:prepare-app` を実行します。Skill はリポジトリを調べて直し、手元の Docker で koroku と同じ形の設定を重ねたリハーサル（`config` → build / pull → `up --wait` → HTTP 確認）を行い、管理画面に入れる値（公開サービスとポート、ヘルスチェックパス、環境変数、ダンプフック）をまとめます。
-
-デプロイが失敗したら「koroku のデプロイが失敗した理由を見て直して」と頼むか、`/koroku:deploy-status` を実行します。管理画面の「セキュリティ」で作った読み取り専用の API トークンを `KOROKU_URL` と `KOROKU_TOKEN` の環境変数に置いておくと、Skill がこのリポジトリからデプロイしたアプリを見つけ、デプロイログ・実行ログ・未設定の環境変数を読んでリポジトリを直します。トークンではデプロイや設定の変更、環境変数の値の表示はできません（[ARCHITECTURE 10.5](docs/ARCHITECTURE.md)）。中身は [plugins/koroku/skills/deploy-status/](plugins/koroku/skills/deploy-status/) にあります。
-
-本番のメモリを減らしたいとき（「メモリを 70% にして」など）は、`/koroku:tune-app` を実行します。本番と同じ構成を手元で動かして全サービスのメモリを測り、設定だけで済むものから順に試して、効いたものだけを残します。速さと引き換えになる変更や、設計の判断が要る変更は、数字とトレードオフを示して利用者に任せます。中身は [plugins/koroku/skills/tune-app/](plugins/koroku/skills/tune-app/) にあります。
-
-## 運用
-
-koroku の更新、OS の更新、日常の確認、証明書のトラブル、サーバーを失ったときの復旧、Heroku Postgres からのデータの移し方は [docs/OPERATIONS.md](docs/OPERATIONS.md) にあります。koroku を再起動・更新しても、アプリのコンテナは止まりません。
-
-## セキュリティについて
-
-koroku は Docker を操作できるので、サーバーの root と同じ力を持ちます。管理画面のログインが唯一の関門です。
-
-- ログインできるのは、オーナー（設定で決めた GitHub の 1 アカウント）と、オーナーがアプリのロールを与えたメンバーだけです。照合には GitHub の数値の ID を使います。メンバーはロールのあるアプリしか扱えず、ホスト全体に関わる操作はオーナーだけができます。ただしメンバーの「管理」はアプリの環境変数や DB のダンプに触れられ、デプロイするコードはホストで動くので、信頼できる人にだけ与えてください。
-- オーナーもメンバーも、GitHub の 2 段階認証を有効にしてください（koroku のログインは GitHub へのサインインを経ます）。削除や本番のデプロイなど危険な操作の前には、再ログインを求めます。
-- 外に開くポートは 22、80、443 だけです。アプリのポートと koroku 自身は `127.0.0.1` でだけ待ち受けます。
-- 環境変数の値は暗号化して保存し、ログには出しません。
-- 前提と限界は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) の 10 章に書いてあります。
-
-## 文書
-
-| 文書 | 内容 |
-| --- | --- |
-| [docs/SETUP.md](docs/SETUP.md) | 初回セットアップ（サーバー、DNS、GitHub App、オブジェクトストレージ） |
-| [docs/OPERATIONS.md](docs/OPERATIONS.md) | サーバーの構築、更新、復旧 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 設計 |
+| [docs/COMPARISON.md](docs/COMPARISON.md) | Comparison with other tools |
+| [docs/SETUP.md](docs/SETUP.md) | First-time setup (server, DNS, GitHub App, object storage) |
+| [docs/USAGE.md](docs/USAGE.md) | Using the console, and the Skills that prepare your app's repository |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Building, updating and recovering the server |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design |
 | [docs/API.md](docs/API.md) | HTTP API |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | koroku 自体の開発 |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Developing koroku itself |

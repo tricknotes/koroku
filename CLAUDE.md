@@ -9,7 +9,7 @@
 - それ以外で両者が食い違ったら ARCHITECTURE.md に従う。
 - 設計を変える必要が出たら、実装より先に ARCHITECTURE.md を新しい設計に書き換える。黙って設計から外れない。
 - ARCHITECTURE.md は現在の設計だけを書くストック情報。日付、「当初は」「変更した」のような経緯、マイルストーン、実機確認の記録は書かない。確かめて分かった事実は、該当する章に現在の振る舞いとその理由として書く。変更の理由と経緯はコミットメッセージと PR に書く。
-- 利用者向けの説明は `README.md`、外部サービスの設定は `docs/SETUP.md`、ホストの構築と運用は `docs/OPERATIONS.md`、開発の手順は `docs/DEVELOPMENT.md`。
+- 初めて来た人への紹介は `README.md`（英語）と `README.ja.md`（日本語）で、2 つの内容をそろえる。画面の使い方は `docs/USAGE.md`、ほかの選択肢との比較は `docs/COMPARISON.md`、外部サービスの設定は `docs/SETUP.md`、ホストの構築と運用は `docs/OPERATIONS.md`、開発の手順は `docs/DEVELOPMENT.md`。
 
 ## 確定している前提
 
