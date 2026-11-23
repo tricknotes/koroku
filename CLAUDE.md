@@ -159,10 +159,10 @@ M0 から順に進める。各マイルストーンの着手時に作業計画�
 
 ARCHITECTURE 7.2。上流の再起動の間 Caddy がリクエストを待たせて送り直す設定（8 章）の上に作る。
 
-- [ ] `apps` の `blue_green`・`alt_host_port`・`web_color`、`deployments` の `web_color`・`switched_at`・`web_switch`。2 つ目のポートの割当（`host_port` と合わせて一意）
+- [ ] `apps` の `blue_green`・`alt_host_port`・`web_color`、`deployments` の `web_color`・`switched_at`。`apps` の `blue_green_drain_seconds`（既定 10 秒）。2 つ目のポートの割当（`host_port` と合わせて一意）
 - [ ] override の生成: 色の付いたサービスを `extends: { file: }` で写し、元の公開サービスをプロファイルで外す。commit の変数を `env.release` に分ける。golden file で固定
 - [ ] ポリシー検査のルール `blue_green`（`container_name`、公開サービスへの依存、名前の衝突、`replicas`、`include`）
-- [ ] デプロイの手順 `start`（ワンショットと新色を `--no-deps`）→ `check` → `switch` → `services` → `drain`。メモリが足りないときの作り直し（`in_place`）
+- [ ] デプロイの手順 `start`（ワンショットと新色を `--no-deps`）→ `check` → `switch` → `services` → `drain`。メモリが足りないときは新色を起動せずにデプロイを失敗にする
 - [ ] 失敗とキャンセルの扱い、`koroku` 起動時の後始末、有効にする・無効にするときの移行、即時ロールバック（7.1）
 - [ ] 起動・再起動・休止から起こす処理・タスク・ダンプフック・DB のコピーで、いまの色だけを動かす
 - [ ] ログのコレクタ、メモリの履歴、リソースの内訳、サービス一覧、Compose の構成で、色の付いたサービスを公開サービスとして見せる
