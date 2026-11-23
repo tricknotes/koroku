@@ -591,6 +591,25 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 	return requireOneRow(res, "update app")
 }
 
+// RecordAppRepoID gives the app the ID of its GitHub repository when it
+// has none, and returns the ID the app has afterwards. An ID the app
+// already has is never replaced: the first reading of a repository's ID is
+// trusted and every later one is compared with it (ARCHITECTURE 5). One
+// statement, so that two recordings cannot both win.
+func (s *Store) RecordAppRepoID(ctx context.Context, appID, repoID int64) (int64, error) {
+	var recorded int64
+	err := s.db.QueryRowContext(ctx,
+		`UPDATE apps SET repo_id = COALESCE(repo_id, ?) WHERE id = ? RETURNING repo_id`,
+		repoID, appID).Scan(&recorded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("record repository id of app %d: %w", appID, ErrNotFound)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("record repository id of app %d: %w", appID, err)
+	}
+	return recorded, nil
+}
+
 // AllocateAltHostPort gives the app its second host port (ARCHITECTURE
 // 7.2), the lowest port in [portStart, portEnd] that no app uses as either
 // port, and returns it. An app that has one keeps it.

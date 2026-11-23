@@ -347,6 +347,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	if gh != nil {
 		tokens := deploy.GitHubTokens{Client: gh}
 		deployOpts.Tokens = tokens
+		// A deployment confirms the repository's ID before it fetches
+		// (ARCHITECTURE 5).
+		deployOpts.Repos = deploy.GitHubRepos{Client: gh}
 		gitRefs.Tokens = tokens
 		apiOpts.Refs = deploy.GitHubRefResolver{Client: gh, Fallback: gitRefs}
 		apiOpts.Auth.GitHub = gh

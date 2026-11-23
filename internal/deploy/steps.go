@@ -40,6 +40,11 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if repoURL == "" {
 		return false, errors.New("the app has no repository configured")
 	}
+	// The name must still denote the repository the app was set up with
+	// (ARCHITECTURE 5).
+	if err := e.confirmRepository(ctx, app, auth != nil, log); err != nil {
+		return false, err
+	}
 	// Only a commit that a branch or tag of the repository reaches is
 	// deployed (ARCHITECTURE 7). Deployments are queued with their ref; one
 	// without is checked against the branch the app follows.
