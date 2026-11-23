@@ -72,6 +72,10 @@ type Deployment struct {
 	// (ARCHITECTURE 5.2). Pusher is the GitHub login that pushed.
 	Trigger string
 	Pusher  string
+	// ContainersReplaced says whether the run touched the running
+	// containers (reached the start step, ARCHITECTURE 9.5); nil when the
+	// run did not end normally.
+	ContainersReplaced *bool
 }
 
 // Deployment triggers.
@@ -88,7 +92,7 @@ const RollbackRef = "rollback"
 
 const deploymentColumns = `id, app_id, ref, commit_sha, commit_message, status, error,
 	queued_at, started_at, finished_at, source_deployment_id, promoted_from_deployment_id,
-	actor_user_id, actor_login, trigger_kind, pusher`
+	actor_user_id, actor_login, trigger_kind, pusher, containers_replaced`
 
 func scanDeployment(row rowScanner) (Deployment, error) {
 	var (
@@ -100,9 +104,10 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 		promoted sql.NullInt64
 		actorID  sql.NullInt64
 		actor    string
+		replaced sql.NullBool
 	)
 	err := row.Scan(&d.ID, &d.AppID, &d.Ref, &d.CommitSHA, &d.CommitMessage, &d.Status, &d.Error,
-		&queued, &started, &finished, &source, &promoted, &actorID, &actor, &d.Trigger, &d.Pusher)
+		&queued, &started, &finished, &source, &promoted, &actorID, &actor, &d.Trigger, &d.Pusher, &replaced)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -118,6 +123,9 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 	}
 	if promoted.Valid {
 		d.PromotedFromID = &promoted.Int64
+	}
+	if replaced.Valid {
+		d.ContainersReplaced = &replaced.Bool
 	}
 	return d, nil
 }
@@ -253,6 +261,41 @@ func (s *Store) ListDeployments(ctx context.Context, appID int64, limit int) ([]
 		return nil, fmt.Errorf("list deployments: %w", err)
 	}
 	return out, nil
+}
+
+// ListDeploymentsFinishedSince returns the app's deployments that finished
+// at or after since, newest first, at most limit of them. The memory
+// history marks them (ARCHITECTURE 9.5).
+func (s *Store) ListDeploymentsFinishedSince(ctx context.Context, appID int64, since time.Time, limit int) ([]Deployment, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+deploymentColumns+` FROM deployments WHERE app_id = ? AND finished_at >= ? ORDER BY id DESC LIMIT ?`,
+		appID, toMillis(since), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list deployments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Deployment
+	for rows.Next() {
+		d, err := scanDeployment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list deployments: %w", err)
+	}
+	return out, nil
+}
+
+// SetDeploymentContainersReplaced records whether the deployment's run
+// touched the running containers (ARCHITECTURE 9.5).
+func (s *Store) SetDeploymentContainersReplaced(ctx context.Context, id int64, replaced bool) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE deployments SET containers_replaced = ? WHERE id = ?`, replaced, id); err != nil {
+		return fmt.Errorf("record replaced containers: %w", err)
+	}
+	return nil
 }
 
 // HasActiveDeployment reports whether the app has a queued or running deployment.
