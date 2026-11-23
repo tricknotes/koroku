@@ -30,8 +30,18 @@ var (
 	ErrNotDeployed = errors.New("the app has not been deployed yet")
 )
 
-// opTimeout bounds stop, restart and delete. Start uses WaitTimeout.
-const opTimeout = 3 * time.Minute
+// opTimeout bounds the operations that stop containers: stop, restart,
+// delete (down) and the stops of sleep and scheduled tasks. Docker waits
+// for each container's stop_grace_period, up to compose.MaxStopGracePeriod
+// in total (ARCHITECTURE 6). Start uses upTimeout.
+const opTimeout = compose.MaxStopGracePeriod + 3*time.Minute
+
+// upTimeout bounds an `up` outside of a deployment's own job (start, the
+// automatic rollback): stopping the containers it recreates, then
+// --wait-timeout, which only covers the wait after they started.
+func (e *Engine) upTimeout() time.Duration {
+	return e.opts.WaitTimeout + compose.MaxStopGracePeriod + time.Minute
+}
 
 // appLocks hands out one mutex per app so that a deployment and a manual
 // operation on the same app never run docker compose at the same time.
@@ -160,7 +170,7 @@ func (e *Engine) Start(ctx context.Context, app store.App) error {
 	if app.CurrentDeploymentID == nil {
 		return ErrNotDeployed
 	}
-	ctx, cancel := context.WithTimeout(ctx, e.opts.WaitTimeout+time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, e.upTimeout())
 	defer cancel()
 	if err := e.upCurrent(ctx, app); err != nil {
 		return err

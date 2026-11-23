@@ -1,4 +1,5 @@
 violations:
+  [stop_grace_period] stop_grace_period adds up to 11m0s across the services (agent 8m0s, web 3m0s), above the limit of 10m0s
   [port_exposure] service "db": unexpected published port 127.0.0.1:5432->5432 (only the web service may publish, on loopback)
   [port_exposure] service "probe": unexpected published port 0.0.0.0:(random)->8080 (only the web service may publish, on loopback)
   [port_exposure] service "web": unexpected published port 0.0.0.0:9229->9229 (only the web service may publish, on loopback)

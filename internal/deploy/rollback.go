@@ -135,11 +135,13 @@ func (e *Engine) executeRollback(ctx context.Context, d store.Deployment, app st
 	log.Printf("Compose file: %s; images: %v", meta.ComposeFile, meta.Images)
 
 	log.Step(StepValidate, "Validating the release again")
-	if err := e.revalidate(ctx, app, src, meta.ComposeFile); err != nil {
+	project, err := e.revalidatedProject(ctx, app, src, meta.ComposeFile)
+	if err != nil {
 		return false, err
 	}
 
 	log.Step(StepStart, "Starting containers")
+	e.logStopGraces(ctx, app, project, log)
 	// The kept images are normally all there; a missing one is pulled.
 	dockerConfig, err := e.registryConfig(ctx, app, log.masker)
 	if err != nil {

@@ -8,7 +8,7 @@ koroku の設計（`docs/ARCHITECTURE.md` の 6〜8 章と 10 章）から、デ
 2. 画面で設定した環境変数を env ファイルに書き、override を生成する。
 3. `docker compose -p koroku-<slug> -f <Compose ファイル> -f koroku.override.yaml --env-file <env ファイル> config` で正規化し、ポリシー検査をかける。
 4. `build:` を持つサービスはホスト（x86_64）でビルドし、`image:` だけのサービスは pull する。
-5. `up -d --pull missing --remove-orphans --wait --wait-timeout 300` で起動する。
+5. `up -d --pull missing --remove-orphans --wait --wait-timeout 300` で起動する。env ファイルの `KOROKU_COMMIT_SHA` とビルドしたイメージの名前がデプロイごとに変わるので、ふつうはワーカーや cron のコンテナも含めて全サービスを作り直す。動いていたコンテナは `SIGTERM` を受け、`stop_grace_period`（既定 10 秒）を過ぎると強制終了される（下の「デプロイのたびに止まる長いジョブ」）。
 6. `http://127.0.0.1:<割当ポート><ヘルスチェックパス>` が 5xx 以外を返すまで最大 60 秒待つ。
 7. 手順 5 以降で失敗したら、直前に成功したリリースへ自動で戻す（DB のマイグレーションは戻さない）。
 
@@ -137,6 +137,7 @@ staging と本番は同じリポジトリを別々の koroku アプリとして�
 | `security_opt` | `seccomp` / `apparmor` の `unconfined`、ラベルの無効化など | 外す | 可 |
 | `runtime` | `runc` 以外の `runtime` | 外す | 可 |
 | `memory_guard` | `oom_kill_disable: true`、`memswap_limit: -1` | 外す | 可 |
+| `stop_grace_period` | 全サービスの `stop_grace_period` の合計が 10 分を超える（Compose は依存の順に 1 サービスずつ止めるので、待ち時間が足し合わさる） | 長い猶予が要るサービスだけに付け、合計を 10 分以内にする。それより長いジョブは途中で止まっても続きからやり直せるようにする | **不可** |
 | `file_outside_release` | リポジトリ外の `env_file`、`secrets` / `configs` の `file`、ビルドコンテキスト、Dockerfile | リポジトリ内に置く。秘密は koroku の環境変数で渡す | 可 |
 
 「検査を緩める」は 1 つのフラグでアプリ単位にしか切り替えられず、立てると上の保護がまとめて効かなくなる。勧めない。
@@ -160,6 +161,19 @@ staging と本番は同じリポジトリを別々の koroku アプリとして�
 | 自前のリバースプロキシ | アプリの中に Caddy や nginx を置いて振り分けている場合、TLS は koroku の Caddy が終端するので、アプリ側は平文の HTTP で待ち受け、証明書の取得をやめる（Caddy なら `auto_https off` と `:8080` のようなサイト）。前段の koroku からの `X-Forwarded-For` / `X-Forwarded-Proto` を信頼する設定（Caddy の `trusted_proxies static private_ranges`、nginx の `set_real_ip_from`）がないと、利用者の IP が全員同じ（前段のアドレス）に見え、IP ごとの回数制限が全員まとめてかかる。Caddy の回数制限やログは `{remote_host}` ではなく `{client_ip}` を使う |
 | `memswap_limit` | swap を禁じるために `mem_limit` と同じ値を書いてよい。koroku の画面でメモリ上限を上げると、koroku が `memswap_limit` も同じ値に上げる |
 | サービス名の `-数字` | ログはコンテナ名からサービス名を求める。サービス名は英小文字と `-` / `_` にしておくと扱いやすい |
+
+## デプロイのたびに止まる長いジョブ
+
+デプロイ（とロールバック、停止、再起動、アクセスがない間の休止）では、ジョブを動かすだけのサービス（supercronic などの cron、Sidekiq、Solid Queue のワーカー）も止まる。Docker はコンテナに `SIGTERM` を送り、`stop_grace_period`（書かなければ 10 秒）を過ぎたら `SIGKILL` で強制終了する。30 分かかる集計を cron のコンテナで走らせていると、その間のデプロイで途中で殺され、どこにも記録が残らない。
+
+- **ジョブは途中で殺されてもよいように作る**: 何度実行しても同じ結果になる（冪等）か、続きから再開できるようにする。進み具合を DB に記録し、次の回がそこから続ける。1 回のジョブは短く分ける（1 件ずつのジョブをキューに入れる、範囲を区切る）。猶予を延ばしても、ホストの再起動や OOM では止まる。
+- **走っている処理を終えてから止まれるサービスには `stop_grace_period` を付ける**:
+  - supercronic: `SIGTERM`（`SIGINT`、`SIGQUIT` も）を受けると新しい実行を始めず、走っているジョブの終わりを待ってから終了する（ジョブ自身にはシグナルを送らず、待つ時間に上限もない）。ジョブがかかる時間より長い `stop_grace_period` を付ける。supercronic をコンテナの PID 1 にする（`command: ["supercronic", "/app/crontab"]` のような exec 形式。`sh -c` で包むとシグナルが届かず、猶予のあとで強制終了される）。
+  - Sidekiq: `SIGTERM` を受けると新しいジョブを取らず、走っているジョブを shutdown timeout（既定 25 秒、`-t` か `:timeout:`）まで待ち、終わらなかったジョブを Redis に戻して終了する（戻したジョブは次の起動でやり直される）。`stop_grace_period` はそれより長く（30 秒以上）する。Puma の中で動かす埋め込みモードでも同じで、Web のサービスに付ける。
+  - Solid Queue: 停止のときに `SolidQueue.shutdown_timeout`（既定 5 秒）まで走っているジョブを待ち、終わらなかったジョブはキューに戻る。延ばすなら、それより長い `stop_grace_period` を付ける。Puma の中で動かすなら（`plugin :solid_queue`）Web のサービスに付ける。
+- **上限は合計 10 分**: koroku は全サービスの `stop_grace_period` の合計が 10 分を超える Compose を拒否する（ポリシー検査の `stop_grace_period`。「検査を緩める」でも許可されない）。Compose は依存の順に 1 サービスずつ止めるので、待ち時間が足し合わさるため。
+- **長い猶予は待たされる**: デプロイはホスト全体で 1 件ずつ順に進む。猶予の長いサービスがジョブの終わりを待つ間、このアプリのデプロイも、その後ろに並んだほかのアプリのデプロイも待つ。起動に失敗して自動で戻すときは、もう一度待つ。デプロイログの `start` の手順に、猶予が既定より長いコンテナと、待ちうる時間の合計が出る。猶予は、止められるコンテナが作られたときの値が使われる（`stop_grace_period` を変えたデプロイでは、古いコンテナは古い値で止まる）。
+- **koroku の定期タスクの実行中の push**: koroku のタスク（定期タスクを含む）の実行中は、そのアプリにデプロイを積まない。push での自動デプロイは断らずに預かり、実行が終わってから積む（デプロイのタブに「コマンドの実行が終わったら自動デプロイします」と出る）。画面からの手動のデプロイは「実行中」として断られる。
 
 ## アクセスの保護
 

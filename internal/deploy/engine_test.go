@@ -348,6 +348,10 @@ func (h *harness) log(slug string, id int64) string {
 	return string(data)
 }
 
+// psGraces is the listing of the app's containers at the start step, which
+// reads their stop grace periods for the deploy log (ARCHITECTURE 6).
+const psGraces = "ps --all --no-trunc --quiet --filter label=com.docker.compose.project=koroku-blog"
+
 // dockerCalls returns the compose subcommands seen so far, in order.
 func (h *harness) dockerCalls() []string {
 	var subs []string
@@ -392,7 +396,7 @@ func TestDeploySucceeds(t *testing.T) {
 	}
 
 	// The steps ran in the documented order.
-	want := []string{"config", "config", "build", "pull", "up", "image prune -f"}
+	want := []string{"config", "config", "build", "pull", psGraces, "up", "image prune -f"}
 	if got := h.dockerCalls(); !slices.Equal(got, want) {
 		t.Errorf("docker calls = %v, want %v", got, want)
 	}
@@ -536,7 +540,7 @@ func TestDeployImageOnlySkipsBuild(t *testing.T) {
 	if d.Status != store.StatusSucceeded {
 		t.Fatalf("deployment = %+v\n%s", d, h.log("blog", d.ID))
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "pull", "up"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "pull", psGraces, "up"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 }
@@ -629,7 +633,7 @@ func TestFailedStartRollsBackToPreviousRelease(t *testing.T) {
 	// The output of the failed containers is read, then the previous
 	// release is validated again and started, and the failed release's
 	// image is removed.
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "config", "up", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", psGraces, "up", "logs", "config", "up", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	rollback := h.lastCall("up")
@@ -675,7 +679,7 @@ func TestFailedHealthCheckRollsBack(t *testing.T) {
 	// The output of the failed containers is read, then the previous
 	// release is validated again and started, and the failed release's
 	// image is removed.
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "config", "up", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", psGraces, "up", "logs", "config", "up", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	if !strings.Contains(h.log("blog", second.ID), fmt.Sprintf("Rolling back to deployment #%d", first.ID)) {
@@ -698,7 +702,7 @@ func TestFailedFirstDeployRemovesContainers(t *testing.T) {
 	if d.Status != store.StatusFailed {
 		t.Fatalf("deployment = %+v", d)
 	}
-	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", "up", "logs", "down", "image rm koroku-blog-web:r1", "ps --all --no-trunc --format {{.Image}}", "image rm postgres:17"}) {
+	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "pull", psGraces, "up", "logs", "down", "image rm koroku-blog-web:r1", "ps --all --no-trunc --format {{.Image}}", "image rm postgres:17"}) {
 		t.Errorf("docker calls = %v", got)
 	}
 	down := h.lastCall("down")
@@ -1300,7 +1304,7 @@ func TestBackupBeforeDeploy(t *testing.T) {
 	if second.Status != store.StatusSucceeded {
 		t.Fatalf("second deployment = %+v", second)
 	}
-	want := []string{"config(backups=0)", "config(backups=0)", "build(backups=0)", "pull(backups=0)", "up(backups=1)"}
+	want := []string{"config(backups=0)", "config(backups=0)", "build(backups=0)", "pull(backups=0)", psGraces + "(backups=1)", "up(backups=1)"}
 	if !slices.Equal(order, want) {
 		t.Errorf("order = %v", order)
 	}

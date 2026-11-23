@@ -328,8 +328,34 @@ export function describeActivity(entry: ActivityEntry): ActivityText {
           `コミット: ${str(d['commit_sha']).slice(0, 7)}（${str(d['branch'])}）`,
         ],
       };
+    case 'auto_deploy.dropped':
+      return {
+        summary: `コマンドの実行中に預かった自動デプロイを${droppedReasonLabel(d['reason'])}ため取りやめ`,
+        details: [
+          `コミット: ${str(d['commit_sha']).slice(0, 7)}（${str(d['branch'])}）`,
+          ...(str(d['pusher']) ? [`push: ${str(d['pusher'])}`] : []),
+        ],
+      };
     default:
       return { summary: entry.action, details: [] };
+  }
+}
+
+/** Why a deferred auto-deploy was not queued (ARCHITECTURE 5.2). */
+function droppedReasonLabel(reason: unknown): string {
+  switch (reason) {
+    case 'disk_full':
+      return 'ディスク使用率が上限を超えていた';
+    case 'auto_deploy_disabled':
+      return '自動デプロイが無効になった';
+    case 'stopped':
+      return 'アプリが停止中になった';
+    case 'branch_changed':
+      return '追うブランチが変わった';
+    case 'workflow_changed':
+      return '待つワークフローが変わった';
+    default:
+      return '積めなかった';
   }
 }
 

@@ -1214,6 +1214,32 @@ SHOTS.push(
     })()`,
     then: '[data-test-auto-deploy-confirm]',
   },
+  // A push kept while a command runs, deployed once it ends
+  // (ARCHITECTURE 5.2), and one that could not be deployed afterwards.
+  {
+    name: 'autodeploy-deferred',
+    path: '/apps/blog-staging/deploy?scenario=deploy-deferred',
+    wait: '[data-test-pending-auto-deploy]',
+  },
+  {
+    name: 'autodeploy-deferred-phone',
+    path: '/apps/blog-staging/deploy?scenario=deploy-deferred',
+    wait: '[data-test-pending-auto-deploy]',
+    ...PHONE,
+  },
+  {
+    name: 'autodeploy-deferred-activity',
+    path: '/apps/blog-staging?scenario=deploy-deferred',
+    wait: '[data-test-activity="auto_deploy.dropped"]',
+    script:
+      "document.querySelector('[data-test-activity-log]').scrollIntoView()",
+  },
+  {
+    name: 'autodeploy-deferred-activity-phone',
+    path: '/apps/blog-staging?scenario=deploy-deferred',
+    wait: '[data-test-activity="auto_deploy.dropped"]',
+    ...PHONE,
+  },
   {
     name: 'autodeploy-workflow-activity',
     path: '/apps/blog-staging?scenario=workflow-gated',

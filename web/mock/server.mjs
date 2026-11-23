@@ -761,9 +761,14 @@ function envRequirements(context) {
   };
 }
 
-route('GET', '/api/apps/:slug/deployments', (context) => ({
-  deployments: context.state.deployments.get(appOf(context).slug),
-}));
+route('GET', '/api/apps/:slug/deployments', (context) => {
+  const { slug } = appOf(context);
+  return {
+    deployments: context.state.deployments.get(slug),
+    // A push kept while a command runs (ARCHITECTURE 5.2).
+    pending_auto_deploy: context.state.pendingAutoDeploys?.get(slug) ?? null,
+  };
+});
 route('POST', '/api/apps/:slug/deployments', (context) => {
   const app = appOf(context);
   // Deploying to production needs a recent login (ARCHITECTURE 10.3).

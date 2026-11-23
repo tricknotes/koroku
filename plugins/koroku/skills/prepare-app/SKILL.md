@@ -28,6 +28,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 - **ホスト名を直書きしない**。koroku はアプリの URL を `KOROKU_APP_URL` と `KOROKU_APP_HOST` で渡す。pull request ごとのレビューアプリはホスト名が作るまで決まらないので、Rails の `config.hosts` やメールの URL の土台はこれから組み立てる。レビューアプリには親（staging）の環境変数が写り、`KOROKU_PR_NUMBER` が入るので、外へ送るもの（メール、Webhook、決済）はこれを見て止める（[references/requirements.md](references/requirements.md) の「pull request ごとのレビューアプリ」）。
 - **データは named volume に置く**。書き込み可能な bind mount、`external` や `name:` 付きの volume、`container_name` は使えないか、同じリポジトリを staging と本番の 2 アプリで動かすと衝突する。
 - **ワンショットのサービス（マイグレーションなど）は `restart: "no"` を書き、別のサービスから `condition: service_completed_successfully` で待たれるようにする**。誰も待っていないと、正常終了でも `up --wait` が失敗する。
+- **デプロイのたびに全サービスが作り直される**。cron（supercronic など）やジョブキューのワーカーも `SIGTERM` を受け、`stop_grace_period`（既定 10 秒）で強制終了される。長いジョブは途中で殺されても続きからやり直せるように作り、走っている処理を待って止まれるサービスには `stop_grace_period` を付ける（全サービスの合計で 10 分まで。[references/requirements.md](references/requirements.md) の「デプロイのたびに止まる長いジョブ」）。
 - **デプロイ時に取得されるのはコミット済みのファイルだけ**。`.git` は消され、submodule と Git LFS は取得されない。
 - **staging のアプリは既定で koroku のログインの後ろにある**（アクセスの保護）。ブラウザー以外の呼び出し元（Webhook、外部の死活監視、ほかのサービスからの API 呼び出し）は通れないので、受け口のパスを洗い出し、利用者に「保護を外すパス」への登録を頼む（例 `/webhooks/`）。外したパスはアプリ自身で認証する（署名の検証など）。`/.koroku/` で始まるパスは koroku が使うのでアプリには届かない。
 - **本番の設定で起動する**。koroku にアプリの開発モードはない。ホットリロードやソースの bind mount は `compose.override.yaml` に分ければ、手元の `docker compose up` では使われ、koroku では使われない（koroku は `-f` を明示するので自動で読まない）。

@@ -405,6 +405,9 @@ type inspectedContainer struct {
 	Config struct {
 		Image  string            `json:"Image"`
 		Labels map[string]string `json:"Labels"`
+		// StopTimeout is the stop grace period in seconds the container
+		// was created with; nil is Docker's default.
+		StopTimeout *int `json:"StopTimeout"`
 	} `json:"Config"`
 	NetworkSettings struct {
 		Ports map[string][]portBinding `json:"Ports"`

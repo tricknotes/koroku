@@ -2,6 +2,7 @@
   "name": "koroku-risky",
   "services": {
     "web": {
+      "stop_grace_period": "3m0s",
       "image": "example/app:1",
       "ports": [
         {"mode": "ingress", "host_ip": "127.0.0.1", "target": 3000, "published": "20001", "protocol": "tcp"},
@@ -17,6 +18,7 @@
       ]
     },
     "agent": {
+      "stop_grace_period": "8m0s",
       "image": "example/agent:1",
       "network_mode": "host",
       "pid": "host",

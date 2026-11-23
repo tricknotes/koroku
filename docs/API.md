@@ -511,6 +511,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `member.role_set` | `{"member": {"id", "login"}, "from", "to"}`（`from` はロールがなければ `""`） |
 | `member.role_removed` | `{"member": {"id", "login"}, "from", "to": ""}` |
 | `auto_deploy.skipped` | `{"workflow", "conclusion", "commit_sha", "branch", "run_url"}`。待つワークフロー（`auto_deploy_workflow`）の実行が成功しなかったので自動デプロイしなかった。`actor` は `null`（koroku 自身）。`run_url` は GitHub の実行の画面（https でなければ空） |
+| `auto_deploy.dropped` | `{"commit_sha", "branch", "pusher", "workflow", "reason"}`。コマンドの実行中に預かった自動デプロイを、実行のあとで積めなかった。`reason` は `disk_full`、`auto_deploy_disabled`、`stopped`、`branch_changed`、`workflow_changed`。`workflow` は待たないアプリでは空。`actor` は `null`（koroku 自身） |
 
 UI は知らない `action` をそのまま表示する。
 
@@ -628,9 +629,24 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 
 `promoted_from` は昇格（ARCHITECTURE 9.7）で積んだデプロイのとき `{"deployment_id": 12, "app_slug": "blog-staging"}`、それ以外（ロールバックの記録を含む）と、昇格元のアプリを削除したあとは `null`。
 
+**預かっている自動デプロイ**（`pending_auto_deploy`）: そのアプリでコマンドやタスクを実行中に push（かワークフローの成功）が届き、実行が終わってから積む自動デプロイ（ARCHITECTURE 5.2）。アプリごとに最大 1 件で、後から届いたものが置き換える。
+
+```json
+{
+  "ref": "main",
+  "commit_sha": "<40 桁>",
+  "commit_message": "Fix the footer",
+  "pusher": "octocat",
+  "workflow": "",
+  "received_at": "2026-11-18T03:00:00Z"
+}
+```
+
+`workflow` は待ったワークフローのパス（待たないアプリでは空）。実行が終わると、ふつうの `push` のデプロイとして `deployments` に現れ、`pending_auto_deploy` は `null` に戻る。
+
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/apps/{slug}/deployments?limit=50` | `{"deployments": [デプロイ, ...]}`（新しい順、`limit` は 1〜200） |
+| `GET /api/apps/{slug}/deployments?limit=50` | `{"deployments": [デプロイ, ...], "pending_auto_deploy": 預かっている自動デプロイ}`（新しい順、`limit` は 1〜200）。`pending_auto_deploy` はコマンドの実行中に届いた push を預かっているときだけ（下記）、なければ `null` |
 | `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}` か `{"sha": "<40 桁>"}`（両方あれば `sha` をデプロイし `ref` は表示用）。202 でデプロイ。保持しているリリースへ再ビルドなしで戻すときは `{"rollback_to": <デプロイの ID>}`（ほかのフィールドと同時には指定できない）。戻せなければ `422 release_unavailable`、別のアプリのデプロイなら `422 validation_failed`（`details.rollback_to`）。保持していない古い版へは、過去の `sha` を指定して再デプロイする。そのアプリでコマンドを実行中なら `409 busy`。昇格は `{"promote_from_deployment": <昇格元のデプロイ ID>}`（下記） |
 | `GET /api/apps/{slug}/promotion` | 昇格の確認に出す差分（下記） |
 | `GET /api/deployments/{id}` | デプロイ |
@@ -762,7 +778,7 @@ ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose ru
 
 **ログの行**: 先頭に `$ <コマンド>`、続いて `Running in service <service> of deployment #<id>.`。終わりに `Exited with code <N>.`、`Timed out after <時間>.`、`Canceled.`、`Failed to run: <理由>` のどれか。コマンドの出力は環境変数の値をマスクしてある。
 
-アプリの実行中（`running` の記録がある間）は、そのアプリへの `POST /api/apps/{slug}/deployments` も `409 busy` になる。起動・停止・再起動・削除・リストアも同じ。
+アプリの実行中（`running` の記録がある間）は、そのアプリへの `POST /api/apps/{slug}/deployments` も `409 busy` になる。push での自動デプロイだけは断らずに預かり、実行が終わってから積む（`pending_auto_deploy`、ARCHITECTURE 5.2）。起動・停止・再起動・削除・リストアも同じ。
 
 ### 定期タスク（2026-11-22）
 
@@ -796,7 +812,7 @@ ARCHITECTURE 9.6「定期実行」。登録タスクに予定を書くと、koro
 
 - ヘッダー: `X-Hub-Signature-256`（`sha256=<本文の HMAC-SHA256 の 16 進>`）、`X-GitHub-Event`、`X-GitHub-Delivery`。`Content-Type: application/json`（App の Webhook の既定）。
 - `ping` は 200 で `{"result": "pong"}`。`push` と `workflow_run` 以外のイベント、タグ、ブランチの削除、どのアプリも追っていないブランチは 200 で `{"result": "ignored", "reason": "..."}`。
-- `push` に応じたアプリがあれば `{"result": "deployed", "apps": [{"app": "blog-staging", "status": "queued", "deployment_id": 43}]}`。`status` は `queued`（デプロイを積んだ）、`duplicate`（同じ配送か同じ本文をすでに受けた）、`stopped`（停止中なので積まない）、`waiting_workflow`（`auto_deploy_workflow` を設定したアプリ。push では積まない）、`failed`（`error` は `busy`、`disk_full`、`internal`）。`failed` が 1 つでもあれば応答は 503 で、GitHub から再配送すると失敗したアプリだけが積まれる。
+- `push` に応じたアプリがあれば `{"result": "deployed", "apps": [{"app": "blog-staging", "status": "queued", "deployment_id": 43}]}`。`status` は `queued`（デプロイを積んだ）、`duplicate`（同じ配送か同じ本文をすでに受けた）、`stopped`（停止中なので積まない）、`waiting_workflow`（`auto_deploy_workflow` を設定したアプリ。push では積まない）、`deferred`（そのアプリでコマンドを実行中なので預かった。実行が終わると積む。ARCHITECTURE 5.2）、`failed`（`error` は `disk_full`、`internal`）。`failed` が 1 つでもあれば応答は 503 で、GitHub から再配送すると失敗したアプリだけが積まれる。
 - `workflow_run` は、`action` が `completed` でないもの、fork のコミットの実行、どのアプリも待っていないワークフロー・ブランチ・リポジトリは `ignored`。応じたアプリがあれば `push` と同じ形で、`status` はほかに `skipped`（実行が成功しなかった。`conclusion` に結論。操作の記録に `auto_deploy.skipped` を残す）と `stale`（ブランチの先頭がもう別のコミット）。ブランチの先頭を GitHub から読めなければ `failed`（`error` は `branch_unresolved`）で 503。
 
 | ステータス | `code` | 意味 |

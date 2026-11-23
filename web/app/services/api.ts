@@ -22,6 +22,7 @@ import type {
   CopySourceKind,
   DbCopy,
   Deployment,
+  PendingAutoDeploy,
   DockerUsageItem,
   Domain,
   DomainList,
@@ -513,10 +514,28 @@ export default class ApiService extends Service {
   // Deployments
 
   async listDeployments(slug: string, limit = 50): Promise<Deployment[]> {
-    const { deployments } = await this.request<{
+    return (await this.deploymentHistory(slug, limit)).deployments;
+  }
+
+  /**
+   * The deployments, newest first, and the automatic deployment kept until
+   * the command running on the app ends (ARCHITECTURE 5.2).
+   */
+  async deploymentHistory(
+    slug: string,
+    limit = 50,
+  ): Promise<{
+    deployments: Deployment[];
+    pendingAutoDeploy: PendingAutoDeploy | null;
+  }> {
+    const json = await this.request<{
       deployments: Deployment[] | null;
+      pending_auto_deploy?: PendingAutoDeploy | null;
     }>('GET', `/api/apps/${seg(slug)}/deployments`, { query: { limit } });
-    return deployments ?? [];
+    return {
+      deployments: json.deployments ?? [],
+      pendingAutoDeploy: json.pending_auto_deploy ?? null,
+    };
   }
 
   /** What promoting the paired staging release would do (ARCHITECTURE 9.7). */

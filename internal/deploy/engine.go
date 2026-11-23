@@ -350,7 +350,20 @@ func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message s
 	e.admit.Lock()
 	defer e.admit.Unlock()
 	if e.taskRunning(app.ID) {
-		return store.Deployment{}, ErrBusy
+		if origin.Trigger != store.TriggerPush || promotedFrom != nil {
+			return store.Deployment{}, ErrBusy
+		}
+		// Nobody would see a refused push, and GitHub does not redeliver
+		// it: keep it until the command ends (ARCHITECTURE 5.2). The end
+		// of the run reads it under this same lock.
+		if err := e.opts.Store.PutPendingAutoDeploy(ctx, store.PendingAutoDeploy{
+			AppID: app.ID, Ref: ref, CommitSHA: sha, CommitMessage: message,
+			Pusher: origin.Pusher, Workflow: origin.Workflow, ReceivedAt: e.opts.Clock.Now(),
+		}); err != nil {
+			return store.Deployment{}, err
+		}
+		e.opts.Logger.Info("auto-deploy deferred until the running command ends", "app", app.Slug, "commit", sha)
+		return store.Deployment{}, ErrDeferred
 	}
 	e.queueing.Lock()
 	defer e.queueing.Unlock()
@@ -383,6 +396,9 @@ func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message s
 		appendLogLine(path, fmt.Sprintf("Queued deployment of %s, pushed to %s by %s.", sha, ref, origin.Pusher))
 	default:
 		appendLogLine(path, fmt.Sprintf("Queued deployment of %s.", sha))
+	}
+	if origin.Deferred {
+		appendLogLine(path, "Deferred while a command was running on the app; queued when it ended.")
 	}
 	e.notify()
 	return d, nil
@@ -447,6 +463,9 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 		return err
 	}
+	// The commands interrupted by the restart are over: what they held
+	// back can be queued now (ARCHITECTURE 5.2).
+	e.queueAllPendingAutoDeploys(ctx)
 	interrupted, err := e.opts.Store.FailInterruptedDeployments(ctx, now)
 	if err != nil {
 		if ctx.Err() != nil {

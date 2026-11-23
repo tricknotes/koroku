@@ -2,7 +2,7 @@
 // fresh relative to "now", so relative times always look alive. Nothing
 // here is real: names, domains and addresses are placeholders.
 
-import { useWorkflowGatedActivity } from './activity.mjs';
+import { useDeferredActivity, useWorkflowGatedActivity } from './activity.mjs';
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -74,6 +74,8 @@ export const SCENARIOS = {
     'everything fine, but blog-staging deploys on push while the webhook secret is not set in config.toml',
   'workflow-gated':
     'everything fine; blog-staging deploys after its image workflow succeeds, and the last run failed',
+  'deploy-deferred':
+    'everything fine; a push to blog-staging arrived while a command ran and waits for it to end; an earlier one was dropped because the disk was full',
   sleeping:
     'everything fine; shop-staging is asleep after 30 minutes without requests, blog-staging sleeps after an hour',
   'reservations-tight':
@@ -924,6 +926,25 @@ export function buildScenario(name) {
         idle_sleep: true,
         idle_sleep_minutes: 60,
       });
+      return state;
+    }
+    case 'deploy-deferred': {
+      const state = scenario(healthyApps());
+      state.pendingAutoDeploys = new Map([
+        [
+          'blog-staging',
+          {
+            ref: 'main',
+            commit_sha: '5eed5eed1234567890abcdef1234567890abcdef',
+            commit_message:
+              'Show the order history on the account page\n\nAlso paginate it.',
+            pusher: 'octo',
+            workflow: '',
+            received_at: ago(4 * MINUTE),
+          },
+        ],
+      ]);
+      useDeferredActivity(state);
       return state;
     }
     case 'workflow-gated': {

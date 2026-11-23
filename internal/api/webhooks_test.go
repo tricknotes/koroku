@@ -328,19 +328,37 @@ func TestWebhookFailureCanBeRedelivered(t *testing.T) {
 	f.app(store.App{Slug: "blog", RepoFullName: "octo/blog", AutoDeploy: true})
 	body := pushBody(0, "octo/blog", "refs/heads/main", pushSHA)
 
-	f.pushes.setErr(deploy.ErrBusy)
-	rec := f.deliver("push", "d1", body)
-	if got := decode[webhookResultJSON](t, rec); rec.Code != http.StatusServiceUnavailable || got.Apps[0].Error != "busy" {
-		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
 	f.pushes.setErr(&deploy.DiskFullError{UsedPercent: 90, LimitPercent: 85})
-	if rec := f.deliver("push", "d1", body); decode[webhookResultJSON](t, rec).Apps[0].Error != "disk_full" {
+	rec := f.deliver("push", "d1", body)
+	if got := decode[webhookResultJSON](t, rec); rec.Code != http.StatusServiceUnavailable || got.Apps[0].Error != "disk_full" {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 	f.pushes.setErr(nil)
 	rec = f.deliver("push", "d1", body)
 	if got := decode[webhookResultJSON](t, rec); rec.Code != http.StatusOK || got.Apps[0].Status != "queued" {
 		t.Fatalf("redelivery: %d %s", rec.Code, rec.Body)
+	}
+}
+
+// TestWebhookDefersDuringACommand covers a push to an app that runs a
+// command: the delivery is accepted, the deployment kept for later
+// (ARCHITECTURE 5.2), and a redelivery is a duplicate.
+func TestWebhookDefersDuringACommand(t *testing.T) {
+	f := newWebhookFixture(t, testWebhookSecret)
+	f.app(store.App{Slug: "blog", RepoFullName: "octo/blog", AutoDeploy: true})
+	body := pushBody(0, "octo/blog", "refs/heads/main", pushSHA)
+
+	f.pushes.setErr(deploy.ErrDeferred)
+	rec := f.deliver("push", "d1", body)
+	if got := decode[webhookResultJSON](t, rec); rec.Code != http.StatusOK || got.Apps[0].Status != "deferred" || got.Apps[0].Error != "" {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	f.pushes.setErr(nil)
+	if got := decode[webhookResultJSON](t, f.deliver("push", "d1", body)); got.Apps[0].Status != "duplicate" {
+		t.Fatalf("redelivery: %+v", got)
+	}
+	if calls := f.pushes.takeCalls(); len(calls) != 1 {
+		t.Fatalf("calls = %v", calls)
 	}
 }
 

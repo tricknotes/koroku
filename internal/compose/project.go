@@ -63,6 +63,10 @@ type Service struct {
 	Runtime        string `json:"runtime"`
 	OomKillDisable bool   `json:"oom_kill_disable"`
 	MemswapLimit   string `json:"memswap_limit"`
+	// StopGracePeriodRaw is how long Docker waits after SIGTERM before it
+	// kills the container, as Compose prints it (a Go duration such as
+	// "1m30s"); empty is Docker's default. See StopGracePeriod.
+	StopGracePeriodRaw string `json:"stop_grace_period"`
 
 	// DependsOn holds the services this one depends on. The normalized
 	// configuration always prints the long form (a map of conditions);

@@ -177,6 +177,55 @@ module('Acceptance | activity', function (hooks) {
       );
   });
 
+  test('a deferred push that could not be deployed is noted by koroku', async function (assert) {
+    fakes.api.on('GET', '/api/apps/blog/activity', () => ({
+      entries: [
+        entry(
+          2,
+          'auto_deploy.dropped',
+          {
+            commit_sha: 'feedface1234567890feedface1234567890feed',
+            branch: 'main',
+            pusher: 'octo',
+            workflow: '',
+            reason: 'disk_full',
+          },
+          null,
+        ),
+        entry(
+          1,
+          'auto_deploy.dropped',
+          {
+            commit_sha: 'c0ffee1234567890c0ffee1234567890c0ffee12',
+            branch: 'main',
+            pusher: '',
+            workflow: '',
+            reason: 'branch_changed',
+          },
+          null,
+        ),
+      ],
+      next_before: null,
+    }));
+    await visit('/apps/blog');
+
+    const items = findAll('[data-test-activity]');
+    assert
+      .dom(items[0])
+      .includesText(
+        'コマンドの実行中に預かった自動デプロイをディスク使用率が上限を超えていたため取りやめ',
+      )
+      .includesText('コミット: feedfac（main）')
+      .includesText('push: octo');
+    assert
+      .dom(items[0]!.querySelector('[data-test-activity-actor]'))
+      .hasText('koroku');
+    assert
+      .dom(items[1])
+      .includesText('追うブランチが変わったため取りやめ')
+      .doesNotIncludeText('push:');
+  });
+
   test('registry credentials are worded without the token', async function (assert) {
     fakes.api.on('GET', '/api/apps/blog/activity', () => ({
       entries: [

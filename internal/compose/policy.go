@@ -105,7 +105,8 @@ func (e *PolicyError) Error() string {
 //
 // Port exposure is never waived: with Docker, a published port bypasses the
 // host firewall, so anything other than the web service's loopback binding
-// would be reachable from outside.
+// would be reachable from outside. Neither is the stop grace limit
+// (RuleStopGracePeriod), which protects other apps and koroku's timeouts.
 func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 	var found []Violation
 	add := func(service, rule, message string, relaxable bool) {
@@ -239,6 +240,18 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 				}
 			}
 		}
+	}
+
+	if total := p.TotalStopGracePeriod(); total > MaxStopGracePeriod {
+		var set []ServiceGrace
+		for _, name := range p.ServiceNames() {
+			if d, ok := p.Services[name].StopGracePeriod(); ok {
+				set = append(set, ServiceGrace{Service: name, Period: d})
+			}
+		}
+		add("", RuleStopGracePeriod,
+			fmt.Sprintf("stop_grace_period adds up to %s across the services (%s), above the limit of %s",
+				total, DescribeGraces(set), MaxStopGracePeriod), false)
 	}
 
 	for name, volume := range p.Volumes {
