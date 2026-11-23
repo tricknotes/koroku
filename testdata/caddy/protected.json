@@ -72,6 +72,10 @@
                 },
                 {
                   "handler": "reverse_proxy",
+                  "load_balancing": {
+                    "try_duration": "30s",
+                    "try_interval": "250ms"
+                  },
                   "stream_close_delay": "5m",
                   "upstreams": [
                     {
@@ -234,6 +238,10 @@
                         },
                         {
                           "handler": "reverse_proxy",
+                          "load_balancing": {
+                            "try_duration": "30s",
+                            "try_interval": "250ms"
+                          },
                           "stream_close_delay": "5m",
                           "upstreams": [
                             {
@@ -409,6 +417,10 @@
                         },
                         {
                           "handler": "reverse_proxy",
+                          "load_balancing": {
+                            "try_duration": "30s",
+                            "try_interval": "250ms"
+                          },
                           "stream_close_delay": "5m",
                           "upstreams": [
                             {

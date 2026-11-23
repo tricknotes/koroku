@@ -29,6 +29,17 @@ const (
 	// every proxied WebSocket the moment a new configuration is loaded.
 	streamCloseDelay = "5m"
 
+	// While an app's containers are recreated (deploy, rollback, restart)
+	// nothing answers on its loopback port. Caddy holds such a request and
+	// tries the upstream again every upstreamTryInterval until
+	// upstreamTryDuration has passed, so a short restart becomes a slow
+	// response instead of a 502. Caddy retries any method when the
+	// connection could not be made (nothing was sent), but only GET once
+	// a connection was made, which is what docker-proxy gives while the
+	// app inside the container is not listening (ARCHITECTURE 8).
+	upstreamTryDuration = "30s"
+	upstreamTryInterval = "250ms"
+
 	// Rotation of the per-app access logs. A later collector ships them to
 	// object storage; these values only bound the local disk usage.
 	accessLogRollSizeMB   = 50
@@ -385,6 +396,10 @@ func appProxy(app App) obj {
 		// WebSocket and SSE work with the reverse proxy defaults (upgrades
 		// are passed through, event streams are flushed immediately).
 		"stream_close_delay": streamCloseDelay,
+		"load_balancing": obj{
+			"try_duration": upstreamTryDuration,
+			"try_interval": upstreamTryInterval,
+		},
 	}
 }
 
@@ -478,7 +493,8 @@ func upstream(app App, korokuUpstream string) obj {
 }
 
 // wakeProxy forwards to koroku, which wakes the app, waits for it and
-// proxies the request on. Responses stream like the app's own.
+// proxies the request on. Responses stream like the app's own. It has no
+// retries: koroku holds the request itself.
 func wakeProxy(app App, korokuUpstream string) obj {
 	return obj{
 		"handler":   "reverse_proxy",
