@@ -11,5 +11,6 @@ services:
       - "127.0.0.1:20002:80"
     env_file:
       - "/var/lib/koroku/apps/static/env"
+      - "/var/lib/koroku/apps/static/env.release"
     restart: unless-stopped
     oom_score_adj: 500

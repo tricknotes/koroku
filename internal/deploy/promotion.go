@@ -88,6 +88,9 @@ func (e *Engine) sourceProject(ctx context.Context, src store.App, id int64) (co
 		Files:       []string{filepath.Join(dir, meta.ComposeFile)},
 		EnvFile:     snapshot,
 	}
+	if e.hasReleaseEnv(src.Slug, id) {
+		inv.ReleaseEnvFile = e.releaseEnvSnapshot(src.Slug, id)
+	}
 	project, err := e.composeConfigTo(ctx, inv, dir, io.Discard)
 	if err != nil {
 		return compose.Project{}, "", "", fmt.Errorf("read the promoted release: %w", err)

@@ -693,8 +693,8 @@ blue/green のアプリ（ARCHITECTURE 7.2）では、`start` 以降が `start`�
 
 | 行 | 意味 |
 | --- | --- |
-| `Recreating <サービス> because the app's environment changed; requests may fail while it restarts.` | blue/green のデプロイの `services` の手順で、アプリの環境変数が変わったため、コミットの変数を読まないサービス（DB など）も作り直す |
-| `Images that follow the commit: <サービス, ...>` | blue/green のデプロイの `prepare` の手順で、補間した `image:` がコミットの変数で変わるサービス（コミットの変数を読むので毎回作り直す） |
+| `Recreating <サービス> because the app's env file changed (<変数の名前>, ...); requests may fail while it restarts.` | `start` の手順（blue/green のデプロイでは `services`）で、稼働中のリリースから env ファイルの変数（並べた名前のもの。値は書かない）が変わったため、コミットの変数を読まないサービス（DB など）も作り直す（ARCHITECTURE 6 章「コミットの変数を渡すサービス」） |
+| `Services that follow the commit: <サービス, ...>` | `prepare` の手順で、リポジトリの Compose の定義（補間した `image:` や `environment` など）がコミットの変数で変わるサービス（`env.release` を読むので毎回作り直す） |
 | `Container registry credential: set for this app` | `prepare` の手順で、アプリのコンテナレジストリの認証（ARCHITECTURE 6.1）をこのデプロイで使うことを示す |
 | `The registry refused access (unauthorized or denied). ...` | `build`・`pull`・`start` の手順が、レジストリにイメージの取得を拒否されて失敗した。認証を設定したアプリには、レジストリ・ユーザー名・トークンの期限と `read:packages` を確かめる案内が、設定していないアプリには設定を促す案内が続く。デプロイの `error` は `the registry refused access to an image; ...` で始まる |
 | `The registry has no image with that tag (manifest unknown). ...` | `build`・`pull`・`start` の手順が、レジストリにないタグを指して失敗した。CI がコミットごとにビルドするイメージなら、まだ push されていない。ワークフローが終わってからデプロイし直す案内と、自動デプロイなら「先に待つワークフロー」（ARCHITECTURE 5.2）を設定する案内が続く。デプロイの `error` は `the registry has no image with that tag yet; ...` で始まる |

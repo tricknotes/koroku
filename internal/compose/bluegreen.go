@@ -47,57 +47,6 @@ type BlueGreenParams struct {
 	ComposeFile string
 	// AltHostPort is where green is published; blue uses HostPort.
 	AltHostPort int
-	// ReleaseEnvFile holds the commit variables. It is given only to the
-	// services that are recreated by every deployment anyway (see
-	// ReleaseEnvServices), so that the others keep their configuration.
-	ReleaseEnvFile string
-	// CommitImages are the services whose interpolated image changes with
-	// the commit (see CommitImageServices).
-	CommitImages []string
-}
-
-// ReleaseEnvServices lists, sorted, the services that read the release env
-// file: the public service and its coloured copies, the one-shot services,
-// the built services (their image is per release) and the services whose
-// image follows the commit. Every deployment recreates them anyway.
-func (p OverrideParams) ReleaseEnvServices() []string {
-	if p.BlueGreen == nil {
-		return nil
-	}
-	set := map[string]bool{p.WebService: true}
-	for _, name := range ColoredNames(p.WebService) {
-		set[name] = true
-	}
-	for _, name := range p.Project.ServiceNames() {
-		svc := p.Project.Services[name]
-		if svc.HasBuild() || p.Project.OneShot(name) || slices.Contains(p.BlueGreen.CommitImages, name) {
-			set[name] = true
-		}
-	}
-	out := make([]string, 0, len(set))
-	for name := range set {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// CommitImageServices lists, sorted, the services without a build section
-// whose image differs between two normalizations of the same project that
-// only differ in the commit variables: their image follows the commit
-// (`image: ...:sha-${KOROKU_COMMIT_SHORT}`).
-func CommitImageServices(actual, probe Project) []string {
-	var out []string
-	for _, name := range actual.ServiceNames() {
-		svc := actual.Services[name]
-		if svc.HasBuild() {
-			continue
-		}
-		if other, ok := probe.Services[name]; ok && other.Image != svc.Image {
-			out = append(out, name)
-		}
-	}
-	return out
 }
 
 // CheckBlueGreen checks the conditions of ARCHITECTURE 7.2 on the

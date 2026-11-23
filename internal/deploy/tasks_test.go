@@ -92,7 +92,7 @@ func TestRunTaskUsesTheCurrentRelease(t *testing.T) {
 	release := h.engine.ReleaseDir("blog", *app.CurrentDeploymentID)
 	want := []string{"compose", "-p", "koroku-blog",
 		"-f", filepath.Join(release, "compose.yaml"), "-f", filepath.Join(release, compose.OverrideFileName),
-		"--env-file", h.engine.EnvFile("blog"),
+		"--env-file", h.engine.EnvFile("blog"), "--env-file", h.engine.ReleaseEnvFile("blog"),
 		"run", "--rm", "--no-deps", "-T", "--name", "koroku-blog-task-" + itoa(run.ID),
 		"web", "sh", "-c", "bin/rails db:migrate"}
 	if !slices.Equal(call.Args, want) {
@@ -386,7 +386,7 @@ func TestConsoleCmd(t *testing.T) {
 	release := h.engine.ReleaseDir("blog", *app.CurrentDeploymentID)
 	base := []string{"compose", "-p", "koroku-blog",
 		"-f", filepath.Join(release, "compose.yaml"), "-f", filepath.Join(release, compose.OverrideFileName),
-		"--env-file", h.engine.EnvFile("blog")}
+		"--env-file", h.engine.EnvFile("blog"), "--env-file", h.engine.ReleaseEnvFile("blog")}
 
 	cmd, err := h.engine.ConsoleCmd(context.Background(), app, "web", []string{"bin/rails", "console"}, true)
 	if err != nil {

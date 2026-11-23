@@ -65,13 +65,17 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 | `services` | 無停止デプロイで、切り替えのあとに作り直したワーカーなどが起動しない | `Last output of the containers:` を読む。そのサービスの Compose と起動コマンド |
 | `drain` | 無停止デプロイで、旧色が止まらない。デプロイは `succeeded` のまま | 直さなくてよい（次のデプロイの前に消える）。続くなら旧色の `stop_grace_period` と `SIGTERM` の扱い |
 
+どの手順でも（無停止デプロイかどうかによらず）、次の 2 行は読み方が決まっている。
+
+- `prepare` の `Services that follow the commit: <サービス, ...>` は、Compose の定義（`image:` のタグ、`environment` など）がコミットの変数（`KOROKU_COMMIT_SHA` / `KOROKU_COMMIT_SHORT`）に従うので、`env.release` を受け取り毎回作り直されるサービス。
+- `start`（無停止デプロイでは `services`）の `Recreating <サービス> because the app's env file changed (<変数の名前>, ...); requests may fail while it restarts.` は、稼働中のリリースから env ファイルの変数（並んだ名前のもの。値は出ない）が変わったので、コミットの変数を受け取らない DB なども作り直した、という意味。その数秒は DB を使うリクエストが失敗しうる。名前に `KOROKU_COMMIT_SHA` と `KOROKU_COMMIT_SHORT` だけが並ぶのは、コミットの変数が `env` にあった古いリリースからの最初のデプロイで、1 回だけのもの。
+
 無停止デプロイ（blue/green）を有効にしたアプリのデプロイは、`start`（`Starting <新色> on port <ポート>`。ワンショットのサービスと新色だけを起動する）→ `check`（新色のポート）→ `switch`（`Switching traffic from <旧色> to <新色>`）→ `services`（`Recreating the other services`）→ `drain`（`Stopping <旧色>`。待ち時間のあとに旧色を止めて消す）→ `done` と進み、`route` はない。有効にして最初のデプロイは旧色が元の形の公開サービスなので、見出しの旧色はサービス名になる（`Switching traffic from web to green`、`Stopping web`）。公開サービスが動いていない（初回、停止中、休止中）ときは `start`（`Starting <色> on port <ポート>`）→ `route` → `check` → `done` で、切り替えはない。読むときの要点:
 
 - `start` か `check` か `switch` で失敗したら、`Removing <新色のサービス>; the previous release keeps serving.` の行のとおり新色を消しただけで、旧色・DB・ワーカーは動き続けている（ロールバックの行は出ない）。ただしマイグレーションは流れたあとかもしれない。古い版のコードと両立しないマイグレーションなら、旧色がエラーを返していることがある（prepare-app の requirements.md の「無停止デプロイ」）。
-- `prepare` の `Images that follow the commit: <サービス, ...>` は、`image:` がコミットの変数に従うので毎回作り直されるサービス。
 - `Not enough memory to run two <サービス> containers (<n> MiB available, <m> MiB needed).` で失敗したら（`start` の手順。デプロイの `error` も同じ文。新色は起動していない）、ホストの空きメモリが公開サービスの上限 1 つ分に足りない。リポジトリの問題ではない。利用者に、メモリを空けるか上限を下げるか、無停止デプロイを外してデプロイし直すよう伝える。
 - `services` で失敗したら、koroku は旧色に戻し、ワーカーなどを前の版で起動し直している（`==> <時刻> rollback Switching back and restoring the other services of deployment #<id>` に続いて `Restored <サービス, ...> of deployment #<id>.`。戻せなければ `Restoring ... failed: ...`）。
-- `services` に `Recreating <サービス> because the app's environment changed` があれば、環境変数を変えたデプロイで DB なども作り直したので、その数秒はエラーが出うる。
+- `services` に `Recreating <サービス> because the app's env file changed (<変数の名前>, ...)` があれば、環境変数を変えたデプロイで DB なども作り直したので、その数秒はエラーが出うる（下の「どの手順でも」の同じ行）。
 - デプロイの JSON（`deployments`）の `web_color` は、そのデプロイが起動した色（`blue` / `green`。公開サービスを元の形で起動したデプロイと、起動の前に終わったものは `null`）、`switched_at` は利用者のリクエストをその色へ切り替えた時刻。切り替えていない（並べる相手がなく全サービスを一度に起動した、切り替えの前に失敗した）か、切り替えたあと `services` で失敗して旧色に戻したときは `null`。`switched_at` が `null` の `failed` でも、ログに `rollback Switching back` があれば、数秒〜数十秒は新色がリクエストを受けていた。
 - タスクとワンオフのコマンドは公開サービスの名前（`web`）で動く。`web-blue` / `web-green` を指定すると koroku が `422` で断る。
 - `services`（`koroku-status.sh` の失敗時のサービスの状態）では、公開サービスの行に色（`blue` / `green`）が付く。デプロイで 2 つの色が並んでいる間は公開サービスの行が 2 つある。

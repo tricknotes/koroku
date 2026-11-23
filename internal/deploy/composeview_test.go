@@ -149,7 +149,7 @@ func TestComposeViewOfTheCurrentRelease(t *testing.T) {
 	dir := h.engine.ReleaseDir("blog", h.second.ID)
 	want := []string{"compose", "-p", "koroku-blog",
 		"-f", filepath.Join(dir, "compose.yaml"), "-f", filepath.Join(dir, compose.OverrideFileName),
-		"--env-file", h.engine.EnvFile("blog"),
+		"--env-file", h.engine.EnvFile("blog"), "--env-file", h.engine.ReleaseEnvFile("blog"),
 		"config", "--format", "json", "--no-interpolate", "--no-env-resolution"}
 	calls := h.runner.Calls()
 	if len(calls) != 1 || !slices.Equal(calls[0].Args, want) || calls[0].Dir != dir {

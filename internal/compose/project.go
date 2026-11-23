@@ -52,6 +52,11 @@ type Service struct {
 	MemReservation string `json:"mem_reservation"`
 	OomScoreAdj    *int   `json:"oom_score_adj"`
 
+	// Raw is the service's whole normalized definition, as Compose printed
+	// it, for telling which services follow the commit (CommitServices).
+	// It may hold variable values and is never logged.
+	Raw json.RawMessage `json:"-"`
+
 	CapAdd            []string          `json:"cap_add"`
 	Devices           []json.RawMessage `json:"devices"`
 	DeviceCgroupRules []string          `json:"device_cgroup_rules"`
@@ -207,6 +212,16 @@ func ParseProject(data []byte) (Project, error) {
 	}
 	if len(p.Services) == 0 {
 		return Project{}, errors.New("parse compose config: the project defines no services")
+	}
+	var raw struct {
+		Services map[string]json.RawMessage `json:"services"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return Project{}, errors.New("parse compose config: output is not the expected JSON")
+	}
+	for name, svc := range p.Services {
+		svc.Raw = raw.Services[name]
+		p.Services[name] = svc
 	}
 	return p, nil
 }
@@ -372,13 +387,16 @@ type Invocation struct {
 	// flag Compose does not read the repository's own .env for interpolation.
 	EnvFile string
 	// ReleaseEnvFile, when set, is passed with a second --env-file: the
-	// commit variables of a blue/green app live in a file of their own
-	// (ARCHITECTURE 7.2), and interpolation sees both.
+	// commit variables live in a file of their own (ARCHITECTURE 6), and
+	// interpolation sees both.
 	ReleaseEnvFile string
 	// Profiles are passed with --profile. Configuration, build and pull
 	// calls of a blue/green release name DisabledProfile, so that the
 	// public service the override disables is part of the project.
 	Profiles []string
+	// BlueGreen marks a call on a release in the blue/green form
+	// (ARCHITECTURE 7.2): configuration calls add DisabledProfile.
+	BlueGreen bool
 	// DockerConfig is the Docker client config directory holding the
 	// app's registry credential (ARCHITECTURE 6.1). Empty means the
 	// default config of the user koroku runs as.

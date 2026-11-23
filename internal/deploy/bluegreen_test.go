@@ -404,7 +404,7 @@ func TestBlueGreenDeploySideBySide(t *testing.T) {
 		}
 	}
 	// The variables did not change: nothing warns of a recreated database.
-	if strings.Contains(log, "because the app's environment changed") {
+	if strings.Contains(log, "because the app's env file changed") {
 		t.Errorf("log:\n%s", log)
 	}
 
@@ -426,7 +426,7 @@ func TestBlueGreenWarnsWhenTheEnvironmentChanged(t *testing.T) {
 	d := b.deploy("blog", shaB)
 	log := b.log("blog", d.ID)
 	if d.Status != store.StatusSucceeded ||
-		!strings.Contains(log, "Recreating db because the app's environment changed; requests may fail while it restarts.") ||
+		!strings.Contains(log, "Recreating db because the app's env file changed (GREETING); requests may fail while it restarts.") ||
 		strings.Contains(log, "Recreating worker because") {
 		t.Errorf("deployment %s, log:\n%s", d.Status, log)
 	}

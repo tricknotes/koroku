@@ -22,13 +22,13 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 
 - **公開サービスは 1 つ**（既定名 `web`）。コンテナ内で `0.0.0.0:<port>` の平文 HTTP を待ち受ける。TLS は前段の Caddy が終端する。
 - **ポートの公開は koroku が決める**。公開サービスの `ports` は置き換えられ、ほかのサービスの `ports` は消される。サービス同士はサービス名（`db:5432`）で通信する。
-- **環境変数は koroku の画面で設定し、全サービスに注入される**。リポジトリの `.env` は `${VAR}` の補間に使われない。Compose の `environment:` に直書きした値は koroku の値より強いので、本番で変えたい値は `${VAR:-既定値}` の形にする。
+- **環境変数は koroku の画面で設定し、全サービスに注入される**。ただし koroku が足すコミットの変数（`KOROKU_COMMIT_SHA`、`KOROKU_COMMIT_SHORT`）は、公開サービス、ワンショット、`build:` を持つサービス、Compose でその変数を補間するサービスにだけ入る。DB などの `image:` だけのサービスで読みたければ `environment: { KOROKU_COMMIT_SHA: ${KOROKU_COMMIT_SHA} }` と書く（[references/requirements.md](references/requirements.md) の「コミットの変数を受け取るサービス」）。リポジトリの `.env` は `${VAR}` の補間に使われない。Compose の `environment:` に直書きした値は koroku の値より強いので、本番で変えたい値は `${VAR:-既定値}` の形にする。
 - **アプリが必要とする環境変数は Compose ファイルに `${VAR}` で宣言する**。koroku は Compose ファイルの `${VAR}` を読み、環境変数の画面とデプロイの前に、未設定のものを知らせる。必須の変数は `${VAR:?説明}`、任意の変数は `${VAR:-既定値}`（空でよければ `${VAR:-}`）と書く。koroku は env ファイルで全変数を全サービスに注入するので、アプリのコードが直接読むだけの変数は Compose に現れず、koroku からは見えない。新しく使い始めた変数も、ここに足すまで知らされない。
 - **環境ごとの値はビルド時ではなく実行時に読む**。koroku は staging のリリースを本番へ昇格するとき、ビルド定義（補間後の `build.args` を含む）が同じならビルド済みのイメージをそのまま使う。イメージに焼き込んだ環境ごとの値（`asset_host`、API の URL、`process.env` を埋め込んだ JS バンドルなど）は本番に持ち越されるので、環境ごとの値を `build.args` で渡さず、起動時の環境変数から読む（[references/requirements.md](references/requirements.md) の「ビルド時と実行時の設定」）。
 - **ホスト名を直書きしない**。koroku はアプリの URL を `KOROKU_APP_URL` と `KOROKU_APP_HOST` で渡す。pull request ごとのレビューアプリはホスト名が作るまで決まらないので、Rails の `config.hosts` やメールの URL の土台はこれから組み立てる。レビューアプリには親（staging）の環境変数が写り、`KOROKU_PR_NUMBER` が入るので、外へ送るもの（メール、Webhook、決済）はこれを見て止める（[references/requirements.md](references/requirements.md) の「pull request ごとのレビューアプリ」）。
 - **データは named volume に置く**。書き込み可能な bind mount、`external` や `name:` 付きの volume、`container_name` は使えないか、同じリポジトリを staging と本番の 2 アプリで動かすと衝突する。
 - **ワンショットのサービス（マイグレーションなど）は `restart: "no"` を書き、別のサービスから `condition: service_completed_successfully` で待たれるようにする**。誰も待っていないと、正常終了でも `up --wait` が失敗する。
-- **デプロイのたびに全サービスが作り直される**。cron（supercronic など）やジョブキューのワーカーも `SIGTERM` を受け、`stop_grace_period`（既定 10 秒）で強制終了される。長いジョブは途中で殺されても続きからやり直せるように作り、走っている処理を待って止まれるサービスには `stop_grace_period` を付ける（全サービスの合計で 10 分まで。[references/requirements.md](references/requirements.md) の「デプロイのたびに止まる長いジョブ」）。
+- **デプロイのたびに公開サービスと、アプリのイメージをビルドするサービスが作り直される**（DB などはアプリの環境変数を変えたときだけ）。cron（supercronic など）やジョブキューのワーカーも `SIGTERM` を受け、`stop_grace_period`（既定 10 秒）で強制終了される。長いジョブは途中で殺されても続きからやり直せるように作り、走っている処理を待って止まれるサービスには `stop_grace_period` を付ける（全サービスの合計で 10 分まで。[references/requirements.md](references/requirements.md) の「デプロイのたびに止まる長いジョブ」）。
 - **無停止デプロイ（blue/green）を使うなら、マイグレーションを古い版のコードと両立させる**。koroku のアプリ設定で選んだアプリだけ、公開サービスを 2 つ並べて入れ替える。マイグレーションは古い版が動いている間に流れるので、カラムの削除や名前の変更は 2 回のデプロイに分ける。公開サービスは状態を持たず、プロセス内の cron のような処理を動かさず、`container_name` を書かず、ほかのサービスから `depends_on` されないようにする。デプロイの間は公開サービスのメモリ上限 1 つ分が余分に要り、足りなければデプロイが失敗する（旧版は動き続ける）。無停止になるのはデプロイと即時ロールバックだけで、再起動は普通の再起動、アプリの環境変数を変えたデプロイでは DB も作り直す（[references/requirements.md](references/requirements.md) の「無停止デプロイ」）。
 - **デプロイ時に取得されるのはコミット済みのファイルだけ**。`.git` は消され、submodule と Git LFS は取得されない。
 - **staging のアプリは既定で koroku のログインの後ろにある**（アクセスの保護）。ブラウザー以外の呼び出し元（Webhook、外部の死活監視、ほかのサービスからの API 呼び出し）は通れないので、受け口のパスを洗い出し、利用者に「保護を外すパス」への登録を頼む（例 `/webhooks/`）。外したパスはアプリ自身で認証する（署名の検証など）。`/.koroku/` で始まるパスは koroku が使うのでアプリには届かない。
@@ -56,15 +56,16 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 
 アクセスがない間の休止を使うアプリ（たいていの staging）は `--sleep` を付ける。koroku が休止と起動でするのと同じく、`stop` してから `start --wait` し、もう一度 HTTP で確かめ、起きるまでの秒数（休止のあとの最初のリクエストが待つ時間）を出す。
 
-無停止デプロイ（blue/green）を使う、または使えるか確かめたいアプリは `--blue-green` を付ける。koroku が断る形（公開サービスの `container_name`、`deploy.replicas` と `scale`、ほかのサービスからの依存、`<公開サービス>-blue` / `-green` という名前、`include:`）を先に調べる。`image:` がコミットの変数（`KOROKU_COMMIT_SHA` / `KOROKU_COMMIT_SHORT`）に従うサービスを koroku と同じ方法で見つけて出し（`Images that follow the commit:`）、色の付いた override を重ねて blue を起動したあと、もう一度デプロイして green への切り替えをなぞる（ワンショットと green を `up --no-deps --wait` → green の確認 → 切り替え → ほかのサービスの作り直し → `--drain` 秒（既定 10）待って blue を止める）。その間 0.2 秒ごとに「いまの転送先」のポートへリクエストを送り、接続エラーか 5xx が 1 件でもあれば失敗にする。green のポートは `--alt-host-port`（既定 28081）。DB が作り直されずに残ったかもサービスごとに出す。
+無停止デプロイ（blue/green）を使う、または使えるか確かめたいアプリは `--blue-green` を付ける。koroku が断る形（公開サービスの `container_name`、`deploy.replicas` と `scale`、ほかのサービスからの依存、`<公開サービス>-blue` / `-green` という名前、`include:`）を先に調べる。色の付いた override を重ねて blue を起動したあと、もう一度デプロイして green への切り替えをなぞる（ワンショットと green を `up --no-deps --wait` → green の確認 → 切り替え → ほかのサービスの作り直し → `--drain` 秒（既定 10）待って blue を止める）。その間 0.2 秒ごとに「いまの転送先」のポートへリクエストを送り、接続エラーか 5xx が 1 件でもあれば失敗にする。green のポートは `--alt-host-port`（既定 28081）。DB が作り直されずに残ったかもサービスごとに出す。
 
 ```sh
 <skill-dir>/scripts/rehearse.sh --service web --port 3000 --health /up --env-file /path/to/test.env --blue-green
 ```
 
 - リポジトリの追跡中と未追跡（ignore されていない）のファイルだけを一時ディレクトリにコピーし、`.git` なしで動かす。
-- koroku と同じ形の override（公開サービスのポートを `127.0.0.1` に置き換え、ほかのポートを消し、env ファイルを全サービスに注入し、メモリ上限 512m、`oom_score_adj`、本番ならメモリの予約）を重ねて `config` → `build` / `pull` → `up --wait` → HTTP 確認（5xx 以外が返るまで最大 60 秒）を行う。
+- koroku と同じ形の override（公開サービスのポートを `127.0.0.1` に置き換え、ほかのポートを消し、env ファイルを全サービスに、コミットの変数の `env.release` を受け取るサービスだけに注入し、メモリ上限 512m、`oom_score_adj`、本番ならメモリの予約）を重ねて `config` → `build` / `pull` → `up --wait` → HTTP 確認（5xx 以外が返るまで最大 60 秒）を行う。
 - 最初に Compose ファイルが参照する変数（`docker compose config --variables`）を出す。koroku が照合に使うのと同じ一覧なので、アプリが必要とする変数が並んでいるか確かめる。
+- コミットの変数に従うサービス（`image:` のタグや `environment` で `${KOROKU_COMMIT_SHA}` を補間するもの）を koroku と同じ方法で見つけて出す（`Services that follow the commit:`）。それらと公開サービス、ワンショット、`build:` を持つサービスだけが `env.release` を受け取る。DB などがコミットの変数を読んでいたら、koroku では空になる。
 - 変数を読む `build.args` を出す。ここに環境ごとの値があると、staging から本番への昇格でイメージを再利用できず、値がイメージに焼き込まれる。実行時に読む形へ直せないか確かめる。
 - 失敗したらコンテナの出力の末尾を出す。終わると Compose プロジェクトを volume ごと消す（`--keep` で残す）。
 - テスト用の env ファイルは一時ディレクトリに作り、本物の秘密を入れない。リポジトリには置かない。

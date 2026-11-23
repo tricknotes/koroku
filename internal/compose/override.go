@@ -19,6 +19,13 @@ type OverrideParams struct {
 	HostPort   int
 	// EnvFile is the absolute path of the env file injected into every service.
 	EnvFile string
+	// ReleaseEnvFile holds the commit variables. It is given only to
+	// ReleaseEnvServices, so that the other services keep their
+	// configuration from one deployment to the next (ARCHITECTURE 6).
+	ReleaseEnvFile string
+	// CommitServices are the services whose definition follows the commit
+	// (see CommitServices); they also read the release env file.
+	CommitServices []string
 	// DefaultMemory is used when neither the app nor the repository sets a limit.
 	DefaultMemory string
 	// AppMemory, when set, applies to every service of the app.
@@ -86,7 +93,8 @@ func (p OverrideParams) ReleaseImages() []string {
 // For every service it
 //   - replaces ports: the web service is published on loopback only
 //     (!override), every other service loses its published ports (!reset);
-//   - appends the app's env file;
+//   - appends the app's env file, and the release env file for
+//     ReleaseEnvServices;
 //   - sets restart: unless-stopped unless the repository chose a policy
 //     (one-shot services such as migrations declare restart: "no");
 //   - applies a memory limit (see memoryLimit), raising memswap_limit with it
@@ -97,8 +105,7 @@ func (p OverrideParams) ReleaseImages() []string {
 //     reservation the repository set;
 //   - for a blue/green app (BlueGreen), disables the public service with
 //     DisabledProfile and adds its coloured copies, blue on HostPort and
-//     green on AltHostPort, each reachable under the public service's name;
-//     the release env file goes to ReleaseEnvServices only.
+//     green on AltHostPort, each reachable under the public service's name.
 func Override(p OverrideParams) ([]byte, error) {
 	if _, ok := p.Project.Services[p.WebService]; !ok {
 		return nil, fmt.Errorf("web service %q is not defined in the Compose file", p.WebService)
@@ -114,7 +121,7 @@ func Override(p OverrideParams) ([]byte, error) {
 		if bg.AltHostPort < 1 || bg.AltHostPort > 65535 || bg.AltHostPort == p.HostPort {
 			return nil, fmt.Errorf("invalid second port %d", bg.AltHostPort)
 		}
-		if bg.ComposeFile == "" || bg.ReleaseEnvFile == "" {
+		if bg.ComposeFile == "" || p.ReleaseEnvFile == "" {
 			return nil, fmt.Errorf("blue/green needs the Compose file and the release env file")
 		}
 	}
@@ -127,7 +134,7 @@ func Override(p OverrideParams) ([]byte, error) {
 		svc := p.Project.Services[name]
 		envFiles := []string{p.EnvFile}
 		if slices.Contains(releaseEnv, name) {
-			envFiles = append(envFiles, p.BlueGreen.ReleaseEnvFile)
+			envFiles = append(envFiles, p.ReleaseEnvFile)
 		}
 		if name != p.WebService {
 			p.writeService(&b, name, svc, serviceForm{envFiles: envFiles})
