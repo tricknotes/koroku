@@ -80,7 +80,7 @@
 | --- | --- |
 | `GET /api/session` | 常に 200。`{"authenticated": true, "user": {"id": 1, "login": "octo", "avatar_url": "https://...", "owner": true}, "reauth_until": "2026-11-19T03:10:00Z"}` か `{"authenticated": false}`。`reauth_until` は再ログインなしで危険な操作ができる期限（ログインから 10 分。`--insecure-no-auth` では `null`）。`owner` はオーナーなら `true`、メンバーなら `false`（`--insecure-no-auth` では `true`） |
 | `GET /auth/github/login?return_to=/apps/blog/env` | GitHub の認可画面へリダイレクト（ページ遷移で開く）。`return_to` はログイン後に戻るパス（省略時は `/`）。`/` で始まらないもの、`//` や `\` を含むものは無視して `/` に戻す |
-| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（オーナーでも、ロールを持つメンバーでもない）、`state_mismatch`、`github_error`、`not_configured`（GitHub App が未設定） |
+| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（オーナーでも、ロールを持つメンバーでもない）、`state_mismatch`（state の Cookie がないか、`state` と一致しない）、`github_error`（`code` がない、GitHub が断った、GitHub への問い合わせが 1 分あたり 10 回の上限に達している）、`not_configured`（GitHub App が未設定）。`state_mismatch` と `code` のないリクエストは上限に数えない（ARCHITECTURE 10 章） |
 | `POST /auth/logout` | 204。セッションを破棄 |
 | `GET /api/sessions` | 有効なセッションの一覧（新しい順）。メンバーには自分のもの、オーナーには全員のもの。`{"sessions": [{"id": "9f2c41d07a1b3e55", "created_at": "...", "last_seen_at": "...", "expires_at": "...", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ...", "current": true, "user": {"id": 1, "login": "octo"}}]}`。`last_seen_at` は 1 分単位の目安 |
 | `DELETE /api/sessions/{id}` | 204。そのセッションを終了する（自分のセッションを指定するとログアウトと同じ）。メンバーは自分のものだけ、オーナーは誰のものでも終了できる。なければ `404 session_not_found` |

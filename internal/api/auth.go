@@ -419,13 +419,6 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		loginErrorRedirect(w, r, "not_configured")
 		return
 	}
-	// Anyone can reach this endpoint with a made-up code and state; without
-	// a limit each such request would make koroku call GitHub with the App's
-	// client secret.
-	if !s.callbackLimiter.allow(s.clock.Now()) {
-		loginErrorRedirect(w, r, "github_error")
-		return
-	}
 	query := r.URL.Query()
 	cookie, err := r.Cookie(s.cookieName(stateCookie))
 	s.clearCookie(w, stateCookie)
@@ -437,6 +430,15 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	code := query.Get("code")
 	if code == "" {
 		// The user declined, or GitHub reported an error.
+		loginErrorRedirect(w, r, "github_error")
+		return
+	}
+	// Anyone can reach this endpoint with a made-up code and state; without
+	// a limit each such request would make koroku call GitHub with the App's
+	// client secret. Only requests that go on to GitHub count: one without
+	// the state cookie of a login started in that browser is refused above,
+	// so that it cannot use up the limit real logins share.
+	if !s.callbackLimiter.allow(s.clock.Now()) {
 		loginErrorRedirect(w, r, "github_error")
 		return
 	}
