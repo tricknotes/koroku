@@ -71,6 +71,19 @@ type App struct {
 	// AccessLogPath is the access log the reverse proxy writes for this app.
 	// Empty means there is none.
 	AccessLogPath string
+	// PublicService, when set, is the public service of a blue/green app:
+	// the lines of its coloured copies (<service>-blue, <service>-green)
+	// are recorded under it (ARCHITECTURE 7.2).
+	PublicService string
+}
+
+// recordedService maps the service of a container to the one its lines are
+// recorded under.
+func (a App) recordedService(service string) string {
+	if a.PublicService != "" && (service == a.PublicService+"-blue" || service == a.PublicService+"-green") {
+		return a.PublicService
+	}
+	return service
 }
 
 // Options configure a Collector. Only Dir is required for reading; Run also

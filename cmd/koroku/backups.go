@@ -79,6 +79,9 @@ func toBackupApp(app store.App) backup.App {
 	// the app is up.
 	if app.DesiredState == store.DesiredRunning && app.CurrentDeploymentID != nil {
 		out.DumpService, out.DumpCommand = app.DumpHookService, app.DumpHookCommand
+		if live := app.LiveService(app.DumpHookService); live != app.DumpHookService {
+			out.DumpExecService = live
+		}
 	}
 	return out
 }

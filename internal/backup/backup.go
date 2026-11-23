@@ -89,6 +89,11 @@ type App struct {
 	// command decides whether the dump is kept; a pipeline should therefore
 	// use `set -o pipefail` or avoid pipes.
 	DumpService string
+	// DumpExecService is the service whose container the dump command runs
+	// in, when it differs from DumpService: the colour the public service
+	// of a blue/green app runs in (ARCHITECTURE 7.2). DumpService still
+	// names the dump.
+	DumpExecService string
 	DumpCommand string
 	// WithDumpService, when set, runs the dump inside it: it makes sure
 	// the dump service runs while run does (an app that sleeps while idle

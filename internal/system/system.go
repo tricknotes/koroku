@@ -166,3 +166,19 @@ func (h Host) dockerVersion(ctx context.Context) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// AvailableMemory is what new containers can still use before the host
+// runs out: MemAvailable plus SwapFree from meminfo. A blue/green deploy
+// checks it before it starts the second copy of the public service
+// (ARCHITECTURE 7.2).
+func (h Host) AvailableMemory() (uint64, error) {
+	m, swap, err := h.memory()
+	if err != nil {
+		return 0, err
+	}
+	free := m.AvailableBytes
+	if swap != nil {
+		free += swap.TotalBytes - swap.UsedBytes
+	}
+	return free, nil
+}

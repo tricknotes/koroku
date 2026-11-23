@@ -101,7 +101,7 @@ func (s *Server) handleWake(w http.ResponseWriter, r *http.Request, app store.Ap
 // would: the same Host and X-Forwarded-* headers, responses not buffered,
 // upgrades (WebSocket) passed through.
 func (s *Server) proxyToApp(w http.ResponseWriter, r *http.Request, app store.App) {
-	target := &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(app.HostPort))}
+	target := &url.URL{Scheme: "http", Host: net.JoinHostPort("127.0.0.1", strconv.Itoa(app.LivePort()))}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)

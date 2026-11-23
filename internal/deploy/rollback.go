@@ -117,7 +117,7 @@ func (e *Engine) executeRollback(ctx context.Context, d store.Deployment, app st
 	if err != nil {
 		return false, ErrReleaseUnavailable
 	}
-	env, err := os.ReadFile(filepath.Join(e.stateDir(app.Slug, src), "env"))
+	env, releaseEnv, err := e.readEnvSnapshots(app.Slug, src)
 	if err != nil {
 		return false, ErrReleaseUnavailable
 	}
@@ -140,22 +140,37 @@ func (e *Engine) executeRollback(ctx context.Context, d store.Deployment, app st
 		return false, err
 	}
 
-	log.Step(StepStart, "Starting containers")
-	e.logStopGraces(ctx, app, project, log)
 	// The kept images are normally all there; a missing one is pulled.
 	dockerConfig, err := e.registryConfig(ctx, app, log.masker)
 	if err != nil {
 		return false, err
 	}
+	if app.BlueGreen && meta.BlueGreen {
+		// The kept release's override has both colours: it starts next to
+		// the serving one, like a deployment (ARCHITECTURE 7.2).
+		return e.deployBlueGreen(ctx, d, app, blueGreenRelease{
+			id: src, composeFile: meta.ComposeFile, project: project, dockerConfig: dockerConfig,
+			env: env, releaseEnv: releaseEnv, releaseEnvServices: meta.ReleaseEnvServices,
+		}, log)
+	}
+
+	log.Step(StepStart, "Starting containers")
+	if app.BlueGreen {
+		log.Printf("The release predates blue/green deploys of this app: the public service is recreated in place.")
+	}
+	e.logStopGraces(ctx, app, project, log)
 	if err := e.endSleep(ctx, app, log); err != nil {
 		return false, err
 	}
-	if err := writeFileAtomic(e.EnvFile(app.Slug), env, 0o600); err != nil {
+	if err := e.writeLiveEnv(app.Slug, env, releaseEnv); err != nil {
 		return false, fmt.Errorf("write env file: %w", err)
 	}
-	inv := e.invocation(app, src, meta.ComposeFile, true)
-	inv.DockerConfig = dockerConfig
-	if err := e.up(ctx, inv, e.ReleaseDir(app.Slug, src), log); err != nil {
+	if meta.BlueGreen {
+		if err := e.opts.Store.SetDeploymentWebColor(ctx, d.ID, e.releaseColor(app, src)); err != nil {
+			return false, err
+		}
+	}
+	if err := e.upRelease(ctx, app, src, dockerConfig, e.deployRun(log)); err != nil {
 		e.logContainerOutput(ctx, app, log)
 		return true, fmt.Errorf("start containers: %w", err)
 	}

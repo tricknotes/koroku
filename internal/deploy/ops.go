@@ -188,6 +188,11 @@ func (e *Engine) Start(ctx context.Context, app store.App) error {
 // With services, only those are brought up, without their dependencies
 // and without removing the others.
 func (e *Engine) upCurrent(ctx context.Context, app store.App, services ...string) error {
+	// A blue/green app runs its public service in its colour.
+	services = slices.Clone(services)
+	for i, name := range services {
+		services[i] = app.LiveService(name)
+	}
 	inv, dir, ok := e.currentInvocation(app)
 	if !ok {
 		// The release files are gone; the stopped containers still exist.
@@ -204,6 +209,11 @@ func (e *Engine) upCurrent(ctx context.Context, app store.App, services ...strin
 	// A missing image is pulled with the app's own registry login.
 	if inv.DockerConfig, err = e.registryConfig(ctx, app, secrets.NewMasker()); err != nil {
 		return err
+	}
+	if len(services) == 0 {
+		// The whole release, in the app's colour when it has the
+		// blue/green form (ARCHITECTURE 7.2).
+		return e.upRelease(ctx, app, *app.CurrentDeploymentID, inv.DockerConfig, e.runCompose)
 	}
 	return e.runCompose(ctx, inv, dir, e.upArgs(services...)...)
 }
@@ -237,7 +247,8 @@ func (e *Engine) Restart(ctx context.Context, app store.App) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, opTimeout)
 	defer cancel()
-	return e.runCompose(ctx, e.projectOnly(app), "", "restart")
+	// Named, so that only the colour that serves restarts.
+	return e.runCompose(ctx, e.projectOnly(app), "", append([]string{"restart"}, e.liveServices(current)...)...)
 }
 
 // Delete removes the app: containers, networks, optionally named volumes,
@@ -341,6 +352,11 @@ type ServiceStatus struct {
 	// the saved settings (0 for none); nil when the running release did
 	// not record its services' memory shapes.
 	NextMemoryReservationBytes *int64 `json:"next_memory_reservation_bytes"`
+	// Color is the colour of the container of a blue/green app's public
+	// service, listed under the public service (ARCHITECTURE 7.2); "" for
+	// other containers. While a deploy runs both colours side by side, the
+	// service has a row for each.
+	Color string `json:"color,omitempty"`
 
 	container string
 }
@@ -359,6 +375,10 @@ func (e *Engine) Services(ctx context.Context, app store.App) ([]ServiceStatus, 
 	if err != nil {
 		return nil, err
 	}
+	for i := range services {
+		services[i].Name, services[i].Color = app.PublicServiceOf(services[i].Name)
+	}
+	sort.SliceStable(services, func(i, j int) bool { return services[i].Name < services[j].Name })
 	var running []string
 	for _, svc := range services {
 		if svc.State == "running" && svc.container != "" {

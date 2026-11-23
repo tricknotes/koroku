@@ -34,9 +34,20 @@ type fakeProber struct {
 	mu      sync.Mutex
 	percent float64
 	err     error
+	free    *uint64
 }
 
 func (p *fakeProber) Info(context.Context) system.Info { return system.Info{} }
+
+// AvailableMemory reports plenty unless a test set free.
+func (p *fakeProber) AvailableMemory() (uint64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.free == nil {
+		return 1 << 40, nil
+	}
+	return *p.free, nil
+}
 
 func (p *fakeProber) DiskUsage() (system.Disk, error) {
 	p.mu.Lock()
@@ -105,6 +116,8 @@ type harness struct {
 	buildOutput string
 	// onFetch lets a test add files to the checkout, as a repository would.
 	onFetch func(dir string) error
+	// psOutput, when set, prints `docker compose ps` (the app's containers).
+	psOutput func() string
 }
 
 const defaultRepoServices = `{
@@ -182,7 +195,7 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 	case "docker":
 		sub, merged := composeSubcommand(cmd.Args)
 		h.mu.Lock()
-		hook, services, buildOutput, servicesFor := h.onCompose, h.repoServices, h.buildOutput, h.servicesFor
+		hook, services, buildOutput, servicesFor, psOutput := h.onCompose, h.repoServices, h.buildOutput, h.servicesFor, h.psOutput
 		h.mu.Unlock()
 		if servicesFor != nil && sub == "config" {
 			services = servicesFor(cmd)
@@ -209,6 +222,10 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 				}
 			}
 			return `{"name": "koroku-blog", "services": ` + services + `}`, nil
+		case "ps":
+			if psOutput != nil {
+				return psOutput(), nil
+			}
 		case "build":
 			return buildOutput, nil
 		}
@@ -228,7 +245,7 @@ func composeSubcommand(args []string) (sub string, merged bool) {
 	}
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
-		case "-p", "--env-file":
+		case "-p", "--env-file", "--profile":
 			i++
 		case "-f":
 			i++

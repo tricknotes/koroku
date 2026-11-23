@@ -99,7 +99,7 @@ func (r *Router) Build(ctx context.Context) ([]byte, error) {
 	for _, app := range apps {
 		route := caddy.App{
 			Slug:      app.Slug,
-			HostPort:  app.HostPort,
+			HostPort:  app.LivePort(),
 			Hostnames: []string{DefaultHostname(app.Slug, r.Settings.BaseDomain)},
 			// An app that was never deployed has nothing to proxy to; it
 			// gets the same fixed 503 page as a stopped one.

@@ -56,7 +56,21 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, err
 	}
 	log.Printf("Compose file: %s", composeFile)
-	envContent, fingerprints, err := e.renderEnv(ctx, app, commit.SHA, log.masker)
+	// A blue/green app replaces its public service side by side
+	// (ARCHITECTURE 7.2).
+	blueGreen := app.BlueGreen
+	if blueGreen && app.AltHostPort == 0 {
+		return false, errors.New("blue/green deploys are on, but the app has no second host port; turn the setting off and on again")
+	}
+	vars, fingerprints, err := e.renderEnvVars(ctx, app, commit.SHA, log.masker)
+	if err != nil {
+		return false, err
+	}
+	envVars, releaseVars := vars, map[string]string(nil)
+	if blueGreen {
+		envVars, releaseVars = splitCommitVars(vars)
+	}
+	envContent, err := RenderEnvFile(envVars)
 	if err != nil {
 		return false, err
 	}
@@ -72,7 +86,17 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if err := writeFileAtomic(snapshot, []byte(envContent), 0o600); err != nil {
 		return false, fmt.Errorf("write env snapshot: %w", err)
 	}
-	meta := releaseMeta{ComposeFile: composeFile}
+	snapshotRelease, releaseContent := "", ""
+	if blueGreen {
+		if releaseContent, err = RenderEnvFile(releaseVars); err != nil {
+			return false, err
+		}
+		snapshotRelease = e.releaseEnvSnapshot(app.Slug, d.ID)
+		if err := writeFileAtomic(snapshotRelease, []byte(releaseContent), 0o600); err != nil {
+			return false, fmt.Errorf("write env snapshot: %w", err)
+		}
+	}
+	meta := releaseMeta{ComposeFile: composeFile, BlueGreen: blueGreen}
 	if err := e.writeMeta(app.Slug, d.ID, meta); err != nil {
 		return false, fmt.Errorf("write release metadata: %w", err)
 	}
@@ -90,6 +114,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	// the running release's env file stays untouched until step 6.
 	base := e.invocation(app, d.ID, composeFile, false)
 	base.EnvFile = snapshot
+	base.ReleaseEnvFile = snapshotRelease
 	base.DockerConfig = dockerConfig
 	repoProject, err := e.composeConfig(ctx, base, releaseDir, log)
 	if err != nil {
@@ -107,6 +132,25 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	overrideParams.EnvFile = e.EnvFile(app.Slug)
 	overrideParams.ProjectName = app.ProjectName()
 	overrideParams.ReleaseTag = "r" + strconv.FormatInt(d.ID, 10)
+	if blueGreen {
+		if violations := compose.CheckBlueGreen(repoProject, app.WebService); len(violations) > 0 {
+			for _, v := range violations {
+				log.Printf("Policy violation: %s", v)
+			}
+			return false, &compose.PolicyError{Violations: violations}
+		}
+		commitImages, err := e.commitImages(ctx, app, d.ID, base, releaseDir, releaseVars, repoProject, log)
+		if err != nil {
+			return false, err
+		}
+		overrideParams.BlueGreen = &compose.BlueGreenParams{
+			ComposeFile:    composeFile,
+			AltHostPort:    app.AltHostPort,
+			ReleaseEnvFile: e.ReleaseEnvFile(app.Slug),
+			CommitImages:   commitImages,
+		}
+		meta.ReleaseEnvServices = overrideParams.ReleaseEnvServices()
+	}
 	override, err := compose.Override(overrideParams)
 	if err != nil {
 		return false, err
@@ -142,22 +186,30 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if err := ensureFile(e.EnvFile(app.Slug)); err != nil {
 		return false, fmt.Errorf("prepare env file: %w", err)
 	}
+	if blueGreen {
+		if err := ensureFile(e.ReleaseEnvFile(app.Slug)); err != nil {
+			return false, fmt.Errorf("prepare env file: %w", err)
+		}
+	}
 	merged := e.invocation(app, d.ID, composeFile, true)
 	merged.EnvFile = snapshot
+	merged.ReleaseEnvFile = snapshotRelease
 	merged.DockerConfig = dockerConfig
-	project, err := e.composeConfig(ctx, merged, releaseDir, log)
+	if blueGreen {
+		// Build and pull see the public service the override disables.
+		merged.Profiles = []string{compose.DisabledProfile}
+	}
+	var configOutput strings.Builder
+	project, err := e.composeConfigTo(ctx, merged, releaseDir, io.MultiWriter(log.Writer(), &configOutput))
 	if err != nil {
+		if blueGreen && compose.ExtendsFailure(configOutput.String(), app.WebService) {
+			v := compose.IncludedViolation(app.WebService, composeFile)
+			log.Printf("Policy violation: %s", v)
+			return false, &compose.PolicyError{Violations: []compose.Violation{v}}
+		}
 		return false, err
 	}
-	policy := compose.CheckPolicy(project, compose.PolicyParams{
-		ReleaseDir:  releaseDir,
-		ProjectName: app.ProjectName(),
-		EnvFile:     e.EnvFile(app.Slug),
-		WebService:  app.WebService,
-		WebPort:     app.WebPort,
-		HostPort:    app.HostPort,
-		Relax:       app.RelaxPolicy,
-	})
+	policy := compose.CheckPolicy(project, e.policyParams(app, releaseDir, blueGreen))
 	for _, v := range policy.Waived {
 		log.Printf("Policy waived for this app: %s", v)
 	}
@@ -168,9 +220,16 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, &compose.PolicyError{Violations: policy.Violations}
 	}
 	log.Printf("Services: %v", project.ServiceNames())
+	meta.Services = project.ServiceNames()
+	// The coloured copies run the release's own image (or the public
+	// service's, which is listed under it).
+	pulling := project
+	if blueGreen {
+		pulling = project.WithoutServices(compose.ColoredNames(app.WebService)...)
+	}
 	// Recorded before pulling, like the built images, so that a failed
 	// deploy does not leave its pulled images behind.
-	meta.PulledImages = project.PulledImages()
+	meta.PulledImages = pulling.PulledImages()
 	if err := e.writeMeta(app.Slug, d.ID, meta); err != nil {
 		return false, fmt.Errorf("write release metadata: %w", err)
 	}
@@ -190,7 +249,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 			}
 		}
 	}
-	if project.NeedsPull() {
+	if pulling.NeedsPull() {
 		log.Step(StepPull, "Pulling images")
 		if err := e.composePulling(ctx, merged, releaseDir, log, "pull", "--ignore-buildable"); err != nil {
 			return false, fmt.Errorf("pull: %w", err)
@@ -211,6 +270,14 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		}
 	}
 
+	if blueGreen {
+		return e.deployBlueGreen(ctx, d, app, blueGreenRelease{
+			id: d.ID, composeFile: composeFile, project: project, dockerConfig: dockerConfig,
+			env: []byte(envContent), releaseEnv: []byte(releaseContent),
+			releaseEnvServices: meta.ReleaseEnvServices,
+		}, log)
+	}
+
 	// 6. Start. From here on a failure rolls back to the previous release.
 	log.Step(StepStart, "Starting containers")
 	e.logStopGraces(ctx, app, project, log)
@@ -220,9 +287,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if err := writeFileAtomic(e.EnvFile(app.Slug), []byte(envContent), 0o600); err != nil {
 		return false, fmt.Errorf("write env file: %w", err)
 	}
-	live := e.invocation(app, d.ID, composeFile, true)
-	live.DockerConfig = dockerConfig
-	if err := e.up(ctx, live, releaseDir, log); err != nil {
+	if err := e.upRelease(ctx, app, d.ID, dockerConfig, e.deployRun(log)); err != nil {
 		e.logContainerOutput(ctx, app, log)
 		return true, fmt.Errorf("start containers: %w", err)
 	}
@@ -240,8 +305,11 @@ func (e *Engine) routeAndCheck(ctx context.Context, app store.App, log *deployLo
 		}
 	}
 
-	// 8. Confirm over HTTP.
-	url := fmt.Sprintf("http://127.0.0.1:%d%s", app.HostPort, app.HealthcheckPath)
+	// 8. Confirm over HTTP, on the port the release now listens on.
+	if current, err := e.opts.Store.GetAppByID(ctx, app.ID); err == nil {
+		app = current
+	}
+	url := healthURL(app)
 	log.Step(StepCheck, "Checking %s", url)
 	if err := e.opts.Health.Wait(ctx, url, e.opts.HealthTimeout); err != nil {
 		e.logContainerOutput(ctx, app, log)
@@ -272,9 +340,22 @@ func (e *Engine) repoAuth(ctx context.Context, app store.App, masker *secrets.Ma
 // provides (ProvidedEnv). It also returns the fingerprint of
 // each variable.
 func (e *Engine) renderEnv(ctx context.Context, app store.App, commitSHA string, masker *secrets.Masker) (string, map[string]string, error) {
-	rows, err := e.opts.Store.ListEnvVars(ctx, app.ID)
+	vars, fingerprints, err := e.renderEnvVars(ctx, app, commitSHA, masker)
 	if err != nil {
 		return "", nil, err
+	}
+	content, err := RenderEnvFile(vars)
+	if err != nil {
+		return "", nil, err
+	}
+	return content, fingerprints, nil
+}
+
+// renderEnvVars is renderEnv before rendering: the variables by name.
+func (e *Engine) renderEnvVars(ctx context.Context, app store.App, commitSHA string, masker *secrets.Masker) (map[string]string, map[string]string, error) {
+	rows, err := e.opts.Store.ListEnvVars(ctx, app.ID)
+	if err != nil {
+		return nil, nil, err
 	}
 	vars := make(map[string]string, len(rows))
 	fingerprints := make(map[string]string, len(rows))
@@ -282,7 +363,7 @@ func (e *Engine) renderEnv(ctx context.Context, app store.App, commitSHA string,
 		ad := secrets.EnvVarContext(app.ID, row.Key)
 		plain, err := e.opts.Box.Open(row.ValueEncrypted, ad)
 		if err != nil {
-			return "", nil, fmt.Errorf("environment variable %s: %w", row.Key, err)
+			return nil, nil, fmt.Errorf("environment variable %s: %w", row.Key, err)
 		}
 		vars[row.Key] = string(plain)
 		fingerprints[row.Key] = e.opts.Box.Fingerprint(ad, plain)
@@ -294,16 +375,12 @@ func (e *Engine) renderEnv(ctx context.Context, app store.App, commitSHA string,
 	if review, err := e.opts.Store.GetReviewApp(ctx, app.ID); err == nil {
 		provided.PRNumber = review.PRNumber
 	} else if !errors.Is(err, store.ErrNotFound) {
-		return "", nil, err
+		return nil, nil, err
 	}
 	for k, v := range ProvidedEnv(provided) {
 		vars[k] = v
 	}
-	content, err := RenderEnvFile(vars)
-	if err != nil {
-		return "", nil, err
-	}
-	return content, fingerprints, nil
+	return vars, fingerprints, nil
 }
 
 // composeConfig runs `docker compose config --format json`. With
@@ -316,6 +393,11 @@ func (e *Engine) composeConfig(ctx context.Context, inv compose.Invocation, dir 
 }
 
 func (e *Engine) composeConfigTo(ctx context.Context, inv compose.Invocation, dir string, stderr io.Writer) (compose.Project, error) {
+	if inv.ReleaseEnvFile != "" && !slices.Contains(inv.Profiles, compose.DisabledProfile) {
+		// A blue/green release: the public service the override disables
+		// is part of the project to check (ARCHITECTURE 7.2).
+		inv.Profiles = append(slices.Clone(inv.Profiles), compose.DisabledProfile)
+	}
 	var stdout bytes.Buffer
 	err := e.opts.Runner.Run(ctx, runner.Cmd{
 		Name:   "docker",
@@ -348,15 +430,7 @@ func (e *Engine) revalidatedProject(ctx context.Context, app store.App, id int64
 	if err != nil {
 		return compose.Project{}, err
 	}
-	policy := compose.CheckPolicy(project, compose.PolicyParams{
-		ReleaseDir:  dir,
-		ProjectName: app.ProjectName(),
-		EnvFile:     e.EnvFile(app.Slug),
-		WebService:  app.WebService,
-		WebPort:     app.WebPort,
-		HostPort:    app.HostPort,
-		Relax:       app.RelaxPolicy,
-	})
+	policy := compose.CheckPolicy(project, e.policyParams(app, dir, e.releaseIsBlueGreen(app.Slug, id)))
 	if !policy.OK() {
 		return compose.Project{}, &compose.PolicyError{Violations: policy.Violations}
 	}
@@ -436,7 +510,9 @@ const containerOutputLines = 30
 // is usually the reason, and afterwards it is only in the app's own logs.
 // The output passes the deploy log's masking like everything else. Problems
 // are noted in the log and otherwise ignored: the deployment failed already.
-func (e *Engine) logContainerOutput(ctx context.Context, app store.App, log *deployLog) {
+//
+// With services, only their output is copied.
+func (e *Engine) logContainerOutput(ctx context.Context, app store.App, log *deployLog, services ...string) {
 	if ctx.Err() != nil {
 		return // canceled or shutting down: nobody is waiting for the reason
 	}
@@ -445,7 +521,7 @@ func (e *Engine) logContainerOutput(ctx context.Context, app store.App, log *dep
 	log.Printf("Last output of the containers:")
 	inv := compose.Invocation{ProjectName: app.ProjectName()}
 	tail := strconv.Itoa(containerOutputLines)
-	if err := e.compose(ctx, inv, "", log, "logs", "--no-color", "--tail", tail); err != nil {
+	if err := e.compose(ctx, inv, "", log, append([]string{"logs", "--no-color", "--tail", tail}, services...)...); err != nil {
 		log.Printf("Reading the container output failed: %v", err)
 	}
 }
@@ -465,6 +541,10 @@ func (e *Engine) rollback(app store.App, log *deployLog) (restored bool) {
 		if err := e.compose(ctx, inv, "", log, "down", "--remove-orphans"); err != nil {
 			log.Printf("Removing the containers failed: %v", err)
 		}
+		// Nothing runs in a colour any more.
+		if err := e.opts.Store.SetAppWebColor(ctx, app.ID, ""); err != nil {
+			log.Printf("Recording the colour of the public service failed: %v", err)
+		}
 		return false
 	}
 
@@ -480,7 +560,7 @@ func (e *Engine) rollback(app store.App, log *deployLog) (restored bool) {
 		log.Printf("Rollback is not possible: the previous release is no longer on disk.")
 		return false
 	}
-	env, err := os.ReadFile(filepath.Join(e.stateDir(app.Slug, prev), "env"))
+	env, releaseEnv, err := e.readEnvSnapshots(app.Slug, prev)
 	if err != nil {
 		log.Printf("Rollback is not possible: the previous environment snapshot is missing.")
 		return false
@@ -494,13 +574,16 @@ func (e *Engine) rollback(app store.App, log *deployLog) (restored bool) {
 		log.Printf("Rollback failed: %v", err)
 		return false
 	}
-	if err := writeFileAtomic(e.EnvFile(app.Slug), env, 0o600); err != nil {
+	if err := e.writeLiveEnv(app.Slug, env, releaseEnv); err != nil {
 		log.Printf("Rollback failed: the env file could not be restored: %v", err)
 		return false
 	}
-	prevInv := e.invocation(app, prev, meta.ComposeFile, true)
-	prevInv.DockerConfig = dockerConfig
-	if err := e.up(ctx, prevInv, prevDir, log); err != nil {
+	// The failed release may have changed the colour; the previous one
+	// comes back in the colour the database now names.
+	if current, err := e.opts.Store.GetAppByID(ctx, app.ID); err == nil {
+		app = current
+	}
+	if err := e.upRelease(ctx, app, prev, dockerConfig, e.deployRun(log)); err != nil {
 		log.Printf("Rollback failed: %v", err)
 		return false
 	}

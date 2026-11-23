@@ -569,6 +569,7 @@ func (w *followWriter) line(raw []byte, truncated bool) {
 	if !ok {
 		return
 	}
+	service = w.f.app.recordedService(service)
 	if !w.all && ts.Before(w.since) {
 		return
 	}

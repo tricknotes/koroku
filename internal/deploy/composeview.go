@@ -331,6 +331,11 @@ func (e *Engine) Containers(ctx context.Context, app store.App) (ContainerView, 
 	}
 	view.Compared = expected != nil
 
+	// Both colours run side by side during a deployment.
+	deploying, err := e.opts.Store.HasActiveDeployment(ctx, app.ID)
+	if err != nil {
+		return view, err
+	}
 	deployments, err := e.opts.Store.ListDeployments(ctx, app.ID, 200)
 	if err != nil {
 		return view, err
@@ -338,7 +343,14 @@ func (e *Engine) Containers(ctx context.Context, app store.App) (ContainerView, 
 	for _, c := range containers {
 		info := c.info(app, digests)
 		info.DeploymentID, info.MatchedBy = creatingDeployment(app, info, deployments)
-		if expected != nil {
+		switch {
+		case !deploying && isStaleColor(app, info.Service):
+			// A colour that receives no requests outside a deployment is
+			// left over (ARCHITECTURE 7.2); koroku's start removes it.
+			info.Mismatches = append(info.Mismatches, MismatchOrphan)
+			current := false
+			info.Current = &current
+		case expected != nil:
 			expected.compare(&info, c.configHash)
 		}
 		info.Mismatches = append(info.Mismatches, stateMismatches(info)...)
@@ -354,6 +366,13 @@ func (e *Engine) Containers(ctx context.Context, app store.App) (ContainerView, 
 		return a.Name < b.Name
 	})
 	return view, nil
+}
+
+// isStaleColor reports whether service is a coloured copy of the app's
+// public service that does not receive the requests.
+func isStaleColor(app store.App, service string) bool {
+	name, color := app.PublicServiceOf(service)
+	return name == app.WebService && color != "" && color != app.WebColor
 }
 
 func valueOr(p *int64) int64 {

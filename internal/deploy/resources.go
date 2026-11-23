@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tricknotes/koroku/internal/runner"
+	"github.com/tricknotes/koroku/internal/store"
 )
 
 // ContainerUsage is what one running container uses.
@@ -24,6 +25,9 @@ type ContainerUsage struct {
 	// was not created by Compose.
 	Project     string `json:"project"`
 	Service     string `json:"service"`
+	// Color is the colour of a copy of a blue/green app's public service,
+	// which is shown as the public service (ARCHITECTURE 7.2); "" otherwise.
+	Color string `json:"color,omitempty"`
 	MemoryBytes int64  `json:"memory_bytes"`
 	// MemoryLimitBytes is nil when the container has no memory limit.
 	MemoryLimitBytes *int64 `json:"memory_limit_bytes"`
@@ -112,8 +116,10 @@ func (e *Engine) ContainerResources(ctx context.Context) (ContainerResources, er
 		return ContainerResources{}, fmt.Errorf("list apps: %w", err)
 	}
 	slugs := map[string]string{}
+	byProject := map[string]store.App{}
 	for _, app := range apps {
 		slugs[app.ProjectName()] = app.Slug
+		byProject[app.ProjectName()] = app
 	}
 
 	var containers []ContainerUsage
@@ -132,6 +138,9 @@ func (e *Engine) ContainerResources(ctx context.Context) (ContainerResources, er
 		if meta.limit > 0 {
 			limit := meta.limit
 			usage.MemoryLimitBytes = &limit
+		}
+		if app, ok := byProject[meta.project]; ok {
+			usage.Service, usage.Color = app.PublicServiceOf(meta.service)
 		}
 		containers = append(containers, usage)
 	}
