@@ -17,8 +17,8 @@ const REASONS: Record<EnvRequirementsReason, string> = {
     'リポジトリを読めません。private リポジトリなら、GitHub App をインストールしてください（public リポジトリは App なしで読めます）。',
   unsupported_repo:
     'GitHub 以外の URL で指定したリポジトリは、ファイルを読めません（github.com のリポジトリだけが対象です）。',
-  // No longer sent since public repositories are read without the App;
-  // kept for older servers.
+  // Sent only by older servers: public repositories are read without the
+  // App.
   not_configured: 'GitHub App が設定されていないため、ファイルを読めません。',
   ref_not_found: 'ブランチかコミットが見つかりません。',
   too_large: 'ファイルが大きすぎて読めません。',
