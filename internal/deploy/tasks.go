@@ -203,6 +203,7 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 			if record != nil {
 				record()
 			}
+			close(done)
 		}()
 		defer func() {
 			e.mu.Lock()
@@ -213,7 +214,6 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 			// no longer registered, so a push from now on is queued
 			// directly (ARCHITECTURE 5.2).
 			e.queuePendingAutoDeploy(lifetime, app.ID)
-			close(done)
 		}()
 		defer log.Close()
 		record = e.executeTask(lifetime, jobCtx, app, run, spec, deps, inv.Args(
