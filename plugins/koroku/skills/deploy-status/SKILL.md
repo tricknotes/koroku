@@ -40,7 +40,7 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 | コマンド | 内容 |
 | --- | --- |
 | `koroku-status.sh apps` | すべてのアプリ |
-| `koroku-status.sh deployments <slug>` | 直近 10 件のデプロイ |
+| `koroku-status.sh deployments <slug>` | 直近 10 件のデプロイ（無停止デプロイは起動した色と切り替えの時刻も） |
 | `koroku-status.sh log <id> [--lines N]` | デプロイログ（既定は全文） |
 | `koroku-status.sh runtime <slug> [--service web] [--lines N]` | 実行ログの最後の N 行（既定 100） |
 | `koroku-status.sh env <slug> [--ref <branch>\|--sha <sha>]` | 必要な環境変数と設定済みかどうか（値は出ない） |
@@ -61,6 +61,17 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 | `pull` | イメージ名やタグの誤り、private イメージ。`The registry has no image with that tag (manifest unknown)` は、CI がコミットごとにビルドするイメージがまだ push されていない（ワークフローの終了前にデプロイした） | Compose の `image:`。CI のイメージなら、ワークフローが終わってからデプロイし直す。自動デプロイなら koroku の設定タブの「先に待つワークフロー」にイメージを作るワークフローを入れる |
 | `start` | コンテナがすぐ終了する、ヘルスチェックが通らない、ワンショットのサービスが誰にも待たれていない | ログの `Last output of the containers:` に続く行を読む |
 | `check` | 公開サービスが `0.0.0.0:<port>` で待ち受けていない、ヘルスチェックパスが 5xx を返す | アプリの設定、ポート、ヘルスチェックパス |
+| `switch` | 無停止デプロイで、Caddy への切り替えの投入に失敗した（koroku 側の問題。旧色に戻している） | リポジトリでは直せない。利用者にデプロイし直してもらい、続くなら koroku の運用者に伝える |
+| `services` | 無停止デプロイで、切り替えのあとに作り直したワーカーなどが起動しない | `Last output of the containers:` を読む。そのサービスの Compose と起動コマンド |
+| `drain` | 無停止デプロイで、旧色が止まらない。デプロイは `succeeded` のまま | 直さなくてよい（次のデプロイの前に消える）。続くなら旧色の `stop_grace_period` と `SIGTERM` の扱い |
+
+無停止デプロイ（blue/green）を有効にしたアプリのデプロイは、`start`（`Starting <新色> on port <ポート>`。ワンショットのサービスと新色だけを起動する）→ `check`（新色のポート）→ `switch`（`Switching traffic from <旧色> to <新色>`）→ `services`（ほかのサービスの作り直し）→ `drain`（`Stopping <旧色>`。待ち時間のあとに旧色を止めて消す）→ `done` と進む。読むときの要点:
+
+- `start` か `check` で失敗したら、新色を消しただけで、旧色・DB・ワーカーは動き続けている（ロールバックの行は出ない）。ただしマイグレーションは流れたあとかもしれない。古い版のコードと両立しないマイグレーションなら、旧色がエラーを返していることがある（prepare-app の requirements.md の「無停止デプロイ」）。
+- `Not enough memory to run two <サービス> containers` で失敗したら（新色は起動していない）、ホストの空きメモリが公開サービスの上限 1 つ分に足りない。リポジトリの問題ではない。利用者に、メモリを空けるか上限を下げるか、無停止デプロイを外してデプロイし直すよう伝える。
+- `services` で失敗したら、koroku は旧色に戻し、ワーカーなどを前の版で起動し直している（`rollback` と同じく本番は止まっていない）。
+- `services` に `Recreating <サービス> because the app's environment changed` があれば、環境変数を変えたデプロイで DB なども作り直したので、その数秒はエラーが出うる。
+- デプロイの JSON（`deployments`）の `web_color` は、そのデプロイが起動した色（`blue` / `green`。無停止でないデプロイは `null`）、`switched_at` は切り替えた時刻（切り替える前に終わったら `null`）。`switched_at` がなく `failed` なら、利用者のリクエストは旧色に届き続けていた。
 
 - `rollback` の行があれば、koroku は直前の成功リリースに戻している（`Rolled back: deployment #N is running again.`）。本番が止まっているとは限らないので、そう伝える。
 - 実行ログ（`runtime`）は、起動はしたが動かない場合（エラーを出して再起動を繰り返す、DB に繋がらない）の手がかりになる。

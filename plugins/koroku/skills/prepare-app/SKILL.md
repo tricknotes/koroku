@@ -29,7 +29,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 - **データは named volume に置く**。書き込み可能な bind mount、`external` や `name:` 付きの volume、`container_name` は使えないか、同じリポジトリを staging と本番の 2 アプリで動かすと衝突する。
 - **ワンショットのサービス（マイグレーションなど）は `restart: "no"` を書き、別のサービスから `condition: service_completed_successfully` で待たれるようにする**。誰も待っていないと、正常終了でも `up --wait` が失敗する。
 - **デプロイのたびに全サービスが作り直される**。cron（supercronic など）やジョブキューのワーカーも `SIGTERM` を受け、`stop_grace_period`（既定 10 秒）で強制終了される。長いジョブは途中で殺されても続きからやり直せるように作り、走っている処理を待って止まれるサービスには `stop_grace_period` を付ける（全サービスの合計で 10 分まで。[references/requirements.md](references/requirements.md) の「デプロイのたびに止まる長いジョブ」）。
-- **無停止デプロイ（blue/green）を使うなら、マイグレーションを古い版のコードと両立させる**。koroku のアプリ設定で選んだアプリだけ、公開サービスを 2 つ並べて入れ替える。マイグレーションは古い版が動いている間に流れるので、カラムの削除や名前の変更は 2 回のデプロイに分ける。公開サービスは状態を持たず、プロセス内の cron のような処理を動かさず、`container_name` を書かず、ほかのサービスから `depends_on` されないようにする（[references/requirements.md](references/requirements.md) の「無停止デプロイ」）。
+- **無停止デプロイ（blue/green）を使うなら、マイグレーションを古い版のコードと両立させる**。koroku のアプリ設定で選んだアプリだけ、公開サービスを 2 つ並べて入れ替える。マイグレーションは古い版が動いている間に流れるので、カラムの削除や名前の変更は 2 回のデプロイに分ける。公開サービスは状態を持たず、プロセス内の cron のような処理を動かさず、`container_name` を書かず、ほかのサービスから `depends_on` されないようにする。デプロイの間は公開サービスのメモリ上限 1 つ分が余分に要り、足りなければデプロイが失敗する（旧版は動き続ける）。無停止になるのはデプロイと即時ロールバックだけで、再起動は普通の再起動、アプリの環境変数を変えたデプロイでは DB も作り直す（[references/requirements.md](references/requirements.md) の「無停止デプロイ」）。
 - **デプロイ時に取得されるのはコミット済みのファイルだけ**。`.git` は消され、submodule と Git LFS は取得されない。
 - **staging のアプリは既定で koroku のログインの後ろにある**（アクセスの保護）。ブラウザー以外の呼び出し元（Webhook、外部の死活監視、ほかのサービスからの API 呼び出し）は通れないので、受け口のパスを洗い出し、利用者に「保護を外すパス」への登録を頼む（例 `/webhooks/`）。外したパスはアプリ自身で認証する（署名の検証など）。`/.koroku/` で始まるパスは koroku が使うのでアプリには届かない。
 - **本番の設定で起動する**。koroku にアプリの開発モードはない。ホットリロードやソースの bind mount は `compose.override.yaml` に分ければ、手元の `docker compose up` では使われ、koroku では使われない（koroku は `-f` を明示するので自動で読まない）。
@@ -56,6 +56,12 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 
 アクセスがない間の休止を使うアプリ（たいていの staging）は `--sleep` を付ける。koroku が休止と起動でするのと同じく、`stop` してから `start --wait` し、もう一度 HTTP で確かめ、起きるまでの秒数（休止のあとの最初のリクエストが待つ時間）を出す。
 
+無停止デプロイ（blue/green）を使う、または使えるか確かめたいアプリは `--blue-green` を付ける。koroku が断る形（公開サービスの `container_name`、`deploy.replicas`、ほかのサービスからの依存、`<公開サービス>-blue` / `-green` という名前、`include:`）を先に調べ、色の付いた override を重ねて blue を起動したあと、もう一度デプロイして green への切り替えをなぞる（ワンショットと green を `up --no-deps --wait` → green の確認 → 切り替え → ほかのサービスの作り直し → `--drain` 秒（既定 10）待って blue を止める）。その間 0.2 秒ごとに「いまの転送先」のポートへリクエストを送り、接続エラーか 5xx が 1 件でもあれば失敗にする。green のポートは `--alt-host-port`（既定 28081）。DB が作り直されずに残ったかもサービスごとに出す。
+
+```sh
+<skill-dir>/scripts/rehearse.sh --service web --port 3000 --health /up --env-file /path/to/test.env --blue-green
+```
+
 - リポジトリの追跡中と未追跡（ignore されていない）のファイルだけを一時ディレクトリにコピーし、`.git` なしで動かす。
 - koroku と同じ形の override（公開サービスのポートを `127.0.0.1` に置き換え、ほかのポートを消し、env ファイルを全サービスに注入し、メモリ上限 512m、`oom_score_adj`、本番ならメモリの予約）を重ねて `config` → `build` / `pull` → `up --wait` → HTTP 確認（5xx 以外が返るまで最大 60 秒）を行う。
 - 最初に Compose ファイルが参照する変数（`docker compose config --variables`）を出す。koroku が照合に使うのと同じ一覧なので、アプリが必要とする変数が並んでいるか確かめる。
@@ -64,7 +70,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 - テスト用の env ファイルは一時ディレクトリに作り、本物の秘密を入れない。リポジトリには置かない。
 - Docker が使えない環境では、スクリプトを動かさずに `config` の確認までにとどめ、そう報告する。
 
-ポリシー検査（特権、ホストの名前空間、bind mount など）はこのスクリプトでは行わない。正規化した `config` を [references/requirements.md](references/requirements.md) の表と照らして確かめる。
+ポリシー検査（特権、ホストの名前空間、bind mount など）はこのスクリプトでは行わない（`--blue-green` のときの無停止デプロイの条件だけは調べる）。正規化した `config` を [references/requirements.md](references/requirements.md) の表と照らして確かめる。
 
 ### 5. 報告する
 
@@ -83,6 +89,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 | バックアップ | ダンプフック（サービス名とコマンド。例 `db` / `pg_dump -U postgres app`）と、ファイルのバックアップから外す volume（DB のデータ volume） |
 | 本番の DB を staging へコピーするとき | ロードフック（例 `db` / `pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"`）と、個人情報を消すコマンドがあればそのサービスとコマンド（`references/requirements.md` の「本番の DB を staging にコピーする」） |
 | タスク | 管理画面に登録しておくと便利なコマンド（名前、サービス、コマンド。例 `マイグレーションの状態` / `web` / `bin/rails db:migrate:status`）。対話的なコマンドは使えない |
+| 無停止デプロイ | 使うなら、`rehearse.sh --blue-green` の結果（条件を満たすか、切り替えの間に失敗したリクエストの数）と、旧色を止めるまでの待ち時間（既定 10 秒で足りなければその秒数。最大 300）。koroku のデプロイタブの「デプロイの設定」で有効にする |
 | 独自ドメインを使うときの準備 | ホスト名の許可リストなど、アプリ側で設定する環境変数 |
 
 あわせて、変えたファイルと理由、リハーサルの結果（実行したコマンドと出力の要点）、確かめられなかったことを書く。リハーサルしていないものを「動く」と書かない。

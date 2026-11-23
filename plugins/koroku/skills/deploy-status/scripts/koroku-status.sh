@@ -130,7 +130,7 @@ show_apps() {
 
 show_deployments() {
   if [ "$have_jq" = 1 ]; then
-    jq -r '.deployments[] | "#\(.id)\t\(.status)\t\(.ref)\t\(.commit_sha[0:12])\t\(.queued_at)\t\((.commit_message // "") | split("\n") | .[0] // "")\(if .error != "" then "\n    error: " + .error else "" end)"'
+    jq -r '.deployments[] | "#\(.id)\t\(.status)\t\(.ref)\t\(.commit_sha[0:12])\t\(.queued_at)\t\((.commit_message // "") | split("\n") | .[0] // "")\(if .web_color then "\n    blue/green: started \(.web_color)" + (if .switched_at then ", switched at \(.switched_at)" else ", not switched" end) else "" end)\(if .error != "" then "\n    error: " + .error else "" end)"'
   else
     cat
   fi
