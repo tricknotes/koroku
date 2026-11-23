@@ -291,6 +291,7 @@ export default class ApiService extends Service {
     return {
       ...status,
       installations: status.installations ?? [],
+      installation_account_ids: status.installation_account_ids ?? [],
       installation_accounts: status.installation_accounts ?? [],
     };
   }

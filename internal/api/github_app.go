@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tricknotes/koroku/internal/config"
 	"github.com/tricknotes/koroku/internal/github"
 )
 
@@ -23,19 +24,26 @@ type gitHubAppJSON struct {
 }
 
 type gitHubInstallationJSON struct {
-	Account             string `json:"account"`
+	Account string `json:"account"`
+	// AccountID is what [github] installation_account_ids lists.
+	AccountID           int64  `json:"account_id"`
 	RepositorySelection string `json:"repository_selection"`
 	// Used: koroku lists and fetches this installation's repositories
 	// (ARCHITECTURE 5).
 	Used bool `json:"used"`
+	// LoginOnly: used because the account's login is in [github]
+	// installation_accounts, while its ID is not listed.
+	LoginOnly bool `json:"login_only"`
 }
 
 type gitHubStatusJSON struct {
 	Configured    bool                     `json:"configured"`
 	App           *gitHubAppJSON           `json:"app"`
 	Installations []gitHubInstallationJSON `json:"installations"`
-	// InstallationAccounts is [github] installation_accounts as configured.
-	InstallationAccounts []string `json:"installation_accounts"`
+	// InstallationAccountIDs and InstallationAccounts are [github]
+	// installation_account_ids and installation_accounts as configured.
+	InstallationAccountIDs []int64  `json:"installation_account_ids"`
+	InstallationAccounts   []string `json:"installation_accounts"`
 }
 
 // handleGitHubApp describes the GitHub App and its installations, so that
@@ -43,8 +51,9 @@ type gitHubStatusJSON struct {
 // widen them (ARCHITECTURE 5).
 func (s *Server) handleGitHubApp(w http.ResponseWriter, r *http.Request) {
 	out := gitHubStatusJSON{
-		Installations:        []gitHubInstallationJSON{},
-		InstallationAccounts: append([]string{}, s.cfg.GitHub.InstallationAccounts...),
+		Installations:          []gitHubInstallationJSON{},
+		InstallationAccountIDs: append([]int64{}, s.cfg.GitHub.InstallationAccountIDs...),
+		InstallationAccounts:   append([]string{}, s.cfg.GitHub.InstallationAccounts...),
 	}
 	info, ok := s.auth.GitHub.(gitHubAppInfo)
 	if s.auth.GitHub == nil || !ok {
@@ -73,8 +82,11 @@ func (s *Server) handleGitHubApp(w http.ResponseWriter, r *http.Request) {
 	for _, in := range installs {
 		out.Installations = append(out.Installations, gitHubInstallationJSON{
 			Account:             in.Account,
+			AccountID:           in.AccountID,
 			RepositorySelection: in.RepositorySelection,
 			Used:                in.Allowed,
+			LoginOnly: in.Allowed &&
+				s.cfg.GitHub.InstallationAccess(in.AccountID, in.Account) == config.InstallationByLogin,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -161,6 +162,28 @@ allowed_user_id = 42
 		}
 	}
 
+	// The accounts whose installations are used, by ID and (the weaker
+	// form) by login.
+	cfg, err = Parse(full + "installation_account_ids = [2002, 3003]\ninstallation_accounts = [\"my-org\"]\n")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !slices.Equal(cfg.GitHub.InstallationAccountIDs, []int64{2002, 3003}) ||
+		!slices.Equal(cfg.GitHub.InstallationAccounts, []string{"my-org"}) {
+		t.Errorf("installation accounts = %+v", cfg.GitHub)
+	}
+	// An ID that no account can have is a typo, not an account to ignore.
+	for _, ids := range []string{"[0]", "[2002, -1]"} {
+		_, err := Parse(full + "installation_account_ids = " + ids + "\n")
+		if err == nil || !strings.Contains(err.Error(), "installation_account_ids") {
+			t.Errorf("installation_account_ids = %s: err = %v", ids, err)
+		}
+	}
+	// A login is not an ID: the two settings do not mix.
+	if _, err := Parse(full + "installation_account_ids = [\"my-org\"]\n"); err == nil {
+		t.Error("a login in installation_account_ids: expected an error")
+	}
+
 	// A partly filled section is rejected instead of half-working.
 	for name, text := range map[string]string{
 		"no allowed user": "[github]\napp_id = 1\nclient_id = \"a\"\nclient_secret = \"b\"",
@@ -312,5 +335,31 @@ func TestLoadRefusesReadableConfigWithSecrets(t *testing.T) {
 func TestExampleConfigIsValid(t *testing.T) {
 	if _, err := Load("../../deploy/config.example.toml"); err != nil {
 		t.Fatalf("deploy/config.example.toml: %v", err)
+	}
+}
+
+func TestInstallationAccess(t *testing.T) {
+	both := GitHub{AllowedUserID: 42, InstallationAccountIDs: []int64{2002}, InstallationAccounts: []string{" My-Org "}}
+	idsOnly := GitHub{AllowedUserID: 42, InstallationAccountIDs: []int64{2002}}
+	for _, tc := range []struct {
+		name  string
+		cfg   GitHub
+		id    int64
+		login string
+		want  InstallationAccess
+	}{
+		{"the owner's own account, whatever its login", both, 42, "octo", InstallationByID},
+		{"a listed ID, whatever its login", idsOnly, 2002, "renamed-org", InstallationByID},
+		{"a listed ID whose login is listed too", both, 2002, "my-org", InstallationByID},
+		{"a listed login, case-insensitively", both, 3003, "MY-ORG", InstallationByLogin},
+		{"neither", both, 9009, "stranger", InstallationIgnored},
+		// Why IDs are preferred: the login list cannot tell the account
+		// that took a listed name over from the one that gave it up.
+		{"another account that took a listed login over", both, 9009, "my-org", InstallationByLogin},
+		{"the same account when only IDs are listed", idsOnly, 9009, "my-org", InstallationIgnored},
+	} {
+		if got := tc.cfg.InstallationAccess(tc.id, tc.login); got != tc.want {
+			t.Errorf("%s: InstallationAccess(%d, %q) = %v, want %v", tc.name, tc.id, tc.login, got, tc.want)
+		}
 	}
 }

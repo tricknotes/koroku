@@ -58,16 +58,16 @@ bin/dev sh -c 'cd web && pnpm build && node mock/server.mjs'
 
 The page URL selects what the API answers and, optionally, the theme:
 
-| URL                     | Shows                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `/?scenario=healthy`    | four apps, everything fine (the default)                                                                      |
-| `/?scenario=warnings`   | a deployment in progress, a failed one, a stopped app, a pending domain, disk above the limit, a stale backup |
-| `/?scenario=empty`      | no apps yet                                                                                                   |
-| `/?scenario=undeployed` | one app that was created and never deployed                                                                   |
-| `/?scenario=error`      | every API call fails with 500                                                                                 |
-| `/?scenario=loading`    | API calls take a minute to answer                                                                             |
-| `/?scenario=login`      | not logged in                                                                                                 |
-| `...&theme=dark`        | pins the theme (`light`, `dark`, or `system` to unpin)                                                        |
+| URL                     | Shows                                                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/?scenario=healthy`    | four apps, everything fine (the default)                                                                                                                     |
+| `/?scenario=warnings`   | a deployment in progress, a failed one, a stopped app, a pending domain, disk above the limit, a stale backup, an org whose installation is matched by login |
+| `/?scenario=empty`      | no apps yet                                                                                                                                                  |
+| `/?scenario=undeployed` | one app that was created and never deployed                                                                                                                  |
+| `/?scenario=error`      | every API call fails with 500                                                                                                                                |
+| `/?scenario=loading`    | API calls take a minute to answer                                                                                                                            |
+| `/?scenario=login`      | not logged in                                                                                                                                                |
+| `...&theme=dark`        | pins the theme (`light`, `dark`, or `system` to unpin)                                                                                                       |
 
 Further scenarios cover single screens (`host-trouble`, `unconfigured`,
 `fresh`, `backups-down`, `volumes-down`, `stale-login`, `rollback`, `copy-running`,

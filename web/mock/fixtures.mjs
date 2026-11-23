@@ -20,7 +20,7 @@ const STALE_BACKUP = 2 * DAY + 3 * HOUR;
 export const SCENARIOS = {
   healthy: 'four apps, everything fine',
   warnings:
-    'a deployment in progress, a failed one, a stopped app, a pending domain, disk above the limit, stale backup',
+    'a deployment in progress, a failed one, a stopped app, a pending domain, disk above the limit, stale backup, an org whose installation is matched by login',
   empty: 'no apps yet, and no container running',
   undeployed: 'one app that was created and never deployed',
   error: 'every API call fails with 500',

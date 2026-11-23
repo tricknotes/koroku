@@ -21,6 +21,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -389,7 +390,7 @@ func checkGitHub(ctx context.Context, d Deps) []Result {
 	}
 
 	if err == nil {
-		out = append(out, installationResult(ctx, d.GitHub, app))
+		out = append(out, installationResult(ctx, d.GitHub, app, cfg))
 	}
 	out = append(out, userResult(ctx, d.Users, cfg.AllowedUserID))
 	out = append(out, webhookResult(ctx, d, app, err == nil))
@@ -511,7 +512,10 @@ func permissionResult(app github.App, consoleURL string) Result {
 	return ok(name, "App %q (ID %d), Contents and Metadata read-only, Deployments read and write, Pull requests read-only; %s", app.Slug, app.ID, callback)
 }
 
-func installationResult(ctx context.Context, gh GitHubApp, app github.App) Result {
+// installationResult lists the accounts the App is installed on with their
+// IDs, and says what to write in config.toml for the accounts koroku
+// ignores or matches by login only (ARCHITECTURE 5).
+func installationResult(ctx context.Context, gh GitHubApp, app github.App, cfg config.GitHub) Result {
 	const name = "github.install"
 	list, err := gh.Installations(ctx)
 	if err != nil {
@@ -524,19 +528,57 @@ func installationResult(ctx context.Context, gh GitHubApp, app github.App) Resul
 		}
 		return warn(name, hint, "the App is not installed anywhere: private repositories cannot be listed or fetched")
 	}
-	var used, ignored []string
+	// ids go on the installation_account_ids line that replaces the
+	// logins: what is configured plus the accounts matched by login only.
+	ids := slices.Clone(cfg.InstallationAccountIDs)
+	var used, ignored, byLogin []string
 	for _, in := range list {
-		if in.Allowed {
-			used = append(used, fmt.Sprintf("%s (%s repositories)", in.Account, in.RepositorySelection))
-		} else {
-			ignored = append(ignored, in.Account)
+		if !in.Allowed {
+			ignored = append(ignored, fmt.Sprintf("%s (ID %d)", in.Account, in.AccountID))
+			continue
+		}
+		used = append(used, fmt.Sprintf("%s (ID %d, %s repositories)", in.Account, in.AccountID, in.RepositorySelection))
+		if cfg.InstallationAccess(in.AccountID, in.Account) == config.InstallationByLogin {
+			byLogin = append(byLogin, in.Account)
+			if !slices.Contains(ids, in.AccountID) {
+				ids = append(ids, in.AccountID)
+			}
 		}
 	}
+	msg := "installed on " + strings.Join(used, ", ")
+	var hints []string
 	if len(ignored) > 0 {
-		return warn(name, "add an account you manage to [github] installation_accounts; uninstall the App from accounts you do not know (docs/SETUP.md 4)",
-			"installed on %s, which koroku ignores; used: %s", strings.Join(ignored, ", "), strings.Join(used, ", "))
+		if len(used) == 0 {
+			used = []string{"none"}
+		}
+		msg = fmt.Sprintf("installed on %s, which koroku ignores; used: %s", strings.Join(ignored, ", "), strings.Join(used, ", "))
+		hints = append(hints, "add the ID of an account you manage to [github] installation_account_ids; uninstall the App from accounts you do not know")
 	}
-	return ok(name, "installed on %s", strings.Join(used, ", "))
+	// A login does not identify an account: a renamed account frees its
+	// name, and whoever takes it and installs the App would be accepted.
+	switch {
+	case len(byLogin) > 0:
+		msg += fmt.Sprintf("; %s matched by login only (installation_accounts), and a login given up in a rename can be taken by another account",
+			strings.Join(byLogin, ", "))
+		hints = append(hints, fmt.Sprintf("write %s in [github] and remove installation_accounts", accountIDsLine(ids)))
+	case len(cfg.InstallationAccounts) > 0:
+		msg += "; installation_accounts lists logins that no used installation needs, and a listed login can be taken by another account"
+		hints = append(hints, "remove installation_accounts from [github]")
+	}
+	if len(hints) == 0 {
+		return ok(name, "%s", msg)
+	}
+	return warn(name, strings.Join(hints, "; ")+" (docs/SETUP.md 4)", "%s", msg)
+}
+
+// accountIDsLine is the installation_account_ids line of config.toml for
+// these account IDs.
+func accountIDsLine(ids []int64) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.FormatInt(id, 10)
+	}
+	return "installation_account_ids = [" + strings.Join(parts, ", ") + "]"
 }
 
 func userResult(ctx context.Context, users GitHubUsers, id int64) Result {

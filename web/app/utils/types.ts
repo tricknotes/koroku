@@ -114,11 +114,18 @@ export interface GitHubAppStatus {
   } | null;
   installations: {
     account: string;
+    /** The account's numeric ID: what `installation_account_ids` lists. */
+    account_id: number;
     /** `all` or `selected`. */
     repository_selection: string;
     /** koroku lists and fetches this installation's repositories. */
     used: boolean;
+    /** Used through its login (`installation_accounts`), its ID is not listed. */
+    login_only: boolean;
   }[];
+  /** `[github] installation_account_ids` as configured. */
+  installation_account_ids: number[];
+  /** `[github] installation_accounts` (logins) as configured. */
   installation_accounts: string[];
 }
 

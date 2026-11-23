@@ -56,19 +56,31 @@ func TestCheckReportsABrokenConfig(t *testing.T) {
 }
 
 func TestInstallationAccountFilter(t *testing.T) {
-	allowed := installationAccountFilter(config.GitHub{AllowedUserID: 42, InstallationAccounts: []string{" My-Org "}})
+	both := config.GitHub{AllowedUserID: 42, InstallationAccountIDs: []int64{2002}, InstallationAccounts: []string{" My-Org "}}
+	idsOnly := config.GitHub{AllowedUserID: 42, InstallationAccountIDs: []int64{2002}}
+	loginsOnly := config.GitHub{AllowedUserID: 42, InstallationAccounts: []string{" My-Org "}}
 	for _, tc := range []struct {
+		name  string
+		cfg   config.GitHub
 		id    int64
 		login string
 		want  bool
 	}{
-		{42, "octo", true},  // the operator's own account, whatever its login
-		{7, "my-org", true}, // listed, case-insensitively
-		{7, "MY-ORG", true},
-		{99, "stranger", false},
+		{"the operator's own account, whatever its login", idsOnly, 42, "octo", true},
+		{"a listed ID", idsOnly, 2002, "my-org", true},
+		{"a listed ID after the account was renamed", idsOnly, 2002, "renamed-org", true},
+		{"a listed login", loginsOnly, 2002, "my-org", true},
+		{"a listed login, case-insensitively", loginsOnly, 2002, "MY-ORG", true},
+		{"either list is enough: by ID", both, 2002, "renamed-org", true},
+		{"either list is enough: by login", both, 3003, "my-org", true},
+		{"a stranger", both, 9009, "stranger", false},
+		// Why IDs are preferred: after my-org is renamed its old name is
+		// free, and the login list accepts whoever registers it.
+		{"another account that took a listed login over is accepted by the login list", loginsOnly, 9009, "my-org", true},
+		{"another account that took the login over is refused when only IDs are listed", idsOnly, 9009, "my-org", false},
 	} {
-		if got := allowed(tc.id, tc.login); got != tc.want {
-			t.Errorf("allowed(%d, %q) = %v, want %v", tc.id, tc.login, got, tc.want)
+		if got := installationAccountFilter(tc.cfg)(tc.id, tc.login); got != tc.want {
+			t.Errorf("%s: allowed(%d, %q) = %v, want %v", tc.name, tc.id, tc.login, got, tc.want)
 		}
 	}
 }

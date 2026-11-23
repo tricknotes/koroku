@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	_ "time/tzdata" // the binary must know Asia/Tokyo on a host without zoneinfo
@@ -105,10 +106,15 @@ type GitHub struct {
 	PrivateKeyFile string `toml:"private_key_file"`
 	// AllowedUserID is the numeric ID of the only GitHub user who may log in.
 	AllowedUserID int64 `toml:"allowed_user_id"`
-	// InstallationAccounts names the users and organizations (by login)
-	// whose installations of the App koroku uses, besides the account of
-	// AllowedUserID, which is always used. Needed when the App is installed
-	// on an organization (ARCHITECTURE 5).
+	// InstallationAccountIDs lists the users and organizations (by numeric
+	// account ID) whose installations of the App koroku uses, besides the
+	// account of AllowedUserID, which is always used. Needed when the App
+	// is installed on an organization (ARCHITECTURE 5).
+	InstallationAccountIDs []int64 `toml:"installation_account_ids"`
+	// InstallationAccounts names such accounts by login instead. It is the
+	// weaker form: a renamed account frees its login, and whoever takes
+	// the name and installs the App would be accepted. An account is used
+	// when either list has it; koroku serve warns when this one is set.
 	InstallationAccounts []string `toml:"installation_accounts"`
 	// WebhookSecret is the secret of the App's webhook, which signs push
 	// events for automatic deployment (ARCHITECTURE 5.2). Empty refuses
@@ -124,6 +130,37 @@ type GitHub struct {
 // Configured reports whether a GitHub App is set up at all.
 func (g GitHub) Configured() bool {
 	return g.AppID != 0 || g.ClientID != "" || g.ClientSecret != "" || g.AllowedUserID != 0 || g.WebhookSecret != ""
+}
+
+// InstallationAccess says why koroku uses an installation of the App, or
+// that it does not.
+type InstallationAccess int
+
+const (
+	// InstallationIgnored: the account is not one koroku uses.
+	InstallationIgnored InstallationAccess = iota
+	// InstallationByLogin: only the account's login is listed
+	// (installation_accounts). The account ID was not checked, so this
+	// may be another account that took the name over.
+	InstallationByLogin
+	// InstallationByID: the account is the owner's, or its ID is listed
+	// (installation_account_ids).
+	InstallationByID
+)
+
+// InstallationAccess decides whether koroku uses the installation on the
+// account with this ID and login (ARCHITECTURE 5). Logins compare without
+// regard to case, as GitHub does.
+func (g GitHub) InstallationAccess(accountID int64, login string) InstallationAccess {
+	if accountID == g.AllowedUserID || slices.Contains(g.InstallationAccountIDs, accountID) {
+		return InstallationByID
+	}
+	for _, listed := range g.InstallationAccounts {
+		if strings.EqualFold(strings.TrimSpace(listed), login) {
+			return InstallationByLogin
+		}
+	}
+	return InstallationIgnored
 }
 
 // MinWebhookSecretLength is the shortest webhook secret accepted. GitHub
@@ -367,6 +404,11 @@ func (c Config) Validate() error {
 		}
 		if g.WebhookSecret != "" && len(g.WebhookSecret) < MinWebhookSecretLength {
 			errs = append(errs, fmt.Errorf("github.webhook_secret must be at least %d characters; generate one with: openssl rand -hex 32", MinWebhookSecretLength))
+		}
+	}
+	for _, id := range c.GitHub.InstallationAccountIDs {
+		if id <= 0 {
+			errs = append(errs, fmt.Errorf("github.installation_account_ids: %d is not an account ID (koroku check prints the IDs of the accounts the App is installed on)", id))
 		}
 	}
 	if c.Caddy.Enabled {

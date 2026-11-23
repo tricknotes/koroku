@@ -66,6 +66,9 @@ type Installation struct {
 	ID int64
 	// Account is the login of the user or organization.
 	Account string
+	// AccountID is the numeric ID of that account. Unlike the login, it
+	// stays with the account when it is renamed.
+	AccountID int64
 	// RepositorySelection is "all" or "selected".
 	RepositorySelection string
 	// Allowed says whether the client uses this installation
@@ -182,6 +185,7 @@ func (c *Client) Installations(ctx context.Context) ([]Installation, error) {
 		out = append(out, Installation{
 			ID:                  in.ID,
 			Account:             in.Account.Login,
+			AccountID:           in.Account.ID,
 			RepositorySelection: in.RepositorySelection,
 			Allowed:             c.accountAllowed(in.Account.ID, in.Account.Login),
 		})

@@ -22,18 +22,37 @@ function selectionLabel(selection: string): string {
 }
 
 /**
- * The installation_accounts line to put in config.toml: what is configured
- * plus the installations koroku does not use yet.
+ * The account IDs for installation_account_ids in config.toml: what is
+ * configured, plus the installations koroku does not use yet and the ones
+ * it uses through their login alone.
  */
-function accountsLine(status: GitHubAppStatus): string {
-  const accounts = [...status.installation_accounts];
+function accountIDs(status: GitHubAppStatus): number[] {
+  const ids = [...status.installation_account_ids];
   for (const inst of status.installations) {
-    if (!inst.used && !accounts.includes(inst.account)) {
-      accounts.push(inst.account);
+    if ((!inst.used || inst.login_only) && !ids.includes(inst.account_id)) {
+      ids.push(inst.account_id);
     }
   }
-  if (accounts.length === 0) accounts.push('my-org');
-  return `installation_accounts = [${accounts.map((a) => `"${a}"`).join(', ')}]`;
+  return ids;
+}
+
+/** The installation_account_ids line to put in config.toml. */
+function accountIDsLine(status: GitHubAppStatus): string {
+  const ids = accountIDs(status);
+  const list = ids.length > 0 ? ids.join(', ') : '<アカウントの ID>';
+  return `installation_account_ids = [${list}]`;
+}
+
+function hasAccountIDs(status: GitHubAppStatus): boolean {
+  return accountIDs(status).length > 0;
+}
+
+function hasLogins(status: GitHubAppStatus): boolean {
+  return status.installation_accounts.length > 0;
+}
+
+function idText(id: number): string {
+  return String(id);
 }
 
 /**
@@ -89,7 +108,20 @@ export default class SystemAdminTemplate extends Component {
             <ul class="box job-rows" data-test-github-installations>
               {{#each gh.installations as |inst|}}
                 <li class="job" data-test-github-installation={{inst.account}}>
-                  <span class="job-name mono">{{inst.account}}</span>
+                  <span class="job-name github-account">
+                    <span class="mono">{{inst.account}}</span>
+                    <span class="github-account-id">
+                      ID
+                      <code
+                        class="mono"
+                        data-test-github-account-id
+                      >{{inst.account_id}}</code>
+                      <CopyButton
+                        @text={{idText inst.account_id}}
+                        @label="{{inst.account}} のアカウント ID"
+                      />
+                    </span>
+                  </span>
                   <span class="job-state">
                     {{#if inst.used}}
                       <StatusIndicator
@@ -104,6 +136,13 @@ export default class SystemAdminTemplate extends Component {
                   <span class="job-facts">{{selectionLabel
                       inst.repository_selection
                     }}</span>
+                  {{#if inst.login_only}}
+                    <p class="job-note" data-test-github-login-only>
+                      login だけで一致しています。org の名前を変えると、元の
+                      login は別のアカウントが取れます。下の 3 の行で ID
+                      を指定してください。
+                    </p>
+                  {{/if}}
                 </li>
               {{else}}
                 <li class="job" data-test-github-no-installation>
@@ -160,15 +199,22 @@ export default class SystemAdminTemplate extends Component {
                     の
                     <code>[github]</code>
                     に次の行を書き、koroku
-                    を再起動します。「使わない」と表示されているインストール先は、ここに加えると使われます。</span>
+                    を再起動します。数値は上の一覧のアカウント ID
+                    です。「使わない」と表示されているインストール先は、ここに加えると使われます。{{#if
+                      (hasLogins gh)
+                    }}<span data-test-github-remove-logins>
+                        <code>installation_accounts</code>
+                        の行は消します。</span>{{/if}}</span>
                   <span class="github-guide-config">
-                    <code class="mono" data-test-github-config>{{accountsLine
+                    <code class="mono" data-test-github-config>{{accountIDsLine
                         gh
                       }}</code>
-                    <CopyButton
-                      @text={{accountsLine gh}}
-                      @label="config.toml に書く行"
-                    />
+                    {{#if (hasAccountIDs gh)}}
+                      <CopyButton
+                        @text={{accountIDsLine gh}}
+                        @label="config.toml に書く行"
+                      />
+                    {{/if}}
                   </span>
                 </li>
               </ol>

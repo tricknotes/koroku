@@ -97,7 +97,8 @@ sudo ./deploy/provision.sh ./koroku
 | `[github] app_id`、`client_id`、`client_secret` | GitHub App の値。権限は Contents と Metadata の Read-only と Deployments の Read and write、callback は `https://<console_host>/auth/github/callback` |
 | `[github] private_key_file` | `/etc/koroku/github-app.pem` |
 | `[github] allowed_user_id` | オーナーの GitHub ユーザーの数値 ID（1 件）。オーナーはすべての操作ができ、メンバーとロールを管理画面で管理する。メンバーは DB にあり、ここには書かない。この値を変えると、前のオーナーのセッションと API トークンは使えなくなる（ARCHITECTURE 10.7） |
-| `[github] installation_accounts` | 任意。App をインストールした別の org など、koroku が使うインストール先の login の一覧。オーナー自身のアカウントは書かなくても使う（SETUP 4.5） |
+| `[github] installation_account_ids` | 任意。App をインストールした別の org など、koroku が使うインストール先のアカウント ID（数値）の一覧。オーナー自身のアカウントは書かなくても使う。ID は `koroku check` の `github.install` と管理画面の「GitHub App」に出る（SETUP 4.5） |
+| `[github] installation_accounts` | 任意。同じ一覧を login で書く形。どちらかの一覧にあるアカウントを使う。login は org の名前を変えると空き、別のアカウントが取れるので、ID で書く（`installation_account_ids`）。書いてあれば起動時に警告が出て、`koroku check` が代わりに書く行を示す（SETUP 4.5） |
 | `[github] webhook_secret` | 任意。push での自動デプロイと、ワークフローの成功を待つ自動デプロイ（ARCHITECTURE 5.2）に使う GitHub App の Webhook の secret（20 文字以上。`openssl rand -hex 32` で作る）。App 側の Webhook secret と同じ値にする。未設定なら `/webhooks/github` はすべての配送を断る（SETUP 4.6） |
 | `[github] require_two_factor` | 使われない（古い版の設定）。書いてあれば起動時に警告が出るので、消してよい。2 段階認証は GitHub アカウント側で有効にする（ARCHITECTURE 10.3） |
 | `[storage] endpoint`、`region`、`bucket`、`access_key_id`、`secret_access_key` | S3 互換のオブジェクトストレージ。endpoint と region は事業者の S3 互換 API のもの（region の概念がなければ `auto`）。パス形式（`https://<endpoint>/<bucket>/<key>`）で接続する。バケットは先に作っておく（`koroku` も restic もバケットは作らない）。このセクションがないと、ログは VPS 内にだけ残り、バックアップは無効になる |

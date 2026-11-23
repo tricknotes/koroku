@@ -1994,6 +1994,22 @@ SHOTS.push(
     fullPage: false,
     themes: ['light'],
   },
+  // An org that is used through its login alone (installation_accounts).
+  {
+    name: 'system-github-login',
+    path: '/system/admin?scenario=warnings',
+    wait: '[data-test-github-login-only]',
+    script: `document.querySelector('[data-test-github-app]').scrollIntoView()`,
+  },
+  {
+    name: 'system-github-login-phone',
+    path: '/system/admin?scenario=warnings',
+    wait: '[data-test-github-login-only]',
+    script: `document.querySelector('[data-test-github-app]').scrollIntoView()`,
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
   {
     name: 'system-problem',
     path: '/system?scenario=host-trouble',

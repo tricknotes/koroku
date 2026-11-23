@@ -545,9 +545,22 @@ module('Acceptance | system', function (hooks) {
         configured: true,
         app,
         installations: [
-          { account: 'octo', repository_selection: 'selected', used: true },
-          { account: 'my-org', repository_selection: 'all', used: false },
+          {
+            account: 'octo',
+            account_id: 1001,
+            repository_selection: 'selected',
+            used: true,
+            login_only: false,
+          },
+          {
+            account: 'my-org',
+            account_id: 2002,
+            repository_selection: 'all',
+            used: false,
+            login_only: false,
+          },
         ],
+        installation_account_ids: [],
         installation_accounts: [],
       });
       await visit('/system/admin');
@@ -558,8 +571,14 @@ module('Acceptance | system', function (hooks) {
         .includesText('使う')
         .includesText('選んだリポジトリ');
       assert
+        .dom(
+          '[data-test-github-installation="octo"] [data-test-github-account-id]',
+        )
+        .hasText('1001');
+      assert
         .dom('[data-test-github-installation="my-org"]')
         .includesText('使わない');
+      assert.dom('[data-test-github-login-only]').doesNotExist();
       assert
         .dom('[data-test-github-settings]')
         .hasAttribute(
@@ -572,23 +591,95 @@ module('Acceptance | system', function (hooks) {
       assert
         .dom('[data-test-github-config]')
         .hasText(
-          'installation_accounts = ["my-org"]',
-          'an unused installation is suggested',
+          'installation_account_ids = [2002]',
+          'the ID of an unused installation is suggested',
         );
+      assert.dom('[data-test-github-remove-logins]').doesNotExist();
+
+      await click(
+        '[data-test-github-installation="my-org"] .github-account-id [data-test-copy]',
+      );
+      await click('.github-guide-config [data-test-copy]');
+      assert.deepEqual(
+        fakes.browser.copied,
+        ['2002', 'installation_account_ids = [2002]'],
+        'the ID and the line can be copied',
+      );
     });
 
-    test('configured accounts are kept in the suggested line', async function (assert) {
+    test('configured IDs are kept in the suggested line', async function (assert) {
       fakes.api.on('GET', '/api/system/github', {
         configured: true,
         app,
         installations: [],
-        installation_accounts: ['acme'],
+        installation_account_ids: [3003],
+        installation_accounts: [],
       });
       await visit('/system/admin');
       assert.dom('[data-test-github-no-installation]').exists();
       assert
         .dom('[data-test-github-config]')
-        .hasText('installation_accounts = ["acme"]');
+        .hasText('installation_account_ids = [3003]');
+    });
+
+    test('an account used through its login is told to be listed by ID', async function (assert) {
+      fakes.api.on('GET', '/api/system/github', {
+        configured: true,
+        app,
+        installations: [
+          {
+            account: 'my-org',
+            account_id: 2002,
+            repository_selection: 'all',
+            used: true,
+            login_only: true,
+          },
+          {
+            account: 'other-org',
+            account_id: 3003,
+            repository_selection: 'all',
+            used: true,
+            login_only: false,
+          },
+        ],
+        installation_account_ids: [3003],
+        installation_accounts: ['my-org'],
+      });
+      await visit('/system/admin');
+      assert
+        .dom(
+          '[data-test-github-installation="my-org"] [data-test-github-login-only]',
+        )
+        .exists();
+      assert
+        .dom(
+          '[data-test-github-installation="other-org"] [data-test-github-login-only]',
+        )
+        .doesNotExist();
+      assert
+        .dom('[data-test-github-config]')
+        .hasText(
+          'installation_account_ids = [3003, 2002]',
+          'the configured IDs, then the account matched by login',
+        );
+      assert
+        .dom('[data-test-github-remove-logins]')
+        .includesText('installation_accounts');
+    });
+
+    test('with nothing to list, the line is a pattern and cannot be copied', async function (assert) {
+      fakes.api.on('GET', '/api/system/github', {
+        configured: true,
+        app,
+        installations: [],
+        installation_account_ids: [],
+        installation_accounts: [],
+      });
+      await visit('/system/admin');
+      assert
+        .dom('[data-test-github-config]')
+        .hasText('installation_account_ids = [<アカウントの ID>]');
+      assert.dom('.github-guide-config [data-test-copy]').doesNotExist();
     });
 
     test('without an App it says so', async function (assert) {
@@ -596,6 +687,7 @@ module('Acceptance | system', function (hooks) {
         configured: false,
         app: null,
         installations: [],
+        installation_account_ids: [],
         installation_accounts: [],
       });
       await visit('/system/admin');

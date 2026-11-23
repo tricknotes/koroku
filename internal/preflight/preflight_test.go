@@ -135,7 +135,7 @@ func healthy(t *testing.T) Deps {
 				Permissions: map[string]string{"contents": "read", "metadata": "read", "deployments": "write", "actions": "read", "pull_requests": "read"},
 				Events:      []string{"push", "workflow_run"}},
 			hook:     github.WebhookConfig{URL: "https://console.apps.test/webhooks/github", ContentType: "json"},
-			installs: []github.Installation{{ID: 1, Account: "octocat", RepositorySelection: "all", Allowed: true}},
+			installs: []github.Installation{{ID: 1, Account: "octocat", AccountID: 7, RepositorySelection: "all", Allowed: true}},
 		},
 		Users:          fakeUsers{7: "octocat"},
 		AutoDeployApps: []string{"blog", "shop"},
@@ -170,6 +170,88 @@ func TestHealthyHost(t *testing.T) {
 		if results[i].Name != name {
 			t.Errorf("result %d is %q, want %q", i, results[i].Name, name)
 		}
+	}
+}
+
+// The installation check prints each account's ID, so that the operator can
+// list the accounts by ID without looking the IDs up elsewhere.
+func TestInstallationCheck(t *testing.T) {
+	owner := github.Installation{ID: 1, Account: "octocat", AccountID: 7, RepositorySelection: "selected", Allowed: true}
+	org := github.Installation{ID: 2, Account: "my-org", AccountID: 2002, RepositorySelection: "all", Allowed: true}
+	other := github.Installation{ID: 3, Account: "other-org", AccountID: 3003, RepositorySelection: "all", Allowed: true}
+	stranger := github.Installation{ID: 4, Account: "stranger", AccountID: 9009, RepositorySelection: "all"}
+	const used = "octocat (ID 7, selected repositories), my-org (ID 2002, all repositories)"
+	const byLogin = "; my-org matched by login only (installation_accounts), " +
+		"and a login given up in a rename can be taken by another account"
+	for name, tc := range map[string]struct {
+		ids      []int64
+		logins   []string
+		installs []github.Installation
+		want     Status
+		message  string
+		hint     string
+	}{
+		"listed by ID": {
+			ids:      []int64{2002},
+			installs: []github.Installation{owner, org},
+			want:     OK,
+			message:  "installed on " + used,
+		},
+		"matched by login only": {
+			logins:   []string{"My-Org"},
+			installs: []github.Installation{owner, org},
+			want:     Warn,
+			message:  "installed on " + used + byLogin,
+			hint:     "write installation_account_ids = [2002] in [github] and remove installation_accounts (docs/SETUP.md 4)",
+		},
+		"one by ID, one by login: the line keeps the configured IDs": {
+			ids:      []int64{3003},
+			logins:   []string{"my-org"},
+			installs: []github.Installation{owner, org, other},
+			want:     Warn,
+			message:  "installed on " + used + ", other-org (ID 3003, all repositories)" + byLogin,
+			hint:     "write installation_account_ids = [3003, 2002] in [github] and remove installation_accounts (docs/SETUP.md 4)",
+		},
+		"a login left next to its ID": {
+			ids:      []int64{2002},
+			logins:   []string{"my-org"},
+			installs: []github.Installation{owner, org},
+			want:     Warn,
+			message: "installed on " + used + "; installation_accounts lists logins that no used installation needs, " +
+				"and a listed login can be taken by another account",
+			hint: "remove installation_accounts from [github] (docs/SETUP.md 4)",
+		},
+		"an account koroku ignores": {
+			ids:      []int64{2002},
+			installs: []github.Installation{owner, org, stranger},
+			want:     Warn,
+			message:  "installed on stranger (ID 9009), which koroku ignores; used: " + used,
+			hint: "add the ID of an account you manage to [github] installation_account_ids; " +
+				"uninstall the App from accounts you do not know (docs/SETUP.md 4)",
+		},
+		"ignored and matched by login": {
+			logins:   []string{"my-org"},
+			installs: []github.Installation{owner, org, stranger},
+			want:     Warn,
+			message:  "installed on stranger (ID 9009), which koroku ignores; used: " + used + byLogin,
+			hint: "add the ID of an account you manage to [github] installation_account_ids; " +
+				"uninstall the App from accounts you do not know; " +
+				"write installation_account_ids = [2002] in [github] and remove installation_accounts (docs/SETUP.md 4)",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := healthy(t)
+			d.Config.GitHub.InstallationAccountIDs = tc.ids
+			d.Config.GitHub.InstallationAccounts = tc.logins
+			a := d.GitHub.(fakeApp)
+			a.installs = tc.installs
+			d.GitHub = a
+			got := byName(Run(context.Background(), d))["github.install"]
+			if got.Status != tc.want || got.Message != tc.message || got.Hint != tc.hint {
+				t.Errorf("github.install = %s\n message %q\n    want %q\n    hint %q\n    want %q",
+					got.Status, got.Message, tc.message, got.Hint, tc.hint)
+			}
+		})
 	}
 }
 
@@ -303,10 +385,10 @@ func TestProblems(t *testing.T) {
 		"installed on an account koroku ignores": {
 			change: func(d *Deps) {
 				a := d.GitHub.(fakeApp)
-				a.installs = append(a.installs, github.Installation{ID: 2, Account: "stranger", RepositorySelection: "all"})
+				a.installs = append(a.installs, github.Installation{ID: 2, Account: "stranger", AccountID: 9009, RepositorySelection: "all"})
 				d.GitHub = a
 			},
-			check: "github.install", want: Warn, text: "stranger",
+			check: "github.install", want: Warn, text: "stranger (ID 9009), which koroku ignores",
 		},
 		"unknown user": {
 			change: func(d *Deps) { d.Users = fakeUsers{} },
