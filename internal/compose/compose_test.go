@@ -663,18 +663,28 @@ func TestReservations(t *testing.T) {
 	}
 	want := map[string]int64{"web": 192 << 20, "db": 256 << 20, "cache": 256 << 20}
 	if got := params.Reservations(); !maps.Equal(got, want) {
-		t.Errorf("Reservations() = %v, want %v (the 8m sidecar's 4m is below Docker's minimum)", got, want)
+		t.Errorf("Reservations() = %v, want %v (the 8m sidecar's 4m is below Docker's minimum, the one-shot migrate reserves nothing)", got, want)
 	}
 
 	params.AppReservation = "0"
-	params.ServiceReservation = map[string]string{"web": "1g", "sidecar": "6m"}
+	params.ServiceReservation = map[string]string{"web": "1g", "sidecar": "6m", "migrate": "256m"}
 	want = map[string]int64{"web": 384 << 20, "sidecar": 6 << 20}
 	if got := params.Reservations(); !maps.Equal(got, want) {
-		t.Errorf("Reservations() = %v, want %v (capped at the limit, 0 for none)", got, want)
+		t.Errorf("Reservations() = %v, want %v (capped at the limit, 0 for none, never a one-shot service)", got, want)
 	}
 
 	params.Production = false
 	if got := params.Reservations(); len(got) != 0 {
 		t.Errorf("a staging app must reserve nothing, got %v", got)
+	}
+}
+
+// TestOneShot: only a service another one waits on to complete is one-shot.
+func TestOneShot(t *testing.T) {
+	p := loadProject(t, "rails-postgres")
+	for name, want := range map[string]bool{"migrate": true, "db": false, "web": false, "worker": false} {
+		if got := p.OneShot(name); got != want {
+			t.Errorf("OneShot(%q) = %v, want %v", name, got, want)
+		}
 	}
 }

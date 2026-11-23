@@ -23,6 +23,13 @@ services:
         reservations:
           memory: !reset null
     oom_score_adj: 500
+  "migrate":
+    ports: !reset []
+    env_file:
+      - "/var/lib/koroku/apps/shop/env"
+    mem_limit: "512m"
+    oom_score_adj: 500
+    mem_reservation: !reset null
   "sidecar":
     ports: !reset []
     env_file:

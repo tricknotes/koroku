@@ -366,10 +366,17 @@ func TestServicesAndPrune(t *testing.T) {
 	if err := h.store.SetDeploymentMemoryReservations(ctx, release.ID, map[string]int64{"web": 256 << 20}); err != nil {
 		t.Fatal(err)
 	}
+	if err := h.store.SetDeploymentMemoryShapes(ctx, release.ID, map[string]compose.MemoryShape{"web": {}, "job": {OneShot: true}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := h.store.FinishDeployment(ctx, release.ID, store.StatusSucceeded, "", h.clock.Now()); err != nil {
 		t.Fatal(err)
 	}
 	app = h.reload("blog")
+	// Settings saved after the deployment: the next one reserves 128m for
+	// web, and nothing for the one-shot job.
+	app.Environment = store.EnvironmentProduction
+	app.ServiceMemoryReservations = map[string]string{"web": "128m", "job": "64m"}
 	h.runner.Handler = func(_ context.Context, cmd runner.Cmd) (string, error) {
 		joined := strings.Join(cmd.Args, " ")
 		switch {
@@ -413,6 +420,10 @@ func TestServicesAndPrune(t *testing.T) {
 	}
 	if web.MemoryReservationBytes == nil || *web.MemoryReservationBytes != 256<<20 || job.MemoryReservationBytes != nil {
 		t.Errorf("reservations come from the running release: web %v, job %v", web.MemoryReservationBytes, job.MemoryReservationBytes)
+	}
+	if web.NextMemoryReservationBytes == nil || *web.NextMemoryReservationBytes != 128<<20 ||
+		job.NextMemoryReservationBytes == nil || *job.NextMemoryReservationBytes != 0 {
+		t.Errorf("next reservations follow the saved settings: web %v, job %v", web.NextMemoryReservationBytes, job.NextMemoryReservationBytes)
 	}
 
 	usage, err := h.engine.DockerDiskUsage(context.Background())

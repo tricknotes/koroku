@@ -38,6 +38,7 @@ import {
   pullRequestsOf,
   promotionPreview,
   services,
+  snapshotReservations,
   settle,
   settleBackups,
   snapshots,
@@ -262,6 +263,60 @@ route('POST', '/api/apps', ({ state, body: { env, ...body }, scenario }) => {
   return { status: 201, json: app };
 });
 route('GET', '/api/apps/:slug', appOf);
+/** Settings that change what the next deployment reserves (ARCHITECTURE 6.2). */
+const MEMORY_FIELDS = [
+  'environment',
+  'memory_limit',
+  'service_memory_limits',
+  'memory_reservation',
+  'service_memory_reservations',
+];
+
+const MiB = 1024 * 1024;
+
+function sizeOf(value) {
+  const match = /^([1-9][0-9]*)([bkmg]?)$/.exec(value ?? '');
+  if (!match) return null;
+  return (
+    Number(match[1]) * { '': 1, b: 1, k: 1024, m: MiB, g: 1024 * MiB }[match[2]]
+  );
+}
+
+/**
+ * The API's checks of the reservations against Docker's minimum and the
+ * limit known when saving (ARCHITECTURE 6.2); null when they pass.
+ */
+function reservationProblemOf(app) {
+  const limitOf = (service) =>
+    app.service_memory_limits?.[service] || app.memory_limit || '512m';
+  const check = (what, value, service) => {
+    if (value === '' || value === '0') return null;
+    const bytes = sizeOf(value);
+    if (bytes === null) {
+      return `${what} must be 0 or a number with an optional unit (b, k, m, g), for example 256m`;
+    }
+    if (bytes < 6 * MiB)
+      return `${what} must be at least 6m, or 0 to reserve nothing`;
+    const limit = limitOf(service);
+    if (bytes > sizeOf(limit)) {
+      return `${what} must not exceed the memory limit (${limit})`;
+    }
+    return null;
+  };
+  const all = check('the reservation', app.memory_reservation ?? '', '');
+  if (all) return { memory_reservation: all };
+  for (const [name, value] of Object.entries(
+    app.service_memory_reservations ?? {},
+  )) {
+    const problem =
+      value === ''
+        ? `the reservation of ${name} is empty`
+        : check(`the reservation of ${name}`, value, name);
+    if (problem) return { service_memory_reservations: problem };
+  }
+  return null;
+}
+
 route('PATCH', '/api/apps/:slug', (context) => {
   const target = appOf(context);
   const { body } = context;
@@ -322,12 +377,20 @@ route('PATCH', '/api/apps/:slug', (context) => {
         'must be a .yml or .yaml file directly in .github/workflows/',
     });
   }
+  const reservationProblem = reservationProblemOf({ ...target, ...body });
+  if (reservationProblem) {
+    throw new HttpError(422, 'validation_failed', reservationProblem);
+  }
   const changes = Object.entries(body)
     .filter(
       ([field, value]) =>
         JSON.stringify(target[field] ?? '') !== JSON.stringify(value ?? ''),
     )
     .map(([field, to]) => ({ field, from: target[field] ?? '', to }));
+  if (changes.some(({ field }) => MEMORY_FIELDS.includes(field))) {
+    // The running release keeps what it reserves until the next deployment.
+    snapshotReservations(target);
+  }
   if (changes.length) {
     record(context, target.slug, 'app.settings_changed', { changes });
   }

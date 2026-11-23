@@ -78,6 +78,8 @@ export const SCENARIOS = {
     'everything fine; a push to blog-staging arrived while a command ran and waits for it to end; an earlier one was dropped because the disk was full',
   sleeping:
     'everything fine; shop-staging is asleep after 30 minutes without requests, blog-staging sleeps after an hour',
+  'reservations-pending':
+    'everything fine; blog saved smaller reservations for db and web after its last deployment, which still reserves the defaults',
   'reservations-tight':
     'production apps reserve more memory than a 4 GB host can keep with its 1 GB margin; docs was switched to staging but not redeployed',
 };
@@ -871,6 +873,17 @@ export function buildScenario(name) {
       };
       return state;
     }
+    case 'reservations-pending': {
+      const state = scenario(healthyApps());
+      const blog = state.apps.get('blog');
+      snapshotReservations(blog);
+      blog.service_memory_reservations = {
+        worker: '0',
+        db: '384m',
+        web: '192m',
+      };
+      return state;
+    }
     case 'reservations-tight': {
       // Raised reservations on both production apps, and docs still runs
       // the production release it had before it became staging.
@@ -1250,6 +1263,20 @@ export function startDeployment(
   return started;
 }
 
+/**
+ * Keeps what the running release reserves before settings that change it
+ * are saved: the release keeps it until the next deployment (ARCHITECTURE
+ * 6.2).
+ */
+export function snapshotReservations(target) {
+  if (target.reserved) return;
+  const reserved = {};
+  for (const svc of services(target)) {
+    reserved[svc.name] = svc.memory_reservation_bytes ?? 0;
+  }
+  target.reserved = reserved;
+}
+
 /** Finishes deployments started through the mock once their time is up. */
 export function settle(state) {
   for (const [slug, list] of state.deployments) {
@@ -1262,6 +1289,9 @@ export function settle(state) {
         // A rollback runs the release it started again.
         const release = list.find((older) => older.id === releaseOf(entry));
         if (target) target.current_deployment = release ?? entry;
+        // A new release reserves what the settings say.
+        if (target && entry.source_deployment_id === null)
+          delete target.reserved;
         if (entry.source_deployment_id === null) {
           // The release now runs with what is saved.
           state.deployedEnv ??= new Map();
@@ -1284,8 +1314,13 @@ function parseSize(value) {
  * What a production release reserves for a service, like the override
  * (ARCHITECTURE 6.2): the app setting, else half the limit; null for none.
  */
-function reservationOf(target, name, limit) {
+function reservationOf(target, name, running) {
   if (target.environment !== 'production') return null;
+  // A limit in the settings applies from the same deployment.
+  const limit =
+    parseSize(
+      target.service_memory_limits?.[name] || target.memory_limit || '',
+    ) || running;
   const value =
     target.service_memory_reservations?.[name] || target.memory_reservation;
   if (value === '0') return null;
@@ -1306,18 +1341,25 @@ export function memoryReservation(state) {
       continue;
     }
     const reserved = {};
+    const next = {};
     for (const svc of services(target)) {
       if (svc.memory_reservation_bytes) {
         reserved[svc.name] = svc.memory_reservation_bytes;
       }
+      if (svc.next_memory_reservation_bytes) {
+        next[svc.name] = svc.next_memory_reservation_bytes;
+      }
     }
-    const total = Object.values(reserved).reduce((a, b) => a + b, 0);
-    if (total > 0) {
+    const sum = (map) => Object.values(map).reduce((a, b) => a + b, 0);
+    const total = sum(reserved);
+    if (total > 0 || sum(next) > 0) {
       apps.push({
         slug: target.slug,
         environment: target.environment,
         total_bytes: total,
         services: reserved,
+        next_total_bytes: sum(next),
+        next_services: next,
       });
     }
   }
@@ -1329,6 +1371,7 @@ export function memoryReservation(state) {
   const host = state.system.memory?.total_bytes ?? 0;
   return {
     total_bytes: total,
+    next_total_bytes: apps.reduce((sum, a) => sum + a.next_total_bytes, 0),
     margin_bytes: margin,
     warning: host > 0 && total + margin > host,
     apps,
@@ -1353,13 +1396,18 @@ export function services(target) {
   }
   // Staging sees little traffic and holds little data.
   const scale = target.environment === 'production' ? 1 : 0.35;
+  // `reserved` is what the running release reserves once the settings
+  // changed after it (snapshotReservations); the next deployment follows
+  // the settings.
   const reserved = (list) =>
-    list.map((svc) => ({
-      ...svc,
-      memory_reservation_bytes:
-        target.reserved?.[svc.name] ??
-        reservationOf(target, svc.name, svc.memory_limit_bytes),
-    }));
+    list.map((svc) => {
+      const next = reservationOf(target, svc.name, svc.memory_limit_bytes);
+      return {
+        ...svc,
+        memory_reservation_bytes: target.reserved?.[svc.name] ?? next,
+        next_memory_reservation_bytes: next ?? 0,
+      };
+    });
   return reserved([
     {
       name: 'web',

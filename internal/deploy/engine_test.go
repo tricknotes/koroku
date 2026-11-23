@@ -514,6 +514,14 @@ func TestDeployProtectsProductionMemory(t *testing.T) {
 	if log := h.log("blog", d.ID); !strings.Contains(log, "reserving db 384 MiB, web 256 MiB") {
 		t.Errorf("log does not say what is reserved:\n%s", log)
 	}
+	// The shapes let the next reservations be told from the settings.
+	shapes, err := h.store.DeploymentMemoryShapes(context.Background(), d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := shapes[d.ID]["web"]; !ok || len(shapes[d.ID]) != 2 {
+		t.Errorf("recorded shapes = %v, want web and db", shapes[d.ID])
+	}
 
 	app = h.reload("blog")
 	app.Environment = store.EnvironmentStaging

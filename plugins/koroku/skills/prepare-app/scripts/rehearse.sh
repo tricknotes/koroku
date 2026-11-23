@@ -24,7 +24,9 @@
 #                        cannot set a negative oom_score_adj; rehearse
 #                        production on a rootful Docker or Docker Desktop
 #   --reservation <size> production only: memory reserved per service
-#                        (default: half its limit; 0 for none)
+#                        (default: half its limit; 0 for none). One-shot
+#                        services (awaited with service_completed_successfully)
+#                        get none
 #   --task <svc>:<cmd>   after the check, run a one-off command the way
 #                        koroku's tasks do (run --rm --no-deps -T <svc>
 #                        sh -c <cmd>); repeatable; a non-zero exit fails
@@ -233,6 +235,15 @@ deploy_memory() {
     on && !/^          / { on = 0 }'
 }
 
+# One-shot services: those another service waits on with
+# condition: service_completed_successfully (migrations, seeds). They have
+# exited once the app is up, so koroku reserves no memory for them.
+oneshots="$("${base[@]}" config --no-env-resolution 2>/dev/null | awk '
+  /^    depends_on:$/ { on = 1; next }
+  on && /^      [^ ]/ { dep = $1; sub(/:$/, "", dep); gsub(/"/, "", dep); next }
+  on && /^        condition: service_completed_successfully$/ { print dep; next }
+  on && !/^      / { on = 0 }' | sort -u)"
+
 # Same shape as the override koroku generates (internal/compose/override.go).
 {
   echo "# Rehearsal of the override koroku generates."
@@ -272,7 +283,9 @@ deploy_memory() {
     bytes=0
     if [ "$environment" = production ]; then
       echo "    oom_score_adj: -400"
-      if [ -z "$reservation" ]; then
+      if printf '%s\n' "$oneshots" | grep -qx -- "$name"; then
+        bytes=0
+      elif [ -z "$reservation" ]; then
         bytes=$((limit / 2 / 1048576 * 1048576))
       elif [ "$reservation" != "0" ]; then
         bytes="$(to_bytes "$reservation")"

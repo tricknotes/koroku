@@ -74,8 +74,12 @@ func (s *Server) idleSleepAvailable() bool {
 const reservationMarginBytes = 1 << 30
 
 type memoryReservationJSON struct {
-	TotalBytes  int64 `json:"total_bytes"`
-	MarginBytes int64 `json:"margin_bytes"`
+	TotalBytes int64 `json:"total_bytes"`
+	// NextTotalBytes is the total once every app is deployed with its
+	// saved settings; an app whose next reservations are unknown counts
+	// with what it reserves now.
+	NextTotalBytes int64 `json:"next_total_bytes"`
+	MarginBytes    int64 `json:"margin_bytes"`
 	// Warning is set when the reservations plus the margin exceed the
 	// host's memory.
 	Warning bool                 `json:"warning"`
@@ -87,6 +91,11 @@ type appReservationJSON struct {
 	Environment string           `json:"environment"`
 	TotalBytes  int64            `json:"total_bytes"`
 	Services    map[string]int64 `json:"services"`
+	// NextTotalBytes and NextServices are what the next deployment
+	// reserves with the saved settings; nil when the running release did
+	// not record its services' memory shapes.
+	NextTotalBytes *int64           `json:"next_total_bytes"`
+	NextServices   map[string]int64 `json:"next_services"`
 }
 
 type webhookStatusJSON struct {
@@ -149,22 +158,41 @@ func (s *Server) memoryReservation(ctx context.Context, host *system.Memory) (me
 	if err != nil {
 		return out, err
 	}
+	shapes, err := s.store.DeploymentMemoryShapes(ctx, ids...)
+	if err != nil {
+		return out, err
+	}
+	sum := func(services map[string]int64) (total int64) {
+		for _, bytes := range services {
+			total += bytes
+		}
+		return total
+	}
 	for _, app := range apps {
 		if app.CurrentDeploymentID == nil || app.DesiredState == store.DesiredStopped {
 			continue
 		}
 		services := recorded[*app.CurrentDeploymentID]
-		var total int64
-		for _, bytes := range services {
-			total += bytes
+		if services == nil {
+			services = map[string]int64{}
 		}
-		if total == 0 {
+		entry := appReservationJSON{
+			Slug: app.Slug, Environment: app.Environment, TotalBytes: sum(services), Services: services,
+		}
+		next := entry.TotalBytes
+		if appShapes, ok := shapes[*app.CurrentDeploymentID]; ok {
+			entry.NextServices = deploy.NextReservations(app, s.cfg.Deploy.DefaultMemoryLimit, appShapes)
+			next = sum(entry.NextServices)
+			entry.NextTotalBytes = &next
+		}
+		// An app that reserves nothing now is listed when its next
+		// deployment will.
+		if entry.TotalBytes == 0 && next == 0 {
 			continue
 		}
-		out.TotalBytes += total
-		out.Apps = append(out.Apps, appReservationJSON{
-			Slug: app.Slug, Environment: app.Environment, TotalBytes: total, Services: services,
-		})
+		out.TotalBytes += entry.TotalBytes
+		out.NextTotalBytes += next
+		out.Apps = append(out.Apps, entry)
 	}
 	slices.SortStableFunc(out.Apps, func(a, b appReservationJSON) int {
 		return cmp.Or(cmp.Compare(b.TotalBytes, a.TotalBytes), cmp.Compare(a.Slug, b.Slug))

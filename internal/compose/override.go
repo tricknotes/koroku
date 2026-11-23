@@ -122,8 +122,8 @@ func Override(p OverrideParams) ([]byte, error) {
 		if svc.Restart == "" {
 			b.WriteString("    restart: unless-stopped\n")
 		}
-		limit := p.memoryLimit(name, svc)
-		reservation := p.reservation(name, svc)
+		limit := p.memoryLimit(name, svc.ownMemoryLimit())
+		reservation := p.reservation(name, MemoryShape{OwnLimit: svc.ownMemoryLimit(), OneShot: p.Project.OneShot(name)})
 		// Compose rejects a project that sets mem_limit and
 		// deploy.resources.limits.memory (or mem_reservation and
 		// deploy.resources.reservations.memory) to different values, so
@@ -178,25 +178,61 @@ func Override(p OverrideParams) ([]byte, error) {
 // gives each service. Services without one are left out, so a staging app
 // has none.
 func (p OverrideParams) Reservations() map[string]int64 {
+	return p.ReservationsFor(p.Project.MemoryShapes())
+}
+
+// MemoryShape is what a service's memory limit and reservation depend on
+// besides the app settings. A deployment records the shapes of its release
+// so that the reservations the current settings would give can be told
+// without the Compose file (ARCHITECTURE 6.2).
+type MemoryShape struct {
+	// OwnLimit is the limit the repository sets, as Compose prints it.
+	OwnLimit string `json:"own_limit,omitempty"`
+	// OneShot: see Project.OneShot.
+	OneShot bool `json:"one_shot,omitempty"`
+}
+
+// MemoryShapes returns the memory shape of every service.
+func (p Project) MemoryShapes() map[string]MemoryShape {
+	out := make(map[string]MemoryShape, len(p.Services))
+	for name, svc := range p.Services {
+		out[name] = MemoryShape{OwnLimit: svc.ownMemoryLimit(), OneShot: p.OneShot(name)}
+	}
+	return out
+}
+
+// ReservationsFor is Reservations for services of the given shapes; the
+// Project of p is not used.
+func (p OverrideParams) ReservationsFor(shapes map[string]MemoryShape) map[string]int64 {
 	out := map[string]int64{}
-	for _, name := range p.Project.ServiceNames() {
-		if r := p.reservation(name, p.Project.Services[name]); r > 0 {
+	for name, shape := range shapes {
+		if r := p.reservation(name, shape); r > 0 {
 			out[name] = r
 		}
 	}
 	return out
 }
 
+// ownMemoryLimit is the limit the repository sets, in either form.
+func (s Service) ownMemoryLimit() string {
+	if s.MemLimit != "" {
+		return s.MemLimit
+	}
+	return s.DeployMemoryLimit()
+}
+
 // reservation is the memory reservation of a service in bytes, 0 for none.
 // Only production apps reserve. Precedence mirrors the limit: per-service
 // app setting, app-wide setting, DefaultReservationPercent of the limit.
 // The result never exceeds the limit the service ends up with (Docker
-// refuses that), and one below MinReservation is dropped.
-func (p OverrideParams) reservation(name string, svc Service) int64 {
-	if !p.Production {
+// refuses that), and one below MinReservation is dropped. A one-shot
+// service (see Project.OneShot) has exited once the app is up, so it
+// reserves nothing whatever the settings say.
+func (p OverrideParams) reservation(name string, shape MemoryShape) int64 {
+	if !p.Production || shape.OneShot {
 		return 0
 	}
-	limit, hasLimit := ParseMemory(p.effectiveLimit(name, svc))
+	limit, hasLimit := ParseMemory(p.effectiveLimit(name, shape.OwnLimit))
 	value := p.ServiceReservation[name]
 	if value == "" {
 		value = p.AppReservation
@@ -223,14 +259,11 @@ func (p OverrideParams) reservation(name string, svc Service) int64 {
 
 // effectiveLimit is the memory limit the service runs with: the one the
 // override writes, or the repository's own when the override leaves it.
-func (p OverrideParams) effectiveLimit(name string, svc Service) string {
-	if limit := p.memoryLimit(name, svc); limit != "" {
+func (p OverrideParams) effectiveLimit(name, own string) string {
+	if limit := p.memoryLimit(name, own); limit != "" {
 		return limit
 	}
-	if svc.MemLimit != "" {
-		return svc.MemLimit
-	}
-	return svc.DeployMemoryLimit()
+	return own
 }
 
 // formatMemory renders bytes in MiB when they divide evenly, for a
@@ -248,16 +281,12 @@ func formatMemory(bytes int64) string {
 // configured default, the configured default. The default is a ceiling for
 // what a repository can claim on its own: raising a limit is done in the
 // app settings, not in the Compose file.
-func (p OverrideParams) memoryLimit(name string, svc Service) string {
+func (p OverrideParams) memoryLimit(name, own string) string {
 	if v := p.ServiceMemory[name]; v != "" {
 		return v
 	}
 	if p.AppMemory != "" {
 		return p.AppMemory
-	}
-	own := svc.MemLimit
-	if own == "" {
-		own = svc.DeployMemoryLimit()
 	}
 	if own != "" {
 		limit, okLimit := ParseMemory(own)

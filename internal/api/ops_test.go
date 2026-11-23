@@ -119,8 +119,8 @@ func TestListServices(t *testing.T) {
 		{Name: "web", State: "restarting", Status: "Restarting (1) 3 seconds ago"},
 	}
 	rec := request(t, h, http.MethodGet, "/api/apps/blog/services", "")
-	want := `{"services":[{"name":"db","state":"running","status":"Up 2 hours (healthy)","health":"healthy","memory_bytes":27283947,"memory_limit_bytes":536870912,"cpu_percent":1.5,"memory_reservation_bytes":268435456},` +
-		`{"name":"web","state":"restarting","status":"Restarting (1) 3 seconds ago","health":"","memory_bytes":null,"memory_limit_bytes":null,"cpu_percent":null,"memory_reservation_bytes":null}]}`
+	want := `{"services":[{"name":"db","state":"running","status":"Up 2 hours (healthy)","health":"healthy","memory_bytes":27283947,"memory_limit_bytes":536870912,"cpu_percent":1.5,"memory_reservation_bytes":268435456,"next_memory_reservation_bytes":null},` +
+		`{"name":"web","state":"restarting","status":"Restarting (1) 3 seconds ago","health":"","memory_bytes":null,"memory_limit_bytes":null,"cpu_percent":null,"memory_reservation_bytes":null,"next_memory_reservation_bytes":null}]}`
 	if strings.TrimSpace(rec.Body.String()) != want {
 		t.Errorf("services = %s", rec.Body)
 	}

@@ -207,17 +207,21 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 {
   "memory_reservation": {
     "total_bytes": 1879048192,
+    "next_total_bytes": 1342177280,
     "margin_bytes": 1073741824,
     "warning": false,
     "apps": [
-      { "slug": "shop", "environment": "production", "total_bytes": 1610612736, "services": { "db": 536870912, "web": 1073741824 } },
-      { "slug": "blog", "environment": "production", "total_bytes": 268435456, "services": { "web": 268435456 } }
+      { "slug": "shop", "environment": "production", "total_bytes": 1610612736, "services": { "db": 536870912, "web": 1073741824 },
+        "next_total_bytes": 1073741824, "next_services": { "db": 536870912, "web": 536870912 } },
+      { "slug": "blog", "environment": "production", "total_bytes": 268435456, "services": { "web": 268435456 },
+        "next_total_bytes": null, "next_services": null }
     ]
   }
 }
 ```
 
-- 数えるのは、停止していない（`desired_state` が `running`）アプリの、稼働中のリリースが予約している量（デプロイのときの記録）。予約のないアプリは `apps` に出ない。`apps` は予約の多い順。
+- 数えるのは、停止していない（`desired_state` が `running`）アプリの、稼働中のリリースが予約している量（デプロイのときの記録）。予約のないアプリは、次のデプロイで予約が付くのでなければ `apps` に出ない。`apps` は予約の多い順。
+- `next_services` と `next_total_bytes` は、保存済みの設定で次のデプロイが付ける予約（稼働中のリリースが記録したサービスの形に今の設定を当てた値。ARCHITECTURE 6.2）。形を記録する前のデプロイが稼働中なら `null`。上の `next_total_bytes` はその合計で、`null` のアプリは今の予約で数える。
 - `environment` はアプリの今の設定。staging に切り替えてまだデプロイしていないアプリは、`staging` のまま予約を持って出る（次のデプロイで外れる）。
 - `warning` は、`total_bytes` に `margin_bytes`（1 GiB。ホスト、ビルド、staging アプリのための余白）を足すと `memory.total_bytes` を超えるとき `true`。`memory` が取れなければ `false`。
 
@@ -347,7 +351,7 @@ UI 再設計で次のフィールドが加わる（ARCHITECTURE 9.1）:
 | `DELETE /api/apps/{slug}?volumes=true`（M5） | コンテナを止めて削除。`volumes=true` なら named volume も消す。204。オーナーだけ（レビューアプリは管理以上で、volume は常に消す）。レビューアプリが残っていれば `409 has_review_apps` |
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart`（M5） | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る）。起動でイメージの取得がレジストリに拒否されたら `502 registry_denied`（アプリのコンテナレジストリの認証を確かめる） |
 | `POST /api/apps/{slug}/wake` | 休止中のアプリを起こす（ARCHITECTURE 8.4）。起きるまで（コンテナの起動と HTTP の確認、最長 10 分）待って 200 でアプリ。休止中でなければ何もせず 200 でアプリ。起こせなければ `502 wake_failed`（理由はサーバーログ）。ロールはデプロイ以上 |
-| `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）、`memory_limit_bytes`（上限。無制限なら 0）、`cpu_percent`（`docker stats` の CPU。1 コアを 100% とする値）も付く。止まっているサービスや、取得できないときは `null`。`memory_reservation_bytes` は稼働中のリリースがそのサービスに付けたメモリの予約（ARCHITECTURE 6.2。予約がなければ `null`。止まっていても出る） |
+| `GET /api/apps/{slug}/services`（M5） | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）、`memory_limit_bytes`（上限。無制限なら 0）、`cpu_percent`（`docker stats` の CPU。1 コアを 100% とする値）も付く。止まっているサービスや、取得できないときは `null`。`memory_reservation_bytes` は稼働中のリリースがそのサービスに付けたメモリの予約（ARCHITECTURE 6.2。予約がなければ `null`。止まっていても出る）。`next_memory_reservation_bytes` は保存済みの設定で次のデプロイが付ける予約（予約しないなら `0`。稼働中のリリースが形を記録していないか、そのリリースにないサービスなら `null`） |
 
 - 作成時の環境変数（ARCHITECTURE 9.8、2026-11-21）: `POST /api/apps` の `env` は `PUT /api/apps/{slug}/env` の `vars` と同じ形と検査（key の形式、`KOROKU_` で始まらない、重複なし、500 件まで、値は 64 KiB まで）。不正なら `422 validation_failed`（`details.env`）で、アプリも作らない。空でない `env` は環境変数の保存なので、直近 10 分以内のログインでなければ `403 reauth_required`（アプリは作らない）。`PATCH` では受け付けない（`400 invalid_json`）。
 

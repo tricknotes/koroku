@@ -19,7 +19,6 @@ services:
       - "/var/lib/koroku/apps/blog/env"
     mem_limit: "512m"
     oom_score_adj: -400
-    mem_reservation: "256m"
   "web":
     image: "koroku-blog-web:r42"
     ports: !override
