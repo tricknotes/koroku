@@ -94,7 +94,7 @@ type App struct {
 	// of a blue/green app runs in (ARCHITECTURE 7.2). DumpService still
 	// names the dump.
 	DumpExecService string
-	DumpCommand string
+	DumpCommand     string
 	// WithDumpService, when set, runs the dump inside it: it makes sure
 	// the dump service runs while run does (an app that sleeps while idle
 	// starts only that service for the dump).

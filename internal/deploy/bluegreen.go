@@ -144,6 +144,20 @@ func (e *Engine) commitImages(ctx context.Context, app store.App, id int64, base
 	return services, nil
 }
 
+// BlueGreenProblems returns what keeps the app's running release from
+// blue/green deploys (ARCHITECTURE 7.2), as found when it was deployed.
+// known is false when the release did not record it.
+func (e *Engine) BlueGreenProblems(app store.App) (problems []compose.Violation, known bool) {
+	if app.CurrentDeploymentID == nil {
+		return nil, false
+	}
+	meta, err := e.readMeta(app.Slug, *app.CurrentDeploymentID)
+	if err != nil || meta.BlueGreenProblems == nil {
+		return nil, false
+	}
+	return *meta.BlueGreenProblems, true
+}
+
 // composeRun runs one docker compose call; deployments write the output
 // into their log, manual operations keep it for the error.
 type composeRun func(ctx context.Context, inv compose.Invocation, dir string, sub ...string) error
@@ -720,4 +734,3 @@ func (e *Engine) CleanUpColors(ctx context.Context) {
 		}()
 	}
 }
-

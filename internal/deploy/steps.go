@@ -124,6 +124,11 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		result := compose.CheckPolicy(repoProject, compose.PolicyParams{WebService: app.WebService, Relax: true})
 		return false, &compose.PolicyError{Violations: filterRule(result.Violations, compose.RuleWebServiceMissing)}
 	}
+	problems := compose.CheckBlueGreen(repoProject, app.WebService)
+	if problems == nil {
+		problems = []compose.Violation{}
+	}
+	meta.BlueGreenProblems = &problems
 	overrideParams := memoryParams(app, e.opts.DefaultMemory)
 	overrideParams.Project = repoProject
 	overrideParams.WebService = app.WebService
@@ -133,11 +138,11 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	overrideParams.ProjectName = app.ProjectName()
 	overrideParams.ReleaseTag = "r" + strconv.FormatInt(d.ID, 10)
 	if blueGreen {
-		if violations := compose.CheckBlueGreen(repoProject, app.WebService); len(violations) > 0 {
-			for _, v := range violations {
+		if len(problems) > 0 {
+			for _, v := range problems {
 				log.Printf("Policy violation: %s", v)
 			}
-			return false, &compose.PolicyError{Violations: violations}
+			return false, &compose.PolicyError{Violations: problems}
 		}
 		commitImages, err := e.commitImages(ctx, app, d.ID, base, releaseDir, releaseVars, repoProject, log)
 		if err != nil {

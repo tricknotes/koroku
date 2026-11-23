@@ -23,11 +23,11 @@ type ContainerUsage struct {
 	Name string `json:"name"`
 	// Project and Service are the Compose labels; empty when the container
 	// was not created by Compose.
-	Project     string `json:"project"`
-	Service     string `json:"service"`
+	Project string `json:"project"`
+	Service string `json:"service"`
 	// Color is the colour of a copy of a blue/green app's public service,
 	// which is shown as the public service (ARCHITECTURE 7.2); "" otherwise.
-	Color string `json:"color,omitempty"`
+	Color       string `json:"color,omitempty"`
 	MemoryBytes int64  `json:"memory_bytes"`
 	// MemoryLimitBytes is nil when the container has no memory limit.
 	MemoryLimitBytes *int64 `json:"memory_limit_bytes"`

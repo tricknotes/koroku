@@ -357,11 +357,11 @@ func TestBlueGreenDeploySideBySide(t *testing.T) {
 		t.Fatalf("deployment = %+v\n%s", d, b.log("blog", d.ID))
 	}
 	want := []string{
-		"up migrate web-green",  // start: the one-shot and the new colour, --no-deps
-		"up db worker",          // services, after the switch
-		"stop web-blue",         // drain
-		"rm web-blue",           //
-		"up web-green",          // removing the containers of removed services
+		"up migrate web-green", // start: the one-shot and the new colour, --no-deps
+		"up db worker",         // services, after the switch
+		"stop web-blue",        // drain
+		"rm web-blue",          //
+		"up web-green",         // removing the containers of removed services
 	}
 	if got := b.composeCalls(); !slices.Equal(got, want) {
 		t.Errorf("compose calls = %q\nwant %q", got, want)

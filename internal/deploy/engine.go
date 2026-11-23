@@ -274,6 +274,11 @@ type releaseMeta struct {
 	BlueGreen          bool     `json:"blue_green,omitempty"`
 	Services           []string `json:"services,omitempty"`
 	ReleaseEnvServices []string `json:"release_env_services,omitempty"`
+	// BlueGreenProblems are the findings of compose.CheckBlueGreen on the
+	// release's Compose file, recorded whether or not the app uses
+	// blue/green, so that its settings can warn before it is turned on
+	// (ARCHITECTURE 7.2); nil for releases from before the check.
+	BlueGreenProblems *[]compose.Violation `json:"blue_green_problems,omitempty"`
 }
 
 func (e *Engine) writeMeta(slug string, id int64, meta releaseMeta) error {

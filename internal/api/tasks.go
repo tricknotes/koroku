@@ -221,6 +221,9 @@ func (s *Server) handlePutTasks(w http.ResponseWriter, r *http.Request) {
 		seen[task.Name] = true
 		if !servicePattern.MatchString(task.Service) {
 			errs.add(field("service"), "is not a valid service name")
+		} else if name, color := app.PublicServiceOf(task.Service); color != "" {
+			// Commands run in the public service itself (ARCHITECTURE 7.2).
+			errs.add(field("service"), fmt.Sprintf("is a colour of the public service; use %s", name))
 		}
 		if msg := validateCommand(task.Command); msg != "" {
 			errs.add(field("command"), msg)
