@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -726,5 +727,63 @@ func TestGateCookieStripping(t *testing.T) {
 		if got != want {
 			t.Errorf("strip(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// Only the proxies to an app's own port hold requests while the app
+// restarts (ARCHITECTURE 8): the console, the gate check and the wake route
+// go to koroku, which answers or holds requests itself.
+func TestGenerateHoldsRequestsOnlyForApps(t *testing.T) {
+	for name, in := range goldenInputs() {
+		t.Run(name, func(t *testing.T) {
+			out, err := Generate(in)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			var doc any
+			if err := json.Unmarshal(out, &doc); err != nil {
+				t.Fatal(err)
+			}
+			appDials := map[string]bool{}
+			want := 0
+			for _, app := range in.Apps {
+				appDials["127.0.0.1:"+strconv.Itoa(app.HostPort)] = true
+				if !app.Stopped && !app.Sleeping {
+					want++
+				}
+			}
+			held := 0
+			var walk func(v any)
+			walk = func(v any) {
+				switch v := v.(type) {
+				case []any:
+					for _, e := range v {
+						walk(e)
+					}
+				case map[string]any:
+					if v["handler"] == "reverse_proxy" {
+						dial := v["upstreams"].([]any)[0].(map[string]any)["dial"].(string)
+						lb, hasLB := v["load_balancing"]
+						switch {
+						case appDials[dial]:
+							held++
+							wantLB := map[string]any{"try_duration": "30s", "try_interval": "250ms"}
+							if !reflect.DeepEqual(lb, wantLB) {
+								t.Errorf("proxy to %s: load_balancing = %v, want %v", dial, lb, wantLB)
+							}
+						case hasLB:
+							t.Errorf("proxy to %s must not retry: load_balancing = %v", dial, lb)
+						}
+					}
+					for _, e := range v {
+						walk(e)
+					}
+				}
+			}
+			walk(doc)
+			if held != want {
+				t.Errorf("%d proxies to app ports, want %d (one per running app)", held, want)
+			}
+		})
 	}
 }
