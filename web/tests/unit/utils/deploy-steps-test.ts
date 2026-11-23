@@ -462,4 +462,203 @@ module('Unit | Utility | deploy-steps', function () {
     );
     assert.deepEqual(logSegments([], true), []);
   });
+  module('blue/green (ARCHITECTURE 7.2)', function () {
+    const BEFORE = [
+      head(1, 'fetch', 'Fetching 9fceb02'),
+      head(3, 'prepare', 'Preparing environment and Compose override'),
+      head(4, 'validate', 'Validating the Compose project'),
+    ];
+
+    test('the new steps have Japanese names', function (assert) {
+      assert.strictEqual(stepLabel('switch'), '切り替え');
+      assert.strictEqual(stepLabel('services'), 'ほかのサービスの作り直し');
+      assert.strictEqual(stepLabel('drain'), '旧色の停止');
+    });
+
+    test('a switched deployment runs start, check, switch, services, drain', function (assert) {
+      const lines = [
+        ...BEFORE,
+        head(10, 'start', 'Starting green on port 20010'),
+        head(20, 'check', 'Checking http://127.0.0.1:20010/up'),
+        head(22, 'switch', 'Switching traffic from blue to green'),
+        head(23, 'services', 'Recreating the other services'),
+        head(30, 'drain', 'Stopping blue'),
+        head(41, 'done', 'Deployment succeeded'),
+      ];
+      const parsed = parseDeployLog(lines, times());
+      assert.deepEqual(
+        parsed.steps.map((step) => step.key),
+        [
+          'fetch',
+          'prepare',
+          'validate',
+          'start',
+          'check',
+          'switch',
+          'services',
+          'drain',
+          'done',
+        ],
+      );
+      assert.strictEqual(parsed.failure, null);
+    });
+
+    test('while it runs, the blue/green steps are waited for in order', function (assert) {
+      const running = times({ status: 'running', finished_at: null });
+      const lines = [
+        ...BEFORE,
+        head(10, 'start', 'Starting green on port 20010'),
+      ];
+      assert.deepEqual(
+        parseDeployLog(lines, running, { blueGreen: true }).steps.map(
+          (step) => `${step.key}:${step.state}`,
+        ),
+        [
+          'fetch:done',
+          'prepare:done',
+          'validate:done',
+          'start:running',
+          'check:pending',
+          'switch:pending',
+          'services:pending',
+          'drain:pending',
+          'done:pending',
+        ],
+      );
+      assert.deepEqual(
+        parseDeployLog(lines, { ...running, web_color: 'green' }).steps.map(
+          (step) => step.key,
+        ),
+        [
+          'fetch',
+          'prepare',
+          'validate',
+          'start',
+          'check',
+          'switch',
+          'services',
+          'drain',
+          'done',
+        ],
+        'the colour of the deployment tells it too',
+      );
+      const alone = [...lines, head(14, 'route', 'Updating routes')];
+      assert.deepEqual(
+        parseDeployLog(alone, running, { blueGreen: true }).steps.map(
+          (step) => step.key,
+        ),
+        ['fetch', 'prepare', 'validate', 'start', 'route', 'check', 'done'],
+        'started alone, nothing is switched',
+      );
+    });
+
+    test('short of memory, nothing was touched', function (assert) {
+      const error =
+        'Not enough memory to run two web containers (312 MiB available, 512 MiB needed).';
+      const parsed = parseDeployLog(
+        [
+          ...BEFORE,
+          head(10, 'start', 'Starting green on port 20010'),
+          error,
+          '',
+          head(11, 'failed', `Deployment failed: ${error}`),
+        ],
+        times({ status: 'failed' }),
+      );
+      assert.strictEqual(parsed.failure?.step?.key, 'start');
+      assert.strictEqual(parsed.rollback?.kind, 'untouched');
+    });
+
+    test('a new colour that fails its check is removed; the old one keeps serving', function (assert) {
+      const parsed = parseDeployLog(
+        [
+          ...BEFORE,
+          head(10, 'start', 'Starting green on port 20010'),
+          head(20, 'check', 'Checking http://127.0.0.1:20010/up'),
+          'web-green-1  | Completed 500 Internal Server Error',
+          'Removing web-green; the previous release keeps serving.',
+          '',
+          head(80, 'failed', 'Deployment failed: health check did not pass'),
+        ],
+        times({ status: 'failed' }),
+      );
+      assert.strictEqual(parsed.failure?.step?.key, 'check');
+      assert.deepEqual(parsed.rollback, {
+        kind: 'kept',
+        deploymentId: null,
+        detail: '',
+      });
+    });
+
+    test('a failure after the switch goes back before the failed headline', function (assert) {
+      const lines = [
+        ...BEFORE,
+        head(10, 'start', 'Starting green on port 20010'),
+        head(20, 'check', 'Checking http://127.0.0.1:20010/up'),
+        head(22, 'switch', 'Switching traffic from blue to green'),
+        head(23, 'services', 'Recreating the other services'),
+        ' Container koroku-blog-worker-1  Error',
+        head(
+          30,
+          'rollback',
+          'Switching back and restoring the other services of deployment #41',
+        ),
+        'Requests reach the previous release again.',
+        'Restored worker of deployment #41.',
+        'Removing web-green.',
+        '',
+        head(
+          34,
+          'failed',
+          'Deployment failed: recreate the other services: exit status 1; the previous release was restored',
+        ),
+      ];
+      const parsed = parseDeployLog(lines, times({ status: 'failed' }));
+      assert.deepEqual(
+        parsed.steps.map((step) => `${step.key}:${step.state}`),
+        [
+          'fetch:done',
+          'prepare:done',
+          'validate:done',
+          'start:done',
+          'check:done',
+          'switch:done',
+          'services:failed',
+          'rollback:done',
+        ],
+      );
+      assert.strictEqual(parsed.failure?.step?.key, 'services');
+      assert.deepEqual(parsed.rollback, {
+        kind: 'switched-back',
+        deploymentId: 41,
+        detail: '',
+      });
+
+      const broken = parseDeployLog(
+        lines.map((line) =>
+          line.startsWith('Restored')
+            ? 'Restoring the other services failed: exit status 1'
+            : line,
+        ),
+        times({ status: 'failed' }),
+      );
+      assert.deepEqual(broken.rollback, {
+        kind: 'failed',
+        deploymentId: 41,
+        detail: 'Restoring the other services failed: exit status 1',
+      });
+
+      const going = parseDeployLog(
+        lines.slice(
+          0,
+          lines.indexOf('Requests reach the previous release again.') + 1,
+        ),
+        times({ status: 'running', finished_at: null }),
+      );
+      assert.deepEqual(
+        going.steps.slice(-2).map((step) => `${step.key}:${step.state}`),
+        ['services:failed', 'rollback:running'],
+      );
+    });
+  });
 });
