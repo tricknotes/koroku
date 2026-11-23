@@ -1632,6 +1632,85 @@ SHOTS.push(
   },
 );
 
+// Deployments on the memory history (ARCHITECTURE 9.5). In `memory-deploys`,
+// blog has manual, pushed and promoted deployments over two weeks, one that
+// failed and rolled back, a failed build (not marked) and a rollback right
+// after a deployment, which share a marker in the longer ranges.
+const MARKERS = '[data-test-deploy-marker]';
+const openMarker = (range, pick, how = 'focus') => `(() => {
+  const option = document.querySelector('[data-test-memory-range-option="${range}"]');
+  if (option && !option.checked) option.click();
+  setTimeout(() => {
+    const buttons = [...document.querySelectorAll('${MARKERS}')];
+    const button = buttons.find(${pick}) ?? buttons[buttons.length - 1];
+    document.querySelector('[data-test-memory-history]').scrollIntoView();
+    if ('${how}' === 'click') button.click(); else button.focus();
+  }, 800);
+})()`;
+SHOTS.push(
+  {
+    name: 'deploy-markers-release',
+    path: '/apps/blog/resources?scenario=memory-deploys',
+    wait: MARKERS,
+    fullPage: false,
+  },
+  {
+    name: 'deploy-markers-24h',
+    path: '/apps/blog/resources?scenario=memory-deploys',
+    wait: MARKERS,
+    script: openMarker(
+      '24h',
+      '(b) => b.getAttribute("aria-label").includes("1b")',
+    ),
+    then: '[data-test-deploy-marker-popup]:not([hidden])',
+    settle: 1200,
+  },
+  {
+    name: 'deploy-markers-14d-reverted',
+    path: '/apps/blog/resources?scenario=memory-deploys',
+    wait: MARKERS,
+    script: openMarker('14d', '(b) => b.classList.contains("is-reverted")'),
+    then: '[data-test-deploy-marker-popup]:not([hidden])',
+    settle: 1200,
+  },
+  {
+    name: 'deploy-markers-14d-group',
+    path: '/apps/blog/resources?scenario=memory-deploys',
+    wait: MARKERS,
+    script: openMarker('14d', '(b) => b.classList.contains("is-group")'),
+    then: '[data-test-deploy-marker-popup]:not([hidden])',
+    settle: 1200,
+  },
+  {
+    name: 'deploy-markers-phone',
+    path: '/apps/blog/resources?scenario=memory-deploys',
+    wait: MARKERS,
+    script: openMarker(
+      '7d',
+      '(b) => b.classList.contains("is-reverted")',
+      'click',
+    ),
+    then: '[data-test-deploy-marker-popup]:not([hidden])',
+    settle: 1200,
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'deploy-markers-phone-group',
+    path: '/apps/blog/resources?scenario=memory-deploys',
+    wait: MARKERS,
+    script: openMarker(
+      '14d',
+      '(b) => b.classList.contains("is-group")',
+      'click',
+    ),
+    then: '[data-test-deploy-marker-popup]:not([hidden])',
+    settle: 1200,
+    ...PHONE,
+    fullPage: false,
+  },
+);
+
 // One service's reservation from the resources tab (ARCHITECTURE 9.5). In
 // `healthy`, blog is production and reserves the defaults, except worker.
 const EDIT_RESERVATION = '[data-test-reservation-edit="web"]';

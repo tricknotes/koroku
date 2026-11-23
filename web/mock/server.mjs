@@ -546,7 +546,11 @@ route('GET', '/api/apps/:slug/memory', (context) => {
   }
   // The app of `fresh` was deployed minutes ago: hours of data at most.
   const collectingHours = context.scenario === 'fresh' ? 3 : undefined;
-  return memoryHistory(appOf(context), range, { collectingHours });
+  const app = appOf(context);
+  return memoryHistory(app, range, {
+    collectingHours,
+    steps: context.state.memorySteps?.get(app.slug),
+  });
 });
 
 route('GET', '/api/apps/:slug/compose', (context) => {
@@ -826,8 +830,19 @@ function envRequirements(context) {
 
 route('GET', '/api/apps/:slug/deployments', (context) => {
   const { slug } = appOf(context);
+  let list = context.state.deployments.get(slug) ?? [];
+  // The memory history reads the deployments of its range (ARCHITECTURE 9.5).
+  const since = context.query.get('finished_since');
+  if (since) {
+    const from = Date.parse(since);
+    if (Number.isNaN(from)) throw new HttpError(400, 'invalid_finished_since');
+    list = list.filter(
+      (d) => d.finished_at && Date.parse(d.finished_at) >= from,
+    );
+  }
+  const limit = Number(context.query.get('limit') ?? 50);
   return {
-    deployments: context.state.deployments.get(slug),
+    deployments: list.slice(0, limit),
     // A push kept while a command runs (ARCHITECTURE 5.2).
     pending_auto_deploy: context.state.pendingAutoDeploys?.get(slug) ?? null,
   };

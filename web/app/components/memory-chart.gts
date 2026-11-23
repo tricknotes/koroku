@@ -14,6 +14,7 @@ import {
   type ChartGeometry,
   type ChartPoint,
 } from 'koroku-console/utils/memory-history';
+import type { DeployMarker } from 'koroku-console/utils/deploy-markers';
 import type {
   MemoryHistory,
   MemoryServiceHistory,
@@ -37,6 +38,10 @@ function readoutClass(point: ChartPoint): string {
     : 'memory-chart-readout';
 }
 
+function isReverted(marker: DeployMarker): boolean {
+  return marker.kind === 'reverted';
+}
+
 function timeOf(iso: string): string {
   return formatDateTimeJst(iso);
 }
@@ -48,12 +53,18 @@ interface Signature {
   Args: {
     service: MemoryServiceHistory;
     history: Pick<MemoryHistory, 'from' | 'to' | 'step_seconds'>;
+    /**
+     * Deployments within the range, drawn as vertical lines; their buttons
+     * are in the row above the charts (ARCHITECTURE 9.5).
+     */
+    markers?: DeployMarker[];
   };
 }
 
 /**
  * The memory use of one service over time: the 5-minute maximum as a line
- * over a light wash, and the limit as a grey step line. Pointer and arrow
+ * over a light wash, the limit as a grey step line, and deployments as
+ * thin vertical lines. Pointer and arrow
  * keys show the values at a time; the same figures are in the summary
  * next to the chart.
  */
@@ -159,6 +170,15 @@ export default class MemoryChart extends Component<Signature> {
               class="memory-chart-grid"
               style={{topAt tick.top}}
               aria-hidden="true"
+            ></span>
+          {{/each}}
+          {{#each @markers as |marker|}}
+            <span
+              class="memory-chart-marker
+                {{if (isReverted marker) 'is-reverted'}}"
+              style={{at marker.left}}
+              aria-hidden="true"
+              data-test-memory-chart-marker={{marker.deployment.id}}
             ></span>
           {{/each}}
           <svg

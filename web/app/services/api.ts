@@ -518,6 +518,23 @@ export default class ApiService extends Service {
   }
 
   /**
+   * The deployments that finished at or after `since`, newest first: the
+   * ones within the memory history's range (ARCHITECTURE 9.5).
+   */
+  async listDeploymentsFinishedSince(
+    slug: string,
+    since: string,
+    limit: number,
+  ): Promise<Deployment[]> {
+    const json = await this.request<{ deployments: Deployment[] | null }>(
+      'GET',
+      `/api/apps/${seg(slug)}/deployments`,
+      { query: { finished_since: since, limit } },
+    );
+    return json.deployments ?? [];
+  }
+
+  /**
    * The deployments, newest first, and the automatic deployment kept until
    * the command running on the app ends (ARCHITECTURE 5.2).
    */

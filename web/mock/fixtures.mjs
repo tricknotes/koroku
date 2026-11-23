@@ -161,6 +161,8 @@ function deployment(slug, message, finishedAgo, overrides = {}) {
     actor: OWNER,
     trigger: 'manual',
     pusher: '',
+    // A failed one says itself whether it got as far as the start step.
+    containers_replaced: overrides.status !== 'failed',
     ...overrides,
   };
 }
@@ -416,6 +418,7 @@ function rolledBack(state, slug) {
   const fix = deployment(slug, 'Fix the image cache key', 22 * MINUTE, {
     status: 'failed',
     error: 'health check did not pass within 1m0s (last result: HTTP 502)',
+    containers_replaced: true,
   });
   const back = rollbackOf(footer, 9 * MINUTE);
   const target = state.apps.get(slug);
@@ -423,6 +426,69 @@ function rolledBack(state, slug) {
   target.latest_deployment = back;
   state.deployments.set(slug, [back, fix, pipeline, footer, deps, initial]);
   markKept(state, slug);
+}
+
+/**
+ * blog's deployments over the memory history's two weeks (ARCHITECTURE
+ * 9.5): manual, pushed and promoted ones, a failed one that rolled back
+ * (marked), a failed build (not marked) and a rollback shortly after a
+ * deployment, which share a marker in the longer ranges.
+ */
+function deploysAcrossTwoWeeks(state, slug) {
+  const initial = deployment(slug, 'Initial import', 13 * DAY + 2 * HOUR);
+  const deps = deployment(slug, 'Update dependencies', 9 * DAY + 5 * HOUR, {
+    trigger: 'push',
+    pusher: 'octo',
+    actor: null,
+  });
+  const cache = deployment(
+    slug,
+    'Cache rendered Markdown',
+    6 * DAY + 3 * HOUR,
+    {
+      actor: MEMBER,
+    },
+  );
+  const build = deployment(
+    slug,
+    'Try the new image pipeline',
+    3 * DAY + 6 * HOUR,
+    {
+      status: 'failed',
+      error: 'build: exit status 17',
+    },
+  );
+  const rails = deployment(slug, 'Bump Rails to 8.1.2', 3 * DAY + 2 * HOUR, {
+    status: 'failed',
+    error: 'health check did not pass within 1m0s (last result: HTTP 502)',
+  });
+  rails.containers_replaced = true;
+  const fonts = deployment(slug, 'Preload the web fonts', 2 * DAY + 4 * HOUR, {
+    ref: 'main',
+    promoted_from: { deployment_id: 7, app_slug: 'blog-staging' },
+  });
+  const sitemap = deployment(slug, 'Generate the sitemap nightly', 20 * HOUR);
+  const back = rollbackOf(fonts, 19 * HOUR + 35 * MINUTE);
+  const current = deployment(slug, 'Add reading time to post pages', 3 * HOUR);
+  const target = state.apps.get(slug);
+  target.current_deployment = current;
+  target.latest_deployment = current;
+  state.deployments.set(slug, [
+    current,
+    back,
+    sitemap,
+    fonts,
+    rails,
+    build,
+    cache,
+    deps,
+    initial,
+  ]);
+  markKept(state, slug);
+  // The memory use steps up with the Markdown cache (mock/memory.mjs).
+  state.memorySteps = new Map([
+    [slug, [{ at: Date.parse(cache.finished_at), service: 'web', mib: 45 }]],
+  ]);
 }
 
 function healthyApps() {
@@ -1106,6 +1172,11 @@ export function buildScenario(name) {
           ['blog', [{ key: 'LEGACY_FLAG', value: '1' }, ...ENV_VARS]],
         ]),
       });
+    }
+    case 'memory-deploys': {
+      const state = scenario(healthyApps());
+      deploysAcrossTwoWeeks(state, 'blog');
+      return state;
     }
     case 'rollback': {
       const state = scenario(healthyApps());

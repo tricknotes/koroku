@@ -272,6 +272,11 @@ export interface Deployment {
   trigger?: DeploymentTrigger;
   /** The GitHub login that pushed, for a push-triggered deployment. */
   pusher?: string;
+  /**
+   * The run touched the running containers (ARCHITECTURE 9.5); null when
+   * it did not run to the end.
+   */
+  containers_replaced?: boolean | null;
 }
 
 /** `manual`: the console or the API (rollbacks and promotions too). */

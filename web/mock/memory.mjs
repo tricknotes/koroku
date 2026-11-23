@@ -44,7 +44,7 @@ function hash(text) {
 }
 
 /** The buckets of one service, oldest first, over `days` up to now. */
-function buckets(slug, service, profile, { days, scale, now }) {
+function buckets(slug, service, profile, { days, scale, now, steps = [] }) {
   const next = random(hash(`${slug}/${service}`));
   const end = Math.floor(now / BUCKET) * BUCKET;
   const count = Math.round((days * DAY) / BUCKET);
@@ -56,8 +56,13 @@ function buckets(slug, service, profile, { days, scale, now }) {
     const hour = (new Date(start).getUTCHours() + 9) % 24;
     const wave = Math.sin(((hour - 15) / 24) * 2 * Math.PI);
     const batch = hour === 3 ? profile.batch * (0.82 + next() * 0.15) : 0;
+    // A deployment that changed how much the service uses.
+    const shift = steps
+      .filter((s) => s.service === service && s.at <= start)
+      .reduce((sum, s) => sum + s.mib, 0);
     const avg =
-      (profile.base + profile.wave * wave + profile.noise * next()) * scale;
+      (profile.base + shift + profile.wave * wave + profile.noise * next()) *
+      scale;
     const max = avg + (profile.noise * next() + batch) * scale;
     out.push({
       start,
@@ -141,7 +146,8 @@ function summarize(name, list, from, step) {
 
 /**
  * `GET /api/apps/:slug/memory`. `collectingHours` makes every service
- * young (the `fresh` scenario).
+ * young (the `fresh` scenario); `steps` (`{ at, service, mib }`) raise a
+ * service's use from a deployment on.
  */
 export function memoryHistory(target, rangeName, options = {}) {
   const range = RANGES[rangeName];
@@ -163,6 +169,7 @@ export function memoryHistory(target, rangeName, options = {}) {
       days,
       scale: name === 'web' || name === 'worker' ? scale : Math.max(scale, 0.6),
       now,
+      steps: options.steps,
     });
     const service = summarize(name, list, from, range.step);
     if (service) result.services.push(service);
