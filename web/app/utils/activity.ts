@@ -16,6 +16,7 @@ export interface ActivityText {
 const SETTING_LABELS: Record<string, string> = {
   repo_full_name: 'リポジトリ',
   repo_url: 'リポジトリの URL',
+  repo_id: 'リポジトリの ID',
   default_branch: '既定のブランチ',
   compose_path: 'Compose ファイルのパス',
   web_service: '公開するサービス',

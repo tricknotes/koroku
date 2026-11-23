@@ -3,6 +3,9 @@ package deploy
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -74,14 +77,22 @@ func TestFirstLine(t *testing.T) {
 }
 
 type fakeGitHubAPI struct {
+	// mu guards the fields while an engine's worker uses the fake.
+	mu        sync.Mutex
 	token     string
 	tokenErr  error
 	commit    github.Commit
 	commitErr error
-	calls     []string
+	// repos is the repository GitHub has under each full name; a name
+	// that is missing is not found.
+	repos   map[string]github.Repo
+	repoErr error
+	calls   []string
 }
 
 func (f *fakeGitHubAPI) RepoToken(_ context.Context, owner, repo string) (github.Token, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "token:"+owner+"/"+repo)
 	if f.tokenErr != nil {
 		return github.Token{}, f.tokenErr
@@ -90,8 +101,44 @@ func (f *fakeGitHubAPI) RepoToken(_ context.Context, owner, repo string) (github
 }
 
 func (f *fakeGitHubAPI) ResolveCommit(_ context.Context, owner, repo, ref string) (github.Commit, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, "resolve:"+owner+"/"+repo+"@"+ref)
 	return f.commit, f.commitErr
+}
+
+func (f *fakeGitHubAPI) GetRepo(_ context.Context, owner, repo string) (github.Repo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "repo:"+owner+"/"+repo)
+	if f.repoErr != nil {
+		return github.Repo{}, f.repoErr
+	}
+	found, ok := f.repos[owner+"/"+repo]
+	if !ok {
+		return github.Repo{}, fmt.Errorf("github: repository %s/%s: %w", owner, repo, github.ErrNotFound)
+	}
+	return found, nil
+}
+
+// set changes the fake under its lock.
+func (f *fakeGitHubAPI) set(change func(f *fakeGitHubAPI)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	change(f)
+}
+
+// lookups returns how often the repository was read.
+func (f *fakeGitHubAPI) lookups() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "repo:") {
+			n++
+		}
+	}
+	return n
 }
 
 func TestGitHubTokens(t *testing.T) {

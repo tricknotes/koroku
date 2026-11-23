@@ -432,6 +432,13 @@ export default class NewAppTemplate extends Component {
       body.repo_url = this.repoUrl.trim();
     } else {
       body.repo_full_name = this.repoFullName;
+      // The ID is the repository's identity: deployments fetch only from
+      // the repository picked here, whatever its name denotes later
+      // (ARCHITECTURE 5).
+      const picked = (this.repos.value ?? []).find(
+        (r) => r.full_name === this.repoFullName,
+      );
+      if (picked) body.repo_id = picked.id;
     }
     if (this.defaultBranch.trim()) {
       body.default_branch = this.defaultBranch.trim();

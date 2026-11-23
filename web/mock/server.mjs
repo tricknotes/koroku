@@ -283,6 +283,8 @@ route('POST', '/api/apps', ({ state, body: { env, ...body }, scenario }) => {
     throw new HttpError(403, 'reauth_required');
   }
   const app = newApp(body, 20000 + state.apps.size);
+  // The repository's ID is stored with the app but not part of its JSON.
+  delete app.repo_id;
   state.apps.set(app.slug, app);
   if (env?.length) {
     state.env ??= new Map();

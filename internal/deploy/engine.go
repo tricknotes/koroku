@@ -20,6 +20,7 @@ import (
 
 	"github.com/tricknotes/koroku/internal/clock"
 	"github.com/tricknotes/koroku/internal/compose"
+	"github.com/tricknotes/koroku/internal/github"
 	"github.com/tricknotes/koroku/internal/gitrepo"
 	"github.com/tricknotes/koroku/internal/runner"
 	"github.com/tricknotes/koroku/internal/secrets"
@@ -43,6 +44,15 @@ type PreDeployBackup interface {
 // It returns "" for repositories that need no authentication.
 type TokenSource interface {
 	RepoToken(ctx context.Context, app store.App) (string, error)
+}
+
+// RepoSource reads which repository GitHub has under a name, so that the
+// fetch step can confirm that it is still the one the app was set up with
+// (ARCHITECTURE 5). With anonymous the repository is read without
+// credentials. An error matching github.ErrNotFound means that GitHub
+// shows no repository of that name to the reader.
+type RepoSource interface {
+	Repository(ctx context.Context, owner, repo string, anonymous bool) (github.Repo, error)
 }
 
 // StatusReporter mirrors the status changes of deployments elsewhere (the
@@ -71,9 +81,10 @@ type Options struct {
 	System  system.Prober
 	Health  HealthChecker
 	Fetcher gitrepo.Fetcher
-	// Router, Tokens, Backup and Status are optional.
+	// Router, Tokens, Repos, Backup and Status are optional.
 	Router Router
 	Tokens TokenSource
+	Repos  RepoSource
 	Backup PreDeployBackup
 	Status StatusReporter
 	// CopyBackups backs up the target of a database copy and reads dump

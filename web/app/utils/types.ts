@@ -546,6 +546,8 @@ export interface NewApp {
   slug: string;
   web_port: number;
   repo_full_name?: string;
+  /** The ID of the repository picked from the list (ARCHITECTURE 5). */
+  repo_id?: number;
   repo_url?: string;
   default_branch?: string;
   compose_path?: string;

@@ -56,6 +56,8 @@ export const SCENARIOS = {
     'blog and blog-staging were rolled back to a kept release after a bad deploy; older releases are kept or already removed',
   'unreachable-commit':
     'everything fine, but the last deployment of blog-staging named a commit that its branch does not reach and was refused',
+  'repository-mismatch':
+    "everything fine, but the name of blog-staging's repository denotes another repository now and its last deployment was refused",
   'copy-running':
     'everything fine, and a copy of the production database into blog-staging is running',
   'copy-failed':
@@ -441,6 +443,28 @@ function refusedCommit(state, slug) {
     `fetch source: commit ${refused.commit_sha.slice(0, 8)} is not reachable from "main": ` +
     'a deployment only takes commits on its branch or tag (the commit may have been removed by a force-push, ' +
     'or belong to another branch or to a pull request); deploy from a branch or tag that contains the commit';
+  state.apps.get(slug).latest_deployment = refused;
+  state.deployments.get(slug).unshift(refused);
+}
+
+/**
+ * The name of an app's repository denotes another repository than the one
+ * the app was set up with (ARCHITECTURE 5): the fetch step refused the
+ * last deployment before fetching, and what ran before keeps running.
+ */
+function refusedRepository(state, slug) {
+  const refused = deployment(slug, '', 4 * MINUTE, {
+    status: 'failed',
+    containers_replaced: false,
+    mockFailure: 'repository',
+  });
+  const name = state.apps.get(slug).repo_full_name;
+  refused.started_at = ago(4 * MINUTE + 1000);
+  refused.queued_at = ago(4 * MINUTE + 2000);
+  refused.error =
+    `fetch source: ${name} is not the repository this app was set up with: ` +
+    'GitHub has repository 200 under that name, the app was set up with repository 100. Nothing was fetched. ' +
+    "If the app should deploy the repository that has the name now, the owner sets the app's repository again (repo_id 200)";
   state.apps.get(slug).latest_deployment = refused;
   state.deployments.get(slug).unshift(refused);
 }
@@ -1403,6 +1427,11 @@ export function buildScenario(name) {
     case 'unreachable-commit': {
       const state = scenario(healthyApps());
       refusedCommit(state, 'blog-staging');
+      return state;
+    }
+    case 'repository-mismatch': {
+      const state = scenario(healthyApps());
+      refusedRepository(state, 'blog-staging');
       return state;
     }
     default:

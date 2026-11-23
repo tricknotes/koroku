@@ -12,6 +12,32 @@ import (
 type GitHubAPI interface {
 	RepoToken(ctx context.Context, owner, repo string) (github.Token, error)
 	ResolveCommit(ctx context.Context, owner, repo, ref string) (github.Commit, error)
+	GetRepo(ctx context.Context, owner, repo string) (github.Repo, error)
+}
+
+// GitHubRepoGetter reads which repository GitHub has under a name.
+type GitHubRepoGetter interface {
+	GetRepo(ctx context.Context, owner, repo string) (github.Repo, error)
+}
+
+// GitHubRepos implements RepoSource with the GitHub App's client and, for
+// repositories the App cannot see, a client without credentials. Either
+// may be nil.
+type GitHubRepos struct {
+	Client GitHubRepoGetter
+	Public GitHubRepoGetter
+}
+
+// Repository implements RepoSource.
+func (g GitHubRepos) Repository(ctx context.Context, owner, repo string, anonymous bool) (github.Repo, error) {
+	client := g.Client
+	if anonymous {
+		client = g.Public
+	}
+	if client == nil {
+		return github.Repo{}, errors.New("no GitHub client is configured for this lookup")
+	}
+	return client.GetRepo(ctx, owner, repo)
 }
 
 // GitHubTokens mints installation tokens for apps backed by a GitHub

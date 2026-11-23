@@ -344,9 +344,14 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	apiOpts.PublicFiles = publicGitHub
 	// Adding a member resolves its login with the public users API.
 	apiOpts.Users = publicGitHub
+	// A deployment confirms the repository's ID before it fetches
+	// (ARCHITECTURE 5): through the App, and without credentials for a
+	// repository the App cannot see.
+	repos := deploy.GitHubRepos{Public: publicGitHub}
 	if gh != nil {
 		tokens := deploy.GitHubTokens{Client: gh}
 		deployOpts.Tokens = tokens
+		repos.Client = gh
 		gitRefs.Tokens = tokens
 		apiOpts.Refs = deploy.GitHubRefResolver{Client: gh, Fallback: gitRefs}
 		apiOpts.Auth.GitHub = gh
@@ -372,6 +377,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 				"GitHub does not report the two-factor status to a GitHub App, so GitHub enforces it at sign-in instead")
 		}
 	}
+	deployOpts.Repos = repos
 	// Assign the interfaces only when there is a router: a nil *Router
 	// stored in an interface would not compare equal to nil.
 	if router != nil {

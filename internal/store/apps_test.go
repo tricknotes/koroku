@@ -69,6 +69,48 @@ func TestCreateAndGetApp(t *testing.T) {
 	}
 }
 
+// The ID of an app's repository is recorded once: the first reading fills
+// an empty repo_id and no later one replaces it (ARCHITECTURE 5).
+func TestRecordAppRepoIDFillsOnlyAnEmptyID(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	app := mustCreateApp(t, s, "blog")
+	if app.RepoID != nil {
+		t.Fatalf("a new app has repo_id %d", *app.RepoID)
+	}
+
+	if got, err := s.RecordAppRepoID(ctx, app.ID, 1296269); err != nil || got != 1296269 {
+		t.Fatalf("first recording = %d, %v", got, err)
+	}
+	if got, err := s.RecordAppRepoID(ctx, app.ID, 555); err != nil || got != 1296269 {
+		t.Errorf("second recording = %d, %v; want the first ID kept", got, err)
+	}
+	stored, err := s.GetApp(ctx, "blog")
+	if err != nil || stored.RepoID == nil || *stored.RepoID != 1296269 {
+		t.Errorf("stored repo_id = %v, %v", stored.RepoID, err)
+	}
+	// Nothing else of the app changes, the time of its last edit included.
+	if !stored.UpdatedAt.Equal(app.UpdatedAt) || stored.RepoFullName != app.RepoFullName {
+		t.Errorf("the recording changed the app: %+v", stored)
+	}
+
+	// An ID set with the app is left alone as well.
+	picked := newApp("shop")
+	id := int64(42)
+	picked.RepoID = &id
+	created, err := s.CreateApp(ctx, picked, 20000, 20999, testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.RecordAppRepoID(ctx, created.ID, 43); err != nil || got != 42 {
+		t.Errorf("recording over a picked ID = %d, %v", got, err)
+	}
+
+	if _, err := s.RecordAppRepoID(ctx, 9999, 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing app: err = %v", err)
+	}
+}
+
 func TestCloneURLPrefersExplicitURL(t *testing.T) {
 	a := App{RepoFullName: "octo/blog", RepoURL: "https://example.com/git/blog.git"}
 	if a.CloneURL() != "https://example.com/git/blog.git" {

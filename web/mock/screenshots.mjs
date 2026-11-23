@@ -426,6 +426,19 @@ const SHOTS = [
     ...PHONE,
   },
   {
+    // The repository's name denotes another repository (ARCHITECTURE 5).
+    name: 'deploy-repository-mismatch',
+    path: '/apps/blog-staging/deploy?scenario=repository-mismatch',
+    wait: '[data-test-repository-mismatch]',
+    fullPage: true,
+  },
+  {
+    name: 'deploy-repository-mismatch-phone',
+    path: '/apps/blog-staging/deploy?scenario=repository-mismatch',
+    wait: '[data-test-repository-mismatch]',
+    ...PHONE,
+  },
+  {
     name: 'deploy-empty-phone',
     path: '/apps/notes/deploy?scenario=undeployed',
     wait: '[data-test-no-deployments]',
