@@ -339,14 +339,13 @@ module('Acceptance | safeguards', function (hooks) {
     test('stopping: the confirmation is locked, and so are the other operations', async function (assert) {
       const held = fakes.api.hold('POST', `${APP}/stop`);
       await visit('/apps/blog/settings');
+      await click('[data-test-action-menu]');
       await click('[data-test-control="stop"]');
 
       const stopping = click('[data-test-dialog-confirm]');
       await waitUntil(() => find('[data-test-dialog-confirm][aria-busy]'));
 
       assertDialogBusy(assert, 'stop');
-      assert.dom('[data-test-control="restart"]').isDisabled();
-      assert.dom('[data-test-control="stop"]').isDisabled();
       hammerDialog();
 
       state.app = { ...state.app, desired_state: 'stopped' };
@@ -355,20 +354,19 @@ module('Acceptance | safeguards', function (hooks) {
 
       assert.strictEqual(sent('POST', `${APP}/stop`), 1);
       assert.dom('[data-test-dialog]').doesNotExist();
-      assert.dom('[data-test-settings-state]').hasText('停止');
+      assert.dom('[data-test-app-state]').hasText('停止');
     });
 
     test('restarting: one request, and no stop on top of it', async function (assert) {
       const held = fakes.api.hold('POST', `${APP}/restart`);
       await visit('/apps/blog/settings');
 
+      await click('[data-test-action-menu]');
       const restarting = click('[data-test-control="restart"]');
-      await waitUntil(() => find('[data-test-control="restart"][aria-busy]'));
+      await waitUntil(() => find('[data-test-control-busy]'));
 
-      assert
-        .dom('[data-test-control="restart"]')
-        .isDisabled()
-        .hasText('再起動中…');
+      await click('[data-test-action-menu]');
+      assert.dom('[data-test-control="restart"]').isDisabled();
       assert.dom('[data-test-control="stop"]').isDisabled();
       (find('[data-test-control="restart"]') as HTMLButtonElement).click();
 
@@ -376,6 +374,7 @@ module('Acceptance | safeguards', function (hooks) {
       await restarting;
 
       assert.strictEqual(sent('POST', `${APP}/restart`), 1);
+      await click('[data-test-action-menu]');
       assert.dom('[data-test-control="restart"]').isNotDisabled();
       assert.dom('[data-test-control="stop"]').isNotDisabled();
     });
@@ -446,7 +445,7 @@ module('Acceptance | safeguards', function (hooks) {
     });
 
     test('"run now" starts one backup, from the app tab and from the system page', async function (assert) {
-      for (const url of ['/apps/blog/backups', '/system']) {
+      for (const url of ['/apps/blog/backups', '/system/jobs']) {
         fakes.api.calls = [];
         const held = fakes.api.hold('POST', '/api/backups');
         await visit(url);

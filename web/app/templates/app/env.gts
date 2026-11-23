@@ -14,6 +14,8 @@ import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import CopyButton from 'koroku-console/components/copy-button';
 import EmptyState from 'koroku-console/components/empty-state';
 import EnvRequirementsPanel from 'koroku-console/components/env-requirements-panel';
+import EnvSourceSettings from 'koroku-console/components/env-source-settings';
+import UnsavedSettingsGuard from 'koroku-console/components/unsaved-settings-guard';
 import ErrorMessage from 'koroku-console/components/error-message';
 import Icon from 'koroku-console/components/icon';
 import RowList from 'koroku-console/components/row-list';
@@ -21,6 +23,10 @@ import TabSection from 'koroku-console/components/tab-section';
 import type ApiService from 'koroku-console/services/api';
 import type SessionService from 'koroku-console/services/session';
 import type AppContext from 'koroku-console/utils/app-context';
+import type AppEnvController from 'koroku-console/controllers/app/env';
+import SettingsEditor, {
+  ENV_SOURCE_FIELDS,
+} from 'koroku-console/utils/settings-editor';
 import { preventDefault, setValue } from 'koroku-console/utils/dom';
 import {
   formatDotenv,
@@ -152,7 +158,7 @@ const focusWhen = modifier<{
 });
 
 interface Signature {
-  Args: { model: AppContext };
+  Args: { model: AppContext; controller: AppEnvController };
 }
 
 export default class AppEnvTemplate extends Component<Signature> {
@@ -209,10 +215,23 @@ export default class AppEnvTemplate extends Component<Signature> {
   /** Read out by screen readers after a row is saved or deleted. */
   @tracked announcement = '';
 
+  /** Where the requirements check reads from (ARCHITECTURE 9.1, 9.4). */
+  sourceEditor: SettingsEditor;
+
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
+    this.sourceEditor = new SettingsEditor(
+      this.api,
+      args.model,
+      ENV_SOURCE_FIELDS,
+      () => void this.requirements.load(),
+    );
     void this.list.load();
     void this.requirements.load();
+  }
+
+  get focusSource(): boolean {
+    return this.args.controller.section === 'env-requirements';
   }
 
   get slug(): string {
@@ -1032,6 +1051,12 @@ export default class AppEnvTemplate extends Component<Signature> {
         </AsyncView>
       </:default>
     </TabSection>
+
+    <EnvSourceSettings
+      @editor={{this.sourceEditor}}
+      @focus={{this.focusSource}}
+    />
+    <UnsavedSettingsGuard @editor={{this.sourceEditor}} @what="照合元" />
 
     {{#if this.confirming}}
       <ConfirmDialog

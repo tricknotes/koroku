@@ -61,9 +61,14 @@ module('Acceptance | roles', function (hooks) {
     assert.dom('[data-test-role-badge="deploy"]').hasText('ロール: デプロイ');
     await click('[data-test-user-menu]');
     assert.dom('[data-test-menu-role]').hasText('メンバー');
-    assert.dom('[data-test-menu-members]').doesNotExist();
+    assert.dom('[data-test-menu-security]').exists();
 
-    for (const url of ['/system', '/members', '/apps/new']) {
+    for (const url of [
+      '/system',
+      '/system/jobs',
+      '/system/admin',
+      '/apps/new',
+    ]) {
       await visit(url);
       assert.strictEqual(currentURL(), '/', `${url} leads back to the list`);
     }
@@ -95,15 +100,32 @@ module('Acceptance | roles', function (hooks) {
       .dom('[data-test-domains] [data-test-copy]')
       .isNotDisabled('copying a record is reading');
 
+    assert.dom('[data-test-env-source-form] fieldset').isDisabled();
+    assert
+      .dom('[data-test-env-source-group] [data-test-role-note="manage"]')
+      .exists();
+    assert.dom('[data-test-env-source-save]').doesNotExist();
+
     await visit('/apps/blog/settings');
     assert.dom('[data-test-settings-form] fieldset').isDisabled();
     assert.dom('[data-test-role-note="manage"]').exists();
-    assert.dom('[data-test-control="restart"]').doesNotExist();
+    assert.dom('[data-test-action-menu]').doesNotExist('no start or stop');
+    assert.dom('[data-test-control]').doesNotExist();
     assert.dom('[data-test-delete]').doesNotExist();
+    assert.dom('[data-test-danger-zone]').doesNotExist();
     assert.dom('[data-test-memory-summary-limit]').exists();
     assert.dom('[data-test-settings-resources-link]').exists();
 
+    await visit('/apps/blog/deploy');
+    assert
+      .dom('[data-test-deploy-settings-form] fieldset')
+      .isDisabled('the deploy settings can be read');
+    assert.dom('[data-test-field="auto_deploy"]').exists();
+    assert.dom('[data-test-deploy-settings-save]').doesNotExist();
+
     await visit('/apps/blog/resources');
+    assert.dom('[data-test-idle-sleep-form] fieldset').isDisabled();
+    assert.dom('[data-test-idle-sleep-save]').doesNotExist();
     assert.dom('[data-test-memory-settings]').exists();
     assert.dom('[data-test-memory-setting-edit]').doesNotExist();
     assert.dom('[data-test-memory-setting-add]').doesNotExist();
@@ -117,16 +139,21 @@ module('Acceptance | roles', function (hooks) {
     await visit('/apps/blog/settings');
 
     assert.dom('[data-test-settings-form] fieldset').isNotDisabled();
-    assert.dom('[data-test-field="relax_policy"]').isDisabled();
     assert.dom('[data-test-domain-form]').exists('manage changes the domains');
-    assert.dom('[data-test-owner-only-note]').exists();
     assert
       .dom('[data-test-environment-option="production"]')
       .isDisabled('the environment is the owner’s');
     assert.dom('[data-test-environment-owner-note]').exists();
+    await click('[data-test-action-menu]');
     assert.dom('[data-test-control="restart"]').exists('may restart');
     assert.dom('[data-test-control="stop"]').exists('may stop');
     assert.dom('[data-test-delete]').doesNotExist('deleting is the owner’s');
+
+    await visit('/apps/blog/deploy');
+    assert.dom('[data-test-deploy-settings-form] fieldset').isNotDisabled();
+    assert.dom('[data-test-field="relax_policy"]').isDisabled();
+    assert.dom('[data-test-field="auto_deploy"]').isNotDisabled();
+    assert.dom('[data-test-owner-only-note]').exists();
   });
 
   test('the deploy history says who deployed', async function (assert) {
@@ -163,9 +190,9 @@ module('Acceptance | roles', function (hooks) {
       .on('DELETE', '/api/members/7', () => undefined);
 
     await visit('/');
-    await click('[data-test-user-menu]');
-    await click('[data-test-menu-members]');
-    assert.strictEqual(currentURL(), '/members');
+    await click('[data-test-nav="system"]');
+    await click('[data-test-system-tab="admin"]');
+    assert.strictEqual(currentURL(), '/system/admin');
     assert.dom('[data-test-no-members]').exists();
 
     await fillIn('[data-test-member-login]', '@mia');
@@ -198,7 +225,7 @@ module('Acceptance | roles', function (hooks) {
       .on('GET', '/api/apps', { apps: [makeApp()] })
       .on('GET', '/api/members', { members: [] })
       .fail('POST', '/api/members', 404, 'user_not_found');
-    await visit('/members');
+    await visit('/system/admin');
     await fillIn('[data-test-member-login]', 'nobody');
     await click('[data-test-member-add]');
 

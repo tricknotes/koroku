@@ -44,7 +44,7 @@ module('Acceptance | automatic deployment on push', function (hooks) {
   });
 
   test('a staging app turns it on without a dialog and shows the GitHub App setup', async function (assert) {
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
 
     assert.dom('[data-test-field="auto_deploy"]').isNotChecked().isEnabled();
     assert.dom('[data-test-webhook-setup]').doesNotExist();
@@ -59,22 +59,22 @@ module('Acceptance | automatic deployment on push', function (hooks) {
     assert.dom('[data-test-webhook-secret-missing]').doesNotExist();
 
     await fillIn('[data-test-field="auto_deploy_branch"]', ' develop ');
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
 
     assert.dom('[data-test-dialog]').doesNotExist();
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
       auto_deploy: true,
       auto_deploy_branch: 'develop',
     });
-    assert.dom('[data-test-settings-saved]').exists();
+    assert.dom('[data-test-deploy-settings-saved]').exists();
   });
 
   test('a production app asks before deploying pushes', async function (assert) {
     app = { ...app, environment: 'production' };
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
 
     await click('[data-test-field="auto_deploy"]');
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
     assert
       .dom('[data-test-auto-deploy-confirm]')
       .includesText('main')
@@ -82,7 +82,7 @@ module('Acceptance | automatic deployment on push', function (hooks) {
     await click('[data-test-dialog-cancel]');
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
 
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
     await click('[data-test-dialog-confirm]');
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
       auto_deploy: true,
@@ -91,12 +91,12 @@ module('Acceptance | automatic deployment on push', function (hooks) {
 
     // Following another branch asks again; turning it off does not.
     await fillIn('[data-test-field="auto_deploy_branch"]', 'release');
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
     assert.dom('[data-test-auto-deploy-confirm]').includesText('release');
     await click('[data-test-dialog-confirm]');
 
     await click('[data-test-field="auto_deploy"]');
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
     assert.dom('[data-test-dialog]').doesNotExist();
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[2]?.body, {
       auto_deploy: false,
@@ -104,7 +104,7 @@ module('Acceptance | automatic deployment on push', function (hooks) {
   });
 
   test('it can wait for a workflow, with the App setup it needs', async function (assert) {
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
 
     await click('[data-test-field="auto_deploy"]');
     assert
@@ -121,7 +121,7 @@ module('Acceptance | automatic deployment on push', function (hooks) {
       .dom('[data-test-workflow-setup]')
       .includesText('Actions')
       .includesText('Workflow run');
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
       auto_deploy: true,
       auto_deploy_workflow: '.github/workflows/image.yml',
@@ -136,10 +136,10 @@ module('Acceptance | automatic deployment on push', function (hooks) {
           'must be a .yml or .yaml file directly in .github/workflows/',
       });
     });
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
 
     await fillIn('[data-test-field="auto_deploy_workflow"]', 'image.yml');
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
     assert
       .dom(
         '[data-test-field-group="auto_deploy_workflow"] [data-test-field-error]',
@@ -149,13 +149,13 @@ module('Acceptance | automatic deployment on push', function (hooks) {
 
   test('a production app asks again when the workflow changes', async function (assert) {
     app = { ...app, environment: 'production', auto_deploy: true };
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
 
     await fillIn(
       '[data-test-field="auto_deploy_workflow"]',
       '.github/workflows/image.yml',
     );
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
     assert
       .dom('[data-test-auto-deploy-confirm]')
       .includesText('.github/workflows/image.yml');
@@ -170,10 +170,10 @@ module('Acceptance | automatic deployment on push', function (hooks) {
     fakes.api.on('PATCH', '/api/apps/blog', () => {
       throw apiError(403, 'reauth_required');
     });
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
 
     await click('[data-test-field="auto_deploy"]');
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
     await click('[data-test-dialog-confirm]');
     assert.dom('[data-test-reauth-dialog]').exists();
   });
@@ -183,7 +183,7 @@ module('Acceptance | automatic deployment on push', function (hooks) {
     system = makeSystem({
       webhook: { url: WEBHOOK_URL, secret_configured: false },
     });
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
 
     assert.dom('[data-test-field="auto_deploy"]').isChecked();
     assert
@@ -197,10 +197,10 @@ module('Acceptance | automatic deployment on push', function (hooks) {
       repo_full_name: '',
       repo_url: 'https://github.com/octo/oss.git',
     };
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
 
     assert.dom('[data-test-field="auto_deploy"]').isDisabled();
-    assert.dom('#settings-auto-deploy-hint').includesText('GitHub App');
+    assert.dom('#auto-deploy-hint').includesText('GitHub App');
   });
 
   test('the deploy history marks deployments started by a push', async function (assert) {

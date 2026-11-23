@@ -68,11 +68,21 @@ module('Acceptance | settings', function (hooks) {
     assert
       .dom('[data-test-memory-summary-limit]')
       .hasText('基盤の既定値（全サービス共通）、db 1g');
-    assert.dom('[data-test-field="relax_policy"]').isNotChecked();
-    assert.dom('[data-test-auto-rollback]').includesText('有効');
     assert
       .dom('[data-test-field="dump_hook_service"]')
       .doesNotExist('the backup settings live on the backups tab');
+    for (const field of [
+      'auto_deploy',
+      'relax_policy',
+      'promote_from',
+      'idle_sleep',
+    ]) {
+      assert
+        .dom(`[data-test-field="${field}"]`)
+        .doesNotExist(`${field} lives on the tab it acts on`);
+    }
+    assert.dom('[data-test-env-source-option]').doesNotExist();
+    assert.dom('[data-test-control]').doesNotExist('nothing to start here');
   });
 
   test('only the changed fields are sent', async function (assert) {
@@ -85,14 +95,12 @@ module('Acceptance | settings', function (hooks) {
     await fillIn('[data-test-field="healthcheck_path"]', '/up');
     await fillIn('[data-test-field="default_branch"]', 'trunk');
     await click('[data-test-environment-option="production"]');
-    await click('[data-test-field="relax_policy"]');
     await click('[data-test-settings-save]');
 
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
       default_branch: 'trunk',
       healthcheck_path: '/up',
       environment: 'production',
-      relax_policy: true,
     });
     assert.dom('[data-test-settings-saved]').exists();
     assert
@@ -176,76 +184,125 @@ module('Acceptance | settings', function (hooks) {
       assert.strictEqual(currentURL(), '/apps/blog/settings');
       assert.dom(fieldError('healthcheck_path')).exists();
     });
+
+    test('the resources and environment tabs guard their settings too', async function (assert) {
+      fakes.api.on('GET', '/api/system', { idle_sleep: { available: true } });
+      await visit('/apps/blog/resources');
+      await click('[data-test-field="idle_sleep"]');
+      await click('[data-test-header-deploy]');
+      assert.dom('[data-test-unsaved-dialog]').includesText('休止の設定');
+      await click('[data-test-dialog-confirm]');
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        idle_sleep: true,
+      });
+      assert.strictEqual(currentURL(), '/apps/blog/deploy');
+
+      await visit('/apps/blog/env');
+      await click('[data-test-env-source-option="off"]');
+      await click('[data-test-tab="deploy"]');
+      assert.dom('[data-test-unsaved-dialog]').includesText('照合元');
+      await click('[data-test-dialog-alt]');
+      assert.strictEqual(currentURL(), '/apps/blog/deploy');
+      assert.strictEqual(
+        fakes.api.callsTo('PATCH', '/api/apps/blog').length,
+        1,
+        'dropped without saving',
+      );
+    });
+
+    test('deploying with unsaved deploy settings asks first', async function (assert) {
+      fakes.api.on(
+        'POST',
+        '/api/apps/blog/deployments',
+        makeDeployment({ id: 50, status: 'queued' }),
+      );
+      app = { ...app, role: 'owner' };
+      await visit('/apps/blog/deploy');
+      await click('[data-test-field="relax_policy"]');
+      await click('[data-test-deploy-submit]');
+
+      assert.dom('[data-test-unsaved-dialog]').exists();
+      assert.dom('[data-test-dialog-confirm]').hasText('保存してデプロイ');
+      assert.deepEqual(
+        fakes.api.callsTo('POST', '/api/apps/blog/deployments'),
+        [],
+        'held back',
+      );
+
+      await click('[data-test-dialog-alt]');
+      assert.strictEqual(
+        fakes.api.callsTo('POST', '/api/apps/blog/deployments').length,
+        1,
+        'deployed with the saved settings',
+      );
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
+      assert
+        .dom('[data-test-field="relax_policy"]')
+        .isChecked('the edit stays in the form');
+
+      await click('[data-test-deploy-submit]');
+      await click('[data-test-dialog-confirm]');
+      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+        relax_policy: true,
+      });
+      assert.strictEqual(
+        fakes.api.callsTo('POST', '/api/apps/blog/deployments').length,
+        2,
+        'saved, then deployed',
+      );
+    });
+
+    test('relaxing the policy checks comes with a warning', async function (assert) {
+      await visit('/apps/blog/deploy');
+
+      assert.dom('[data-test-relax-warning]').doesNotExist();
+      assert.dom('[data-test-auto-rollback]').includesText('有効');
+
+      await click('[data-test-field="relax_policy"]');
+
+      assert
+        .dom('[data-test-relax-warning]')
+        .includesText('保護の多くが効きません')
+        .includesText('root');
+
+      await click('[data-test-field="relax_policy"]');
+      assert.dom('[data-test-relax-warning]').doesNotExist();
+    });
+
+    test('an app that already runs relaxed shows the warning at once', async function (assert) {
+      app = { ...app, relax_policy: true };
+
+      await visit('/apps/blog/deploy');
+
+      assert.dom('[data-test-field="relax_policy"]').isChecked();
+      assert.dom('[data-test-relax-warning]').exists();
+    });
   });
 
-  test('the requirements check is shown and follows a saved change', async function (assert) {
-    fakes.api.on('GET', '/api/apps/blog/env/requirements', () => ({
-      source: 'compose',
-      status: 'ok',
-      reason: '',
-      ref: app.default_branch,
-      commit_sha: 'a'.repeat(40),
-      path: 'compose.yaml',
-      variables:
-        app.default_branch === 'next'
-          ? [
-              { key: 'DATABASE_URL', required: true, set: false },
-              { key: 'SECRET_KEY_BASE', required: true, set: true },
-            ]
-          : [{ key: 'SECRET_KEY_BASE', required: true, set: true }],
-      unlisted: [],
-    }));
+  test('a production app that deploys pushes asks before its branch changes', async function (assert) {
+    app = { ...app, environment: 'production', auto_deploy: true };
     await visit('/apps/blog/settings');
-    assert
-      .dom('[data-test-settings-requirements="default"]')
-      .includesText('1 件は、すべて設定済み');
 
-    await fillIn('[data-test-field="default_branch"]', 'next');
+    await fillIn('[data-test-field="default_branch"]', 'release');
     await click('[data-test-settings-save]');
-
-    assert.strictEqual(
-      fakes.api.callsTo('GET', '/api/apps/blog/env/requirements').length,
-      2,
-      'read again after the branch changed',
-    );
     assert
-      .dom('[data-test-settings-requirements="warning"]')
-      .includesText('ブランチ next')
-      .includesText('2 件のうち、1 件が未設定');
-    assert.dom('[data-test-settings-requirements-link]').exists();
+      .dom('[data-test-auto-deploy-confirm]')
+      .includesText('release', 'auto-deploy follows the default branch');
+    await click('[data-test-dialog-confirm]');
+    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+      default_branch: 'release',
+    });
+  });
 
-    await fillIn('[data-test-field="healthcheck_path"]', '/up');
+  test('turning a staging app that sleeps into production asks first', async function (assert) {
+    app = { ...app, idle_sleep: true, idle_sleep_minutes: 60 };
+    await visit('/apps/blog/settings');
+
+    await click('[data-test-environment-option="production"]');
     await click('[data-test-settings-save]');
-    assert.strictEqual(
-      fakes.api.callsTo('GET', '/api/apps/blog/env/requirements').length,
-      2,
-      'other settings do not read it again',
-    );
-  });
-
-  test('relaxing the policy checks comes with a warning', async function (assert) {
-    await visit('/apps/blog/settings');
-
-    assert.dom('[data-test-relax-warning]').doesNotExist();
-
-    await click('[data-test-field="relax_policy"]');
-
-    assert
-      .dom('[data-test-relax-warning]')
-      .includesText('保護の多くが効きません')
-      .includesText('root');
-
-    await click('[data-test-field="relax_policy"]');
-    assert.dom('[data-test-relax-warning]').doesNotExist();
-  });
-
-  test('an app that already runs relaxed shows the warning at once', async function (assert) {
-    app = { ...app, relax_policy: true };
-
-    await visit('/apps/blog/settings');
-
-    assert.dom('[data-test-field="relax_policy"]').isChecked();
-    assert.dom('[data-test-relax-warning]').exists();
+    assert.dom('[data-test-idle-sleep-confirm]').includesText('1 時間');
+    await click('[data-test-dialog-cancel]');
+    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
   });
 
   test('validation errors are shown next to the fields', async function (assert) {
@@ -381,126 +438,6 @@ module('Acceptance | settings', function (hooks) {
     });
   });
 
-  module('start, stop and restart', function () {
-    test('restart is an ordinary action; stop sits in the danger zone and asks first', async function (assert) {
-      fakes.api
-        .on('POST', '/api/apps/blog/restart', () => app)
-        .on('POST', '/api/apps/blog/stop', () => {
-          app = { ...app, desired_state: 'stopped' };
-          return app;
-        })
-        .on('POST', '/api/apps/blog/start', () => {
-          app = { ...app, desired_state: 'running' };
-          return app;
-        });
-
-      await visit('/apps/blog/settings');
-
-      assert.dom('[data-test-settings-state]').hasText('稼働中');
-      assert
-        .dom('[data-test-danger-zone] [data-test-control="restart"]')
-        .doesNotExist('restart is not a dangerous operation');
-      assert.dom('[data-test-danger-zone] [data-test-control="stop"]').exists();
-      assert.dom('[data-test-danger-zone] [data-test-delete]').exists();
-      assert
-        .dom('[data-test-settings-form] [data-test-control]')
-        .doesNotExist('none of them is next to the save button');
-      assert.dom('[data-test-control="start"]').doesNotExist();
-
-      await click('[data-test-control="restart"]');
-
-      assert.dom('[data-test-dialog]').doesNotExist();
-      assert.strictEqual(
-        fakes.api.callsTo('POST', '/api/apps/blog/restart').length,
-        1,
-      );
-      assert.dom('[data-test-notice]').hasText('再起動しました。');
-
-      await click('[data-test-control="stop"]');
-
-      assert.dom('[data-test-dialog]').includesText('503');
-      assert.deepEqual(fakes.api.callsTo('POST', '/api/apps/blog/stop'), []);
-      assert.dom('[data-test-dialog-input]').doesNotExist();
-
-      await click('[data-test-dialog-confirm]');
-
-      assert.strictEqual(
-        fakes.api.callsTo('POST', '/api/apps/blog/stop').length,
-        1,
-      );
-      assert.dom('[data-test-dialog]').doesNotExist();
-      assert.dom('[data-test-notice]').hasText('停止しました。');
-      assert.dom('[data-test-settings-state]').hasText('停止');
-      assert
-        .dom('[data-test-control="stop"]')
-        .isDisabled('a stopped app cannot be stopped again');
-      assert.dom('[data-test-control="restart"]').doesNotExist();
-
-      await click('[data-test-control="start"]');
-
-      assert.dom('[data-test-settings-state]').hasText('稼働中');
-      assert.dom('[data-test-notice]').hasText('起動しました。');
-      assert.dom('[data-test-control="stop"]').isNotDisabled();
-    });
-
-    test('stopping a production app names it as such', async function (assert) {
-      app = { ...app, environment: 'production' };
-
-      await visit('/apps/blog/settings');
-      await click('[data-test-control="stop"]');
-
-      assert.dom('[data-test-dialog]').includesText('本番アプリ');
-
-      await click('[data-test-dialog-cancel]');
-      assert.dom('[data-test-dialog]').doesNotExist();
-      assert.deepEqual(fakes.api.callsTo('POST', '/api/apps/blog/stop'), []);
-    });
-
-    test('an app that was never deployed cannot be started or stopped', async function (assert) {
-      app = makeApp();
-
-      await visit('/apps/blog/settings');
-
-      assert.dom('[data-test-settings-state]').hasText('未デプロイ');
-      assert.dom('[data-test-control="restart"]').isDisabled();
-      assert.dom('[data-test-control="stop"]').isDisabled();
-      assert.dom('[data-test-delete]').isNotDisabled();
-    });
-
-    test('a refused operation says why', async function (assert) {
-      fakes.api.fail('POST', '/api/apps/blog/restart', 409, 'busy');
-
-      await visit('/apps/blog/settings');
-      await click('[data-test-control="restart"]');
-
-      assert.dom('[data-test-error]').includesText('ほかの処理が実行中です');
-      assert.dom('[data-test-notice]').doesNotExist();
-      assert.dom('[data-test-control="restart"]').isNotDisabled();
-    });
-
-    test('a start refused by the policy lists the findings', async function (assert) {
-      app = { ...app, desired_state: 'stopped' };
-      fakes.api.fail('POST', '/api/apps/blog/start', 422, 'policy_violation', {
-        violations: [
-          {
-            service: 'web',
-            rule: 'privileged',
-            message: 'privileged containers are not allowed',
-            relaxable: true,
-          },
-        ],
-      });
-
-      await visit('/apps/blog/settings');
-      await click('[data-test-control="start"]');
-
-      assert.dom('[data-test-error]').includesText('再デプロイ');
-      assert
-        .dom('[data-test-violations]')
-        .hasText('web: privileged containers are not allowed');
-    });
-  });
-
   module('delete', function () {
     test('deleting requires typing the app name', async function (assert) {
       await visit('/apps/blog/settings');
@@ -587,16 +524,11 @@ module('Acceptance | settings', function (hooks) {
       );
       assert.deepEqual(links, [
         'source',
-        'auto-deploy',
         'publish',
         'environment',
         'protection',
-        'idle-sleep',
-        'env-requirements',
         'memory',
-        'safeguards',
         'registry',
-        'operations',
         'danger',
       ]);
       const sections = findAll('[data-settings-section]').map((section) =>
@@ -623,12 +555,9 @@ module('Acceptance | settings', function (hooks) {
     test('the jump control does the same on a narrow screen', async function (assert) {
       await visit('/apps/blog/settings');
 
-      await fillIn('[data-test-settings-jump-select]', 'safeguards');
-      assert.strictEqual(
-        currentURL(),
-        '/apps/blog/settings?section=safeguards',
-      );
-      assert.dom('#settings-safeguards').isFocused();
+      await fillIn('[data-test-settings-jump-select]', 'registry');
+      assert.strictEqual(currentURL(), '/apps/blog/settings?section=registry');
+      assert.dom('#settings-registry').isFocused();
 
       // Which of the two shows depends on the width of the window.
       const narrow = window.matchMedia('(width < 64rem)').matches;
@@ -696,17 +625,11 @@ module('Acceptance | settings', function (hooks) {
       assert.dom('[data-test-field="web_service"]').hasValue('app');
     });
 
-    test('a production app lists 昇格元, a view role no operations', async function (assert) {
-      app = { ...app, environment: 'production' };
+    test('only those who may delete see the danger zone in the index', async function (assert) {
+      app = { ...app, role: 'manage' };
       await visit('/apps/blog/settings');
-      assert.dom('[data-test-settings-index-link="promotion"]').exists();
-
-      app = { ...app, environment: 'staging', role: 'view' };
-      await visit('/');
-      await visit('/apps/blog/settings');
-      assert.dom('[data-test-settings-index-link="promotion"]').doesNotExist();
-      assert.dom('[data-test-settings-index-link="operations"]').doesNotExist();
       assert.dom('[data-test-settings-index-link="danger"]').doesNotExist();
+      assert.dom('[data-test-danger-zone]').doesNotExist();
       assert.dom('[data-test-settings-index-link="memory"]').exists();
     });
   });

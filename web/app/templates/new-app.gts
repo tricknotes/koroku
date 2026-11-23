@@ -606,7 +606,7 @@ export default class NewAppTemplate extends Component {
                   {{on "click" this.useUrl}}
                 >一覧にない公開リポジトリを URL で指定</Button>
                 <LinkTo
-                  @route="system"
+                  @route="system.admin"
                   class="new-app-repo-help"
                   data-test-repo-other-org
                 >別の org のリポジトリを使うには</LinkTo>

@@ -2,6 +2,7 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
+import { hash } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import Badge from 'koroku-console/components/badge';
@@ -214,9 +215,10 @@ export default class PromotionPanel extends Component<Signature> {
           <p class="promotion-note" data-test-promotion-unpaired>
             同じリポジトリのステージングアプリを
             <LinkTo
-              @route="app.settings"
+              @route="app.deploy"
+              @query={{hash section="promotion"}}
               data-test-promotion-settings
-            >設定の「昇格元」</LinkTo>
+            >下の「デプロイの設定」の「昇格元」</LinkTo>
             で選ぶと、staging で確かめたリリースをそのまま本番へ出せます。
           </p>
         {{else if (eqStatus this.promotion "unavailable")}}

@@ -1,13 +1,18 @@
 import Component from '@glimmer/component';
 import { service } from '@ember/service';
-import { array, hash } from '@ember/helper';
+import { tracked } from '@glimmer/tracking';
+import { array, fn, hash } from '@ember/helper';
 import { on } from '@ember/modifier';
 import { LinkTo } from '@ember/routing';
 import type RouterService from '@ember/routing/router-service';
 import { schedule } from '@ember/runloop';
 import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
+import ActionMenu from 'koroku-console/components/action-menu';
 import Banner from 'koroku-console/components/banner';
+import Button from 'koroku-console/components/button';
+import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import ErrorMessage from 'koroku-console/components/error-message';
 import { buttonClass } from 'koroku-console/components/button';
 import EnvironmentBadge from 'koroku-console/components/environment-badge';
 import ProtectionBadge from 'koroku-console/components/protection-badge';
@@ -19,7 +24,7 @@ import scrollActiveIntoView from 'koroku-console/modifiers/scroll-active-into-vi
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
-import { errorMessage } from 'koroku-console/utils/errors';
+import { errorMessage, policyViolations } from 'koroku-console/utils/errors';
 import { hostOf } from 'koroku-console/utils/format';
 import { can } from 'koroku-console/utils/roles';
 import {
@@ -40,6 +45,15 @@ const POLL_INTERVAL = 5000;
 const FULL_SIZE_ROUTES = new Set(['app.logs']);
 
 const DEPLOY_ROUTE = 'app.deploy';
+
+type ControlAction = 'start' | 'stop' | 'restart' | 'wake';
+
+const CONTROL_DONE: Record<ControlAction, string> = {
+  start: '起動しました。',
+  stop: '停止しました。',
+  restart: '再起動しました。',
+  wake: '起こしました。',
+};
 
 function stateKind(app: App) {
   return APP_STATE_KINDS[deriveAppState(app)];
@@ -64,8 +78,9 @@ interface Signature {
 
 /**
  * App detail: a header that every tab shares (name, environment, state,
- * primary URL and the way to the deploy form) above the tabs. The state is
- * re-read while the page is open, so it never needs a reload.
+ * primary URL, the way to the deploy form and the start, stop and restart
+ * actions; ARCHITECTURE 9.1) above the tabs. The state is re-read while the
+ * page is open, so it never needs a reload.
  */
 export default class AppTemplate extends Component<Signature> {
   @service declare api: ApiService;
@@ -76,6 +91,82 @@ export default class AppTemplate extends Component<Signature> {
     super(owner, args);
     this.poller.every(this, POLL_INTERVAL, () => this.refresh());
   }
+
+  @tracked controlling: ControlAction | null = null;
+  @tracked controlNotice = '';
+  @tracked controlError: unknown = null;
+  @tracked confirmingStop = false;
+
+  get app(): App {
+    return this.args.model.app;
+  }
+
+  /** Start, stop and restart need a release to act on. */
+  get deployed(): boolean {
+    return this.app.current_deployment !== null;
+  }
+
+  get stopped(): boolean {
+    return this.app.desired_state === 'stopped';
+  }
+
+  /** Stopped while idle; a request or 「起こす」 wakes it (ARCHITECTURE 8.4). */
+  get sleeping(): boolean {
+    return !this.stopped && Boolean(this.app.sleeping_since);
+  }
+
+  /** What to do with a stopped or sleeping app, shown as a button. */
+  get showsStart(): boolean {
+    return this.canDeploy && this.deployed && this.stopped;
+  }
+
+  get showsWake(): boolean {
+    return this.canDeploy && this.deployed && this.sleeping;
+  }
+
+  /** Restart and stop, for an app that is not stopped. */
+  get showsMenu(): boolean {
+    return this.canDeploy && this.deployed && !this.stopped;
+  }
+
+  get violations(): string[] {
+    return policyViolations(this.controlError);
+  }
+
+  isControlling = (action: ControlAction): boolean =>
+    this.controlling === action;
+
+  control = async (action: ControlAction) => {
+    if (this.controlling) return;
+    this.controlling = action;
+    this.controlNotice = '';
+    this.controlError = null;
+    try {
+      const app =
+        action === 'wake'
+          ? await this.api.wakeApp(this.args.model.slug)
+          : await this.api.controlApp(this.args.model.slug, action);
+      this.args.model.set(app);
+      this.controlNotice = CONTROL_DONE[action];
+    } catch (error) {
+      this.controlError = error;
+    } finally {
+      this.controlling = null;
+      this.confirmingStop = false;
+    }
+  };
+
+  requestStop = () => {
+    this.controlNotice = '';
+    this.controlError = null;
+    this.confirmingStop = true;
+  };
+
+  cancelStop = () => {
+    this.confirmingStop = false;
+  };
+
+  confirmStop = () => this.control('stop');
 
   get isFullSize(): boolean {
     return FULL_SIZE_ROUTES.has(this.router.currentRouteName ?? '');
@@ -94,9 +185,13 @@ export default class AppTemplate extends Component<Signature> {
     return this.router.urlFor(DEPLOY_ROUTE, this.args.model.slug);
   }
 
-  /** The deploy tab has the form's own button as its main action. */
+  /**
+   * The deploy tab has the form's own button as its main action, and a
+   * stopped or sleeping app has 「起動」 or 「起こす」.
+   */
   get deployButtonClass(): string {
-    return buttonClass(this.onDeployTab ? 'default' : 'primary');
+    const quiet = this.onDeployTab || this.showsStart || this.showsWake;
+    return buttonClass(quiet ? 'default' : 'primary');
   }
 
   /**
@@ -208,14 +303,80 @@ export default class AppTemplate extends Component<Signature> {
             </div>
           </div>
           {{#if this.canDeploy}}
-            <a
-              class={{this.deployButtonClass}}
-              href={{this.deployUrl}}
-              data-test-header-deploy
-              {{on "click" this.openDeploy}}
-            >デプロイ</a>
+            <div class="app-header-actions" data-test-header-actions>
+              {{#if this.showsStart}}
+                <Button
+                  @variant="primary"
+                  @busy={{this.isControlling "start"}}
+                  @busyLabel="起動中…"
+                  @disabled={{if this.controlling true false}}
+                  data-test-control="start"
+                  {{on "click" (fn this.control "start")}}
+                >起動</Button>
+              {{else if this.showsWake}}
+                <Button
+                  @variant="primary"
+                  @busy={{this.isControlling "wake"}}
+                  @busyLabel="起動中…"
+                  @disabled={{if this.controlling true false}}
+                  data-test-control="wake"
+                  {{on "click" (fn this.control "wake")}}
+                >起こす</Button>
+              {{/if}}
+              <a
+                class={{this.deployButtonClass}}
+                href={{this.deployUrl}}
+                data-test-header-deploy
+                {{on "click" this.openDeploy}}
+              >デプロイ</a>
+              {{#if this.showsMenu}}
+                <ActionMenu @label="その他の操作" as |close|>
+                  <button
+                    type="button"
+                    class="menu-item"
+                    disabled={{if this.controlling true false}}
+                    data-test-control="restart"
+                    {{on "click" close}}
+                    {{on "click" (fn this.control "restart")}}
+                  >再起動</button>
+                  <button
+                    type="button"
+                    class="menu-item menu-item-danger"
+                    disabled={{if this.controlling true false}}
+                    data-test-control="stop"
+                    {{on "click" close}}
+                    {{on "click" this.requestStop}}
+                  >停止…</button>
+                </ActionMenu>
+              {{/if}}
+            </div>
           {{/if}}
         </header>
+
+        <div class="app-header-notices" aria-live="polite">
+          {{#if this.controlling}}
+            <p class="app-header-note" data-test-control-busy>
+              <Icon @name="spinner" />
+              {{if
+                (this.isControlling "stop")
+                "停止しています…"
+                "完了まで待っています…"
+              }}
+            </p>
+          {{else if this.controlNotice}}
+            <Banner data-test-notice>{{this.controlNotice}}</Banner>
+          {{/if}}
+          {{#if this.controlError}}
+            <ErrorMessage @error={{this.controlError}} />
+            {{#if this.violations.length}}
+              <ul class="form-problems" data-test-violations>
+                {{#each this.violations as |line|}}
+                  <li>{{line}}</li>
+                {{/each}}
+              </ul>
+            {{/if}}
+          {{/if}}
+        </div>
 
         <Tabs
           @label="アプリのメニュー"
@@ -275,6 +436,28 @@ export default class AppTemplate extends Component<Signature> {
           {{/each}}
         </div>
       </div>
+
+      {{#if this.confirmingStop}}
+        <ConfirmDialog
+          @title={{if
+            @model.isProduction
+            "本番アプリを停止しますか？"
+            "アプリを停止しますか？"
+          }}
+          @confirmLabel="停止する"
+          @danger={{true}}
+          @busy={{this.isControlling "stop"}}
+          @onConfirm={{this.confirmStop}}
+          @onCancel={{this.cancelStop}}
+        >
+          <p data-test-stop-dialog>
+            {{if @model.isProduction "本番アプリ" "アプリ"}}
+            <strong>{{@model.app.slug}}</strong>
+            のコンテナを止めます。起動するまで、アクセスには 503
+            のページが返ります。データは消えません。
+          </p>
+        </ConfirmDialog>
+      {{/if}}
     {{else}}
       <div class="app-missing" data-test-app-error>
         <h1>{{@model.slug}}</h1>

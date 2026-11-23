@@ -10,6 +10,7 @@ import Badge from 'koroku-console/components/badge';
 import Banner from 'koroku-console/components/banner';
 import Button from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
+import DeploySettings from 'koroku-console/components/deploy-settings';
 import DeploymentDetail from 'koroku-console/components/deployment-detail';
 import EnvRequirementsWarning from 'koroku-console/components/env-requirements-warning';
 import EnvironmentBadge from 'koroku-console/components/environment-badge';
@@ -40,6 +41,9 @@ import {
 } from 'koroku-console/utils/format';
 import { ApiError } from 'koroku-console/utils/errors';
 import Loadable from 'koroku-console/utils/loadable';
+import SettingsEditor, {
+  DEPLOY_SETTINGS_FIELDS,
+} from 'koroku-console/utils/settings-editor';
 import { can } from 'koroku-console/utils/roles';
 import {
   canRollBack,
@@ -177,8 +181,18 @@ export default class AppDeployTemplate extends Component<Signature> {
   /** Why the rollback in the dialog did not start. */
   @tracked rollbackError: unknown = null;
 
+  /** 「デプロイの設定」, saved on its own (ARCHITECTURE 9.1). */
+  settingsEditor: SettingsEditor;
+  /** A deployment held back because the deploy settings are unsaved. */
+  @tracked unsavedTarget: DeployTarget | null = null;
+
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
+    this.settingsEditor = new SettingsEditor(
+      this.api,
+      args.model,
+      DEPLOY_SETTINGS_FIELDS,
+    );
     this.branch = this.app.default_branch;
     this.manualRef = this.app.default_branch;
 
@@ -440,10 +454,38 @@ export default class AppDeployTemplate extends Component<Signature> {
     });
   };
 
-  /** Production apps go through the confirmation dialog first. */
+  /**
+   * A deployment uses the saved settings: with unsaved deploy settings it
+   * asks first (ARCHITECTURE 9.1). Production apps then go through the
+   * confirmation dialog.
+   */
   private requestDeploy(target: DeployTarget): void {
     this.error = null;
     if (!target.ref && !target.sha) return;
+    if (this.settingsEditor.dirty) {
+      this.unsavedTarget = target;
+      return;
+    }
+    this.proceed(target);
+  }
+
+  saveAndDeploy = async () => {
+    const target = this.unsavedTarget;
+    this.unsavedTarget = null;
+    if (target && (await this.settingsEditor.save())) this.proceed(target);
+  };
+
+  deployWithoutSaving = () => {
+    const target = this.unsavedTarget;
+    this.unsavedTarget = null;
+    if (target) this.proceed(target);
+  };
+
+  cancelUnsaved = () => {
+    this.unsavedTarget = null;
+  };
+
+  private proceed(target: DeployTarget): void {
     if (this.args.model.isProduction) {
       this.pending = target;
       if (this.checksRequirements) void this.pendingRequirements.load();
@@ -1003,6 +1045,27 @@ export default class AppDeployTemplate extends Component<Signature> {
         />
         <ReviewAppsPermission @context={{@model}} />
       </div>
+    {{/if}}
+
+    <DeploySettings
+      @editor={{this.settingsEditor}}
+      @section={{@controller.section}}
+    />
+
+    {{#if this.unsavedTarget}}
+      <ConfirmDialog
+        @title="保存していない変更があります"
+        @confirmLabel="保存してデプロイ"
+        @altLabel="保存せずにデプロイ"
+        @busy={{this.settingsEditor.saving}}
+        @onConfirm={{this.saveAndDeploy}}
+        @onAlt={{this.deployWithoutSaving}}
+        @onCancel={{this.cancelUnsaved}}
+      >
+        <p data-test-unsaved-dialog>
+          デプロイの設定に保存していない変更があります。デプロイは保存済みの設定で行われます。保存してからデプロイしますか？保存せずにデプロイしても、変更は欄に残ります。
+        </p>
+      </ConfirmDialog>
     {{/if}}
 
     {{#if this.pending}}

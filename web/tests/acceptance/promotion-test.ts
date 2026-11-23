@@ -227,7 +227,7 @@ module('Acceptance | promotion', function (hooks) {
     assert.dom('[data-test-promotion]').doesNotExist();
   });
 
-  test('settings pair a production app with a staging app of its repository', async function (assert) {
+  test('the deploy settings pair a production app with a staging app of its repository', async function (assert) {
     const app = serveApp({ promote_from: '' });
     fakes.api
       .on('GET', '/api/apps', {
@@ -247,7 +247,7 @@ module('Acceptance | promotion', function (hooks) {
         ...app,
         ...(call.body as object),
       }));
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
 
     const options = [
       ...document.querySelectorAll('[data-test-field="promote_from"] option'),
@@ -255,19 +255,23 @@ module('Acceptance | promotion', function (hooks) {
     assert.deepEqual(options, ['', 'blog-staging', 'blog-review']);
 
     await fillIn('[data-test-field="promote_from"]', 'blog-staging');
-    await click('[data-test-settings-save]');
+    await click('[data-test-deploy-settings-save]');
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
       promote_from: 'blog-staging',
     });
   });
 
-  test('settings hide the promotion source for staging apps', async function (assert) {
+  test('the promotion source is offered to production apps only', async function (assert) {
     serveApp({ slug: 'blog', environment: 'staging', promote_from: '' });
     fakes.api.on('GET', '/api/apps', { apps: [] });
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/deploy');
     assert.dom('[data-test-promotion-group]').doesNotExist();
-    await click('[data-test-environment-option="production"]');
+
+    serveApp({ promote_from: '' });
+    await visit('/');
+    await visit('/apps/blog/deploy?section=promotion');
     assert.dom('[data-test-promotion-group]').exists();
+    assert.dom('#promotion').isFocused('a link to the section lands there');
     assert.dom('[data-test-no-promotion-sources]').exists();
   });
 });

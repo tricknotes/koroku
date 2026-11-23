@@ -1,5 +1,5 @@
 import { module, test } from 'qunit';
-import { click, settled, visit } from '@ember/test-helpers';
+import { click, currentURL, settled, visit } from '@ember/test-helpers';
 import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   installFakes,
@@ -134,6 +134,64 @@ module('Acceptance | system', function (hooks) {
       .on('GET', '/api/backups', makeBackups({ runs: [run()] }));
   });
 
+  module('tabs', function () {
+    test('three tabs, each with its own URL and its own requests', async function (assert) {
+      fakes.api
+        .on('GET', '/api/members', { members: [] })
+        .on('GET', '/api/apps', { apps: [] });
+      const heavy = () =>
+        fakes.api.calls
+          .map((call) => call.path)
+          .filter(
+            (path) =>
+              path === '/api/system/containers' ||
+              path === '/api/system/docker',
+          );
+
+      await visit('/system/jobs');
+      assert.dom('[data-test-system-tab="jobs"]').hasAria('current', 'page');
+      assert.dom('[data-test-job="backup"]').exists();
+      assert.dom('[data-test-resource]').doesNotExist();
+      assert.deepEqual(heavy(), [], 'no container or disk figures asked for');
+
+      await click('[data-test-system-tab="admin"]');
+      assert.strictEqual(currentURL(), '/system/admin');
+      assert.dom('[data-test-members-section]').exists('members live here');
+      assert.dom('[data-test-koroku-version]').exists();
+      assert.deepEqual(heavy(), []);
+
+      await click('[data-test-system-tab="index"]');
+      assert.strictEqual(currentURL(), '/system');
+      assert.dom('[data-test-resource="disk"]').exists();
+      assert.dom('[data-test-docker]').exists();
+      assert.dom('[data-test-job]').doesNotExist();
+      assert.deepEqual(heavy().sort(), [
+        '/api/system/containers',
+        '/api/system/docker',
+      ]);
+    });
+
+    test('the warnings of the app list land on the right tab', async function (assert) {
+      system = makeSystem({
+        disk: {
+          total_bytes: 40 * GB,
+          used_bytes: 36 * GB,
+          used_percent: 90,
+        },
+      });
+      fakes.api
+        .on('GET', '/api/apps', { apps: [] })
+        .on('GET', '/api/backups', makeBackups({ warning: true }));
+      await visit('/');
+
+      const links = [
+        ...document.querySelectorAll('[data-test-attention] a'),
+      ].map((link) => link.getAttribute('href'));
+      assert.true(links.includes('/system'), links.join(' '));
+      assert.true(links.includes('/system/jobs'), links.join(' '));
+    });
+  });
+
   module('resources', function () {
     test('disk, memory and swap are plain numbers with a meter', async function (assert) {
       await visit('/system');
@@ -162,6 +220,8 @@ module('Acceptance | system', function (hooks) {
         .includesText('512.0 MB / 2.0 GB');
       assert.dom('[data-test-resource-flag]').doesNotExist('quiet when fine');
       assert.dom('[data-test-disk-warning]').doesNotExist();
+
+      await visit('/system/admin');
       assert.dom('[data-test-koroku-version]').hasText('v0.1.0');
       assert.dom('[data-test-docker-version]').hasText('29.8.0');
     });
@@ -220,7 +280,11 @@ module('Acceptance | system', function (hooks) {
       assert
         .dom('[data-test-resource="swap"]')
         .doesNotExist('an older backend does not report swap');
+
+      await visit('/system/admin');
       assert.dom('[data-test-docker-version]').hasText('取得できません');
+
+      await visit('/system/jobs');
       assert.dom('[data-test-job="log-archive"]').doesNotExist();
       assert.dom('[data-test-job="caddy"]').doesNotExist();
     });
@@ -486,7 +550,7 @@ module('Acceptance | system', function (hooks) {
         ],
         installation_accounts: [],
       });
-      await visit('/system');
+      await visit('/system/admin');
 
       assert.dom('[data-test-github-app-link]').hasText('koroku-octo');
       assert
@@ -520,7 +584,7 @@ module('Acceptance | system', function (hooks) {
         installations: [],
         installation_accounts: ['acme'],
       });
-      await visit('/system');
+      await visit('/system/admin');
       assert.dom('[data-test-github-no-installation]').exists();
       assert
         .dom('[data-test-github-config]')
@@ -534,20 +598,20 @@ module('Acceptance | system', function (hooks) {
         installations: [],
         installation_accounts: [],
       });
-      await visit('/system');
+      await visit('/system/admin');
       assert.dom('[data-test-github-unconfigured]').exists();
       assert.dom('[data-test-github-guide]').doesNotExist();
     });
 
     test('a server without the endpoint shows no panel', async function (assert) {
-      await visit('/system');
+      await visit('/system/admin');
       assert.dom('[data-test-github-app]').doesNotExist();
     });
   });
 
   module('background jobs', function () {
     test('backup, log archive and Caddy report last and next run', async function (assert) {
-      await visit('/system');
+      await visit('/system/jobs');
 
       assert.dom('[data-test-backup-state]').hasText('正常');
       assert
@@ -602,7 +666,7 @@ module('Acceptance | system', function (hooks) {
         }),
       );
 
-      await visit('/system');
+      await visit('/system/jobs');
 
       assert.dom('[data-test-backup-state]').hasText('直近の実行が失敗');
       assert
@@ -633,7 +697,7 @@ module('Acceptance | system', function (hooks) {
         makeBackups({ warning: true, runs: [run()] }),
       );
 
-      await visit('/system');
+      await visit('/system/jobs');
 
       assert.dom('[data-test-backup-state]').hasText('24 時間以上成功なし');
       assert
@@ -655,7 +719,7 @@ module('Acceptance | system', function (hooks) {
           return run({ id: 13, trigger: 'manual', status: 'running' });
         });
 
-      await visit('/system');
+      await visit('/system/jobs');
       await click('[data-test-backup-run]');
 
       assert.strictEqual(fakes.api.callsTo('POST', '/api/backups').length, 1);
@@ -674,7 +738,7 @@ module('Acceptance | system', function (hooks) {
     test('a refused backup says why', async function (assert) {
       fakes.api.fail('POST', '/api/backups', 409, 'busy');
 
-      await visit('/system');
+      await visit('/system/jobs');
       await click('[data-test-backup-run]');
 
       assert.dom('[data-test-error]').includesText('ほかの処理が実行中です');
@@ -700,7 +764,7 @@ module('Acceptance | system', function (hooks) {
         }),
       );
 
-      await visit('/system');
+      await visit('/system/jobs');
 
       assert.dom('[data-test-backup-state]').hasText('未設定');
       assert
@@ -718,7 +782,7 @@ module('Acceptance | system', function (hooks) {
     test('a backup status that cannot be read keeps the rest', async function (assert) {
       fakes.api.fail('GET', '/api/backups', 500, 'internal');
 
-      await visit('/system');
+      await visit('/system/jobs');
 
       assert.dom('[data-test-backup-load-error]').exists();
       assert.dom('[data-test-archive-state]').hasText('正常');
@@ -733,7 +797,7 @@ module('Acceptance | system', function (hooks) {
     test('a backend without backups says so', async function (assert) {
       fakes.api.fail('GET', '/api/backups', 404, 'not_found');
 
-      await visit('/system');
+      await visit('/system/jobs');
 
       assert.dom('[data-test-backup-unavailable]').exists();
       assert.dom('[data-test-backup-run]').doesNotExist();

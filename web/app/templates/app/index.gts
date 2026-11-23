@@ -1,5 +1,4 @@
 import Component from '@glimmer/component';
-import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
 import { hash } from '@ember/helper';
@@ -12,7 +11,6 @@ import Banner from 'koroku-console/components/banner';
 import Button, { buttonClass } from 'koroku-console/components/button';
 import CopyButton from 'koroku-console/components/copy-button';
 import EmptyState from 'koroku-console/components/empty-state';
-import ErrorMessage from 'koroku-console/components/error-message';
 import Icon from 'koroku-console/components/icon';
 import Meter from 'koroku-console/components/meter';
 import RelativeTime from 'koroku-console/components/relative-time';
@@ -150,10 +148,6 @@ export default class AppOverviewTemplate extends Component<Signature> {
     this.api.getAppBackupStatus(this.slug),
   );
   snapshots = new Loadable<Snapshot[]>(() => this.api.listSnapshots(this.slug));
-
-  @tracked starting = false;
-  @tracked error: unknown = null;
-  @tracked notice = '';
 
   private lastState: string;
 
@@ -377,45 +371,6 @@ export default class AppOverviewTemplate extends Component<Signature> {
     ]);
   }
 
-  /**
-   * Starts a stopped app: the one thing to do next in that state. Stopping
-   * and restarting live on the settings tab.
-   */
-  start = async () => {
-    this.starting = true;
-    this.error = null;
-    this.notice = '';
-    try {
-      const app = await this.api.controlApp(this.slug, 'start');
-      this.args.model.set(app);
-      this.lastState = stateKey(app);
-      this.notice = '起動しました。';
-      await this.services.load({ quiet: this.services.loaded });
-    } catch (error) {
-      this.error = error;
-    } finally {
-      this.starting = false;
-    }
-  };
-
-  /** Wakes a sleeping app without waiting for a visitor. */
-  wake = async () => {
-    this.starting = true;
-    this.error = null;
-    this.notice = '';
-    try {
-      const app = await this.api.wakeApp(this.slug);
-      this.args.model.set(app);
-      this.lastState = stateKey(app);
-      this.notice = '起こしました。';
-      await this.services.load({ quiet: this.services.loaded });
-    } catch (error) {
-      this.error = error;
-    } finally {
-      this.starting = false;
-    }
-  };
-
   <template>
     <div class="overview" data-test-overview>
       <div class="overview-top">
@@ -556,41 +511,14 @@ export default class AppOverviewTemplate extends Component<Signature> {
                     <p class="overview-stopped-hint" data-test-stopped-hint>
                       {{this.stoppedHint}}
                     </p>
-                    {{#if this.canDeploy}}
-                      <Button
-                        @busy={{this.starting}}
-                        @busyLabel="起動中…"
-                        data-test-control="start"
-                        {{on "click" this.start}}
-                      >起動</Button>
-                    {{/if}}
                   </div>
                 {{else if this.isSleeping}}
                   <div class="overview-stopped" data-test-sleeping>
                     <p class="overview-stopped-hint" data-test-sleeping-hint>
                       アクセスがないため休止しています。次のアクセスで起動し、最初の応答は起動を待ちます。
                     </p>
-                    {{#if this.canDeploy}}
-                      <Button
-                        @busy={{this.starting}}
-                        @busyLabel="起動中…"
-                        data-test-control="wake"
-                        {{on "click" this.wake}}
-                      >起こす</Button>
-                    {{/if}}
                   </div>
                 {{/if}}
-              </div>
-
-              <div class="overview-feedback" aria-live="polite">
-                {{#if this.starting}}
-                  <p class="overview-note">起動しています。完了まで待ちます…</p>
-                {{else if this.notice}}
-                  <p class="overview-note" data-test-notice>
-                    <Icon @name="check" />{{this.notice}}
-                  </p>
-                {{/if}}
-                <ErrorMessage @error={{this.error}} />
               </div>
             </:default>
           </TabSection>

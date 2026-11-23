@@ -227,9 +227,11 @@ module('Acceptance | create app', function (hooks) {
     assert.deepEqual(body['env'], [{ key: 'NODE_ENV', value: 'production' }]);
   });
 
-  test('the way to another org leads to the system screen', async function (assert) {
+  test('the way to another org leads to the system admin tab', async function (assert) {
     await visit('/apps/new');
-    assert.dom('[data-test-repo-other-org]').hasAttribute('href', '/system');
+    assert
+      .dom('[data-test-repo-other-org]')
+      .hasAttribute('href', '/system/admin');
   });
 
   test('a URL outside github.com is typed in by hand', async function (assert) {

@@ -37,12 +37,12 @@ module('Acceptance | loading states', function (hooks) {
     const system = fakes.api.hold('GET', '/api/system');
     const docker = fakes.api.hold('GET', '/api/system/docker');
     const containers = fakes.api.hold('GET', '/api/system/containers');
-    const backups = fakes.api.hold('GET', '/api/backups');
 
     const visiting = visit('/system');
     await waitFor('[data-test-loading]');
 
     assert.dom('h1').hasText('システム', 'the page frame is there at once');
+    assert.dom('[data-test-system-tab]').exists({ count: 3 });
     assert
       .dom('[data-test-loading]')
       .hasAttribute('role', 'status')
@@ -51,15 +51,10 @@ module('Acceptance | loading states', function (hooks) {
     assert.dom('[data-test-docker-loading] .skeleton').exists();
     assert.dom('[data-test-containers-loading]').hasAttribute('role', 'status');
     assert.dom('[data-test-containers-loading] .skeleton').exists();
-    assert.dom('[data-test-job="backup"] .skeleton').exists();
-    assert.dom('[data-test-job="backup"]').includesText('読み込み中');
     assert.dom('[data-test-resource]').doesNotExist();
     assert.dom('[data-test-docker-item]').doesNotExist();
     assert.dom('[data-test-error]').doesNotExist();
     assert.dom('[data-test-stale]').doesNotExist();
-    assert
-      .dom('[data-test-backup-run]')
-      .doesNotExist('nothing to run before the state is known');
 
     // One answer does not wait for the others.
     docker.release({
@@ -76,19 +71,34 @@ module('Acceptance | loading states', function (hooks) {
 
     assert.dom('[data-test-docker-loading]').doesNotExist();
     assert.dom('[data-test-loading]').exists('the host is still loading');
-    assert.dom('[data-test-job="backup"] .skeleton').exists();
 
     system.release(makeSystem());
     containers.release({ cpu_count: 2, memory_total_bytes: 1024, groups: [] });
-    backups.release(makeBackups());
     await visiting;
 
     assert.dom('[data-test-loading]').doesNotExist();
     assert.dom('[data-test-resource="disk"]').exists();
     assert.dom('[data-test-containers-empty]').exists();
+    assert.dom('.skeleton').doesNotExist('no placeholder is left behind');
+  });
+
+  test('system jobs: the backup stands in for itself until it arrives', async function (assert) {
+    fakes.api.on('GET', '/api/system', makeSystem());
+    const backups = fakes.api.hold('GET', '/api/backups');
+
+    const visiting = visit('/system/jobs');
+    await waitFor('[data-test-job="backup"] .skeleton');
+
+    assert.dom('[data-test-job="backup"]').includesText('読み込み中');
+    assert
+      .dom('[data-test-backup-run]')
+      .doesNotExist('nothing to run before the state is known');
+
+    backups.release(makeBackups());
+    await visiting;
+
     assert.dom('[data-test-job="backup"] .skeleton').doesNotExist();
     assert.dom('[data-test-backup-run]').exists();
-    assert.dom('.skeleton').doesNotExist('no placeholder is left behind');
   });
 
   test('backups: the status first, then snapshots and volumes', async function (assert) {

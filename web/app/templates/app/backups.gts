@@ -531,8 +531,8 @@ export default class AppBackupsTemplate extends Component<Signature> {
           <p class="backup-note">
             バックアップは、すべてのアプリと基盤の設定をまとめて 1
             回の実行で取ります。{{#if this.isOwner}}実行の履歴は<LinkTo
-                @route="system"
-              >システム</LinkTo>にあります。{{/if}}
+                @route="system.jobs"
+              >システムの定期処理</LinkTo>にあります。{{/if}}
           </p>
         </section>
 

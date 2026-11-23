@@ -18,8 +18,10 @@ Router.map(function () {
     this.route('backups');
     this.route('settings');
   });
-  this.route('system');
+  this.route('system', function () {
+    this.route('jobs');
+    this.route('admin');
+  });
   this.route('security');
-  this.route('members');
   this.route('not-found', { path: '/*path' });
 });

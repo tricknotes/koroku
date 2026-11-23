@@ -1,4 +1,5 @@
-/* Settings tab: the app's settings, start and restart, the danger zone. */
+/* Settings tab: the app's settings and the danger zone; and the settings
+   sections other tabs hold (ARCHITECTURE 9.1). */
 
 /*
  * The section index (ARCHITECTURE 9.1): a list beside the sections that
@@ -217,7 +218,6 @@
   overflow-wrap: anywhere;
 }
 
-.settings-operations,
 .settings-registry {
   margin-top: var(--space-12);
 }
@@ -310,4 +310,19 @@
   padding: 0;
   list-style: none;
   font-variant-numeric: tabular-nums;
+}
+
+/* A section's own save, on the tabs that hold one settings section. */
+.section-footer {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+}
+
+.env-source-path {
+  max-width: 32rem;
+  margin-top: var(--space-4);
+}
+
+.env-source-form .option-group > legend {
+  margin-bottom: var(--space-2);
 }

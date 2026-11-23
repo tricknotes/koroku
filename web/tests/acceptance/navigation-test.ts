@@ -51,6 +51,8 @@ module('Acceptance | navigation', function (hooks) {
       '/apps/new': 'apps',
       '/apps/blog/settings': 'apps',
       '/system': 'system',
+      '/system/jobs': 'system',
+      '/system/admin': 'system',
     };
 
     for (const [url, section] of Object.entries(sections)) {
@@ -75,7 +77,9 @@ module('Acceptance | navigation', function (hooks) {
       '/apps/new': 'アプリを作成',
       '/apps/blog': 'blog',
       '/apps/blog/logs': 'ログ',
-      '/system': 'システム',
+      '/system': '状態',
+      '/system/jobs': '定期処理',
+      '/system/admin': '管理',
       '/nope': 'ページが見つかりません',
     };
     const seen = new Set<string>();

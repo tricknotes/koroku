@@ -206,6 +206,9 @@ module('Acceptance | environment variable requirements', function (hooks) {
         .includesText('.env.example')
         .includesText('ファイルがリポジトリにありません');
       assert.dom('[data-test-env-row]').exists({ count: 1 });
+      assert
+        .dom('[data-test-env-reqs-source-link]')
+        .hasAttribute('href', '/apps/blog/env?section=env-requirements');
 
       fakes.api.fail('GET', REQUIREMENTS, 500, 'internal');
       await visit('/apps/blog');
@@ -344,23 +347,32 @@ module('Acceptance | environment variable requirements', function (hooks) {
     });
   });
 
-  test('the source is chosen on the settings tab', async function (assert) {
+  test('the source is chosen on the environment tab, next to the results', async function (assert) {
     fakes.api.on('PATCH', '/api/apps/blog', (call: FakeCall) => {
       app = { ...app, ...(call.body as Partial<App>) };
       return app;
     });
-    await visit('/apps/blog/settings');
+    await visit('/apps/blog/env?section=env-requirements');
+
+    assert.dom('#env-requirements').isFocused();
+    const before = fakes.api.callsTo('GET', REQUIREMENTS).length;
 
     assert.dom('[data-test-env-source-option="compose"]').isChecked();
     assert.dom('[data-test-field="env_example_path"]').doesNotExist();
 
     await click('[data-test-env-source-option="dotenv"]');
     await fillIn('[data-test-field="env_example_path"]', 'config/.env.sample');
-    await click('[data-test-settings-save]');
+    await click('[data-test-env-source-save]');
 
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
       env_source: 'dotenv',
       env_example_path: 'config/.env.sample',
     });
+    assert.dom('[data-test-env-source-saved]').exists();
+    assert.strictEqual(
+      fakes.api.callsTo('GET', REQUIREMENTS).length,
+      before + 1,
+      'checked again with the new source',
+    );
   });
 });
