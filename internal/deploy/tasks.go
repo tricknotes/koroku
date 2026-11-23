@@ -179,7 +179,16 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 	}
 
 	go func() {
-		defer release()
+		// The result is recorded last, once the app's lock is free and a
+		// deferred push is queued: a run seen as finished means the app
+		// takes the next operation (ARCHITECTURE 9.6).
+		var record func()
+		defer func() {
+			release()
+			if record != nil {
+				record()
+			}
+		}()
 		defer func() {
 			e.mu.Lock()
 			delete(e.tasks, run.ID)
@@ -192,7 +201,7 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 			close(done)
 		}()
 		defer log.Close()
-		e.executeTask(lifetime, jobCtx, app, run, spec, deps, inv.Args(
+		record = e.executeTask(lifetime, jobCtx, app, run, spec, deps, inv.Args(
 			"run", "--rm", "--no-deps", "-T", "--name", taskContainerName(app, run.ID),
 			spec.Service, "sh", "-c", spec.Command,
 		), dir, log, masker)
@@ -216,8 +225,10 @@ func (e *Engine) taskMasker(ctx context.Context, app store.App) (*secrets.Masker
 	return masker, nil
 }
 
+// executeTask runs the command and writes its log. It returns how to record
+// the result, which the caller does once the app's lock is released.
 func (e *Engine) executeTask(lifetime, jobCtx context.Context, app store.App, run store.TaskRun,
-	spec TaskSpec, deps []string, args []string, dir string, log *deployLog, masker *secrets.Masker) {
+	spec TaskSpec, deps []string, args []string, dir string, log *deployLog, masker *secrets.Masker) (record func()) {
 	logger := e.opts.Logger.With("app", app.Slug, "task_run", run.ID)
 	ctx, cancel := context.WithTimeout(jobCtx, e.opts.TaskTimeout)
 	defer cancel()
@@ -286,9 +297,11 @@ func (e *Engine) executeTask(lifetime, jobCtx context.Context, app store.App, ru
 		// Stopping `docker compose run` leaves the container running.
 		e.removeTaskContainer(app, run.ID)
 	}
-	e.finishTask(run.ID, status, exitCode, message)
-	logger.Info("command finished", "status", status)
-	e.pruneTaskRuns(app)
+	return func() {
+		e.finishTask(run.ID, status, exitCode, message)
+		logger.Info("command finished", "status", status)
+		e.pruneTaskRuns(app)
+	}
 }
 
 func (e *Engine) removeTaskContainer(app store.App, id int64) {
