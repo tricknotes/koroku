@@ -2943,10 +2943,11 @@ SHOTS.push(
       field.value = '600';
       field.dispatchEvent(new Event('input', { bubbles: true }));
       setTimeout(() => document.querySelector('[data-test-deploy-settings-save]').click(), 300);
-      setTimeout(() => document.querySelector('${BLUE_GREEN}').scrollIntoView(), 800);
+      setTimeout(() => document.querySelector('${BLUE_GREEN}').scrollIntoView(), 1500);
     })()`,
     then: '[data-test-field-group="blue_green_drain_seconds"] [data-test-field-error]',
     themes: ['light'],
+    settle: 2000,
   },
   {
     name: 'bluegreen-history',
