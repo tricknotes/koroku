@@ -136,6 +136,12 @@ type settingField struct {
 var settingFields = []settingField{
 	{name: "repo_full_name", get: func(a store.App) any { return a.RepoFullName }},
 	{name: "repo_url", get: func(a store.App) any { return a.RepoURL }},
+	{name: "repo_id", get: func(a store.App) any {
+		if a.RepoID == nil {
+			return nil
+		}
+		return *a.RepoID
+	}},
 	{name: "default_branch", get: func(a store.App) any { return a.DefaultBranch }},
 	{name: "compose_path", get: func(a store.App) any { return a.ComposePath }},
 	{name: "web_service", get: func(a store.App) any { return a.WebService }},

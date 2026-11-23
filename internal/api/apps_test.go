@@ -385,6 +385,71 @@ func TestUpdateApp(t *testing.T) {
 	}
 }
 
+// The repository ID belongs to the repository the app names (ARCHITECTURE
+// 5): it is kept while the name stays, set with the name, and dropped when
+// the name changes without it, so that the next deployment records the ID
+// of the new repository instead of refusing it for the old one.
+func TestUpdateAppRepositoryID(t *testing.T) {
+	srv := newTestServer(t, nil)
+	h := srv.Handler()
+	repoID := func() int64 {
+		t.Helper()
+		app, err := srv.store.GetApp(context.Background(), "blog")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if app.RepoID == nil {
+			return 0
+		}
+		return *app.RepoID
+	}
+	rec := request(t, h, http.MethodPost, "/api/apps",
+		`{"slug": "blog", "repo_full_name": "octo/blog", "repo_id": 100, "web_port": 3000}`)
+	if rec.Code != http.StatusCreated || repoID() != 100 {
+		t.Fatalf("create: %d %s, repo_id %d", rec.Code, rec.Body, repoID())
+	}
+
+	steps := []struct {
+		body string
+		want int64
+	}{
+		{`{"web_port": 8080}`, 100},
+		{`{"repo_full_name": "octo/blog"}`, 100},
+		{`{"repo_full_name": "octo/journal"}`, 0},
+		{`{"repo_id": 200}`, 200},
+		{`{"repo_full_name": "my-org/journal", "repo_id": 300}`, 300},
+		{`{"repo_url": "https://git.example.com/journal.git"}`, 0},
+	}
+	for _, step := range steps {
+		rec := request(t, h, http.MethodPatch, "/api/apps/blog", step.body)
+		if rec.Code != http.StatusOK || repoID() != step.want {
+			t.Errorf("PATCH %s: %d %s, repo_id %d, want %d", step.body, rec.Code, rec.Body, repoID(), step.want)
+		}
+	}
+	for _, body := range []string{`{"repo_id": 0}`, `{"repo_id": -5}`} {
+		rec := request(t, h, http.MethodPatch, "/api/apps/blog", body)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "repo_id") {
+			t.Errorf("PATCH %s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+
+	// The record of the change names the ID.
+	app, _ := srv.store.GetApp(context.Background(), "blog")
+	entries, err := srv.store.ListActivity(context.Background(), app.ID, 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, entry := range entries {
+		if entry.Action == "app.settings_changed" && strings.Contains(string(entry.Details), `"field":"repo_id","from":100,"to":null`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no activity records the dropped repository ID: %+v", entries)
+	}
+}
+
 func TestEnvVars(t *testing.T) {
 	srv := newTestServer(t, nil)
 	h := srv.Handler()

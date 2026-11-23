@@ -327,14 +327,23 @@ func (f fieldErrors) add(field, message string) {
 // apply copies the sent fields onto app and validates the result.
 func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	errs := fieldErrors{}
+	repoBefore := [2]string{app.RepoFullName, app.RepoURL}
 	if in.RepoFullName != nil {
 		app.RepoFullName = strings.TrimSpace(*in.RepoFullName)
 	}
 	if in.RepoURL != nil {
 		app.RepoURL = strings.TrimSpace(*in.RepoURL)
 	}
-	if in.RepoID != nil {
+	switch {
+	case in.RepoID != nil:
+		if *in.RepoID <= 0 {
+			errs.add("repo_id", "must be the positive ID of the repository")
+		}
 		app.RepoID = in.RepoID
+	case repoBefore != [2]string{app.RepoFullName, app.RepoURL}:
+		// The ID belongs to the repository the app pointed at before. The
+		// next deployment records the ID of the new one (ARCHITECTURE 5).
+		app.RepoID = nil
 	}
 	if in.DefaultBranch != nil {
 		app.DefaultBranch = strings.TrimSpace(*in.DefaultBranch)
