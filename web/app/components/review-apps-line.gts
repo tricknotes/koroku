@@ -1,4 +1,5 @@
 import type { TOC } from '@ember/component/template-only';
+import { hash } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import Badge from './badge';
 import TabSection from './tab-section';
@@ -11,15 +12,16 @@ function count(app: App): number {
 
 /**
  * The parent's overview tells how many review apps there are, and how many
- * failed, and leads to the review apps tab (ARCHITECTURE 9.9).
+ * failed, and leads to the review apps on the deploy tab (ARCHITECTURE 9.9).
  */
 const ReviewAppsLine: TOC<{ Element: HTMLElement; Args: { app: App } }> =
   <template>
     <TabSection @title="レビューアプリ" data-test-review-line ...attributes>
       <:actions>
         <LinkTo
-          @route="app.review-apps"
+          @route="app.deploy"
           @model={{@app.slug}}
+          @query={{hash section="review-apps"}}
           class="overview-more"
           data-test-review-line-link
         >開く</LinkTo>

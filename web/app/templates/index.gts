@@ -1,5 +1,6 @@
 import Component from '@glimmer/component';
 import { service } from '@ember/service';
+import { hash } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
@@ -259,8 +260,9 @@ export default class IndexTemplate extends Component {
                     {{#if (reviewCount app.review_apps)}}
                       <span class="app-review-count" data-test-review-count>
                         <LinkTo
-                          @route="app.review-apps"
+                          @route="app.deploy"
                           @model={{app.slug}}
+                          @query={{hash section="review-apps"}}
                           class="app-review-link"
                           data-test-review-count-link
                         >レビューアプリ

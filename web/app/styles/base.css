@@ -112,3 +112,9 @@ time {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* A section a link led to takes the focus (modifiers/focus-section); it is
+   not a control, so it shows no ring unless the keyboard put it there. */
+[tabindex="-1"]:focus:not(:focus-visible) {
+  outline: none;
+}

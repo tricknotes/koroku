@@ -16,6 +16,7 @@ import Icon from 'koroku-console/components/icon';
 import RelativeTime from 'koroku-console/components/relative-time';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import TabSection from 'koroku-console/components/tab-section';
+import focusSection from 'koroku-console/modifiers/focus-section';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
@@ -79,10 +80,20 @@ function url(hostname: string): string {
 }
 
 interface Signature {
-  Args: { model: AppContext };
+  Args: {
+    context: AppContext;
+    /** Led here by a link (`?section=domains`): in view and focused. */
+    focus: boolean;
+  };
 }
 
-export default class AppDomainsTemplate extends Component<Signature> {
+/**
+ * The hostnames of an app (ARCHITECTURE 8.1), in the 公開 section of the
+ * settings tab: the assigned one, the custom ones with their DNS records,
+ * and adding one. Every action takes effect at once, outside the settings
+ * form and its save button.
+ */
+export default class DomainsPanel extends Component<Signature> {
   @service declare api: ApiService;
   @service declare poller: PollerService;
 
@@ -108,7 +119,7 @@ export default class AppDomainsTemplate extends Component<Signature> {
 
   /** Changing domains needs manage (ARCHITECTURE 10.7). */
   get canManage(): boolean {
-    return can(this.args.model.app, 'manage');
+    return can(this.args.context.app, 'manage');
   }
 
   get readOnly(): boolean {
@@ -116,7 +127,7 @@ export default class AppDomainsTemplate extends Component<Signature> {
   }
 
   get slug(): string {
-    return this.args.model.slug;
+    return this.args.context.slug;
   }
 
   get domains(): Domain[] {
@@ -167,7 +178,7 @@ export default class AppDomainsTemplate extends Component<Signature> {
   private async reload(): Promise<void> {
     await Promise.all([
       this.list.load({ quiet: true }),
-      this.args.model.reload(),
+      this.args.context.reload(),
     ]);
   }
 
@@ -246,9 +257,17 @@ export default class AppDomainsTemplate extends Component<Signature> {
     this.running?.id === domain.id && this.running.action === action;
 
   <template>
-    <TabSection @title="ドメイン" data-test-domains>
+    <TabSection
+      @level={{3}}
+      @title="ドメイン"
+      class="domain-section"
+      id="domains"
+      tabindex="-1"
+      data-test-domains
+      {{focusSection @focus}}
+    >
       <p class="pane-description">
-        このアプリに届くホスト名です。プライマリを決めると、ほかのホスト名へのアクセスはプライマリへリダイレクトされます。
+        このアプリに届くホスト名です。プライマリを決めると、ほかのホスト名へのアクセスはプライマリへリダイレクトされます。追加や削除は、押したときにすぐ反映されます（保存は要りません）。
       </p>
 
       {{#if this.list.stale}}
@@ -509,54 +528,55 @@ export default class AppDomainsTemplate extends Component<Signature> {
           </ul>
         </:default>
       </AsyncView>
-    </TabSection>
 
-    {{#if this.readOnly}}
-      <RoleNote @needed="manage" @what="ドメインの追加と変更" />
-    {{else if this.list.loaded}}
-      <TabSection @title="独自ドメインを追加" data-test-domain-add-section>
-        <form
-          class="domain-form"
-          novalidate
-          data-test-domain-form
-          {{on "submit" (preventDefault this.add)}}
-        >
-          <FormField
-            @label="ホスト名"
-            @hint="追加すると「確認待ち」になり、設定する DNS レコードが表示されます（サブドメインは CNAME、apex は A レコード）。"
-            @error={{this.hostnameError}}
-            as |field|
+      {{#if this.readOnly}}
+        <RoleNote @needed="manage" @what="ドメインの追加と変更" />
+      {{else if this.list.loaded}}
+        <div class="domain-add" data-test-domain-add-section>
+          <h4 class="domain-add-title">独自ドメインを追加</h4>
+          <form
+            class="domain-form"
+            novalidate
+            data-test-domain-form
+            {{on "submit" (preventDefault this.add)}}
           >
-            <div class="domain-form-line">
-              <input
-                id={{field.id}}
-                type="text"
-                class="mono"
-                placeholder="www.example.org"
-                spellcheck="false"
-                autocapitalize="off"
-                autocomplete="off"
-                value={{this.hostname}}
-                aria-invalid={{field.invalid}}
-                aria-describedby={{field.describedBy}}
-                data-test-domain-hostname
-                {{on "input" (setValue this "hostname")}}
-              />
-              <Button
-                @type="submit"
-                @variant="primary"
-                @busy={{this.adding}}
-                @busyLabel="追加中…"
-                data-test-domain-add
-              >追加</Button>
-            </div>
-          </FormField>
-        </form>
-        <div aria-live="polite">
-          <ErrorMessage @error={{this.addError}} />
+            <FormField
+              @label="ホスト名"
+              @hint="追加すると「確認待ち」になり、設定する DNS レコードが表示されます（サブドメインは CNAME、apex は A レコード）。"
+              @error={{this.hostnameError}}
+              as |field|
+            >
+              <div class="domain-form-line">
+                <input
+                  id={{field.id}}
+                  type="text"
+                  class="mono"
+                  placeholder="www.example.org"
+                  spellcheck="false"
+                  autocapitalize="off"
+                  autocomplete="off"
+                  value={{this.hostname}}
+                  aria-invalid={{field.invalid}}
+                  aria-describedby={{field.describedBy}}
+                  data-test-domain-hostname
+                  {{on "input" (setValue this "hostname")}}
+                />
+                <Button
+                  @type="submit"
+                  @variant="primary"
+                  @busy={{this.adding}}
+                  @busyLabel="追加中…"
+                  data-test-domain-add
+                >追加</Button>
+              </div>
+            </FormField>
+          </form>
+          <div aria-live="polite">
+            <ErrorMessage @error={{this.addError}} />
+          </div>
         </div>
-      </TabSection>
-    {{/if}}
+      {{/if}}
+    </TabSection>
 
     {{#if this.deleting}}
       <ConfirmDialog

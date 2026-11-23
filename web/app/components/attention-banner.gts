@@ -19,7 +19,13 @@ interface Line {
   time?: string | null;
   route: string;
   models: string[];
+  /** Query parameters of the link: the section of a tab (ARCHITECTURE 9.1). */
+  query?: Record<string, string>;
   link: string;
+}
+
+function queryOf(line: Line): Record<string, string> {
+  return line.query ?? {};
 }
 
 function line(item: AttentionItem): Line {
@@ -91,8 +97,9 @@ function line(item: AttentionItem): Line {
         kind: item.kind,
         subject: item.slug,
         text: `に確認待ちのドメインが ${item.count} 件あります。`,
-        route: 'app.domains',
+        route: 'app.settings',
         models: [item.slug],
+        query: { section: 'domains' },
         link: 'ドメインを確認',
       };
   }
@@ -136,7 +143,11 @@ const AttentionBanner: TOC<{
               <RelativeTime @time={{item.time}} /></span>
           {{/if}}
           {{#if item.route}}
-            <LinkTo @route={{item.route}} @models={{item.models}}>
+            <LinkTo
+              @route={{item.route}}
+              @models={{item.models}}
+              @query={{queryOf item}}
+            >
               {{item.link}}
             </LinkTo>
           {{/if}}

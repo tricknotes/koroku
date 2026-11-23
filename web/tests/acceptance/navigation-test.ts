@@ -109,7 +109,7 @@ module('Acceptance | navigation', function (hooks) {
   test('the tabs keep the app when moving between them', async function (assert) {
     await visit('/apps/blog/settings');
 
-    const order = ['index', 'deploy', 'logs', 'env', 'domains', 'backups'];
+    const order = ['index', 'deploy', 'logs', 'resources', 'env', 'backups'];
     const urls: string[] = [];
     for (const tab of order) {
       await click(`[data-test-tab="${tab}"]`);
@@ -121,8 +121,8 @@ module('Acceptance | navigation', function (hooks) {
       '/apps/blog',
       '/apps/blog/deploy',
       '/apps/blog/logs',
+      '/apps/blog/resources',
       '/apps/blog/env',
-      '/apps/blog/domains',
       '/apps/blog/backups',
     ]);
     assert.strictEqual(
@@ -130,6 +130,45 @@ module('Acceptance | navigation', function (hooks) {
       1,
       'the app is read once, not once per tab',
     );
+  });
+
+  test('the URLs of sections without a tab lead to their section', async function (assert) {
+    const sections = [
+      {
+        url: '/apps/blog/review-apps',
+        to: '/apps/blog/deploy?section=review-apps',
+        tab: 'deploy',
+        focused: '#review-apps',
+      },
+      {
+        url: '/apps/blog/compose',
+        to: '/apps/blog/resources?section=compose',
+        tab: 'resources',
+        focused: '#compose',
+      },
+      {
+        url: '/apps/blog/domains',
+        to: '/apps/blog/settings?section=domains',
+        tab: 'settings',
+        focused: '#domains',
+      },
+    ];
+    for (const { url, to, tab, focused } of sections) {
+      await visit(url);
+
+      assert.strictEqual(currentURL(), to, url);
+      assert.deepEqual(current('data-test-tab'), [tab], `${url}: the tab`);
+      assert.dom(focused).isFocused(`${url}: the section has the focus`);
+    }
+  });
+
+  test('a section URL on an app without that section opens the tab', async function (assert) {
+    serveConsole(fakes, { environment: 'production' });
+    await visit('/apps/blog/review-apps');
+
+    assert.strictEqual(currentURL(), '/apps/blog/deploy?section=review-apps');
+    assert.dom('[data-test-review-tab]').doesNotExist();
+    assert.dom('[data-test-deploy-panel]').exists();
   });
 
   test('the log filters in the URL are read leniently', async function (assert) {

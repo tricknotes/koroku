@@ -1,4 +1,4 @@
-/* Compose tab (ARCHITECTURE 9.10): the containers compared with the current
+/* Compose section of the resources tab (ARCHITECTURE 9.10): the containers compared with the current
    release, and the override and merged configuration of a release. */
 
 .compose-view {
@@ -163,7 +163,7 @@
   margin-bottom: var(--space-2);
 }
 
-.compose-file-header h3 {
+.compose-file-header h4 {
   margin: 0;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);

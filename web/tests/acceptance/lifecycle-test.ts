@@ -83,21 +83,21 @@ module('Acceptance | lifecycle', function (hooks) {
     assert.true(onDeploy.includes('/api/apps/blog/deployments'));
     assert.deepEqual(openStreams(), ['/api/deployments/43/logs']);
 
-    await click('[data-test-tab="domains"]');
-    const onDomains = await requestsOfOneTick();
+    await click('[data-test-tab="settings"]');
+    const onSettings = await requestsOfOneTick();
 
     assert.deepEqual(openStreams(), [], 'the deploy log is let go');
     assert.false(
-      onDomains.includes('/api/apps/blog/deployments'),
+      onSettings.includes('/api/apps/blog/deployments'),
       'the history is no longer followed',
     );
     assert.deepEqual(
-      onDomains.sort(),
+      onSettings.sort(),
       ['/api/apps/blog', '/api/apps/blog/domains'],
-      'the header and the pending domain are',
+      'the header and the pending domain of the 公開 section are',
     );
 
-    await click('[data-test-tab="settings"]');
+    await click('[data-test-tab="env"]');
 
     assert.deepEqual(
       await requestsOfOneTick(),

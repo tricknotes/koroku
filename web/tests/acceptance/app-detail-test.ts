@@ -91,13 +91,10 @@ module('Acceptance | app detail', function (hooks) {
     assert.deepEqual(tabs, [
       '概要',
       'デプロイ',
-      'レビューアプリ',
       'ログ',
       'リソース',
-      '構成',
       'タスク',
       '環境変数',
-      'ドメイン',
       'バックアップ',
       '設定',
     ]);

@@ -304,7 +304,7 @@ export default class MemoryHistory extends Component<Signature> {
           <p class="field-hint">
             目安は、いまの上限になってからの直近 14 日のピーク × 1.5 を 64m
             単位に切り上げた値です（128m
-            以上）。上限の変更は次のデプロイから反映されます。上限は設定タブの「メモリ上限」でも変えられます。
+            以上）。上限の変更は次のデプロイから反映されます。目安と違う値は「メモリの上限と予約」で入れられます。
           </p>
         {{else}}
           <EmptyState

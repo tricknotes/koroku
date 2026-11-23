@@ -1,5 +1,13 @@
 import { module, test } from 'qunit';
-import { click, currentURL, fillIn, visit } from '@ember/test-helpers';
+import {
+  click,
+  currentURL,
+  fillIn,
+  find,
+  findAll,
+  triggerEvent,
+  visit,
+} from '@ember/test-helpers';
 import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   apiError,
@@ -57,9 +65,9 @@ module('Acceptance | settings', function (hooks) {
     assert.dom('[data-test-host-port]').hasText('127.0.0.1:20000');
     assert.dom('[data-test-field="healthcheck_path"]').hasValue('/');
     assert.dom('[data-test-environment-option="staging"]').isChecked();
-    assert.dom('[data-test-field="memory_limit"]').hasValue('');
-    assert.dom('[data-test-limit-service]').hasValue('db');
-    assert.dom('[data-test-limit-value]').hasValue('1g');
+    assert
+      .dom('[data-test-memory-summary-limit]')
+      .hasText('基盤の既定値（全サービス共通）、db 1g');
     assert.dom('[data-test-field="relax_policy"]').isNotChecked();
     assert.dom('[data-test-auto-rollback]').includesText('有効');
     assert
@@ -75,40 +83,34 @@ module('Acceptance | settings', function (hooks) {
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
 
     await fillIn('[data-test-field="healthcheck_path"]', '/up');
-    await fillIn('[data-test-field="memory_limit"]', '768m');
+    await fillIn('[data-test-field="default_branch"]', 'trunk');
     await click('[data-test-environment-option="production"]');
     await click('[data-test-field="relax_policy"]');
-    await click('[data-test-limit-add]');
-    await fillIn(
-      '[data-test-limit-row]:nth-child(2) [data-test-limit-service]',
-      'web',
-    );
-    await fillIn(
-      '[data-test-limit-row]:nth-child(2) [data-test-limit-value]',
-      '512m',
-    );
     await click('[data-test-settings-save]');
 
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+      default_branch: 'trunk',
       healthcheck_path: '/up',
       environment: 'production',
       relax_policy: true,
-      memory_limit: '768m',
-      service_memory_limits: { db: '1g', web: '512m' },
     });
     assert.dom('[data-test-settings-saved]').exists();
     assert
       .dom('[data-test-app-environment]')
       .hasText('本番', 'the header follows the saved app');
 
-    await click('[data-test-limit-row]:nth-child(1) [data-test-limit-remove]');
+    await fillIn('[data-test-field="web_service"]', 'app');
     assert
       .dom('[data-test-settings-saved]')
       .doesNotExist('a new change clears the note');
-    await click('[data-test-settings-save]');
+    // Enter in a field of another part of the page saves everything too.
+    await triggerEvent(
+      find('[data-test-field="default_branch"]')!.closest('form')!,
+      'submit',
+    );
 
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[1]?.body, {
-      service_memory_limits: { web: '512m' },
+      web_service: 'app',
     });
   });
 
@@ -249,13 +251,11 @@ module('Acceptance | settings', function (hooks) {
   test('validation errors are shown next to the fields', async function (assert) {
     await visit('/apps/blog/settings');
 
-    await fillIn('[data-test-field="memory_limit"]', '512 MB');
-    await fillIn('[data-test-limit-value]', 'lots');
+    await fillIn('[data-test-field="web_port"]', '0');
     await click('[data-test-settings-save]');
-    assert.dom(fieldError('memory_limit')).exists();
-    assert.dom(fieldError('service_memory_limits')).exists();
+    assert.dom(fieldError('web_port')).exists();
     assert
-      .dom('[data-test-field="memory_limit"]')
+      .dom('[data-test-field="web_port"]')
       .hasAttribute('aria-invalid', 'true');
     assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
 
@@ -265,8 +265,7 @@ module('Acceptance | settings', function (hooks) {
         mystery: 'is not understood',
       });
     });
-    await fillIn('[data-test-field="memory_limit"]', '');
-    await fillIn('[data-test-limit-value]', '1g');
+    await fillIn('[data-test-field="web_port"]', '3000');
     await fillIn('[data-test-field="compose_path"]', '/etc/compose.yaml');
     await click('[data-test-settings-save]');
 
@@ -569,6 +568,146 @@ module('Acceptance | settings', function (hooks) {
       assert
         .dom('[data-test-danger-zone] [data-test-error]')
         .includesText('ほかの処理が実行中です');
+    });
+  });
+
+  module('sections', function (hooks) {
+    hooks.beforeEach(function () {
+      fakes.api.on('GET', '/api/apps/blog/domains', {
+        default_hostname: 'blog.dev.example.com',
+        domains: [],
+      });
+    });
+
+    test('the index leads to each section and marks it', async function (assert) {
+      await visit('/apps/blog/settings');
+
+      const links = findAll('[data-test-settings-index-link]').map((link) =>
+        link.getAttribute('data-test-settings-index-link'),
+      );
+      assert.deepEqual(links, [
+        'source',
+        'auto-deploy',
+        'publish',
+        'environment',
+        'protection',
+        'idle-sleep',
+        'env-requirements',
+        'memory',
+        'safeguards',
+        'registry',
+        'operations',
+        'danger',
+      ]);
+      const sections = findAll('[data-settings-section]').map((section) =>
+        section.getAttribute('data-settings-section'),
+      );
+      assert.deepEqual(sections, links, 'the index follows the page');
+      assert
+        .dom('[data-test-settings-index-link="source"]')
+        .hasAttribute('aria-current', 'location')
+        .hasAttribute('href', '/apps/blog/settings?section=source');
+
+      await click('[data-test-settings-index-link="environment"]');
+      assert.strictEqual(
+        currentURL(),
+        '/apps/blog/settings?section=environment',
+      );
+      assert.dom('#settings-environment').isFocused();
+      assert
+        .dom('[data-test-settings-index-link="environment"]')
+        .hasAttribute('aria-current', 'location');
+      assert.dom('[data-test-settings-jump-select]').hasValue('environment');
+    });
+
+    test('the jump control does the same on a narrow screen', async function (assert) {
+      await visit('/apps/blog/settings');
+
+      await fillIn('[data-test-settings-jump-select]', 'safeguards');
+      assert.strictEqual(
+        currentURL(),
+        '/apps/blog/settings?section=safeguards',
+      );
+      assert.dom('#settings-safeguards').isFocused();
+
+      // Which of the two shows depends on the width of the window.
+      const narrow = window.matchMedia('(width < 64rem)').matches;
+      assert
+        .dom('[data-test-settings-index]')
+        .hasStyle({ display: narrow ? 'none' : 'block' });
+      assert
+        .dom('[data-test-settings-jump]')
+        .hasStyle({ display: narrow ? 'flex' : 'none' });
+    });
+
+    test('a link to a section opens the page there', async function (assert) {
+      await visit('/apps/blog/settings?section=memory');
+
+      assert.dom('#settings-memory').isFocused();
+      assert
+        .dom('[data-test-settings-index-link="memory"]')
+        .hasAttribute('aria-current', 'location');
+
+      await visit('/apps/blog/settings?section=domains');
+      assert.dom('#domains').isFocused();
+      assert
+        .dom('[data-test-settings-index-link="publish"]')
+        .hasAttribute(
+          'aria-current',
+          'location',
+          'the domains are part of 公開',
+        );
+    });
+
+    test('the domains sit in 公開, outside the settings forms', async function (assert) {
+      fakes.api.on('POST', '/api/apps/blog/domains', {
+        id: 3,
+        hostname: 'www.example.org',
+        status: 'pending',
+        is_primary: false,
+        force_active: false,
+        records: [],
+        last_checked_at: null,
+        last_error: '',
+      });
+      await visit('/apps/blog/settings');
+
+      assert.dom('#settings-publish [data-test-domains]').exists();
+      assert.dom('#settings-publish [data-test-field="web_service"]').exists();
+      assert.strictEqual(
+        find('[data-test-domain-form]')!.parentElement!.closest('form'),
+        null,
+        'not nested in a settings form',
+      );
+
+      await fillIn('[data-test-field="web_service"]', 'app');
+      await fillIn('[data-test-domain-hostname]', 'www.example.org');
+      await click('[data-test-domain-add]');
+      assert.strictEqual(
+        fakes.api.callsTo('POST', '/api/apps/blog/domains').length,
+        1,
+        'the domain is added at once',
+      );
+      assert.deepEqual(
+        fakes.api.callsTo('PATCH', '/api/apps/blog'),
+        [],
+        'the settings wait for their save',
+      );
+      assert.dom('[data-test-field="web_service"]').hasValue('app');
+    });
+
+    test('a production app lists 昇格元, a view role no operations', async function (assert) {
+      app = { ...app, environment: 'production' };
+      await visit('/apps/blog/settings');
+      assert.dom('[data-test-settings-index-link="promotion"]').exists();
+
+      app = { ...app, environment: 'staging', role: 'view' };
+      await visit('/');
+      await visit('/apps/blog/settings');
+      assert.dom('[data-test-settings-index-link="promotion"]').doesNotExist();
+      assert.dom('[data-test-settings-index-link="operations"]').doesNotExist();
+      assert.dom('[data-test-settings-index-link="danger"]').doesNotExist();
+      assert.dom('[data-test-settings-index-link="memory"]').exists();
     });
   });
 });

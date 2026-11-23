@@ -298,26 +298,4 @@ module('Acceptance | service reservation', function (hooks) {
       .hasText('256.0 MB');
     assert.dom('[data-test-reservation-edit]').doesNotExist();
   });
-
-  test('the settings tab shows what the next deployment changes', async function (assert) {
-    app = { ...app, service_memory_reservations: { web: '200m' } };
-    services = [
-      svc('db', 512 * MB, 512 * MB),
-      svc('web', 256 * MB, 200 * MB),
-      svc('worker', null, 256 * MB),
-    ];
-    fakes.api.on('GET', '/api/apps/blog/env/requirements', {
-      status: 'unavailable',
-      reason: 'file_not_found',
-    });
-    await visit('/apps/blog/settings');
-
-    assert
-      .dom('[data-test-reservation-change="web"]')
-      .hasText('web 稼働中 256.0 MB → 次のデプロイから 200.0 MB');
-    assert
-      .dom('[data-test-reservation-change="worker"]')
-      .hasText('worker 稼働中 なし → 次のデプロイから 256.0 MB');
-    assert.dom('[data-test-reservation-change="db"]').doesNotExist();
-  });
 });

@@ -21,7 +21,11 @@ import RelativeTime from 'koroku-console/components/relative-time';
 import RoleNote from 'koroku-console/components/role-note';
 import RowList from 'koroku-console/components/row-list';
 import StatusIndicator from 'koroku-console/components/status-indicator';
+import focusSection from 'koroku-console/modifiers/focus-section';
 import scrollIntoViewWhen from 'koroku-console/modifiers/scroll-into-view-when';
+import ReviewAppsPanel from 'koroku-console/components/review-apps-panel';
+import ReviewAppsPermission from 'koroku-console/components/review-apps-permission';
+import { hasReviewTab } from 'koroku-console/utils/review';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
@@ -204,6 +208,18 @@ export default class AppDeployTemplate extends Component<Signature> {
 
   get app(): App {
     return this.args.model.app;
+  }
+
+  /**
+   * The review apps of pull requests, under the history (ARCHITECTURE
+   * 9.9): apps they can be made from, and apps that still have some.
+   */
+  get showsReviewApps(): boolean {
+    return hasReviewTab(this.app);
+  }
+
+  get focusReviewApps(): boolean {
+    return this.args.controller.section === 'review-apps';
   }
 
   /**
@@ -975,6 +991,19 @@ export default class AppDeployTemplate extends Component<Signature> {
         </AsyncView>
       </section>
     {{/unless}}
+
+    {{#if this.showsReviewApps}}
+      <div class="deploy-review" data-test-review-tab>
+        <ReviewAppsPanel
+          id="review-apps"
+          tabindex="-1"
+          @parent={{this.app}}
+          @onCreated={{@model.reload}}
+          {{focusSection this.focusReviewApps}}
+        />
+        <ReviewAppsPermission @context={{@model}} />
+      </div>
+    {{/if}}
 
     {{#if this.pending}}
       <ConfirmDialog

@@ -1,7 +1,6 @@
 import { module, test } from 'qunit';
 import SettingsForm, {
   ExemptRow,
-  LimitRow,
   MAX_EXEMPT_PATHS,
   exemptPathProblem,
   isValidMemoryLimit,
@@ -35,16 +34,11 @@ module('Unit | Utility | settings-form', function () {
 
     form.webPort = '8080';
     form.composePath = ' deploy/compose.yaml ';
-    form.limits = [...form.limits, new LimitRow('web', '512m'), new LimitRow()];
 
     assert.deepEqual(form.patch(app), {
       compose_path: 'deploy/compose.yaml',
       web_port: 8080,
-      service_memory_limits: { db: '1g', web: '512m' },
     });
-
-    form.limits = [];
-    assert.deepEqual(form.patch(app).service_memory_limits, {});
   });
 
   test('the backup settings are left to their own form', function (assert) {
@@ -58,22 +52,13 @@ module('Unit | Utility | settings-form', function () {
     assert.deepEqual(form.patch(app), { environment: 'production' });
   });
 
-  test('validate checks the port and the memory limits', function (assert) {
+  test('validate checks the port', function (assert) {
     const form = new SettingsForm(makeApp());
 
     form.webPort = '0';
-    form.memoryLimit = '512 MB';
-    form.limits = [new LimitRow('db', '')];
-
-    assert.deepEqual(Object.keys(form.validate()).sort(), [
-      'memory_limit',
-      'service_memory_limits',
-      'web_port',
-    ]);
+    assert.deepEqual(Object.keys(form.validate()), ['web_port']);
 
     form.webPort = '3000';
-    form.memoryLimit = '512m';
-    form.limits = [new LimitRow('db', '1g'), new LimitRow('', '')];
     assert.deepEqual(form.validate(), {});
   });
 
@@ -150,35 +135,18 @@ module('Unit | Utility | settings-form', function () {
     assert.deepEqual(form.patch(app), {});
   });
 
-  test('memory reservations are edited like the limits, 0 meaning none', function (assert) {
+  test('the memory limits and reservations are left to the resources tab', function (assert) {
     const app = makeApp({
       environment: 'production',
+      memory_limit: '512m',
       service_memory_reservations: { worker: '0' },
     });
     const form = new SettingsForm(app);
-    assert.deepEqual(form.patch(app), {}, 'untouched');
+    form.webService = 'app';
+    assert.deepEqual(form.patch(app), { web_service: 'app' });
+  });
 
-    form.memoryReservation = ' 256m ';
-    form.reservations = [
-      ...form.reservations,
-      new LimitRow('db', '1g'),
-      new LimitRow(),
-    ];
-    assert.deepEqual(form.validate(), {});
-    assert.deepEqual(form.patch(app), {
-      memory_reservation: '256m',
-      service_memory_reservations: { worker: '0', db: '1g' },
-    });
-
-    form.memoryReservation = 'lots';
-    form.reservations = [new LimitRow('db', '')];
-    const errors = form.validate();
-    assert.ok(errors['memory_reservation'], 'not a size');
-    assert.ok(
-      errors['service_memory_reservations'],
-      'a named row needs a value',
-    );
-
+  test('isValidReservation', function (assert) {
     assert.true(isValidReservation(''));
     assert.true(isValidReservation('0'));
     assert.true(isValidReservation('512m'));

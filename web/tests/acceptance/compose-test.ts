@@ -1,5 +1,5 @@
 import { module, test } from 'qunit';
-import { click, fillIn, visit } from '@ember/test-helpers';
+import { click, currentURL, fillIn, visit } from '@ember/test-helpers';
 import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import { serveConsole } from 'koroku-console/tests/helpers/console';
 import {
@@ -14,7 +14,7 @@ import { installFakes, type Fakes } from 'koroku-console/tests/helpers/fakes';
 const MB = 1024 ** 2;
 const APP = '/api/apps/blog';
 
-// The Compose tab (ARCHITECTURE 9.10).
+// The Compose section of the resources tab (ARCHITECTURE 9.10).
 module('Acceptance | compose', function (hooks) {
   setupApplicationTest(hooks);
 
@@ -28,7 +28,18 @@ module('Acceptance | compose', function (hooks) {
   test('it shows the containers, the override and the merged configuration', async function (assert) {
     await visit('/apps/blog/compose');
 
-    assert.dom('[data-test-tab="compose"]').hasText('構成');
+    assert.strictEqual(
+      currentURL(),
+      '/apps/blog/resources?section=compose',
+      'the URL of the section stands for it',
+    );
+    assert
+      .dom('[data-test-tab="resources"]')
+      .hasAttribute('aria-current', 'page');
+    assert
+      .dom('[data-test-compose-toggle]')
+      .hasAttribute('aria-expanded', 'true');
+    assert.dom('[data-test-compose-section]').isFocused();
     assert
       .dom('[data-test-container="web"]')
       .includesText('稼働中')
@@ -51,6 +62,35 @@ module('Acceptance | compose', function (hooks) {
       .hasText(`#42 ${'a'.repeat(7)} Fix the header（稼働中）`);
     assert.strictEqual(fakes.api.callsTo('GET', `${APP}/compose`).length, 1);
     assert.strictEqual(fakes.api.callsTo('GET', `${APP}/containers`).length, 1);
+  });
+
+  test('the section asks Docker only once it is opened', async function (assert) {
+    await visit('/apps/blog/resources');
+
+    assert.dom('[data-test-compose-section] h2').hasText('構成');
+    assert
+      .dom('[data-test-compose-toggle]')
+      .hasAttribute('aria-expanded', 'false')
+      .hasText('表示');
+    assert.dom('[data-test-compose]').doesNotExist();
+    assert.strictEqual(fakes.api.callsTo('GET', `${APP}/compose`).length, 0);
+    assert.strictEqual(fakes.api.callsTo('GET', `${APP}/containers`).length, 0);
+
+    await click('[data-test-compose-toggle]');
+    assert
+      .dom('[data-test-compose-toggle]')
+      .hasAttribute('aria-expanded', 'true');
+    assert.dom('[data-test-compose-override] pre').hasText(OVERRIDE.trim());
+    assert.strictEqual(fakes.api.callsTo('GET', `${APP}/compose`).length, 1);
+
+    await click('[data-test-compose-toggle]');
+    assert.dom('[data-test-compose]').doesNotExist();
+    await click('[data-test-compose-toggle]');
+    assert.strictEqual(
+      fakes.api.callsTo('GET', `${APP}/compose`).length,
+      1,
+      'opening again shows what was read',
+    );
   });
 
   test('it marks containers that differ from the release', async function (assert) {
