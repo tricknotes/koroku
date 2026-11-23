@@ -106,7 +106,6 @@ module('Unit | Utility | container-resources', function () {
         memoryPercent: '50%',
         cpu: '3.3%',
         cpuMax: '200%',
-        hostMemory: '4.0 GB',
         cpuCount: 2,
       },
     );

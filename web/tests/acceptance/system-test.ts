@@ -359,7 +359,7 @@ module('Acceptance | system', function (hooks) {
         .dom('[data-test-containers-total]')
         .includesText('メモリ 940.0 MB（ホストの 22.9%）')
         .includesText('CPU 12.4%')
-        .includesText('このホストは 2 コアなので最大 200%');
+        .includesText('2 コアで最大 200%');
     });
 
     test('no running container says so', async function (assert) {

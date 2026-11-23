@@ -454,18 +454,13 @@ export default class SystemIndexTemplate extends Component {
             </RowList>
             {{#let (containerTotals resources) as |totals|}}
               <p class="system-note" data-test-containers-total>
-                コンテナ全体で、メモリ
+                合計 メモリ
                 {{totals.memory}}（ホストの
                 {{totals.memoryPercent}}）、CPU
-                {{totals.cpu}}。CPU は Docker と同じく 1 コアを 100%
-                とした値で、このホストは
-                {{totals.cpuCount}}
-                コアなので最大
-                {{totals.cpuMax}}
-                です。計測した瞬間の値です。メーターはホスト全体（メモリ
-                {{totals.hostMemory}}、CPU
-                {{totals.cpuMax}}）に対する割合です。「その他」は koroku
-                のアプリではないコンテナです。
+                {{totals.cpu}}（{{totals.cpuCount}}
+                コアで最大
+                {{totals.cpuMax}}）。「その他」は koroku
+                のアプリ以外のコンテナです。
               </p>
             {{/let}}
           {{else}}
@@ -595,11 +590,11 @@ export default class SystemIndexTemplate extends Component {
             {{/if}}
             <p class="system-note" data-test-reservation-note>
               {{#if reservation.apps.length}}
-                停止していない本番アプリが、稼働中のリリースで予約している量です。保存した予約の設定は次のデプロイから反映され、それまでは「次のデプロイから」として並べます。ホストのメモリが足りなくなったとき、カーネルは予約した量までを後回しにして、ステージングのアプリから先に回収します。合計にホストやビルド、ステージングのための余白
+                稼働中のリリースが予約している量です。保存した設定は次のデプロイから反映されます。余白
                 {{reservation.margin}}
-                を足して、ホストのメモリに収まるようにします。
+                を残してホストのメモリに収めます。
               {{else}}
-                予約している本番アプリはありません。本番のアプリをデプロイすると、各サービスのメモリ上限の半分（リソースタブで変えられます）を予約します。
+                予約している本番アプリはありません。本番アプリは、デプロイすると各サービスの上限の半分を予約します。
               {{/if}}
             </p>
           </section>
@@ -694,11 +689,7 @@ export default class SystemIndexTemplate extends Component {
           </RowList>
           <p class="system-note" data-test-docker-total>
             合計
-            {{dockerTotal
-              items
-            }}。「空く見込み」は「不要なデータを削除」で空く量の目安で、少なめに出ます。消えるのは、どのコンテナにも使われていないタグのないイメージと、1
-            週間使われていないビルドキャッシュです。ロールバック用に残している直近のリリースや停止中のアプリのイメージ、volume
-            は消しません。
+            {{dockerTotal items}}。「空く見込み」は削除で空く量の目安です。
           </p>
         </:default>
       </AsyncView>
@@ -715,7 +706,8 @@ export default class SystemIndexTemplate extends Component {
       >
         <p>
           使われていないデータを Docker
-          から消して、ディスクを空けます。稼働中のアプリには影響しません。消したものは戻せませんが、必要になれば次のビルドで作り直されます。
+          から消して、ディスクを空けます。稼働中のアプリ、ロールバック用のリリースと停止中のアプリのイメージ、volume
+          には触れません。消したものは戻せませんが、次のビルドで作り直されます。
         </p>
         <fieldset class="option-group dialog-options">
           <legend class="visually-hidden">削除するもの</legend>
