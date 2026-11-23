@@ -1520,6 +1520,14 @@ SHOTS.push(
     wait: SETTINGS,
     click: '[data-test-delete]',
   },
+  {
+    name: 'settings-delete-dialog-phone',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: SETTINGS,
+    click: '[data-test-delete]',
+    ...PHONE,
+    fullPage: false,
+  },
 
   {
     name: 'settings-focus',

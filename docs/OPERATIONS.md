@@ -119,13 +119,15 @@ sudo ./deploy/provision.sh ./koroku
 | マスターキー（環境変数とレジストリのトークンの暗号化） | `/etc/koroku/master.key`（0600） | `koroku` が初回起動時に生成する。失うと保存済みの環境変数とレジストリのトークンを復号できない |
 | GitHub App の秘密鍵 | `/etc/koroku/github-app.pem`（0600） | GitHub App の設定画面で発行して置く |
 | GitHub App の client secret | `/etc/koroku/config.toml`（0600） | 同上 |
-| オブジェクトストレージの Access Key ID / Secret Access Key | `/etc/koroku/config.toml`（0600） | バケット限定のアクセスキーを発行して書く |
+| オブジェクトストレージの Access Key ID / Secret Access Key | `/etc/koroku/config.toml`（0600） | バケット限定のアクセスキーを発行して書く。このキーだけで、退避した全アプリのログ（`logs/`。暗号化していない）を読める。バックアップ（`restic/`）を読むには restic のパスワードも要る |
 | restic のリポジトリパスワード | `/etc/koroku/restic.key`（0600） | 自分で決めて置く。失うとバックアップを復元できない |
 | private なイメージのレジストリ認証（アプリごと。推奨） | `koroku.db` に暗号化して保存。使うときに `/var/lib/koroku/apps/<slug>/docker/config.json`（0600）へ書き出す | 管理 UI のアプリの設定タブ「コンテナレジストリの認証」で入れる（管理以上のロールと再ログインが要る）。そのアプリのビルド・pull・起動にだけ使われ、ほかのアプリには見えない（ARCHITECTURE 6.1） |
 | private なイメージのレジストリ認証（ホスト全体） | `/root/.docker/config.json` | VPS 上で `sudo docker login ghcr.io`。`koroku` は root で動くので、`sudo` を付けずに自分のユーザーでログインしても使われない。アプリごとの認証を設定していない全アプリが共有するので、メンバーにアプリを任せるときはアプリごとの認証を使う |
 | TLS 証明書と ACME アカウント | `/var/lib/caddy`（Caddy が管理） | 自動。バックアップ対象外で、失っても再発行される |
 
 `/etc/koroku` は 0700、`/var/lib/koroku` も 0700 で、どちらも root 専用。
+
+バケットの中身のうち、`restic/` は restic が暗号化する（`koroku.db`、鍵を含む `/etc/koroku`、volume、ダンプ）。`logs/<slug>/...` は gzip しただけで、実行ログ・アクセスログ・デプロイログを平文で持つ（ARCHITECTURE 10.1）。バケットを読める人は全アプリのログを読めるので、アクセスキーを作り直す、事業者のアカウントに人を足す、バケットの公開設定を変える、といった操作は、ログを見せる相手を変える操作として扱う。
 
 ## 7. VPS の外に控えるもの
 
@@ -279,6 +281,30 @@ staging アプリの pull request ごとのレビューアプリ（ARCHITECTURE 
 - ホスト全損から戻すとき（11 章）、レビューアプリは作り直すほうが早い（再デプロイすれば動き、データは親からコピーし直せる）。
 - 作成のあとでホスト名が解決されないと画面が出したら、DNS にワイルドカードのレコードがないので、そのホスト名を登録する。
 - `journalctl -u koroku` には、データのコピーを始めたとき `copying the parent's data into the review app`、始められなかったとき `the parent's data is not copied into the review app` が出る。
+
+### 10.5 削除したアプリが残すもの
+
+アプリの削除（管理 UI の設定タブ）が消すのは、コンテナ、選べば volume、イメージ、`koroku.db` の行、`/var/lib/koroku/apps/<slug>`。ログとバックアップは残る（ARCHITECTURE 10 章の「起動制御と削除」）。
+
+| 残るもの | 場所 | 消えるとき |
+| --- | --- | --- |
+| 実行ログとアクセスログ | `/var/lib/koroku/logs/<slug>/` | 14 日（`[logs] retention_days`） |
+| 退避したログ（デプロイログを含む） | バケットの `logs/<slug>/` | バケットのライフサイクルルール（SETUP の手順どおりなら 90 日） |
+| バックアップ | restic のスナップショットのうち、タグ `app:<slug>` のもの | 世代管理（日次 7・週次 4・月次 6）。月次のものは数か月残る |
+
+- あとから同じ名前でアプリを作ると、残ったものはそのアプリのログタブとバックアップタブに出る。そのアプリの閲覧のロールは前のアプリのログを読め、管理のロールは前のアプリのダンプをダウンロードし、volume をリストアできる。誤って消したアプリは、同じ名前で作り直せばバックアップから戻せる。
+- 前のアプリのデータを新しいアプリのメンバーに見せたくないときは、別の名前で作る。同じ名前を使うなら、作る前に残ったものを消す。
+  - ローカルのログ: `sudo rm -r /var/lib/koroku/logs/<slug>`。
+  - 退避したログ: 事業者の画面か S3 互換のクライアントで、プレフィックス `logs/<slug>/` のオブジェクトを消す（`logs/<slug>-staging/` などを巻き込まないよう、末尾の `/` まで指定する）。
+  - スナップショット: バックアップが実行中でないときに、root で次を実行する。`--tag app:<slug>` は名前が完全に一致するタグだけを選ぶ。
+
+    ```sh
+    export RESTIC_REPOSITORY="s3:<endpoint>/<bucket>/restic"   # config.toml の [storage]
+    export RESTIC_PASSWORD_FILE=/etc/koroku/restic.key
+    export AWS_ACCESS_KEY_ID=<access_key_id> AWS_SECRET_ACCESS_KEY=<secret_access_key> AWS_DEFAULT_REGION=<region>
+    restic snapshots --tag app:<slug>           # 消すものを確かめる
+    restic forget --prune <ID> <ID> ...         # 一覧に出た ID を渡す
+    ```
 
 ## 11. ホスト全損からの復旧
 
