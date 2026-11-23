@@ -73,8 +73,8 @@ koroku は「手元の `compose.yaml` を、自分の VPS 1 台で、安全柵�
 | アクセスがない間はアプリを休止する | ◯ | — | — | — | — | — |
 | **連携と利用者** | | | | | | |
 | GitHub への push で自動でデプロイする | ◯ | ◯ | ◯ | △<sup>14</sup> | △<sup>15</sup> | — |
-| pull request ごとのレビューアプリ | ◯ | ◯ | ◯ | — | — | — |
-| 複数の利用者に権限を分ける | △<sup>16</sup> | ◯ | ◯ | — | — | — |
+| pull request ごとのレビューアプリ | ◯ | ◯ | △<sup>16</sup> | — | — | — |
+| 複数の利用者に権限を分ける | △<sup>17</sup> | ◯ | ◯ | — | — | — |
 | AI エージェント（Claude Code）向けの Skill | ◯ | — | — | — | — | — |
 
 1. Compose を解析して、ラベル、ネットワーク、`restart` を足す。手を加えずに使う "Raw" の形もあるが、そのときは経路の設定を自分で書く。
@@ -87,12 +87,13 @@ koroku は「手元の `compose.yaml` を、自分の VPS 1 台で、安全柵�
 8. Compose のアプリは対象外。
 9. Compose を Swarm の stack として動かすとき（`build:` は使えない）。
 10. volume のないアプリだけ。
-11. Coolify の管理する DB を S3 互換のストレージへ退避する。
+11. Coolify が管理する DB（PostgreSQL、MySQL など）だけ。アプリの volume は対象外。
 12. DB のプラグインごとに用意されている。
-13. 基盤の設定だけ。アプリは再デプロイが要る。
+13. 基盤の設定と状態（`/captain/data`）だけ。アプリは再デプロイが要り、volume は含まれない。
 14. Dokku のサーバーへの `git push` を受ける。
 15. Webhook を受ける。
-16. オーナー 1 人と、オーナーがアプリごとにロール（閲覧 / デプロイ / 管理）を与えたメンバー。チームや組織は持たない。
+16. Compose のアプリは対象外。
+17. オーナー 1 人と、オーナーがアプリごとにロール（閲覧 / デプロイ / 管理）を与えたメンバー。チームや組織は持たない。
 
 ## マネージドな PaaS との違い
 
@@ -100,9 +101,9 @@ Heroku のようなマネージドな PaaS は、サーバーの面倒をまっ�
 
 ## 参照した文書
 
-- Coolify: [Docker Compose](https://coolify.io/docs/applications/build-packs/docker-compose)、[Rollbacks](https://coolify.io/docs/applications/deployments/rollbacks)、[Installation](https://coolify.io/docs/get-started/installation)、[Multi-server deployments](https://coolify.io/docs/core/infrastructure/scaling/multi-server-deployments)
-- Dokploy: [Docker Compose の domains](https://docs.dokploy.com/docs/core/docker-compose/domains)、[Rollbacks](https://docs.dokploy.com/docs/core/applications/rollbacks)、[Volume backups](https://docs.dokploy.com/docs/core/volume-backups)、[Architecture](https://docs.dokploy.com/docs/core/architecture)
-- Dokku: [Builder management](https://dokku.com/docs/deployment/builders/builder-management/)、[Scheduler management](https://dokku.com/docs/deployment/schedulers/scheduler-management/)、[Zero downtime deploys](https://dokku.com/docs/deployment/zero-downtime-deploys/)
-- CapRover: [Docker Compose](https://caprover.com/docs/docker-compose.html)、[Zero downtime](https://caprover.com/docs/zero-downtime.html)、[Backup and restore](https://caprover.com/docs/backup-and-restore.html)
+- Coolify: [Docker Compose](https://coolify.io/docs/applications/build-packs/docker-compose)、[Rollbacks](https://coolify.io/docs/applications/deployments/rollbacks)、[Installation](https://coolify.io/docs/get-started/installation)、[Multi-server deployments](https://coolify.io/docs/core/infrastructure/scaling/multi-server-deployments)、[Database backups](https://coolify.io/docs/databases/backups)、[Preview deployments](https://coolify.io/docs/applications/ci-cd/github/preview-deploy)
+- Dokploy: [Docker Compose の domains](https://docs.dokploy.com/docs/core/docker-compose/domains)、[Rollbacks](https://docs.dokploy.com/docs/core/applications/rollbacks)、[Volume backups](https://docs.dokploy.com/docs/core/volume-backups)、[Architecture](https://docs.dokploy.com/docs/core/architecture)、[Permissions](https://docs.dokploy.com/docs/core/permissions)、[Compose の preview deployments の要望（Dokploy/dokploy#2028）](https://github.com/Dokploy/dokploy/issues/2028)
+- Dokku: [Builder management](https://dokku.com/docs/deployment/builders/builder-management/)、[Scheduler management](https://dokku.com/docs/deployment/schedulers/scheduler-management/)、[Zero downtime deploys](https://github.com/dokku/dokku/blob/master/docs/deployment/zero-downtime-deploys.md)
+- CapRover: [Docker Compose](https://caprover.com/docs/docker-compose.html)、[Zero downtime](https://caprover.com/docs/zero-downtime.html)、[How CapRover works](https://caprover.com/docs/fundamentals/how-caprover-works)、[Backup](https://caprover.com/docs/server/backup)
 - Kamal: [kamal rollback](https://kamal-deploy.org/docs/commands/rollback/)、[Accessories](https://kamal-deploy.org/docs/configuration/accessories/)
 - Piku: [README](https://github.com/piku/piku)
