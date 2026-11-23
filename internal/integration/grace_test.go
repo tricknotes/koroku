@@ -13,6 +13,7 @@ import (
 // its job and records that it did, in a named volume the next container
 // sees. The job takes longer than Docker's default 10 s, so without the
 // stop_grace_period the worker would be killed before writing the record.
+// The worker reads the commit, so every deploy recreates it (ARCHITECTURE 6).
 const graceCompose = `services:
   web:
     image: busybox:1.37
@@ -21,6 +22,8 @@ const graceCompose = `services:
   worker:
     image: busybox:1.37
     stop_grace_period: 20s
+    environment:
+      KOROKU_COMMIT_SHA: ${KOROKU_COMMIT_SHA}
     volumes:
       - jobs:/data
     command:
@@ -31,7 +34,7 @@ volumes:
   jobs:
 `
 
-// TestStopGracePeriodIsWaitedFor: a redeploy recreates every service, and
+// TestStopGracePeriodIsWaitedFor: a redeploy recreates the worker, and
 // Docker lets a worker with a stop_grace_period finish its job (12 s, more
 // than Docker's default 10 s) before replacing it. The start step says
 // what it may wait for (ARCHITECTURE 6).
@@ -52,7 +55,7 @@ func TestStopGracePeriodIsWaitedFor(t *testing.T) {
 		t.Errorf("first deploy log:\n%s", log)
 	}
 
-	source.write("NOTES.md", "A new commit, so every service is recreated.\n")
+	source.write("NOTES.md", "A new commit, so the worker is recreated.\n")
 	second := source.commit("Redeploy")
 	started := time.Now()
 	d = e.deploy(slug, map[string]string{"sha": second})
