@@ -56,7 +56,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 
 アクセスがない間の休止を使うアプリ（たいていの staging）は `--sleep` を付ける。koroku が休止と起動でするのと同じく、`stop` してから `start --wait` し、もう一度 HTTP で確かめ、起きるまでの秒数（休止のあとの最初のリクエストが待つ時間）を出す。
 
-無停止デプロイ（blue/green）を使う、または使えるか確かめたいアプリは `--blue-green` を付ける。koroku が断る形（公開サービスの `container_name`、`deploy.replicas` と `scale`、ほかのサービスからの依存、`<公開サービス>-blue` / `-green` という名前、`include:`）を先に調べる。`image:` がコミットの変数（`KOROKU_COMMIT_SHA` / `KOROKU_COMMIT_SHORT`）に従うサービスを koroku と同じ方法で見つけて出し（`Images that follow the commit:`）、色の付いた override を重ねて blue を起動したあと、もう一度デプロイして green への切り替えをなぞる（ワンショットと green を `up --no-deps --wait` → green の確認 → 切り替え → ほかのサービスの作り直し → `--drain` 秒（既定 10）待って blue を止める）。その間 0.2 秒ごとに「いまの転送先」のポートへリクエストを送り、接続エラーか 5xx が 1 件でもあれば失敗にする。green のポートは `--alt-host-port`（既定 28081）。DB が作り直されずに残ったかもサービスごとに出す。
+無停止デプロイ（blue/green）を使う、または使えるか確かめたいアプリは `--blue-green` を付ける。koroku が断る形（公開サービスの `container_name`、`deploy.replicas` と `scale`、ほかのサービスからの依存、`<公開サービス>-blue` / `-green` という名前、`include:`）を先に調べる。色の付いた override を重ねて blue を起動したあと、もう一度デプロイして green への切り替えをなぞる（ワンショットと green を `up --no-deps --wait` → green の確認 → 切り替え → ほかのサービスの作り直し → `--drain` 秒（既定 10）待って blue を止める）。その間 0.2 秒ごとに「いまの転送先」のポートへリクエストを送り、接続エラーか 5xx が 1 件でもあれば失敗にする。green のポートは `--alt-host-port`（既定 28081）。DB が作り直されずに残ったかもサービスごとに出す。
 
 ```sh
 <skill-dir>/scripts/rehearse.sh --service web --port 3000 --health /up --env-file /path/to/test.env --blue-green
@@ -65,6 +65,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 - リポジトリの追跡中と未追跡（ignore されていない）のファイルだけを一時ディレクトリにコピーし、`.git` なしで動かす。
 - koroku と同じ形の override（公開サービスのポートを `127.0.0.1` に置き換え、ほかのポートを消し、env ファイルを全サービスに、コミットの変数の `env.release` を受け取るサービスだけに注入し、メモリ上限 512m、`oom_score_adj`、本番ならメモリの予約）を重ねて `config` → `build` / `pull` → `up --wait` → HTTP 確認（5xx 以外が返るまで最大 60 秒）を行う。
 - 最初に Compose ファイルが参照する変数（`docker compose config --variables`）を出す。koroku が照合に使うのと同じ一覧なので、アプリが必要とする変数が並んでいるか確かめる。
+- コミットの変数に従うサービス（`image:` のタグや `environment` で `${KOROKU_COMMIT_SHA}` を補間するもの）を koroku と同じ方法で見つけて出す（`Services that follow the commit:`）。それらと公開サービス、ワンショット、`build:` を持つサービスだけが `env.release` を受け取る。DB などがコミットの変数を読んでいたら、koroku では空になる。
 - 変数を読む `build.args` を出す。ここに環境ごとの値があると、staging から本番への昇格でイメージを再利用できず、値がイメージに焼き込まれる。実行時に読む形へ直せないか確かめる。
 - 失敗したらコンテナの出力の末尾を出す。終わると Compose プロジェクトを volume ごと消す（`--keep` で残す）。
 - テスト用の env ファイルは一時ディレクトリに作り、本物の秘密を入れない。リポジトリには置かない。
