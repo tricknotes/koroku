@@ -1,4 +1,8 @@
 import { tracked } from '@glimmer/tracking';
+import {
+  DEFAULT_DRAIN_SECONDS,
+  drainSecondsProblem,
+} from 'koroku-console/utils/blue-green';
 import type {
   App,
   AppPatch,
@@ -98,6 +102,10 @@ export default class SettingsForm {
   /** Sleep while idle (ARCHITECTURE 8.4) and after how many minutes. */
   @tracked idleSleep: boolean;
   @tracked idleSleepMinutes: number;
+  /** Blue/green deploys of the public service (ARCHITECTURE 7.2). */
+  @tracked blueGreen: boolean;
+  /** The drain in seconds, as typed. */
+  @tracked blueGreenDrainSeconds: string;
 
   constructor(app: App) {
     this.defaultBranch = app.default_branch;
@@ -119,6 +127,10 @@ export default class SettingsForm {
     this.autoDeployWorkflow = app.auto_deploy_workflow ?? '';
     this.idleSleep = app.idle_sleep ?? false;
     this.idleSleepMinutes = app.idle_sleep_minutes ?? DEFAULT_IDLE_MINUTES;
+    this.blueGreen = app.blue_green ?? false;
+    this.blueGreenDrainSeconds = String(
+      app.blue_green_drain_seconds ?? DEFAULT_DRAIN_SECONDS,
+    );
   }
 
   /** The branch whose pushes would deploy, as the form stands. */
@@ -155,6 +167,8 @@ export default class SettingsForm {
         break;
       }
     }
+    const drain = drainSecondsProblem(this.blueGreenDrainSeconds);
+    if (drain) errors['blue_green_drain_seconds'] = drain;
     return errors;
   }
 
@@ -219,6 +233,20 @@ export default class SettingsForm {
       this.idleSleepMinutes !== (app.idle_sleep_minutes ?? DEFAULT_IDLE_MINUTES)
     ) {
       patch.idle_sleep_minutes = this.idleSleepMinutes;
+    }
+    if (this.blueGreen !== (app.blue_green ?? false)) {
+      patch.blue_green = this.blueGreen;
+    }
+    // A value that does not pass the check still counts as a change (the
+    // unsaved-changes guard asks about it); validate() keeps it from being
+    // sent.
+    if (drainSecondsProblem(this.blueGreenDrainSeconds) === null) {
+      const drain = Number(this.blueGreenDrainSeconds.trim());
+      if (drain !== (app.blue_green_drain_seconds ?? DEFAULT_DRAIN_SECONDS)) {
+        patch.blue_green_drain_seconds = drain;
+      }
+    } else {
+      patch.blue_green_drain_seconds = Number.NaN;
     }
     return patch;
   }

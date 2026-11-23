@@ -8,8 +8,11 @@ const SECOND = 1000;
 /**
  * What a deployment's log depends on besides the deployment itself:
  * `slug`, `hostPort`, `healthPath`, `previousId` (the release that was
- * serving before, or null on a first deployment) and `backup` (the app
- * backs up before deploying).
+ * serving before, or null on a first deployment), `backup` (the app
+ * backs up before deploying) and, for a blue/green app (ARCHITECTURE 7.2),
+ * `blueGreen`: `{ webService, oldName, ports: { blue, green } }`, where
+ * `oldName` is what served before (a colour, the public service's own
+ * name, or null when nothing ran).
  */
 function projectOf(context) {
   return `koroku-${context.slug}`;
@@ -53,6 +56,156 @@ function startLines(context) {
     ` Container ${project}-db-1  Waiting`,
     ` Container ${project}-db-1  Healthy`,
   ];
+}
+
+/**
+ * The steps from `start` on of a blue/green deployment
+ * (internal/deploy/bluegreen.go). `entry.mockFailure` picks how a failed
+ * one ends: `memory` (no room for a second copy), `check` (the new colour
+ * fails its check and is removed) or `services` (a worker fails after the
+ * switch; the requests go back).
+ */
+function blueGreenSteps(entry, context, step, at, stamp, scale) {
+  const bg = context.blueGreen;
+  const project = projectOf(context);
+  const color = entry.web_color ?? entry.mockColor;
+  const port = bg.ports[color];
+  const fail = (title) => [
+    { line: '' },
+    { line: `==> ${stamp(at())} failed ${title}` },
+  ];
+  const out = [];
+  const push = (items) =>
+    items.forEach((item) => out.push({ at: at(), line: item.line }));
+
+  if (bg.oldName === null) {
+    // Nothing to switch from: everything starts at once, as in chapter 7.
+    step(
+      'start',
+      `Starting ${color} on port ${port}`,
+      [
+        'The public service is not running; all services start at once.',
+        ` Container ${project}-db-1  Started`,
+        ` Container ${project}-${bg.webService}-${color}-1  Started`,
+      ],
+      6 * SECOND * scale,
+    );
+    step('route', 'Updating routes', [], 1 * SECOND * scale);
+    return { out, finished: false };
+  }
+
+  const service = `${bg.webService}-${color}`;
+  if (entry.mockFailure === 'memory') {
+    step(
+      'start',
+      `Starting ${color} on port ${port}`,
+      [
+        entry.error,
+        'Free memory (stop or put other apps to sleep, lower the limit) or turn blue/green deploys off, then deploy again.',
+      ],
+      1 * SECOND * scale,
+    );
+    push(fail(`Deployment failed: ${entry.error}`));
+    return { out, finished: true };
+  }
+  step(
+    'start',
+    `Starting ${color} on port ${port}`,
+    [
+      ` Container ${project}-migrate-1  Started`,
+      ` Container ${project}-migrate-1  Exited`,
+      ` Container ${project}-${service}-1  Created`,
+      ` Container ${project}-${service}-1  Started`,
+      ` Container ${project}-${service}-1  Healthy`,
+    ],
+    7 * SECOND * scale,
+  );
+  const url = `http://127.0.0.1:${port}${context.healthPath}`;
+  if (entry.mockFailure === 'check') {
+    step(
+      'check',
+      `Checking ${url}`,
+      [
+        'Last output of the containers:',
+        `${service}-1  | => Booting Puma`,
+        `${service}-1  | Started GET "${context.healthPath}" for 172.18.0.1`,
+        `${service}-1  | ActiveRecord::StatementInvalid (PG::UndefinedColumn: ERROR:  column posts.reading_minutes does not exist)`,
+        `${service}-1  | Completed 500 Internal Server Error in 9ms`,
+        `Removing ${service}; the previous release keeps serving.`,
+      ],
+      3 * SECOND * scale,
+    );
+    push(fail(`Deployment failed: ${entry.error}`));
+    return { out, finished: true };
+  }
+  step(
+    'check',
+    `Checking ${url}`,
+    ['The app is answering.'],
+    2 * SECOND * scale,
+  );
+  step(
+    'switch',
+    `Switching traffic from ${bg.oldName} to ${color}`,
+    [`Requests now reach ${color} on port ${port}.`],
+    1 * SECOND * scale,
+  );
+  if (entry.mockFailure === 'services') {
+    step(
+      'services',
+      'Recreating the other services',
+      [
+        ` Container ${project}-worker-1  Recreate`,
+        ` Container ${project}-worker-1  Error`,
+        'Last output of the containers:',
+        'worker-1  | NameError: uninitialized constant ReadingTimeJob',
+      ],
+      4 * SECOND * scale,
+    );
+    step(
+      'rollback',
+      `Switching back and restoring the other services of deployment #${context.previousId}`,
+      [
+        'Requests reach the previous release again.',
+        ` Container ${project}-worker-1  Recreated`,
+        `Restored worker of deployment #${context.previousId}.`,
+        `Removing ${service}.`,
+      ],
+      4 * SECOND * scale,
+    );
+    push(
+      fail(
+        `Deployment failed: ${entry.error}; the previous release was restored`,
+      ),
+    );
+    return { out, finished: true };
+  }
+  step(
+    'services',
+    'Recreating the other services',
+    [
+      ` Container ${project}-worker-1  Recreate`,
+      ` Container ${project}-worker-1  Recreated`,
+      ` Container ${project}-worker-1  Started`,
+    ],
+    4 * SECOND * scale,
+  );
+  const oldService =
+    bg.oldName === bg.webService
+      ? bg.webService
+      : `${bg.webService}-${bg.oldName}`;
+  step(
+    'drain',
+    `Stopping ${bg.oldName}`,
+    [
+      `Waiting ${context.drainSeconds}s for the requests in flight.`,
+      ` Container ${project}-${oldService}-1  Stopping`,
+      ` Container ${project}-${oldService}-1  Stopped`,
+      ` Container ${project}-${oldService}-1  Removed`,
+    ],
+    Math.max(1, context.drainSeconds) * SECOND * scale,
+  );
+  return { out, finished: false };
 }
 
 /**
@@ -177,6 +330,39 @@ function plan(entry, context) {
     });
     return out;
   }
+  if (context.blueGreen) {
+    const { out: extra, finished } = blueGreenSteps(
+      entry,
+      context,
+      step,
+      () => at,
+      (time) => stamp(started + time),
+      scale,
+    );
+    out.push(...extra);
+    if (finished) return out;
+    if (!failed) {
+      // Started alone, it routes and checks afterwards; switched, it
+      // checked before the switch.
+      if (out.some((item) => / route /.test(item.line))) {
+        step(
+          'check',
+          `Checking ${url}`,
+          ['The app is answering.'],
+          2 * SECOND * scale,
+        );
+      }
+      step('done', 'Deployment succeeded', [], 0);
+      step(
+        'cleanup',
+        'Pruning dangling images',
+        ['Total reclaimed space: 0B'],
+        1 * SECOND * scale,
+      );
+      return out;
+    }
+  }
+
   step('start', 'Starting containers', startLines(context), 9 * SECOND * scale);
   if (context.previousId === null) {
     step('route', 'Updating routes', [], 1 * SECOND * scale);
@@ -266,9 +452,17 @@ export function deploymentLog(entry, context) {
   // One from a fixture never ends: it stays in its build.
   const endless = entry.mockFinishAt === undefined;
   if (endless) {
-    const build = script.findIndex((item) => / build /.test(item.line));
+    // It stays in its build, or in the step `mockStopAt` names.
+    const key = entry.mockStopAt ?? 'build';
+    const begin = script.findIndex((item) =>
+      new RegExp(`^==> \\S+ ${key} `).test(item.line),
+    );
+    const next = script.findIndex(
+      (item, index) => index > begin && item.line.startsWith('==> '),
+    );
+    const until = key === 'build' ? begin + 13 : next;
     script = script
-      .slice(0, build + 13)
+      .slice(0, until)
       .map((item) => ({ ...item, at: Math.min(item.at, 0) }));
   }
 
@@ -291,6 +485,7 @@ export function deploymentLog(entry, context) {
         return { lines: rest.map((item) => item.line), end: entry.status };
       }
       if (!endless) return { lines: due() };
+      if (entry.mockStopAt) return { lines: [] };
       // Now and then a line, as a slow build would print.
       calls++;
       if (calls % 4 !== 0) return { lines: [] };

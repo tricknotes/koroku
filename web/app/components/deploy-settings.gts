@@ -5,6 +5,7 @@ import { eq } from '@ember/helper';
 import type Owner from '@ember/owner';
 import Banner from 'koroku-console/components/banner';
 import Button from 'koroku-console/components/button';
+import ColorBadge from 'koroku-console/components/color-badge';
 import CopyButton from 'koroku-console/components/copy-button';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
@@ -19,11 +20,19 @@ import {
   setChecked,
   setValue,
 } from 'koroku-console/utils/dom';
+import {
+  BLUE_GREEN_GUIDE_URL,
+  MAX_DRAIN_SECONDS,
+} from 'koroku-console/utils/blue-green';
 import Loadable from 'koroku-console/utils/loadable';
 import { can } from 'koroku-console/utils/roles';
 import type SettingsEditor from 'koroku-console/utils/settings-editor';
 import { DEPLOY_SETTINGS_FIELDS } from 'koroku-console/utils/settings-editor';
-import type { App, SystemInfo } from 'koroku-console/utils/types';
+import type {
+  App,
+  BlueGreenProblem,
+  SystemInfo,
+} from 'koroku-console/utils/types';
 
 const KNOWN_FIELDS = new Set<string>(DEPLOY_SETTINGS_FIELDS);
 
@@ -53,7 +62,8 @@ interface Signature {
 /**
  * 「デプロイの設定」 on the deploy tab (ARCHITECTURE 9.1): whether pushes
  * deploy by themselves (5.2), which staging app a production app promotes
- * from (9.7), and the safeguards of a deployment (6, 7). One form with its
+ * from (9.7), whether the public service is deployed blue/green (7.2) and
+ * the safeguards of a deployment (6, 7). One form with its
  * own save; the tab asks before deploying while it has unsaved changes.
  */
 export default class DeploySettings extends Component<Signature> {
@@ -151,6 +161,26 @@ export default class DeploySettings extends Component<Signature> {
     return this.editor.otherErrors(KNOWN_FIELDS);
   }
 
+  guideUrl = BLUE_GREEN_GUIDE_URL;
+  maxDrain = MAX_DRAIN_SECONDS;
+
+  /**
+   * What keeps the running release from blue/green deploys; null when it
+   * is not known until the next deployment (ARCHITECTURE 7.2).
+   */
+  get blueGreenProblems(): BlueGreenProblem[] | null {
+    return this.app.blue_green_problems ?? null;
+  }
+
+  get blueGreenUnknown(): boolean {
+    return this.blueGreenProblems === null;
+  }
+
+  /** The saved setting is on and receives requests in a colour already. */
+  get liveColor() {
+    return this.app.blue_green ? (this.app.web_color ?? null) : null;
+  }
+
   setPromoteFrom = (event: Event) => {
     this.editor.form.promoteFrom = inputValue(event);
     this.editor.touch();
@@ -175,7 +205,7 @@ export default class DeploySettings extends Component<Signature> {
       </header>
       <p class="pane-description">
         push
-        で自動でデプロイするか、何を本番へ昇格するか、どのリリースを通すかの設定です。
+        で自動でデプロイするか、何を本番へ昇格するか、公開サービスをどう入れ替えるか、どのリリースを通すかの設定です。
       </p>
       {{#if this.readOnly}}
         <RoleNote @needed="manage" @what="デプロイの設定の変更" />
@@ -425,6 +455,165 @@ export default class DeploySettings extends Component<Signature> {
           {{/if}}
 
           <div
+            class="form-group blue-green-group"
+            id="blue-green"
+            tabindex="-1"
+            data-test-blue-green-group
+            {{focusSection (this.focuses "blue-green")}}
+          >
+            <div>
+              <h3
+                class="form-group-title"
+                id="deploy-settings-blue-green-title"
+              >無停止デプロイ</h3>
+              <p class="form-group-description">
+                公開サービス（<code
+                >{{this.app.web_service}}</code>）の新しい版を、動いている版と並べて起動し、確認が通ってから切り替えます。DB
+                やワーカーなどほかのサービスは、これまでどおり作り直します。
+              </p>
+            </div>
+            <div class="form-group-body">
+              <label class="option">
+                <input
+                  type="checkbox"
+                  checked={{@editor.form.blueGreen}}
+                  aria-describedby="blue-green-hint"
+                  data-test-field="blue_green"
+                  {{on "change" (setChecked @editor.form "blueGreen")}}
+                />
+                <span class="option-body">
+                  <span
+                    class="option-label"
+                  >公開サービスを無停止で入れ替える</span>
+                  <span class="option-hint" id="blue-green-hint">
+                    設定の変更は次のデプロイから効きます。保存してもコンテナは動かしません。
+                  </span>
+                </span>
+              </label>
+
+              {{#if @editor.form.blueGreen}}
+                <FormField
+                  class="field-narrow"
+                  @label="旧色を止めるまでの待ち時間（秒）"
+                  @hint="切り替えのあと、処理中のリクエストを古い版で終えるための待ち時間です。0〜{{this.maxDrain}} 秒。長い処理を抱えるリクエストが多いアプリは延ばします。"
+                  @error={{@editor.errors.blue_green_drain_seconds}}
+                  data-test-field-group="blue_green_drain_seconds"
+                  as |field|
+                >
+                  <input
+                    id={{field.id}}
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    value={{@editor.form.blueGreenDrainSeconds}}
+                    aria-describedby={{field.describedBy}}
+                    aria-invalid={{field.invalid}}
+                    data-test-field="blue_green_drain_seconds"
+                    {{on
+                      "input"
+                      (setValue @editor.form "blueGreenDrainSeconds")
+                    }}
+                  />
+                </FormField>
+              {{/if}}
+
+              {{#if this.liveColor}}
+                <dl class="readout blue-green-readout">
+                  <dt>受けている色</dt>
+                  <dd data-test-blue-green-live>
+                    <ColorBadge @color={{this.liveColor}} />
+                    <span class="readout-note">
+                      blue はポート
+                      <span class="mono">{{this.app.host_port}}</span>、green
+                      はポート
+                      <span class="mono">{{this.app.alt_host_port}}</span>
+                    </span>
+                  </dd>
+                </dl>
+              {{/if}}
+
+              {{#if this.blueGreenUnknown}}
+                <p class="readout-note" data-test-blue-green-unknown>
+                  稼働中のリリースの Compose
+                  ファイルが条件を満たすかは、次のデプロイで確かめます。
+                </p>
+              {{else if this.blueGreenProblems.length}}
+                <Banner
+                  @tone={{if @editor.form.blueGreen "warning" "info"}}
+                  @title="稼働中のリリースの Compose ファイルは条件を満たしていません"
+                  data-test-blue-green-problems
+                >
+                  <ul class="blue-green-problems">
+                    {{#each this.blueGreenProblems as |problem|}}
+                      <li data-test-blue-green-problem>
+                        {{#if problem.service}}
+                          <span class="mono">{{problem.service}}</span>:
+                        {{/if}}
+                        {{problem.message}}
+                      </li>
+                    {{/each}}
+                  </ul>
+                  有効にしたまま直さずにデプロイすると、検証の手順で止まります（アプリは動き続けます）。
+                </Banner>
+              {{else}}
+                <p class="readout-note" data-test-blue-green-ok>
+                  <Icon @name="check" />
+                  稼働中のリリースの Compose ファイルは条件を満たしています。
+                </p>
+              {{/if}}
+
+              <div class="blue-green-notes" data-test-blue-green-notes>
+                <p
+                  class="field-hint"
+                >有効にする条件（デプロイの検証で確かめます）:</p>
+                <ul class="blue-green-list">
+                  <li>公開サービスに
+                    <code>container_name</code>
+                    がなく、<code>deploy.replicas</code>
+                    が 1 以下</li>
+                  <li>ほかのサービスが公開サービスに
+                    <code>depends_on</code>
+                    していない</li>
+                  <li><code>{{this.app.web_service}}-blue</code>
+                    と
+                    <code>{{this.app.web_service}}-green</code>
+                    という名前のサービスがない</li>
+                  <li>公開サービスを
+                    <code>include</code>
+                    した別ファイルではなく、Compose ファイルの中で定義している</li>
+                </ul>
+                <p class="field-hint">注意:</p>
+                <ul class="blue-green-list">
+                  <li
+                    data-test-blue-green-note="migration"
+                  >古い版と新しい版が並ぶので、マイグレーションは古い版のコードでも動く形にします。公開サービスは状態を持たないようにします。</li>
+                  <li
+                    data-test-blue-green-note="memory"
+                  >デプロイの間は、公開サービスのメモリ上限 1
+                    つ分が余分に要ります。ホストの空きが足りなければ、新しい版を起動せずにデプロイを失敗にします（アプリは動き続けます）。</li>
+                  <li
+                    data-test-blue-green-note="env"
+                  >環境変数を変えたあとのデプロイは、DB
+                    などのサービスも作り直すため、その回は無停止になりません。</li>
+                  <li
+                    data-test-blue-green-note="restart"
+                  >再起動・起動・停止は無停止にはなりません。ふつうの再起動と同じく数秒止まります。</li>
+                </ul>
+                <p class="field-hint">
+                  <a
+                    href={{this.guideUrl}}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-test-blue-green-guide
+                  >リポジトリの準備（prepare-app Skill の案内）<Icon
+                      @name="external"
+                    /></a>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div
             class="form-group"
             id="safeguards"
             tabindex="-1"
@@ -506,7 +695,7 @@ export default class DeploySettings extends Component<Signature> {
                 {{#if @editor.saved}}
                   <span class="form-saved" data-test-deploy-settings-saved>
                     <Icon @name="check" />
-                    保存しました。ポリシー検査の変更は、次のデプロイから反映されます。
+                    保存しました。ポリシー検査と無停止デプロイの変更は、次のデプロイから反映されます。
                   </span>
                 {{else if @editor.nothingToSave}}
                   <span

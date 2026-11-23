@@ -88,6 +88,15 @@ export default class ComposeSection extends Component<Signature> {
     if (this.open) this.loadAll();
   }
 
+  /**
+   * The container of a blue/green app's public service that receives the
+   * requests: `<web>-<web_color>` (ARCHITECTURE 7.2).
+   */
+  receivesRequests = (c: ContainerInfo): boolean => {
+    const color = this.app.web_color;
+    return Boolean(color) && c.service === `${this.app.web_service}-${color}`;
+  };
+
   get app(): App {
     return this.args.app;
   }
@@ -230,6 +239,12 @@ export default class ComposeSection extends Component<Signature> {
                                       @tone="ok"
                                       data-test-container-current
                                     >稼働中のリリース</Badge>
+                                  {{/if}}
+                                  {{#if (this.receivesRequests c)}}
+                                    <span
+                                      class="service-name-note"
+                                      data-test-container-live
+                                    >リクエストを受信中</span>
                                   {{/if}}
                                 </div>
                                 <p

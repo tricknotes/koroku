@@ -211,6 +211,11 @@ export interface ContainerUsage {
   memory_limit_bytes: number | null;
   /** As `docker stats` shows it: one core is 100%, up to cores × 100. */
   cpu_percent: number;
+  /**
+   * The colour of a copy of a blue/green app's public service, which
+   * `service` names as the public service (ARCHITECTURE 7.2).
+   */
+  color?: WebColor;
 }
 
 /** The running containers of one app, or (`app: null`) of no app. */
@@ -277,6 +282,24 @@ export interface Deployment {
    * it did not run to the end.
    */
   containers_replaced?: boolean | null;
+  /**
+   * The colour of the public service it started (ARCHITECTURE 7.2); null
+   * when it ran the public service as itself or ended before starting it.
+   */
+  web_color?: WebColor | null;
+  /** When the requests were switched to that colour; null when they were not. */
+  switched_at?: string | null;
+}
+
+/** The two copies of a blue/green app's public service (ARCHITECTURE 7.2). */
+export type WebColor = 'blue' | 'green';
+
+/** Why the running release cannot be deployed blue/green. */
+export interface BlueGreenProblem {
+  service: string;
+  rule: string;
+  message: string;
+  relaxable: boolean;
 }
 
 /** `manual`: the console or the API (rollbacks and promotions too). */
@@ -409,6 +432,19 @@ export interface App {
   review_apps_allowed?: boolean;
   /** How many review apps the app has; null on a review app. */
   review_apps?: ReviewSummary | null;
+  /** Deploy the public service blue/green (ARCHITECTURE 7.2). */
+  blue_green?: boolean;
+  /** Seconds between the switch and stopping the old colour (0 to 300). */
+  blue_green_drain_seconds?: number;
+  /** The second host port; null until blue/green is first turned on. */
+  alt_host_port?: number | null;
+  /** The colour receiving the requests; null while the public service runs as itself. */
+  web_color?: WebColor | null;
+  /**
+   * What keeps the running release's Compose file from blue/green deploys
+   * (empty when nothing does); null when unknown until the next deployment.
+   */
+  blue_green_problems?: BlueGreenProblem[] | null;
 }
 
 export interface ReviewSummary {
@@ -495,6 +531,8 @@ export interface AppPatch {
   idle_sleep_minutes?: number;
   /** Only the owner changes it (ARCHITECTURE 9.9). */
   review_apps_allowed?: boolean;
+  blue_green?: boolean;
+  blue_green_drain_seconds?: number;
 }
 
 export interface NewApp {
@@ -528,6 +566,11 @@ export interface ServiceStatus {
    * none); `null` when the running release did not record it.
    */
   next_memory_reservation_bytes?: number | null;
+  /**
+   * The colour of a copy of a blue/green app's public service; while a
+   * deployment runs both copies, the public service has a row for each.
+   */
+  color?: WebColor;
 }
 
 export type MemoryRange = '24h' | '7d' | '14d';

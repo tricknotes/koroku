@@ -38,11 +38,19 @@ function share(used: number, total: number): number {
   return total > 0 ? (used / total) * 100 : 0;
 }
 
-/** A container is named by its service within an app, by its name elsewhere. */
-function containerLabel(group: ContainerGroup, container: ContainerUsage) {
-  return group.app !== null && container.service
-    ? container.service
-    : container.name;
+/**
+ * A container is named by its service within an app, by its name
+ * elsewhere. A blue/green copy of the public service adds its colour
+ * (ARCHITECTURE 7.2): during a deployment both copies run.
+ */
+export function containerLabel(
+  group: ContainerGroup,
+  container: ContainerUsage,
+): string {
+  if (group.app === null || !container.service) return container.name;
+  return container.color
+    ? `${container.service}（${container.color}）`
+    : container.service;
 }
 
 function nearItsLimit(container: ContainerUsage): boolean {

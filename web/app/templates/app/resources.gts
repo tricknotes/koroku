@@ -13,6 +13,7 @@ import MemoryHistory from 'koroku-console/components/memory-history';
 import MemorySettings from 'koroku-console/components/memory-settings';
 import Meter from 'koroku-console/components/meter';
 import RowList from 'koroku-console/components/row-list';
+import ServiceName from 'koroku-console/components/service-name';
 import ServiceReservation from 'koroku-console/components/service-reservation';
 import TabSection from 'koroku-console/components/tab-section';
 import UnsavedSettingsGuard from 'koroku-console/components/unsaved-settings-guard';
@@ -25,7 +26,11 @@ import Loadable from 'koroku-console/utils/loadable';
 import SettingsEditor, {
   IDLE_SLEEP_FIELDS,
 } from 'koroku-console/utils/settings-editor';
-import { memoryUsage, type MemoryUsage } from 'koroku-console/utils/services';
+import {
+  memoryUsage,
+  serviceRows,
+  type MemoryUsage,
+} from 'koroku-console/utils/services';
 import type { App, ServiceStatus } from 'koroku-console/utils/types';
 
 /** As often as the overview follows its services. */
@@ -183,12 +188,21 @@ export default class AppResourcesTemplate extends Component<Signature> {
                     {{/if}}
                   </:header>
                   <:rows as |Row|>
-                    {{#each services key="name" as |svc|}}
-                      {{#let (memoryUsage svc) (cpuText svc) as |memory cpu|}}
+                    {{#each
+                      (serviceRows services this.app.web_color) key="key"
+                      as |row|
+                    }}
+                      {{#let
+                        row.service
+                        (memoryUsage row.service)
+                        (cpuText row.service)
+                        as |svc memory cpu|
+                      }}
                         <Row data-test-resource-service={{svc.name}}>
-                          <div
+                          <ServiceName
                             class="resource-service-name mono"
-                          >{{svc.name}}</div>
+                            @row={{row}}
+                          />
                           <div class="resource-cpu" data-test-resource-cpu>
                             <span class="cell-label">CPU</span>
                             {{#if cpu}}
@@ -227,7 +241,12 @@ export default class AppResourcesTemplate extends Component<Signature> {
                               >—</span>
                             {{/if}}
                           </div>
-                          {{#if withReservations}}
+                          {{#if row.standby}}
+                            {{#if withReservations}}
+                              {{! The row receiving the requests edits the public service's reservation. }}
+                              <div class="resource-reservation-cell"></div>
+                            {{/if}}
+                          {{else if withReservations}}
                             <ServiceReservation
                               @app={{this.app}}
                               @service={{svc}}

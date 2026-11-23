@@ -909,3 +909,34 @@ input[type="radio"] {
   font-size: var(--text-sm);
   line-height: var(--leading-relaxed);
 }
+
+/* The colour of a blue/green copy: a name, so monospace and grey. */
+.badge-web-color {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-regular);
+}
+
+/* A service in the service lists, with the colour of a blue/green copy. */
+.service-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-2);
+  align-items: center;
+  min-width: 0;
+  white-space: normal;
+}
+
+.service-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-name-note {
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  white-space: nowrap;
+}

@@ -40,6 +40,12 @@ import {
   shortSha,
 } from 'koroku-console/utils/format';
 import { ApiError } from 'koroku-console/utils/errors';
+import {
+  MEMORY_SHORTAGE_TITLE,
+  colorSummary,
+  memoryShortage,
+  memoryShortageDetail,
+} from 'koroku-console/utils/blue-green';
 import Loadable from 'koroku-console/utils/loadable';
 import SettingsEditor, {
   DEPLOY_SETTINGS_FIELDS,
@@ -110,6 +116,17 @@ function duration(deployment: Deployment): string {
 
 function detailId(deployment: Deployment): string {
   return `deployment-${deployment.id}-detail`;
+}
+
+/**
+ * The error of a history row: a failure for want of memory for a second
+ * copy of the public service in plain words (ARCHITECTURE 7.2), any other
+ * as koroku wrote it.
+ */
+function rowError(deployment: Deployment): string {
+  const shortage = memoryShortage(deployment.error);
+  if (!shortage) return deployment.error;
+  return `${MEMORY_SHORTAGE_TITLE}（${memoryShortageDetail(shortage)}）`;
 }
 
 /** "9fceb02 Fix login": the commit of a deployment, in one line. */
@@ -915,9 +932,20 @@ export default class AppDeployTemplate extends Component<Signature> {
                             >実行: {{deployment.actor.login}}</span>
                           {{/if}}
                         </span>
+                        {{#if deployment.web_color}}
+                          <span
+                            class="deploy-color"
+                            title="公開サービスの色（無停止デプロイ）"
+                            data-test-deployment-color
+                          >{{colorSummary deployment}}</span>
+                        {{/if}}
                         {{#if deployment.error}}
-                          <span class="deploy-row-error" data-test-row-error>
-                            {{deployment.error}}
+                          <span
+                            class="deploy-row-error"
+                            title={{deployment.error}}
+                            data-test-row-error
+                          >
+                            {{rowError deployment}}
                           </span>
                         {{/if}}
                       </div>
@@ -982,6 +1010,7 @@ export default class AppDeployTemplate extends Component<Signature> {
                       <DeploymentDetail
                         id={{detailId deployment}}
                         @deployment={{deployment}}
+                        @blueGreen={{this.app.blue_green}}
                         @onLogEnd={{this.refresh}}
                       >
                         {{#if (this.showsReleaseActions deployment)}}
@@ -1081,8 +1110,14 @@ export default class AppDeployTemplate extends Component<Signature> {
           に
           <strong data-test-dialog-target>{{this.pending.label}}</strong>
           をデプロイします。</p>
-        <p
-        >コンテナの入れ替えで数秒の断があります。起動に失敗した場合は直前の成功リリースに戻ります。</p>
+        {{#if this.app.blue_green}}
+          <p data-test-deploy-dialog-blue-green>
+            公開サービスは無停止で入れ替えます（新しい版の確認が通ってから切り替えます）。ほかのサービスは作り直します。確認に失敗した場合は、新しい版を削除し、旧版が応答し続けます。
+          </p>
+        {{else}}
+          <p
+          >コンテナの入れ替えで数秒の断があります。起動に失敗した場合は直前の成功リリースに戻ります。</p>
+        {{/if}}
         <EnvRequirementsWarning
           @slug={{this.app.slug}}
           @requirements={{this.pendingRequirementsValue}}
