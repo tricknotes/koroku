@@ -10,10 +10,10 @@ func blueGreenParams(p Project) OverrideParams {
 	return OverrideParams{
 		Project:    p,
 		WebService: "web", WebPort: 3000, HostPort: 20001,
-		EnvFile:       "/var/lib/koroku/apps/blog/env",
-		DefaultMemory: "512m",
-		ProjectName:   "koroku-blog",
-		ReleaseTag:    "r43",
+		EnvFile:        "/var/lib/koroku/apps/blog/env",
+		DefaultMemory:  "512m",
+		ProjectName:    "koroku-blog",
+		ReleaseTag:     "r43",
 		Production:     true,
 		ReleaseEnvFile: "/var/lib/koroku/apps/blog/env.release",
 		BlueGreen: &BlueGreenParams{
