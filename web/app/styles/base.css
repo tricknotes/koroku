@@ -113,8 +113,9 @@ time {
   white-space: nowrap;
 }
 
-/* A section a link led to takes the focus (modifiers/focus-section); it is
-   not a control, so it shows no ring unless the keyboard put it there. */
-[tabindex="-1"]:focus:not(:focus-visible) {
+/* A section a link led to takes the focus (modifiers/focus-section) so that
+   reading and Tab go on from there. It is not a control and sits at the top
+   of the window already, so it draws no ring. */
+[tabindex="-1"]:focus {
   outline: none;
 }

@@ -77,7 +77,7 @@ interface Signature {
 
 /**
  * The review apps of a staging app and the way to create one (ARCHITECTURE
- * 9.9), on the parent's review apps tab.
+ * 9.9), in the review apps section of the parent's deploy tab.
  */
 export default class ReviewAppsPanel extends Component<Signature> {
   @service declare api: ApiService;

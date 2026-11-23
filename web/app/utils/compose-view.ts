@@ -1,4 +1,4 @@
-// Wording and comparisons of the Compose tab (ARCHITECTURE 9.10).
+// Wording and comparisons of the Compose section (ARCHITECTURE 9.10).
 
 import type { StatusKind, Tone } from 'koroku-console/utils/status';
 import type {

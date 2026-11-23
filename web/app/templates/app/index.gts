@@ -195,7 +195,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
   }
 
   /**
-   * The line that leads to the review apps tab: where review apps are
+   * The line that leads to the review apps section: where review apps are
    * allowed, or where there are some.
    */
   get showReviewLine(): boolean {

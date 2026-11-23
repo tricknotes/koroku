@@ -40,10 +40,9 @@ module('Unit | Utility | memory-settings', function () {
       memoryPatch(app, { kind: 'limit', service: 'web' }, '512m'),
       { service_memory_limits: { worker: '256m', db: '1g', web: '512m' } },
     );
-    assert.deepEqual(
-      memoryPatch(app, { kind: 'limit', service: 'db' }, null),
-      { service_memory_limits: { worker: '256m' } },
-    );
+    assert.deepEqual(memoryPatch(app, { kind: 'limit', service: 'db' }, null), {
+      service_memory_limits: { worker: '256m' },
+    });
     assert.deepEqual(
       memoryPatch(app, { kind: 'reservation', service: 'db' }, '0'),
       { service_memory_reservations: { db: '0' } },
