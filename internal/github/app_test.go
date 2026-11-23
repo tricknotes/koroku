@@ -58,14 +58,14 @@ func TestInstallations(t *testing.T) {
 			return
 		}
 		writeJSON(w, http.StatusOK, []map[string]any{
-			{"id": 7, "account": map[string]any{"login": "octocat"}, "repository_selection": "selected"},
+			{"id": 7, "account": map[string]any{"id": 1001, "login": "octocat"}, "repository_selection": "selected"},
 		})
 	})
 	list, err := f.client().Installations(context.Background())
 	if err != nil {
 		t.Fatalf("Installations: %v", err)
 	}
-	if len(list) != 1 || list[0].ID != 7 || list[0].Account != "octocat" || list[0].RepositorySelection != "selected" {
+	if len(list) != 1 || list[0].ID != 7 || list[0].Account != "octocat" || list[0].AccountID != 1001 || list[0].RepositorySelection != "selected" {
 		t.Errorf("installations = %+v", list)
 	}
 }

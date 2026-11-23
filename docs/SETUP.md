@@ -157,15 +157,19 @@ rm github-app.pem
 
 自分が管理する別の org の private リポジトリをデプロイするときだけ行う。管理画面の「システム」→「管理」の「GitHub App」にも、同じ手順とリンク、`config.toml` に書く行が出る。
 
-1. App の設定画面の **Advanced** → **Make public**（「Where can this GitHub App be installed?」を **Any account** にする）。App のページを知っていれば誰でもインストールできるようになるが、koroku は下の 3 で許したアカウントのインストールしか使わない。
+1. App の設定画面の **Advanced** → **Make public**（「Where can this GitHub App be installed?」を **Any account** にする）。App のページを知っていれば誰でもインストールできるようになるが、koroku は下の 4 で許したアカウントのインストールしか使わない。
 2. App のページ（`https://github.com/apps/<app 名>`）の **Install** から、その org を選んでインストールする。**Only select repositories** でデプロイしたいリポジトリだけを選ぶ。
-3. `config.toml` の `[github]` に org の login を書き、`koroku` を再起動する。
+3. `sudo koroku check` を実行し、`github.install` でその org のアカウント ID を調べる。インストール先が `my-org (ID 2002)` のように ID と一緒に出る。この時点では、koroku が使わないインストール先として警告になる。管理画面の「GitHub App」の一覧にも同じ ID が出て、コピーできる。
+4. `config.toml` の `[github]` にその ID を書き、`koroku` を再起動する。
 
    ```toml
-   installation_accounts = ["my-org"]
+   installation_account_ids = [2002]
    ```
 
-4. `sudo koroku check` の `github.install` に org が出ることを確かめる。知らないアカウントにインストールされていれば警告が出るので、その場合は App の設定画面の **Install App** の一覧を確かめる。
+5. `sudo koroku check` の `github.install` に org が使うインストール先として出ることを確かめる。知らないアカウントにインストールされていれば警告が出るので、その場合は App の設定画面の **Install App** の一覧を確かめる。
+
+org は名前（login）ではなく ID で書く。org の名前を変えると元の名前は空き、その名前を取った別のアカウントが App をインストールできるため。`installation_accounts = ["my-org"]` のように login で書くこともでき、両方を書くとどちらかに一致するアカウントを使う。ただし login で書くと、その名前を取ったアカウントのインストールも使うことになる。login で書いてあると、`koroku` は起動時に警告を出し、`koroku check` は代わりに書く `installation_account_ids` の行を示す。その行を書いたら、`installation_accounts` の行は消す。
+
 ### 4.6 push での自動デプロイ（任意）
 
 アプリのデプロイタブの「デプロイの設定」で「push されたら自動でデプロイする」を使うときだけ行う（ARCHITECTURE 5.2）。使わなければ Webhook はオフのままでよい。あとから行ってもよい。

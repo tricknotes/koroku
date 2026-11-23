@@ -69,9 +69,14 @@ access_log_dir = "/var/log/caddy/apps"
 # (see https://api.github.com/users/<login>).
 # allowed_user_id = 0
 # Other accounts (organizations you manage) whose installations of the App
-# koroku uses, by login. The App must be installable on any account for this;
-# installations on accounts not listed here (or the allowed user's own) are
-# ignored.
+# koroku uses, by numeric account ID. The App must be installable on any
+# account for this; installations on accounts not listed here (or the allowed
+# user's own) are ignored. `koroku check` and the console's system screen
+# print the ID of every account the App is installed on.
+# installation_account_ids = [2002]
+# The same list by login is accepted too (an account in either list is used),
+# but a login is not a stable identity: when an organization is renamed its
+# old name is free for another account to take. List the IDs instead.
 # installation_accounts = ["my-org"]
 # Secret of the App's webhook, for automatic deployment on push (an app
 # setting, off by default). Set the same value in the App's settings with

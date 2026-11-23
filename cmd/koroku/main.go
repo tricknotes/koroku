@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -119,14 +118,11 @@ func newGitHubClient(cfg config.GitHub) (*github.Client, error) {
 }
 
 // installationAccountFilter allows the installations on the operator's own
-// account and on the accounts listed in installation_accounts.
+// account and on the accounts listed in installation_account_ids (by ID) or
+// installation_accounts (by login).
 func installationAccountFilter(cfg config.GitHub) func(int64, string) bool {
-	logins := make(map[string]bool, len(cfg.InstallationAccounts))
-	for _, login := range cfg.InstallationAccounts {
-		logins[strings.ToLower(strings.TrimSpace(login))] = true
-	}
 	return func(id int64, login string) bool {
-		return id == cfg.AllowedUserID || logins[strings.ToLower(login)]
+		return cfg.InstallationAccess(id, login) != config.InstallationIgnored
 	}
 }
 
@@ -367,6 +363,10 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		})
 		deployOpts.Status = ghDeployments
 		go ghDeployments.Run(ctx)
+		if len(cfg.GitHub.InstallationAccounts) > 0 {
+			logger.Warn("github.installation_accounts matches accounts by login, and a login given up in a rename can be taken by another account: " +
+				"list the account IDs in github.installation_account_ids instead and remove installation_accounts (koroku check prints the IDs)")
+		}
 		if cfg.GitHub.ObsoleteRequireTwoFactor != nil {
 			logger.Warn("github.require_two_factor is no longer used and can be removed from config.toml: " +
 				"GitHub does not report the two-factor status to a GitHub App, so GitHub enforces it at sign-in instead")

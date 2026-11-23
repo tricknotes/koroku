@@ -119,7 +119,9 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 | App をインストールした、自分が管理する別の org のリポジトリ（private を含む） | 同上 | installation token |
 | App をインストールしていない public リポジトリ（OSS など） | 作成画面で URL を入れる（`repo_url`） | 認証なし |
 
-- 別の org に App をインストールするには、App の「Where can this GitHub App be installed?」を「Any account」にする。そうすると誰でも App を自分のアカウントにインストールできるので、koroku は使うインストール先を、オーナー自身のアカウント（`allowed_user_id` と一致するアカウント ID）と、`[github] installation_accounts` に書いたアカウント（login、大文字小文字を区別しない）に限る。それ以外のインストール先のリポジトリは一覧に出さず、token も発行しない。そのリポジトリを指定しても App が入っていないものとして扱う（public なら認証なしで読む）。`koroku check` は、使わないインストール先があれば警告する。システム画面の「GitHub App」は、インストール先ごとに使うかどうかを示し、別の org を加える手順（App の設定画面とインストール画面へのリンク、`config.toml` に書く `installation_accounts` の行）を出す。作成画面のリポジトリ欄からも、そこへ移れる。
+- 別の org に App をインストールするには、App の「Where can this GitHub App be installed?」を「Any account」にする。そうすると誰でも App を自分のアカウントにインストールできるので、koroku は使うインストール先を、オーナー自身のアカウント（`allowed_user_id` と一致するアカウント ID）と、`[github] installation_account_ids` に書いたアカウント（数値のアカウント ID）に限る。それ以外のインストール先のリポジトリは一覧に出さず、token も発行しない。そのリポジトリを指定しても App が入っていないものとして扱う（public なら認証なしで読む）。
+- アカウントを ID で指定するのは、login ではアカウントを特定できないため。org の名前を変えると元の名前は空き、その名前を取った別のアカウントが App をインストールできる（メンバーを ID で照合するのと同じ理由。10.7）。`[github] installation_accounts`（login の一覧、大文字小文字を区別しない）でも指定でき、どちらかの一覧にあるアカウントを使う（両方を書くと、ID の一覧と login の一覧の和になる）。login での指定は、その名前を取った別のアカウントのインストールも使ってしまう弱い形で、login で指定した既存のホストがインストール先を失わないために受け付ける。書いてあれば `koroku serve` は起動時に、ID を `installation_account_ids` に書くよう警告を出す。
+- `koroku check` は、インストール先ごとにアカウントの login と ID を表示し、使わないインストール先があれば警告する。login だけで一致しているアカウントがあれば、代わりに書く `installation_account_ids` の行を示す（10.4）。システム画面の「GitHub App」は、インストール先ごとにアカウントの ID（コピーできる）と使うかどうかを示し、login だけで一致しているインストール先にはその旨を出す。別の org を加える手順（App の設定画面とインストール画面へのリンク、`config.toml` に書く `installation_account_ids` の行）も出す。作成画面のリポジトリ欄からも、そこへ移れる。
 - 作成画面の Compose ファイルの検出（`GET /api/repos/{owner}/{repo}/compose`）は、App で読めないリポジトリ（未インストール、または使わないインストール先）を認証なしで読み直す。github.com 以外の URL は読めないので、サービスとポートを手で入れる。
 
 | 用途 | 方式 |
@@ -1963,7 +1965,7 @@ Heroku の Review Apps に当たるもの。staging アプリ（8.2）を親に�
   - DNS: `console_host` と、登録していない名前（`koroku-check-<乱数>.<base_domain>`）が `public_ip` だけに解決されること。後者が解決されなければワイルドカードがないとして警告する（アプリごとの登録でも運用できるため）。判定は独自ドメインの検証（8 章）と同じ関数。
   - Caddy の admin API が応答すること。`console_url` に HTTPS で接続でき、証明書が信頼できること。`acme_ca` が Let's Encrypt の staging なら、信頼できない証明書は警告にとどめ、本番への切り替えを促す。
   - `master.key` があり 0600 であること（ないときは警告。初回起動で作られる）。
-  - GitHub App: App の JWT で `GET /app` が通り、`app_id`・`client_id` が一致し、権限が Contents と Metadata の read（足りなければ失敗）と Deployments の write（なければ GitHub への反映が止まる旨の警告）で、それ以外がないこと（余分なら警告。Actions の read と Pull requests の read は余分に数えない）。`GET /app/installations` で 1 つ以上インストールされていること。`allowed_user_id` が実在するアカウントであること（`GET /user/{id}`、認証なし）。callback URL は API で読めないので、正しい値を表示するだけにする。
+  - GitHub App: App の JWT で `GET /app` が通り、`app_id`・`client_id` が一致し、権限が Contents と Metadata の read（足りなければ失敗）と Deployments の write（なければ GitHub への反映が止まる旨の警告）で、それ以外がないこと（余分なら警告。Actions の read と Pull requests の read は余分に数えない）。`GET /app/installations` で 1 つ以上インストールされていること。インストール先は、アカウントの login と ID を並べて表示する（`my-org (ID 2002, all repositories)`）。koroku が使わないアカウントへのインストールがあれば警告する。`installation_accounts`（login での指定。5 章）が書いてあれば警告し、login だけで一致しているアカウントがあるときは、代わりに書く行（`installation_account_ids = [2002]`。設定済みの ID も含める）を示す。`allowed_user_id` が実在するアカウントであること（`GET /user/{id}`、認証なし）。callback URL は API で読めないので、正しい値を表示するだけにする。
   - 自動デプロイ（5.2）: 有効なアプリがあるのに `webhook_secret` がない、App が push のイベントを購読していない（`GET /app` の `events`）、App の Webhook の URL が `<console_url>/webhooks/github` でない（`GET /app/hook/config`）、のいずれかなら警告。有効なアプリは DB を読み取り専用で開いて数える。Webhook が Active かどうかは API で読めないので、表示するだけにする。
   - ワークフローを待つ自動デプロイ（5.2）: 待つワークフローを設定した、自動デプロイが有効なアプリがあるのに、App に Actions の read がない、または workflow_run のイベントを購読していない（`GET /app` の `permissions` と `events`）なら警告。
   - レビューアプリ（9.9）: App に Pull requests の read がなければ警告（レビューアプリを作れない旨）。
