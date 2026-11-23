@@ -581,6 +581,12 @@ export default class SystemIndexTemplate extends Component {
                           data-test-reservation-next
                         >設定を変更済み。次のデプロイから {{app.next}}</span>
                       {{/if}}
+                      {{#if app.unknownNext}}
+                        <span
+                          class="usage-breakdown reservation-next"
+                          data-test-reservation-unknown
+                        >このリリースは予約の設定を計算するための情報を持っていません。保存した設定は次のデプロイから反映されます。</span>
+                      {{/if}}
                     </span>
                     <span class="usage-value">{{app.total}}</span>
                   </li>

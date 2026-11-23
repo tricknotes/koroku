@@ -30,6 +30,12 @@ export interface ReservationView {
      * it: `300.0 MB（db 200.0 MB、web 100.0 MB）`; or ''.
      */
     next: string;
+    /**
+     * The running release did not record what the settings act on, so the
+     * next reservation cannot be told (a production app deployed before
+     * koroku recorded the memory shapes).
+     */
+    unknownNext: boolean;
   }[];
 }
 
@@ -92,6 +98,9 @@ export function reservationView(system: SystemInfo): ReservationView | null {
       total: app.total_bytes > 0 ? formatBytes(app.total_bytes) : 'なし',
       breakdown: breakdownOf(app.services),
       next: app.environment === 'production' ? nextOf(app) : '',
+      // `undefined` comes from a backend that does not report it at all.
+      unknownNext:
+        app.environment === 'production' && app.next_services === null,
     })),
   };
 }

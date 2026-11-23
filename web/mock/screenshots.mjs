@@ -2394,6 +2394,20 @@ SHOTS.push(
     script: scrollTo(RESERVATION),
   },
   {
+    name: 'reservation-system-unrecorded',
+    path: '/system?scenario=reservations-unrecorded',
+    wait: '[data-test-reservation-unknown]',
+    script: scrollTo(RESERVATION),
+  },
+  {
+    name: 'reservation-system-unrecorded-phone',
+    path: '/system?scenario=reservations-unrecorded',
+    wait: '[data-test-reservation-unknown]',
+    script: scrollTo(RESERVATION),
+    ...PHONE,
+    fullPage: false,
+  },
+  {
     name: 'reservation-system-tight',
     path: '/system?scenario=reservations-tight',
     wait: '[data-test-reservation-warning]',

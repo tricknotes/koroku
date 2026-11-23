@@ -69,4 +69,43 @@ module('Unit | Utility | memory-reservation', function () {
     assert.true(view?.warning);
     assert.strictEqual(view?.room, '');
   });
+
+  test('a release without memory shapes: the next reservation is unknown', function (assert) {
+    const view = reservationView(
+      makeSystem({
+        memory: { total_bytes: 4 * GB, available_bytes: GB },
+        memory_reservation: {
+          total_bytes: 512 * MB,
+          next_total_bytes: 512 * MB,
+          margin_bytes: GB,
+          warning: false,
+          apps: [
+            {
+              slug: 'shop',
+              environment: 'production',
+              total_bytes: 512 * MB,
+              services: { web: 256 * MB, db: 256 * MB },
+              next_total_bytes: null,
+              next_services: null,
+            },
+            {
+              slug: 'blog',
+              environment: 'production',
+              total_bytes: 256 * MB,
+              services: { web: 256 * MB },
+            },
+          ],
+        },
+      }),
+    );
+
+    assert.deepEqual(
+      view?.apps.map((a) => [a.slug, a.unknownNext, a.next]),
+      [
+        ['shop', true, ''],
+        ['blog', false, ''],
+      ],
+      'only a reported null counts as unknown, not an older backend',
+    );
+  });
 });
