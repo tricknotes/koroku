@@ -329,15 +329,15 @@ func (e *Engine) deployBlueGreen(ctx context.Context, d store.Deployment, app st
 	}
 	upArgs := append([]string{"up", "-d", "--pull", "missing", "--no-deps", "--wait", "--wait-timeout", e.waitSeconds()}, startNames...)
 	if err := run(ctx, inv, dir, upArgs...); err != nil {
-		e.logContainerOutput(ctx, app, log, startNames...)
-		return undoStart(fmt.Errorf("start %s: %w", newService, err))
+		line := e.logContainerOutput(ctx, app, log, startNames...)
+		return undoStart(withOutput(fmt.Errorf("start %s: %w", newService, err), line))
 	}
 
 	url := fmt.Sprintf("http://127.0.0.1:%d%s", newPort, app.HealthcheckPath)
 	log.Step(StepCheck, "Checking %s", url)
 	if err := e.opts.Health.Wait(ctx, url, e.opts.HealthTimeout); err != nil {
-		e.logContainerOutput(ctx, app, log, newService)
-		return undoStart(err)
+		line := e.logContainerOutput(ctx, app, log, newService)
+		return undoStart(withOutput(err, line))
 	}
 	log.Printf("The app is answering.")
 
@@ -355,8 +355,8 @@ func (e *Engine) deployBlueGreen(ctx context.Context, d store.Deployment, app st
 		e.noteEnvChange(app, rel.env, otherNames, rel.releaseEnvServices, log)
 		args := append([]string{"up", "-d", "--pull", "missing", "--no-deps", "--wait", "--wait-timeout", e.waitSeconds()}, otherNames...)
 		if err := run(ctx, inv, dir, args...); err != nil {
-			e.logContainerOutput(ctx, app, log, otherNames...)
-			err = fmt.Errorf("recreate the other services: %w", err)
+			line := e.logContainerOutput(ctx, app, log, otherNames...)
+			err = withOutput(fmt.Errorf("recreate the other services: %w", err), line)
 			if shuttingDown(ctx) {
 				return true, &blueGreenFailure{err: err}
 			}
@@ -391,8 +391,8 @@ func (e *Engine) startBlueGreenAlone(ctx context.Context, d store.Deployment, ap
 		return false, fmt.Errorf("write env file: %w", err)
 	}
 	if err := e.upRelease(ctx, app, rel.id, rel.dockerConfig, e.deployRun(log)); err != nil {
-		e.logContainerOutput(ctx, app, log)
-		return true, fmt.Errorf("start containers: %w", err)
+		line := e.logContainerOutput(ctx, app, log)
+		return true, withOutput(fmt.Errorf("start containers: %w", err), line)
 	}
 	return e.routeAndCheck(ctx, app, log)
 }
