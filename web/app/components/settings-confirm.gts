@@ -10,7 +10,7 @@ interface Signature {
 
 /**
  * The questions a production app asks before a settings save goes out
- * (ARCHITECTURE 8.3, 8.4, 5.2), one at a time. Every tab with settings
+ * (ARCHITECTURE 8.3, 8.4, 5.2, 7.2), one at a time. Every tab with settings
  * renders this for its editor, so the questions are the same wherever the
  * setting lives.
  */
@@ -91,6 +91,33 @@ export default class SettingsConfirm extends Component<Signature> {
             @editor.form.idleSleepMinutes
           }}アクセスがなければ止まります。休止のあとの最初の利用者は、アプリの起動を待つことになります。外部の死活監視を当てていると休止しません。
         </p>
+      </ConfirmDialog>
+    {{else if (eq @editor.confirming "blue-green")}}
+      <ConfirmDialog
+        @title="本番アプリで無停止デプロイを有効にしますか？"
+        @confirmLabel="有効にする"
+        @busy={{@editor.saving}}
+        @onConfirm={{@editor.confirm}}
+        @onCancel={{@editor.cancel}}
+      >
+        <div data-test-blue-green-confirm>
+          <p>
+            次のデプロイから、本番アプリ
+            <strong>{{this.slug}}</strong>
+            の公開サービスを、動いている版と並べて起動してから切り替えます。
+          </p>
+          <ul class="dialog-points">
+            <li data-test-blue-green-confirm-migration>
+              マイグレーションは、古い版が利用者のリクエストを受けている間に流れます。古い版のコードでも動く形（足すだけ。消す・名前を変えるのは
+              2
+              回のデプロイに分ける）で書いてください。守れないデプロイでは、その間だけ無効にしてください。
+            </li>
+            <li data-test-blue-green-confirm-memory>
+              デプロイの間は、公開サービスのメモリが一時的に上限 2
+              つ分要ります。ホストに空きがなければ、デプロイは失敗します（アプリは動き続けます）。
+            </li>
+          </ul>
+        </div>
       </ConfirmDialog>
     {{/if}}
   </template>

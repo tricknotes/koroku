@@ -6,7 +6,8 @@ import SettingsForm from 'koroku-console/utils/settings-form';
 import type { App, AppPatch } from 'koroku-console/utils/types';
 
 /** A change a production app asks about before it is saved. */
-export type SettingsConfirmation = 'protection' | 'auto-deploy' | 'idle-sleep';
+export type SettingsConfirmation =
+  'protection' | 'auto-deploy' | 'idle-sleep' | 'blue-green';
 
 /** The fields each tab edits (ARCHITECTURE 9.1). */
 export const SETTINGS_TAB_FIELDS: (keyof AppPatch)[] = [
@@ -26,6 +27,8 @@ export const DEPLOY_SETTINGS_FIELDS: (keyof AppPatch)[] = [
   'auto_deploy_workflow',
   'promote_from',
   'relax_policy',
+  'blue_green',
+  'blue_green_drain_seconds',
 ];
 
 export const IDLE_SLEEP_FIELDS: (keyof AppPatch)[] = [
@@ -191,6 +194,7 @@ export default class SettingsEditor {
     }
     if (this.startsProductionAutoDeploy(patch)) ask.push('auto-deploy');
     if (this.startsProductionIdleSleep(patch)) ask.push('idle-sleep');
+    if (this.startsProductionBlueGreen(patch)) ask.push('blue-green');
     return ask;
   }
 
@@ -217,6 +221,16 @@ export default class SettingsEditor {
   private startsProductionIdleSleep(patch: AppPatch): boolean {
     if (!this.isProductionForm || !this.form.idleSleep) return false;
     return patch.idle_sleep === true || patch.environment === 'production';
+  }
+
+  /**
+   * Whether a save turns on blue/green deploys of a production app: its
+   * migrations must then work with the old release's code (ARCHITECTURE
+   * 7.2). Turning them off asks nothing.
+   */
+  private startsProductionBlueGreen(patch: AppPatch): boolean {
+    if (!this.isProductionForm || !this.form.blueGreen) return false;
+    return patch.blue_green === true || patch.environment === 'production';
   }
 
   private async commit(patch: AppPatch): Promise<boolean> {
