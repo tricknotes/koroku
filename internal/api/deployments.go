@@ -305,12 +305,12 @@ func (s *Server) writeEnqueueError(w http.ResponseWriter, r *http.Request, err e
 func (s *Server) loadDeployment(w http.ResponseWriter, r *http.Request) (store.Deployment, store.App, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		writeError(w, http.StatusNotFound, "deployment_not_found", "no such deployment")
+		writeMissing(w, missingDeployment)
 		return store.Deployment{}, store.App{}, false
 	}
 	d, err := s.store.GetDeployment(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "deployment_not_found", "no such deployment")
+		writeMissing(w, missingDeployment)
 		return store.Deployment{}, store.App{}, false
 	}
 	if err != nil {

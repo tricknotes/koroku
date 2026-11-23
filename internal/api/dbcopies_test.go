@@ -111,7 +111,7 @@ func TestStartDBCopy(t *testing.T) {
 		t.Errorf("get = %+v", got)
 	}
 	if rec := request(t, h, http.MethodGet, "/api/db-copies/999", ""); rec.Code != http.StatusNotFound ||
-		!strings.Contains(rec.Body.String(), "copy_not_found") {
+		errorCode(t, rec) != "db_copy_not_found" {
 		t.Errorf("missing copy: %d %s", rec.Code, rec.Body)
 	}
 	if rec := request(t, h, http.MethodGet, "/api/apps/blog-staging/db-copies?limit=0", ""); rec.Code != http.StatusBadRequest {

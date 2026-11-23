@@ -186,12 +186,12 @@ func (s *Server) writeCopyError(w http.ResponseWriter, r *http.Request, err erro
 func (s *Server) loadDBCopy(w http.ResponseWriter, r *http.Request) (store.DBCopy, store.App, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		writeError(w, http.StatusNotFound, "copy_not_found", "no such database copy")
+		writeMissing(w, missingDBCopy)
 		return store.DBCopy{}, store.App{}, false
 	}
 	c, err := s.store.GetDBCopy(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "copy_not_found", "no such database copy")
+		writeMissing(w, missingDBCopy)
 		return store.DBCopy{}, store.App{}, false
 	}
 	if err != nil {

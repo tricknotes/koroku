@@ -365,12 +365,12 @@ func (s *Server) handleCreateTaskRun(w http.ResponseWriter, r *http.Request) {
 func (s *Server) loadTaskRun(w http.ResponseWriter, r *http.Request) (store.TaskRun, store.App, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
-		writeError(w, http.StatusNotFound, "task_run_not_found", "no such task run")
+		writeMissing(w, missingTaskRun)
 		return store.TaskRun{}, store.App{}, false
 	}
 	run, err := s.store.GetTaskRun(r.Context(), id)
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "task_run_not_found", "no such task run")
+		writeMissing(w, missingTaskRun)
 		return store.TaskRun{}, store.App{}, false
 	}
 	if err != nil {

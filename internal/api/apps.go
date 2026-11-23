@@ -619,7 +619,7 @@ func (s *Server) internalError(w http.ResponseWriter, r *http.Request, err error
 func (s *Server) loadApp(w http.ResponseWriter, r *http.Request) (store.App, bool) {
 	app, err := s.store.GetApp(r.Context(), r.PathValue("slug"))
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "app_not_found", "no such app")
+		writeMissing(w, missingApp)
 		return store.App{}, false
 	}
 	if err != nil {

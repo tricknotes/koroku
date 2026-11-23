@@ -269,6 +269,70 @@ func TestAppRoutesNeedTheirLevel(t *testing.T) {
 	}
 }
 
+// A member cannot tell an app it has no role on, or a deployment, task run
+// or database copy of such an app, from one that does not exist: every
+// route answers both with the same status and the same body.
+func TestHiddenRecordsAnswerLikeMissingOnes(t *testing.T) {
+	f := newRoleFixture(t)
+	ctx := context.Background()
+	blog, shop := f.app(t, "blog"), f.app(t, "shop")
+	d, _, err := f.srv.store.EnqueueDeployment(ctx, blog.ID, "main", testSHA, "first", f.clk.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := f.srv.store.StartTaskRun(ctx, store.TaskRun{AppID: blog.ID, Service: "web", Command: "true"}, f.clk.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := f.srv.store.StartDBCopy(ctx, blog, shop, store.CopySourceLive, f.clk.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden := map[scope]int64{scopeApp: 0, scopeDeployment: d.ID, scopeTaskRun: run.ID, scopeDBCopy: c.ID}
+	want := map[scope]string{
+		scopeApp:        `{"error":{"code":"app_not_found","message":"no such app"}}`,
+		scopeDeployment: `{"error":{"code":"deployment_not_found","message":"no such deployment"}}`,
+		scopeTaskRun:    `{"error":{"code":"task_run_not_found","message":"no such task run"}}`,
+		scopeDBCopy:     `{"error":{"code":"db_copy_not_found","message":"no such database copy"}}`,
+	}
+	// The stranger has a role on shop only; the owner sees what the handler
+	// itself answers for a record that does not exist.
+	stranger := f.as[strangerID]
+	checked := map[scope]int{}
+	for _, rt := range f.srv.apiRoutes() {
+		id, ok := hidden[rt.access.scope]
+		if !ok {
+			continue
+		}
+		body := ""
+		if method, _ := fillPattern(rt.pattern, "blog", id); isMutating(method) {
+			body = `{}`
+		}
+		ask := func(b *browser, slug string, id int64) (int, string) {
+			method, path := fillPattern(rt.pattern, slug, id)
+			rec := b.do(method, path, body, originHeader)
+			return rec.Code, strings.TrimSpace(rec.Body.String())
+		}
+		hiddenCode, hiddenBody := ask(stranger, "blog", id)
+		if hiddenCode != http.StatusNotFound || hiddenBody != want[rt.access.scope] {
+			t.Errorf("%s on a record without a role: %d %s, want 404 %s", rt.pattern, hiddenCode, hiddenBody, want[rt.access.scope])
+		}
+		for who, b := range map[string]*browser{"a member": stranger, "the owner": f.owner} {
+			code, got := ask(b, "nope", 987654)
+			if code != hiddenCode || got != hiddenBody {
+				t.Errorf("%s: a record without a role answers %d %s, a missing one answers %s %d %s",
+					rt.pattern, hiddenCode, hiddenBody, who, code, got)
+			}
+		}
+		checked[rt.access.scope]++
+	}
+	for sc := range hidden {
+		if checked[sc] == 0 {
+			t.Errorf("no route of scope %d was checked", sc)
+		}
+	}
+}
+
 func decodeApps(t *testing.T, rec *httptest.ResponseRecorder) []appJSON {
 	t.Helper()
 	var out struct {

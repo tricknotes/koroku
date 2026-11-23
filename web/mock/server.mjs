@@ -1250,7 +1250,7 @@ function findCopy(state, id) {
     const found = list.find((entry) => entry.id === Number(id));
     if (found) return found;
   }
-  throw notFound('copy_not_found');
+  throw notFound('db_copy_not_found');
 }
 
 function copyJson(entry) {
