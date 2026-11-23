@@ -693,6 +693,13 @@ func TestFailedHealthCheckRollsBack(t *testing.T) {
 	if !strings.Contains(h.log("blog", second.ID), fmt.Sprintf("Rolling back to deployment #%d", first.ID)) {
 		t.Errorf("log:\n%s", h.log("blog", second.ID))
 	}
+	// Both replaced the running containers, so the memory history marks
+	// both (ARCHITECTURE 9.5).
+	for _, d := range []store.Deployment{first, second} {
+		if d.ContainersReplaced == nil || !*d.ContainersReplaced {
+			t.Errorf("deployment #%d containers_replaced = %v, want true", d.ID, d.ContainersReplaced)
+		}
+	}
 }
 
 func TestFailedFirstDeployRemovesContainers(t *testing.T) {
@@ -743,6 +750,9 @@ func TestBuildFailureDoesNotRollBack(t *testing.T) {
 	}
 	if got := h.dockerCalls(); !slices.Equal(got, []string{"config", "config", "build", "image rm koroku-blog-web:r2", "ps --all --no-trunc --format {{.Image}}"}) {
 		t.Errorf("a build failure must not touch running containers: %v", got)
+	}
+	if second.ContainersReplaced == nil || *second.ContainersReplaced {
+		t.Errorf("containers_replaced = %v, want false", second.ContainersReplaced)
 	}
 	// The running release keeps its environment until a start is attempted.
 	env, _ := os.ReadFile(h.engine.EnvFile("blog"))

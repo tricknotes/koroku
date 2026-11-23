@@ -61,6 +61,9 @@ type deploymentJSON struct {
 	// login behind a push, "" otherwise.
 	Trigger string `json:"trigger"`
 	Pusher  string `json:"pusher"`
+	// ContainersReplaced says whether the run touched the running
+	// containers (ARCHITECTURE 9.5); null when the run did not end normally.
+	ContainersReplaced *bool `json:"containers_replaced"`
 }
 
 // actorJSON names the user who started an operation.
@@ -118,6 +121,7 @@ func deploymentToJSON(d store.Deployment, slug string) deploymentJSON {
 		Actor:              actorToJSON(d.Actor),
 		Trigger:            d.Trigger,
 		Pusher:             d.Pusher,
+		ContainersReplaced: d.ContainersReplaced,
 	}
 }
 
@@ -135,7 +139,19 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	list, err := s.store.ListDeployments(r.Context(), app.ID, limit)
+	var list []store.Deployment
+	var err error
+	if raw := r.URL.Query().Get("finished_since"); raw != "" {
+		// The deployments within the memory history's range (ARCHITECTURE 9.5).
+		since, perr := time.Parse(time.RFC3339, raw)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "invalid_finished_since", "finished_since must be an RFC 3339 time")
+			return
+		}
+		list, err = s.store.ListDeploymentsFinishedSince(r.Context(), app.ID, since, limit)
+	} else {
+		list, err = s.store.ListDeployments(r.Context(), app.ID, limit)
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return

@@ -578,6 +578,14 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 		run = e.executeRollback
 	}
 	touched, runErr := run(jobCtx, d, app, log)
+	// The memory history marks the deployments that replaced containers,
+	// failed ones included (ARCHITECTURE 9.5). Recorded before the status
+	// so that a finished deployment always has it.
+	replacedCtx, cancelReplaced := context.WithTimeout(context.WithoutCancel(ctx), e.finishTimeout)
+	if err := e.opts.Store.SetDeploymentContainersReplaced(replacedCtx, d.ID, touched); err != nil {
+		logger.Error("recording whether the containers were replaced failed", "error", err)
+	}
+	cancelReplaced()
 
 	status, message := store.StatusSucceeded, ""
 	if runErr != nil {
