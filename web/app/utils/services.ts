@@ -3,7 +3,7 @@
 
 import { formatBytes } from './format';
 import type { StatusKind } from './status';
-import type { ServiceStatus } from './types';
+import type { ServiceStatus, WebColor } from './types';
 
 export interface ServiceState {
   kind: StatusKind;
@@ -96,4 +96,49 @@ export function memoryUsage(
     percent,
     high: percent >= MEMORY_HIGH_PERCENT,
   };
+}
+
+/** A row of the service lists, with what a blue/green copy adds. */
+export interface ServiceRow {
+  /** Unique within the list: the name, plus the colour of a copy. */
+  key: string;
+  service: ServiceStatus;
+  /** The colour of a copy of a blue/green app's public service. */
+  color: WebColor | null;
+  /**
+   * Both copies run (during a deployment, ARCHITECTURE 7.2) and this one
+   * receives the requests.
+   */
+  live: boolean;
+  /** Both copies run and this one does not receive the requests. */
+  standby: boolean;
+}
+
+/**
+ * The service rows of `GET /api/apps/{slug}/services`. A blue/green app's
+ * public service has a row per running copy, each with its colour;
+ * `webColor` (the app's) tells which one receives the requests.
+ */
+export function serviceRows(
+  services: readonly ServiceStatus[],
+  webColor: WebColor | null | undefined,
+): ServiceRow[] {
+  const copies = new Map<string, number>();
+  for (const service of services) {
+    if (service.color) {
+      copies.set(service.name, (copies.get(service.name) ?? 0) + 1);
+    }
+  }
+  return services.map((service) => {
+    const color = service.color ?? null;
+    const paired = color !== null && (copies.get(service.name) ?? 0) > 1;
+    const live = paired && color === webColor;
+    return {
+      key: color ? `${service.name}:${color}` : service.name,
+      service,
+      color,
+      live,
+      standby: paired && !live,
+    };
+  });
 }

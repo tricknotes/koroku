@@ -17,6 +17,7 @@ import RelativeTime from 'koroku-console/components/relative-time';
 import ReviewAppSummary from 'koroku-console/components/review-app-summary';
 import ReviewAppsLine from 'koroku-console/components/review-apps-line';
 import RowList from 'koroku-console/components/row-list';
+import ServiceName from 'koroku-console/components/service-name';
 import StatusIndicator from 'koroku-console/components/status-indicator';
 import TabSection from 'koroku-console/components/tab-section';
 import TimeUntil from 'koroku-console/components/time-until';
@@ -36,6 +37,7 @@ import { isRollback, rollbackSummary } from 'koroku-console/utils/rollback';
 import {
   healthLabel,
   memoryUsage,
+  serviceRows,
   serviceState,
   type MemoryUsage,
 } from 'koroku-console/utils/services';
@@ -556,18 +558,24 @@ export default class AppOverviewTemplate extends Component<Signature> {
                       <span>メモリ</span>
                     </:header>
                     <:rows as |Row|>
-                      {{#each services key="name" as |svc|}}
+                      {{#each
+                        (serviceRows services this.app.web_color) key="key"
+                        as |row|
+                      }}
                         {{#let
-                          (serviceState svc) (memoryUsage svc)
-                          as |state memory|
+                          row.service
+                          (serviceState row.service)
+                          (memoryUsage row.service)
+                          as |svc state memory|
                         }}
                           <Row
                             data-test-service={{svc.name}}
                             data-problem={{if state.problem "true"}}
                           >
-                            <div
+                            <ServiceName
                               class="overview-service-name"
-                            >{{svc.name}}</div>
+                              @row={{row}}
+                            />
                             <div class="overview-service-state">
                               <StatusIndicator
                                 @kind={{state.kind}}
