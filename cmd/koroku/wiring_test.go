@@ -18,6 +18,7 @@ import (
 	"github.com/tricknotes/koroku/internal/logs"
 	"github.com/tricknotes/koroku/internal/objstore"
 	"github.com/tricknotes/koroku/internal/runner"
+	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
 )
 
@@ -62,6 +63,62 @@ func TestToBackupApp(t *testing.T) {
 	app.DesiredState, app.CurrentDeploymentID = store.DesiredRunning, nil
 	if got := toBackupApp(app); got.DumpService != "" {
 		t.Errorf("never deployed app keeps its dump hook: %+v", got)
+	}
+}
+
+// A backup that takes the dump hands the backup package the values of the
+// app's variables to mask in the dump command's output: the saved ones and
+// the ones the running containers still hold.
+func TestToDumpingAppMasksTheValuesOfTheApp(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	app := testApp(t, st, "blog")
+	box, err := secrets.NewBox([]byte(strings.Repeat("k", secrets.KeySize)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := box.Seal([]byte("s3cret-db-passw0rd"), secrets.EnvVarContext(app.ID, "DATABASE_PASSWORD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutEnvVar(ctx, app.ID, store.EnvVar{Key: "DATABASE_PASSWORD", ValueEncrypted: sealed}); err != nil {
+		t.Fatal(err)
+	}
+	engine := deploy.New(deploy.Options{Store: st, Runner: &runner.Fake{}, AppsDir: t.TempDir(), Box: box})
+	// The live env file holds a value that was deleted since the deployment.
+	if err := os.MkdirAll(filepath.Dir(engine.EnvFile("blog")), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engine.EnvFile("blog"), []byte("OLD_TOKEN=deleted-t0ken-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	current := int64(1)
+	app.DesiredState, app.CurrentDeploymentID = store.DesiredRunning, &current
+	app.DumpHookService, app.DumpHookCommand = "db", "pg_dump -U postgres app"
+
+	got := toDumpingApp(app, &appController{store: st, engine: engine})
+	if got.OutputMasker == nil || got.WithDumpService == nil {
+		t.Fatalf("dumping app = %+v", got)
+	}
+	masker, err := got.OutputMasker(ctx)
+	if err != nil {
+		t.Fatalf("OutputMasker: %v", err)
+	}
+	line := masker.Mask("connection to postgres://app:s3cret-db-passw0rd@db failed (deleted-t0ken-value)")
+	if want := "connection to postgres://app:[MASKED]@db failed ([MASKED])"; line != want {
+		t.Errorf("masked = %q, want %q", line, want)
+	}
+
+	// Without the engine the values are unknown: an error, so that the
+	// backup keeps nothing of the output.
+	got = toDumpingApp(app, &appController{store: st})
+	if _, err := got.OutputMasker(ctx); err == nil {
+		t.Error("OutputMasker without an engine: no error")
+	}
+	// An app whose dump hook does not run has nothing to mask.
+	app.DesiredState = store.DesiredStopped
+	if got := toDumpingApp(app, &appController{store: st, engine: engine}); got.OutputMasker != nil {
+		t.Errorf("stopped app = %+v", got)
 	}
 }
 

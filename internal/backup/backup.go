@@ -99,6 +99,15 @@ type App struct {
 	// the dump service runs while run does (an app that sleeps while idle
 	// starts only that service for the dump).
 	WithDumpService func(ctx context.Context, run func(context.Context) error) error
+	// OutputMasker, when set, returns a masker that knows the secret values
+	// the dump command can print: the values of the app's environment
+	// variables. What the command writes to its standard error ends up in
+	// the message of a failed dump, which everyone who may view the app
+	// reads, and tools such as pg_dump print connection strings when they
+	// fail. It is called once for every dump, right before the command
+	// runs. When it fails, nothing of the command's output is kept. Nil
+	// means that the app has no values to hide.
+	OutputMasker func(ctx context.Context) (*secrets.Masker, error)
 }
 
 // Recorder keeps the history of runs. The caller implements it on the

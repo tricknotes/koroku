@@ -14,8 +14,19 @@ const (
 	DomainActive  = "active"
 )
 
-// ErrDomainNotActive is returned when a pending domain is made primary.
-var ErrDomainNotActive = errors.New("domain is not active")
+// MaxDomainsPerApp bounds the custom domains of one app, pending ones
+// included. Every verified hostname has a certificate ordered from the ACME
+// account all apps share, and every change reloads the whole proxy
+// configuration (ARCHITECTURE 8.1).
+const MaxDomainsPerApp = 20
+
+var (
+	// ErrDomainNotActive is returned when a pending domain is made primary.
+	ErrDomainNotActive = errors.New("domain is not active")
+	// ErrTooManyDomains is returned when an app has MaxDomainsPerApp
+	// domains already.
+	ErrTooManyDomains = errors.New("too many domains")
+)
 
 // Domain is a custom hostname attached to an app.
 type Domain struct {
@@ -73,16 +84,24 @@ func (s *Store) queryDomains(ctx context.Context, query string, args ...any) ([]
 }
 
 // AddDomain registers a hostname for an app in the pending state. Hostnames
-// are unique across all apps.
+// are unique across all apps. It returns ErrTooManyDomains when the app has
+// MaxDomainsPerApp domains already.
 func (s *Store) AddDomain(ctx context.Context, appID int64, hostname string, now time.Time) (Domain, error) {
+	// One statement, so that concurrent requests cannot pass the limit.
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO app_domains (app_id, hostname, created_at) VALUES (?, ?, ?)`,
-		appID, hostname, toMillis(now))
+		`INSERT INTO app_domains (app_id, hostname, created_at)
+		 SELECT ?, ?, ? WHERE (SELECT count(*) FROM app_domains WHERE app_id = ?) < ?`,
+		appID, hostname, toMillis(now), appID, MaxDomainsPerApp)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return Domain{}, fmt.Errorf("hostname %q: %w", hostname, ErrConflict)
 		}
 		return Domain{}, fmt.Errorf("add domain: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return Domain{}, fmt.Errorf("add domain: %w", err)
+	} else if n == 0 {
+		return Domain{}, fmt.Errorf("hostname %q: %w", hostname, ErrTooManyDomains)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {

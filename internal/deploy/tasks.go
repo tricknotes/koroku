@@ -242,6 +242,13 @@ func (e *Engine) taskMasker(ctx context.Context, app store.App) (*secrets.Masker
 	return masker, nil
 }
 
+// OutputMasker returns a masker for what a command in the app's containers
+// can print of the app's secrets (taskMasker). The backups mask the output
+// of the dump hook with it (ARCHITECTURE 10.2).
+func (e *Engine) OutputMasker(ctx context.Context, app store.App) (*secrets.Masker, error) {
+	return e.taskMasker(ctx, app)
+}
+
 // executeTask runs the command and writes its log. It returns how to record
 // the result, which the caller does once the app's lock is released.
 func (e *Engine) executeTask(lifetime, jobCtx context.Context, app store.App, run store.TaskRun,

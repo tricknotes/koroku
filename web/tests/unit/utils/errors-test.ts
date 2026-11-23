@@ -48,6 +48,7 @@ module('Unit | Utility | errors', function () {
       'no_free_port',
       'not_cancelable',
       'hostname_taken',
+      'too_many_domains',
       'busy',
       'not_deployed',
       'validation_failed',
@@ -73,6 +74,13 @@ module('Unit | Utility | errors', function () {
       seen.add(message);
     }
     assert.strictEqual(seen.size, codes.length, 'no two codes share a text');
+  });
+
+  test('errorMessage names the limit of custom domains', function (assert) {
+    assert.strictEqual(
+      errorMessage(new ApiError(422, 'too_many_domains', '', { limit: 20 })),
+      '独自ドメインはアプリごとに 20 個までです。使っていないものを削除してから追加してください。',
+    );
   });
 
   test('errorMessage explains the hardening refusals', function (assert) {

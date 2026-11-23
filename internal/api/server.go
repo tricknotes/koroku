@@ -132,7 +132,7 @@ type Server struct {
 	routeStatus func() RouteStatus
 
 	// callbackLimiter bounds OAuth code exchanges (see handleCallback).
-	callbackLimiter *rateLimiter
+	callbackLimiter *callbackLimiter
 	// tokenLimiter bounds the requests of each API token.
 	tokenLimiter *tokenLimiter
 }
@@ -192,8 +192,7 @@ func New(opts Options) *Server {
 
 		routeStatus: opts.RouteStatus,
 
-		// One person logs in a few times a week; ten a minute is generous.
-		callbackLimiter: &rateLimiter{limit: 10, window: time.Minute},
+		callbackLimiter: newCallbackLimiter(),
 		tokenLimiter:    &tokenLimiter{},
 
 		pushDeployer: opts.PushDeployer,

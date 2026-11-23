@@ -1098,6 +1098,9 @@ route('GET', '/api/task-runs/:id/logs', (context) => {
   return { sse: log.lines, end: log.end, next: log.next };
 });
 
+/** The custom domains one app can have (ARCHITECTURE 8.1). */
+const MAX_DOMAINS_PER_APP = 20;
+
 route('GET', '/api/apps/:slug/domains', (context) => ({
   default_hostname: `${appOf(context).slug}.${BASE_DOMAIN}`,
   domains: context.state.domains.get(context.params.slug),
@@ -1112,6 +1115,11 @@ route('POST', '/api/apps/:slug/domains', (context) => {
   const all = [...state.domains.values()].flat();
   if (all.some((entry) => entry.hostname === hostname)) {
     throw new HttpError(409, 'hostname_taken');
+  }
+  if (state.domains.get(app.slug).length >= MAX_DOMAINS_PER_APP) {
+    throw new HttpError(422, 'too_many_domains', {
+      limit: MAX_DOMAINS_PER_APP,
+    });
   }
   const created = newDomain(1 + all.length * 7, hostname, app.slug);
   state.domains.get(app.slug).push(created);
@@ -1138,6 +1146,17 @@ route('PATCH', '/api/apps/:slug/domains/:id', (context) => {
   const { state, params, body } = context;
   const found = domainOf(context);
   const app = state.apps.get(params.slug);
+  // Skipping the DNS check is the owner's (ARCHITECTURE 8.1).
+  if (
+    body.force_active !== undefined &&
+    body.force_active !== found.force_active &&
+    isMember(context.scenario)
+  ) {
+    throw new HttpError(403, 'forbidden_role', {
+      required: 'owner',
+      fields: ['force_active'],
+    });
+  }
   if (body.force_active !== undefined) {
     found.force_active = body.force_active;
     if (body.force_active) found.status = 'active';

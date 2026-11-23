@@ -413,6 +413,22 @@ module('Acceptance | domains', function (hooks) {
     assert.dom('[data-test-domain-hostname]').hasValue('www.example.org');
   });
 
+  test('an app with as many domains as it can have says so under the form', async function (assert) {
+    fakes.api.fail('POST', DOMAINS, 422, 'too_many_domains', { limit: 20 });
+
+    await visit('/apps/blog/settings?section=domains');
+    await fillIn('[data-test-domain-hostname]', 'www.example.org');
+    await click('[data-test-domain-add]');
+
+    assert
+      .dom('[data-test-domain-add-section] [data-test-error]')
+      .hasText(
+        '独自ドメインはアプリごとに 20 個までです。使っていないものを削除してから追加してください。',
+      );
+    assert.dom('[data-test-field-error]').doesNotExist();
+    assert.dom('[data-test-domain-hostname]').hasValue('www.example.org');
+  });
+
   test('a failed action shows its error and keeps the list', async function (assert) {
     domains = [makeDomain()];
     fakes.api.fail('PATCH', `${DOMAINS}/3`, 500, 'internal');

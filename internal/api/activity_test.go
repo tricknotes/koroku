@@ -67,7 +67,9 @@ func TestActivityRecordsWhoDidWhat(t *testing.T) {
 	var d domainBody
 	_ = json.Unmarshal(must(manager, http.MethodPost, "/api/apps/blog/domains", `{"hostname":"www.example.com"}`, http.StatusCreated), &d)
 	must(manager, http.MethodPost, fmt.Sprintf("/api/apps/blog/domains/%d/verify", d.ID), "", http.StatusOK)
-	must(manager, http.MethodPatch, fmt.Sprintf("/api/apps/blog/domains/%d", d.ID), `{"force_active":true,"is_primary":true}`, http.StatusOK)
+	// Skipping the DNS check is the owner's; the manager makes it primary.
+	must(f.owner, http.MethodPatch, fmt.Sprintf("/api/apps/blog/domains/%d", d.ID), `{"force_active":true}`, http.StatusOK)
+	must(manager, http.MethodPatch, fmt.Sprintf("/api/apps/blog/domains/%d", d.ID), `{"is_primary":true}`, http.StatusOK)
 	must(manager, http.MethodDelete, fmt.Sprintf("/api/apps/blog/domains/%d", d.ID), "", http.StatusNoContent)
 
 	must(manager, http.MethodPost, "/api/apps/blog/stop", "", http.StatusOK)
@@ -97,7 +99,7 @@ func TestActivityRecordsWhoDidWhat(t *testing.T) {
 	for i := len(list.Entries) - 1; i >= 0; i-- {
 		e := list.Entries[i]
 		want := "max"
-		if strings.HasPrefix(e.Action, "member.") || strings.HasPrefix(e.Action, "db_copy.") || e.Action == actAppCreated {
+		if strings.HasPrefix(e.Action, "member.") || strings.HasPrefix(e.Action, "db_copy.") || e.Action == actAppCreated || e.Action == actDomainForced {
 			want = "octo"
 		}
 		if e.Actor == nil || e.Actor.Login != want {

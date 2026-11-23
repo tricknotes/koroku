@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -138,6 +139,49 @@ func TestAddDomainValidation(t *testing.T) {
 	}
 	if rec := request(t, h, http.MethodPost, "/api/apps/missing/domains", `{"hostname": "x.example.org"}`); rec.Code != http.StatusNotFound {
 		t.Errorf("missing app status = %d", rec.Code)
+	}
+}
+
+func TestAddDomainStopsAtTheLimit(t *testing.T) {
+	h, _, router := newDomainServer(t)
+	for i := range store.MaxDomainsPerApp {
+		rec := request(t, h, http.MethodPost, "/api/apps/blog/domains", fmt.Sprintf(`{"hostname": "h%d.example.org"}`, i))
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("domain %d: %d %s", i, rec.Code, rec.Body)
+		}
+	}
+	before := router.calls
+	rec := request(t, h, http.MethodPost, "/api/apps/blog/domains", `{"hostname": "more.example.org"}`)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("one over the limit: %d %s", rec.Code, rec.Body)
+	}
+	var refusal struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				Limit int `json:"limit"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &refusal); err != nil {
+		t.Fatal(err)
+	}
+	if refusal.Error.Code != "too_many_domains" || refusal.Error.Details.Limit != store.MaxDomainsPerApp {
+		t.Errorf("refusal = %+v", refusal.Error)
+	}
+	if router.calls != before {
+		t.Errorf("a refused domain synced the routes: %d -> %d", before, router.calls)
+	}
+	list := decode[struct{ Domains []domainBody }](t, request(t, h, http.MethodGet, "/api/apps/blog/domains", ""))
+	if len(list.Domains) != store.MaxDomainsPerApp {
+		t.Errorf("%d domains listed", len(list.Domains))
+	}
+	// Deleting one makes room again.
+	if rec := request(t, h, http.MethodDelete, fmt.Sprintf("/api/apps/blog/domains/%d", list.Domains[0].ID), ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", rec.Code, rec.Body)
+	}
+	if rec := request(t, h, http.MethodPost, "/api/apps/blog/domains", `{"hostname": "more.example.org"}`); rec.Code != http.StatusCreated {
+		t.Errorf("after deleting one: %d %s", rec.Code, rec.Body)
 	}
 }
 

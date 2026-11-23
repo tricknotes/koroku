@@ -910,6 +910,9 @@ export default class AppSettingsTemplate extends Component<Signature> {
             {{/if}}
           </p>
         {{/if}}
+        <p data-test-delete-leftovers>
+          ログとバックアップはこの名前で残り、同じ名前で作ったアプリのものになります。
+        </p>
       </ConfirmDialog>
     {{/if}}
   </template>

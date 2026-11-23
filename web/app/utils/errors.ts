@@ -65,6 +65,8 @@ const MESSAGES: Record<string, string> = {
   no_free_port: '割り当てられるポートが残っていません。',
   not_cancelable: 'すでに終了しているためキャンセルできません。',
   hostname_taken: 'このホスト名はすでに登録されています。',
+  too_many_domains:
+    '独自ドメインが上限に達しています。使っていないものを削除してから追加してください。',
   env_var_exists: '同じキーの環境変数がすでにあります。',
   env_var_not_found:
     'この環境変数は見つかりません。ほかの画面で変更されたかもしれません。再読み込みしてください。',
@@ -127,6 +129,12 @@ export function errorMessage(error: unknown): string {
       const limit = percent(error.details['limit_percent']);
       if (used && limit) {
         return `${known}（使用率 ${used} / 上限 ${limit}）`;
+      }
+    }
+    if (error.code === 'too_many_domains') {
+      const limit = error.details['limit'];
+      if (typeof limit === 'number') {
+        return `独自ドメインはアプリごとに ${limit} 個までです。使っていないものを削除してから追加してください。`;
       }
     }
     return known;

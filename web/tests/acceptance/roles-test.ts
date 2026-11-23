@@ -139,6 +139,15 @@ module('Acceptance | roles', function (hooks) {
 
     assert.dom('[data-test-settings-form] fieldset').isNotDisabled();
     assert.dom('[data-test-domain-form]').exists('manage changes the domains');
+    const pending = '[data-test-domain="example.net"]';
+    assert.dom(`${pending} [data-test-domain-verify]`).exists();
+    assert.dom(`${pending} [data-test-domain-delete]`).exists();
+    assert
+      .dom('[data-test-domain-force-toggle]')
+      .doesNotExist('skipping the DNS check is the owner’s');
+    assert
+      .dom(`${pending} [data-test-domain-force-owner-note]`)
+      .hasText('強制有効化はオーナーだけが変えられます。');
     assert
       .dom('[data-test-environment-option="production"]')
       .isDisabled('the environment is the owner’s');

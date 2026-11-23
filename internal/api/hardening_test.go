@@ -128,17 +128,26 @@ func TestAPIRejectsCrossSiteBrowserRequests(t *testing.T) {
 
 // TestOAuthCallbackIsRateLimited: the callback can be reached by anyone with
 // a self-chosen state, and each accepted call makes koroku talk to GitHub.
+// The calls are counted per client address, so that one client cannot keep
+// the logins of everyone else failing, and in total.
 func TestOAuthCallbackIsRateLimited(t *testing.T) {
 	gh := defaultGitHub()
 	srv, clk := newAuthServer(t, gh)
 	h := srv.Handler()
-	call := func(target, stateCookie string) string {
+	// callFrom is a request as the proxy passes it on for the client at addr.
+	callFrom := func(addr, target, stateCookie string) string {
 		req := localRequest(http.MethodGet, target, nil)
+		req.RemoteAddr = "127.0.0.1:40000"
+		req.Header.Set("X-Forwarded-For", addr)
 		if stateCookie != "" {
 			req.AddCookie(&http.Cookie{Name: secureStateCookie, Value: stateCookie})
 		}
 		return send(h, req).Header().Get("Location")
 	}
+	call := func(target, stateCookie string) string {
+		return callFrom("198.51.100.7", target, stateCookie)
+	}
+	const forged = "/auth/github/callback?code=bogus&state=abc"
 
 	// Requests that are refused before GitHub is asked do not count: no
 	// state cookie, another state than the cookie's, no state, no code.
@@ -163,19 +172,84 @@ func TestOAuthCallbackIsRateLimited(t *testing.T) {
 		t.Errorf("login after refused callbacks: Location = %q", final.Header().Get("Location"))
 	}
 
-	// Requests that would reach GitHub are bounded.
-	for i := 0; i < 25; i++ {
-		if got := call("/auth/github/callback?code=bogus&state=abc", "abc"); got != "/?login_error=github_error" {
+	// A client that sends a state cookie and a matching state of its own
+	// reaches GitHub, but only so often.
+	clk.Advance(callbackWindow)
+	gh.exchanges = 0
+	for i := 0; i < 50; i++ {
+		if got := call(forged, "abc"); got != "/?login_error=github_error" {
 			t.Fatalf("call %d: Location = %q", i, got)
 		}
 	}
-	if gh.exchanges != 10 {
-		t.Errorf("GitHub was asked %d times in one minute, want 10", gh.exchanges)
+	if gh.exchanges != callbackPerClient {
+		t.Errorf("GitHub was asked %d times for one address in one window, want %d", gh.exchanges, callbackPerClient)
+	}
+	// It has used up its own allowance, not that of the others: a real
+	// login from another address in the same window goes through.
+	if final := b.login("code-owner"); final.Header().Get("Location") != "/" {
+		t.Errorf("login from another address: Location = %q", final.Header().Get("Location"))
+	}
+	// The addresses of one IPv6 /64 are one client.
+	gh.exchanges = 0
+	for i := 0; i < 30; i++ {
+		callFrom(fmt.Sprintf("2001:db8:0:1::%x", i+1), forged, "abc")
+	}
+	if gh.exchanges != callbackPerClient {
+		t.Errorf("GitHub was asked %d times for one /64, want %d", gh.exchanges, callbackPerClient)
+	}
+
+	// All clients together are bounded too: that is the bound on requests
+	// to GitHub.
+	clk.Advance(callbackWindow)
+	gh.exchanges = 0
+	for i := 0; i < 100; i++ {
+		callFrom(fmt.Sprintf("203.0.113.%d", i+1), forged, "abc")
+		callFrom(fmt.Sprintf("2001:db8:0:%x::1", i+0x100), forged, "abc")
+	}
+	if gh.exchanges != callbackTotal {
+		t.Errorf("GitHub was asked %d times in one window, want %d", gh.exchanges, callbackTotal)
 	}
 	// The window resets, so a real login is only delayed.
-	clk.Advance(time.Minute)
+	clk.Advance(callbackWindow)
 	if final := b.login("code-owner"); final.Header().Get("Location") != "/" {
 		t.Errorf("login after the window: Location = %q", final.Header().Get("Location"))
+	}
+}
+
+// The limiter remembers a bounded number of addresses, and none for longer
+// than a window.
+func TestCallbackLimiterForgetsAddresses(t *testing.T) {
+	l := newCallbackLimiter()
+	now := time.Date(2026, 11, 18, 3, 0, 0, 0, time.UTC)
+	for i := 0; i < 3*maxCallbackClients; i++ {
+		l.allow(fmt.Sprintf("client-%d", i), now)
+	}
+	if len(l.clients) != maxCallbackClients {
+		t.Errorf("%d addresses remembered within a window, want %d", len(l.clients), maxCallbackClients)
+	}
+	// An address that was not remembered is refused.
+	if l.allow("one-more", now) {
+		t.Error("an address beyond the bound was allowed")
+	}
+	// A window later all of them are forgotten, and counting starts anew.
+	later := now.Add(callbackWindow)
+	if !l.allow("one-more", later) {
+		t.Error("an address was refused after the window")
+	}
+	if len(l.clients) != 1 {
+		t.Errorf("%d addresses remembered after the window, want 1", len(l.clients))
+	}
+	for i := 1; i < callbackPerClient; i++ {
+		if !l.allow("one-more", later) {
+			t.Fatalf("call %d of an address within its limit was refused", i+1)
+		}
+	}
+	if l.allow("one-more", later) {
+		t.Error("an address over its limit was allowed")
+	}
+	// An address over its own limit does not use up the total.
+	if got := l.total.count; got != callbackPerClient {
+		t.Errorf("the total counted %d, want %d", got, callbackPerClient)
 	}
 }
 

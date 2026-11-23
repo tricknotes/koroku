@@ -25,10 +25,11 @@
 | 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない |
 | 403 | `token_not_allowed` | API トークンでは使えない API（API トークンの節） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
-| 403 | `forbidden_role` | ユーザーのロールではできない操作（ARCHITECTURE 10.7）。`details.required` は要るもの（`view` / `deploy` / `manage` / `owner`）。設定の `PATCH` でオーナー専用の項目を変えようとしたときは `details.fields` に項目名（`relax_policy`、`repository`、`promote_from`） |
+| 403 | `forbidden_role` | ユーザーのロールではできない操作（ARCHITECTURE 10.7）。`details.required` は要るもの（`view` / `deploy` / `manage` / `owner`）。設定の `PATCH` でオーナー専用の項目を変えようとしたときは `details.fields` に項目名（`relax_policy`、`repository`、`promote_from`）、ドメインの `PATCH` で強制有効化を変えようとしたときは `force_active` |
 | 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found`、`db_copy_not_found` | 対象がない。メンバーがロールを持たないアプリ（とそのデプロイ・実行・コピー）も、存在しないものとして同じ 404 になる（`code` も `message` も、存在しないときと同じ） |
 | 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens`、`not_deployed`、`promotion_unavailable`、`promotion_stale` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
+| 422 | `too_many_domains`（`details.limit`） | アプリの独自ドメインが上限（20 個）に達している（独自ドメインの節） |
 | 429 | `rate_limited` | API トークンの利用回数の上限（1 分あたり 120 回）を超えた。`Retry-After` あり |
 | 507 | `disk_full`（`details.used_percent`、`details.limit_percent`） | ディスク使用率が上限超過でデプロイ拒否 |
 | 500 | `internal` | サーバー側の失敗（詳細はサーバーログ） |
@@ -48,6 +49,7 @@
 
 - 要件を満たさなければ `403 forbidden_role`。ロールのないアプリに関わるものは `404`（共通の表）。判定は再ログイン（`reauth_required`）より先に行う。
 - `PATCH /api/apps/{slug}` で `environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。本番アプリの `auto_deploy` を有効にすること（と、有効なまま追うブランチや `auto_deploy_workflow` を変えること）もオーナーだけ（`details.fields` に `auto_deploy`）。今と同じ値を送るのはかまわない。
+- `PATCH /api/apps/{slug}/domains/{id}` で `force_active` を今と違う値にできるのはオーナーだけ（`details.fields` に `force_active`）。`is_primary` は `manage` で変えられる。
 - API トークンも、トークンのユーザーとして同じ要件で判定する。
 
 ## メンバー
@@ -80,7 +82,7 @@
 | --- | --- |
 | `GET /api/session` | 常に 200。`{"authenticated": true, "user": {"id": 1, "login": "octo", "avatar_url": "https://...", "owner": true}, "reauth_until": "2026-11-19T03:10:00Z"}` か `{"authenticated": false}`。`reauth_until` は再ログインなしで危険な操作ができる期限（ログインから 10 分。`--insecure-no-auth` では `null`）。`owner` はオーナーなら `true`、メンバーなら `false`（`--insecure-no-auth` では `true`） |
 | `GET /auth/github/login?return_to=/apps/blog/env` | GitHub の認可画面へリダイレクト（ページ遷移で開く）。`return_to` はログイン後に戻るパス（省略時は `/`）。`/` で始まらないもの、`//` や `\` を含むものは無視して `/` に戻す |
-| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（オーナーでも、ロールを持つメンバーでもない）、`state_mismatch`（state の Cookie がないか、`state` と一致しない）、`github_error`（`code` がない、GitHub が断った、GitHub への問い合わせが 1 分あたり 10 回の上限に達している）、`not_configured`（GitHub App が未設定）。`state_mismatch` と `code` のないリクエストは上限に数えない（ARCHITECTURE 10 章） |
+| `GET /auth/github/callback` | GitHub からの戻り先。成功すると Cookie を発行して `return_to` へ、拒否なら `/?login_error=<code>` へリダイレクト。`code` は `not_allowed`（オーナーでも、ロールを持つメンバーでもない）、`state_mismatch`（state の Cookie がないか、`state` と一致しない）、`github_error`（`code` がない、GitHub が断った、GitHub への問い合わせが上限に達している）、`not_configured`（GitHub App が未設定）。GitHub への問い合わせの上限は、クライアントのアドレスごとに 1 分あたり 10 回（IPv6 は /64 ごと）、全体で 1 分あたり 60 回。`state_mismatch` と `code` のないリクエストは上限に数えず、自分の上限を超えたアドレスのリクエストは全体の上限に数えない（ARCHITECTURE 10 章） |
 | `POST /auth/logout` | 204。セッションを破棄 |
 | `GET /api/sessions` | 有効なセッションの一覧（新しい順）。メンバーには自分のもの、オーナーには全員のもの。`{"sessions": [{"id": "9f2c41d07a1b3e55", "created_at": "...", "last_seen_at": "...", "expires_at": "...", "ip": "203.0.113.5", "user_agent": "Mozilla/5.0 ...", "current": true, "user": {"id": 1, "login": "octo"}}]}`。`last_seen_at` は 1 分単位の目安 |
 | `DELETE /api/sessions/{id}` | 204。そのセッションを終了する（自分のセッションを指定するとログアウトと同じ）。メンバーは自分のものだけ、オーナーは誰のものでも終了できる。なければ `404 session_not_found` |
@@ -914,9 +916,9 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/domains` | `{"default_hostname": "blog.dev.example.com", "domains": [ドメイン, ...]}` |
-| `POST /api/apps/{slug}/domains` | ボディ `{"hostname": "www.example.org"}`。201 でドメイン（直後に 1 回検証する）。重複は `409 hostname_taken`、ベースドメイン配下や不正な名前は 422 |
+| `POST /api/apps/{slug}/domains` | ボディ `{"hostname": "www.example.org"}`。201 でドメイン（直後に 1 回検証する）。重複は `409 hostname_taken`、ベースドメイン配下や不正な名前は 422。独自ドメインはアプリごとに 20 個まで（`pending` のものを含む）で、すでに 20 個あれば `422 too_many_domains`（`details.limit` が `20`）。削除すれば、また追加できる |
 | `POST /api/apps/{slug}/domains/{id}/verify` | 再検証。200 でドメイン |
-| `PATCH /api/apps/{slug}/domains/{id}` | ボディ `{"is_primary": true}` や `{"force_active": true}`。200 でドメイン。プライマリはアプリに 1 つで、`active` のドメインだけがなれる |
+| `PATCH /api/apps/{slug}/domains/{id}` | ボディ `{"is_primary": true}` や `{"force_active": true}`。200 でドメイン。プライマリはアプリに 1 つで、`active` のドメインだけがなれる。`force_active`（DNS の検証を飛ばして `active` にする）を今と違う値にできるのはオーナーだけで、メンバーには `403 forbidden_role`（`details.required` が `owner`、`details.fields` が `["force_active"]`）を返し、同じリクエストの `is_primary` も適用しない |
 | `DELETE /api/apps/{slug}/domains/{id}` | 204 |
 
 ## 実行ログ
@@ -939,7 +941,7 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/backups` | 全体の状況。`{"configured": true, "running": false, "last_success_at": "2026-11-18T18:00:40Z", "warning": false, "runs": [{"id": 12, "trigger": "scheduled", "status": "succeeded", "started_at": "...", "finished_at": "...", "error": ""}]}`。`warning` は 24 時間以上成功がないとき true。`problems` は直近の取得が成功しなかったアプリ（`[{"app": "shop", "status": "failed", "whole_run": false}]`。メンバーにはロールのあるアプリだけ）、`system_failed` は基盤の直近の取得が失敗したか（オーナーだけ。メンバーには `false`）。`next_run_at` は次回の定期実行の予定時刻（未設定なら `null`）。`trigger` は `scheduled` / `manual` / `pre_deploy`、`status` は `running` / `succeeded` / `failed` |
-| `GET /api/apps/{slug}/backups/status` | そのアプリのバックアップの状況（ARCHITECTURE 10.2）。`{"configured": true, "last_success_at": "...", "warning": false, "last_run": {"id": 12, "trigger": "scheduled", "started_at": "...", "finished_at": "...", "status": "failed", "whole_run": false, "error": "", "targets": [{"kind": "dump", "target": "db", "status": "failed", "error": "..."}]}}`。`last_run` はそのアプリの対象を含む直近の実行で、`targets` はそのアプリの分だけ。`status` は `succeeded` / `warning` / `failed`。`whole_run` は何も取る前に失敗した実行（`targets` は空）で、`error` はそのときの実行のメッセージ（オーナーにだけ。メンバーには空）。`last_success_at` はそのアプリの対象をすべて保存できた直近の時刻、`warning` はそれが 24 時間以上前（一度も実行に含まれていなければ `false`）。未設定でも 200（`configured: false`） |
+| `GET /api/apps/{slug}/backups/status` | そのアプリのバックアップの状況（ARCHITECTURE 10.2）。`{"configured": true, "last_success_at": "...", "warning": false, "last_run": {"id": 12, "trigger": "scheduled", "started_at": "...", "finished_at": "...", "status": "failed", "whole_run": false, "error": "", "targets": [{"kind": "dump", "target": "db", "status": "failed", "error": "..."}]}}`。`last_run` はそのアプリの対象を含む直近の実行で、`targets` はそのアプリの分だけ。`targets` の `error` は、ストレージのアクセスキーと、そのアプリの環境変数の値をマスクしてある（ダンプフックの出力の末尾を含むため）。`status` は `succeeded` / `warning` / `failed`。`whole_run` は何も取る前に失敗した実行（`targets` は空）で、`error` はそのときの実行のメッセージ（オーナーにだけ。メンバーには空）。`last_success_at` はそのアプリの対象をすべて保存できた直近の時刻、`warning` はそれが 24 時間以上前（一度も実行に含まれていなければ `false`）。未設定でも 200（`configured: false`） |
 | `POST /api/backups` | 手動実行。202 で実行（`runs` の 1 件と同じ形）。実行中なら `409 busy` |
 | `GET /api/apps/{slug}/backups` | そのアプリのスナップショット。`{"snapshots": [{"id": "4bba301e", "time": "2026-11-18T18:00:12Z", "kind": "volume", "target": "pgdata"}]}`。`kind` は `volume` / `dump`、`target` は volume 名かダンプフックのサービス名。`size_bytes` は restic が記録していればその処理量、なければ `null` |
 | `POST /api/apps/{slug}/backups/restore` | ボディ `{"snapshot_id": "4bba301e"}`。volume のスナップショットをリストアする（アプリ停止 → 現在の中身を退避 → 復元 → 起動）。完了まで待って 200 で `{"restored": true}` |

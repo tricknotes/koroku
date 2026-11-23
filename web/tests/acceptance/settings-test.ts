@@ -446,6 +446,11 @@ module('Acceptance | settings', function (hooks) {
       assert.dom('[data-test-dialog]').includesText('blog');
       assert.dom('[data-test-dialog-confirm]').isDisabled();
       assert.dom('[data-test-delete-volumes]').isNotChecked();
+      assert
+        .dom('[data-test-delete-leftovers]')
+        .hasText(
+          'ログとバックアップはこの名前で残り、同じ名前で作ったアプリのものになります。',
+        );
 
       await fillIn('[data-test-dialog-input]', 'blo');
       assert.dom('[data-test-dialog-confirm]').isDisabled();
@@ -473,6 +478,9 @@ module('Acceptance | settings', function (hooks) {
 
       await click('[data-test-delete-volumes]');
       assert.dom('[data-test-delete-volumes-warning]').exists();
+      assert
+        .dom('[data-test-delete-leftovers]')
+        .exists('deleting the volumes does not delete logs and backups');
 
       await fillIn('[data-test-dialog-input]', 'blog');
       await click('[data-test-dialog-confirm]');

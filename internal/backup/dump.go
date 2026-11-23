@@ -73,11 +73,22 @@ func (m *Manager) storeDump(ctx context.Context, app App) TargetResult {
 	defer stopRestic()
 
 	hookTail := &tail{}
+	hookMasker, keepOutput := m.hookMasker(ctx, app)
+	if !keepOutput {
+		_, _ = io.WriteString(hookTail, outputWithheld)
+	}
 	hookDone := make(chan error, 1)
 	go func() {
-		stderr := secrets.NewLineWriter(hookTail, m.masker)
-		err := m.opts.Runner.Run(hookCtx, runner.Cmd{Name: "docker", Args: dumpArgs(app), Stdout: pw, Stderr: stderr})
-		_ = stderr.Flush()
+		cmd := runner.Cmd{Name: "docker", Args: dumpArgs(app), Stdout: pw, Stderr: io.Discard}
+		var stderr *secrets.LineWriter
+		if keepOutput {
+			stderr = secrets.NewLineWriter(hookTail, hookMasker)
+			cmd.Stderr = stderr
+		}
+		err := m.opts.Runner.Run(hookCtx, cmd)
+		if stderr != nil {
+			_ = stderr.Flush()
+		}
 		hookDone <- err
 	}()
 
@@ -143,6 +154,31 @@ func (m *Manager) storeDump(ctx context.Context, app App) TargetResult {
 		}
 	}
 	return res
+}
+
+// outputWithheld stands in for the output of a dump command that could not
+// be masked.
+const outputWithheld = "the output of the command is not kept, because the values to mask in it could not be loaded"
+
+// hookMasker returns the masker for the output of the app's dump command:
+// the storage keys plus the secret values of the app (App.OutputMasker).
+// keep is false when those could not be loaded; the output must then not be
+// kept, because the message of a failed dump is shown with the app.
+func (m *Manager) hookMasker(ctx context.Context, app App) (masker *secrets.Masker, keep bool) {
+	if app.OutputMasker == nil {
+		return m.masker, true
+	}
+	masker, err := app.OutputMasker(ctx)
+	if err == nil && masker == nil {
+		err = errors.New("no masker")
+	}
+	if err != nil {
+		m.opts.Logger.Error("loading the values to mask in the output of the dump command failed; its output is not kept",
+			"app", app.Slug, "error", m.masker.Mask(err.Error()))
+		return nil, false
+	}
+	masker.Add(m.opts.Repository.AccessKeyID, m.opts.Repository.SecretAccessKey)
+	return masker, true
 }
 
 func shortID(id string) string {
