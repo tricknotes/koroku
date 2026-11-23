@@ -84,6 +84,8 @@ export const SCENARIOS = {
     'blog deploys blue/green and serves from green; its history has switches, a deploy that failed for want of memory and one whose new colour failed its check; blog-staging has blue/green on but its Compose file breaks the conditions; shop has not been checked yet',
   'blue-green-deploying':
     'blog is in the middle of a blue/green deploy, stopping blue after the switch to green; shop-staging is at the switch',
+  'reservations-unrecorded':
+    'everything fine; blog saved smaller reservations, but its running release was deployed before koroku recorded the memory shapes, so the next reservations are unknown',
   'reservations-tight':
     'production apps reserve more memory than a 4 GB host can keep with its 1 GB margin; docs was switched to staging but not redeployed',
 };
@@ -1090,6 +1092,14 @@ export function buildScenario(name) {
       };
       return state;
     }
+    case 'reservations-unrecorded': {
+      const state = scenario(healthyApps());
+      const blog = state.apps.get('blog');
+      snapshotReservations(blog);
+      blog.service_memory_reservations = { db: '384m', web: '192m' };
+      blog.shapes_unrecorded = true;
+      return state;
+    }
     case 'reservations-tight': {
       // Raised reservations on both production apps, and docs still runs
       // the production release it had before it became staging.
@@ -1586,14 +1596,17 @@ export function memoryReservation(state) {
     }
     const sum = (map) => Object.values(map).reduce((a, b) => a + b, 0);
     const total = sum(reserved);
-    if (total > 0 || sum(next) > 0) {
+    // A release from before the memory shapes were recorded: the next
+    // reservations are unknown.
+    const unknown = Boolean(target.shapes_unrecorded);
+    if (total > 0 || (!unknown && sum(next) > 0)) {
       apps.push({
         slug: target.slug,
         environment: target.environment,
         total_bytes: total,
         services: reserved,
-        next_total_bytes: sum(next),
-        next_services: next,
+        next_total_bytes: unknown ? null : sum(next),
+        next_services: unknown ? null : next,
       });
     }
   }
@@ -1605,7 +1618,10 @@ export function memoryReservation(state) {
   const host = state.system.memory?.total_bytes ?? 0;
   return {
     total_bytes: total,
-    next_total_bytes: apps.reduce((sum, a) => sum + a.next_total_bytes, 0),
+    next_total_bytes: apps.reduce(
+      (sum, a) => sum + (a.next_total_bytes ?? a.total_bytes),
+      0,
+    ),
     margin_bytes: margin,
     warning: host > 0 && total + margin > host,
     apps,
