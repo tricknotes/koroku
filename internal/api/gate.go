@@ -342,9 +342,26 @@ func isGatePath(p string) bool {
 		strings.HasPrefix(matched, caddy.ReservedPrefix)
 }
 
+// servesApp reports whether host belongs to an app: an automatic app
+// hostname, or an active custom domain.
+func (s *Server) servesApp(ctx context.Context, host string) (bool, error) {
+	if s.isAppHostname(host) {
+		return true, nil
+	}
+	if host == "" || host == strings.ToLower(s.cfg.ConsoleHost) {
+		return false, nil
+	}
+	_, err := s.store.GetActiveDomainByHostname(ctx, host)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // hostDispatch sends the access protection paths to the gate handlers and
-// refuses everything else on app hostnames, so that a request for an app
-// host can never reach the console, its API or its session cookie.
+// refuses everything else on the hostnames of apps (custom domains
+// included), so that a request for an app host can never reach the console,
+// its API or its session cookie.
 // The gate handlers answer only the exact spelling of their paths; another
 // spelling of a gate path is not found. The console host never serves the
 // gate paths.
@@ -360,7 +377,12 @@ func (s *Server) hostDispatch(console, gate http.Handler) http.Handler {
 			gate.ServeHTTP(w, r)
 			return
 		}
-		if s.isAppHostname(host) {
+		isApp, err := s.servesApp(r.Context(), host)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		if isApp {
 			http.NotFound(w, r)
 			return
 		}

@@ -334,11 +334,19 @@ func TestGateCheckForOtherHosts(t *testing.T) {
 			t.Errorf("console %s: %d", target, rec.Code)
 		}
 	}
-	// Nothing else of koroku answers on an app host.
-	for _, target := range []string{"/api/apps", "/api/session", "/auth/gate?host=" + stagingHost, "/auth/github/login", "/"} {
-		if rec := f.onHost(stagingHost, http.MethodGet, target, nil, nil); rec.Code != http.StatusNotFound {
-			t.Errorf("app host %s: %d", target, rec.Code)
+	// Nothing else of koroku answers on an app host, an active custom
+	// domain included.
+	for _, host := range []string{stagingHost, customHost, publicHost} {
+		for _, target := range []string{"/api/apps", "/api/session", "/auth/gate?host=" + stagingHost, "/auth/github/login", "/"} {
+			if rec := f.onHost(host, http.MethodGet, target, nil, nil); rec.Code != http.StatusNotFound {
+				t.Errorf("%s%s: %d", host, target, rec.Code)
+			}
 		}
+	}
+	// A hostname that is no app's gets the console (the loopback address
+	// koroku listens on, for one).
+	if rec := f.onHost("unknown.example", http.MethodGet, "/api/session", nil, nil); rec.Code == http.StatusNotFound {
+		t.Errorf("unknown host: %d", rec.Code)
 	}
 	// The callback does nothing for an unprotected app.
 	if rec := f.onHost(publicHost, http.MethodGet, "/.koroku/auth/callback?code=x", nil, nil); rec.Code != http.StatusNotFound {

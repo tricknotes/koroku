@@ -142,7 +142,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 | `GET /.koroku/auth/callback?code=<コード>&return=<パス>` | アプリ | コードを消費してグラントを作り、`__Host-koroku_gate`（`Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/`、期限は元のセッションと同じ）を発行して `return` へ 303。コードが無効・期限切れ・使用済み・別のホスト向け、または元のセッションがもうなければ 400 で、やり直しのリンクを載せた HTML を返す |
 | `GET` / `POST /.koroku/auth/logout` | アプリ | そのホストのグラントを消し、Cookie を削除して 200（HTML）。管理 UI からはログアウトしない |
 
-- アプリのホスト名で `koroku` に届くリクエストは、上の 3 つ（`/auth/gate/check` と `/.koroku/auth/*`）以外は 404。上の 3 つも、この綴りのとおりに届いたものだけに応える。`.` や `..` の区切り、重複した `/`、大文字を含む別の綴り（`/x/../.koroku/auth/logout`、`/.KOROKU/auth/logout` など）は 404。
+- アプリのホスト名（`<slug>.<base_domain>` と有効な独自ドメイン）で `koroku` に届くリクエストは、上の 3 つ（`/auth/gate/check` と `/.koroku/auth/*`）以外は 404。上の 3 つも、この綴りのとおりに届いたものだけに応える。`.` や `..` の区切り、重複した `/`、大文字を含む別の綴り（`/x/../.koroku/auth/logout`、`/.KOROKU/auth/logout` など）は 404。
 - `/.koroku/` で始まるその他のパスは Caddy が 404 を返し、アプリには届かない。
 
 ## システム
