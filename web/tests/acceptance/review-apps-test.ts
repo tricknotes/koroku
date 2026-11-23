@@ -169,7 +169,7 @@ module('Acceptance | review apps', function (hooks) {
       ...created,
       dns_warning: true,
     }));
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     assert.strictEqual(
       currentURL(),
       '/apps/blog-staging/deploy?section=review-apps',
@@ -221,7 +221,7 @@ module('Acceptance | review apps', function (hooks) {
         Object.assign(parent, body as Partial<App>);
         return { ...parent };
       });
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     assert
       .dom('[data-test-review-allow]')
       .hasAttribute('aria-checked', 'false');
@@ -258,7 +258,7 @@ module('Acceptance | review apps', function (hooks) {
 
   test('existing review apps stay when they are no longer allowed', async function (assert) {
     parent.review_apps_allowed = false;
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     await waitFor('[data-test-review-app]');
     assert.dom('[data-test-review-app="blog-staging-pr-42"]').exists();
     assert.dom('[data-test-review-create]').isDisabled();
@@ -271,7 +271,7 @@ module('Acceptance | review apps', function (hooks) {
     fakes.api.on('GET', '/api/apps/blog-staging/review-apps', {
       review_apps: [],
     });
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     assert.dom('[data-test-review-allow]').doesNotExist();
     assert
       .dom('[data-test-review-allowed-state]')
@@ -328,7 +328,7 @@ module('Acceptance | review apps', function (hooks) {
 
   test('a parent without hooks creates without data', async function (assert) {
     parent.dump_hook_command = '';
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     await click('[data-test-review-create]');
     assert.dom('[data-test-review-copy]').isNotChecked().isDisabled();
     assert.dom('[data-test-review-copy-hint]').includesText('ダンプフック');
@@ -341,7 +341,7 @@ module('Acceptance | review apps', function (hooks) {
       502,
       'github_permission_missing',
     );
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     await click('[data-test-review-create]');
     await waitFor('[data-test-review-permission]');
     assert
@@ -354,7 +354,7 @@ module('Acceptance | review apps', function (hooks) {
     parent.review_apps = { count: 0, failed: 0, deploying: 0 };
     await visit('/apps/blog-staging');
     assert.dom('[data-test-review-line]').doesNotExist();
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     assert.strictEqual(
       currentURL(),
       '/apps/blog-staging/deploy?section=review-apps',

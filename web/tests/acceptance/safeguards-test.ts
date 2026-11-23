@@ -473,7 +473,7 @@ module('Acceptance | safeguards', function (hooks) {
   module('domains', function () {
     test('deleting a domain: locked, and the other rows wait', async function (assert) {
       const held = fakes.api.hold('DELETE', `${APP}/domains/3`);
-      await visit('/apps/blog/domains');
+      await visit('/apps/blog/settings?section=domains');
       await click('[data-test-domain="example.net"] [data-test-domain-delete]');
       assert.dom('[data-test-dialog]').includesText('example.net');
 
@@ -500,7 +500,7 @@ module('Acceptance | safeguards', function (hooks) {
 
     test('adding a domain sends one request', async function (assert) {
       const held = fakes.api.hold('POST', `${APP}/domains`);
-      await visit('/apps/blog/domains');
+      await visit('/apps/blog/settings?section=domains');
       await fillIn('[data-test-domain-hostname]', 'docs.example.org');
 
       const adding = click('[data-test-domain-add]');

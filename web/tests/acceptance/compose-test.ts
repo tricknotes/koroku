@@ -26,7 +26,7 @@ module('Acceptance | compose', function (hooks) {
   });
 
   test('it shows the containers, the override and the merged configuration', async function (assert) {
-    await visit('/apps/blog/compose');
+    await visit('/apps/blog/resources?section=compose');
 
     assert.strictEqual(
       currentURL(),
@@ -114,7 +114,7 @@ module('Acceptance | compose', function (hooks) {
         }),
       ]),
     );
-    await visit('/apps/blog/compose');
+    await visit('/apps/blog/resources?section=compose');
 
     assert
       .dom('[data-test-compose-trouble]')
@@ -150,7 +150,7 @@ module('Acceptance | compose', function (hooks) {
           ? makeComposeView({ deployment_id: 41, override: 'older: true\n' })
           : makeComposeView(),
     );
-    await visit('/apps/blog/compose');
+    await visit('/apps/blog/resources?section=compose');
     await fillIn('[data-test-compose-release]', '41');
 
     assert.dom('[data-test-compose-override] pre').hasText('older: true');
@@ -164,7 +164,7 @@ module('Acceptance | compose', function (hooks) {
 
   test('it explains a release that is no longer kept', async function (assert) {
     fakes.api.fail('GET', `${APP}/compose`, 409, 'release_unavailable');
-    await visit('/apps/blog/compose');
+    await visit('/apps/blog/resources?section=compose');
 
     assert
       .dom('[data-test-compose-release-gone]')
@@ -183,7 +183,7 @@ module('Acceptance | compose', function (hooks) {
         config_error: 'docker compose config: exit status 15: invalid project',
       }),
     );
-    await visit('/apps/blog/compose');
+    await visit('/apps/blog/resources?section=compose');
 
     assert.dom('[data-test-compose-override] pre').exists();
     assert
@@ -201,7 +201,7 @@ module('Acceptance | compose', function (hooks) {
         current_deployment_id: null,
       }),
     );
-    await visit('/apps/blog/compose');
+    await visit('/apps/blog/resources?section=compose');
 
     assert
       .dom('[data-test-compose-not-deployed]')
@@ -214,7 +214,7 @@ module('Acceptance | compose', function (hooks) {
     fakes.api
       .fail('GET', `${APP}/compose`, 500, 'internal')
       .fail('GET', `${APP}/containers`, 500, 'internal');
-    await visit('/apps/blog/compose');
+    await visit('/apps/blog/resources?section=compose');
 
     assert.dom('[data-test-compose-containers] [data-test-error]').exists();
     assert.dom('[data-test-compose-files] [data-test-error]').exists();
@@ -235,7 +235,7 @@ module('Acceptance | compose', function (hooks) {
         comparison_error: 'docker compose config --hash: exit status 1',
       }),
     );
-    await visit('/apps/blog/compose');
+    await visit('/apps/blog/resources?section=compose');
 
     assert
       .dom('[data-test-compose-comparison-error]')

@@ -87,7 +87,7 @@ module('Acceptance | roles', function (hooks) {
     assert.dom('[data-test-env-edit]').doesNotExist();
     assert.dom('[data-test-env-key]').exists({ count: 2 }, 'the keys show');
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     assert.dom('[data-test-domains]').exists('the domains can be read');
     assert.dom('[data-test-domain-form]').doesNotExist();
     assert.dom('[data-test-domain-delete]').doesNotExist();

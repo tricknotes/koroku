@@ -77,7 +77,7 @@ module('Acceptance | domains', function (hooks) {
   });
 
   test('the assigned domain is always listed, and without custom ones the form is the next step', async function (assert) {
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
 
     assert.dom('[data-test-default-hostname]').hasText('blog.dev.example.com');
     assert
@@ -107,7 +107,7 @@ module('Acceptance | domains', function (hooks) {
   });
 
   test('add, verify and make primary', async function (assert) {
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
 
     await fillIn('[data-test-domain-hostname]', ' WWW.example.org ');
     await click('[data-test-domain-add]');
@@ -177,7 +177,7 @@ module('Acceptance | domains', function (hooks) {
       }),
     ];
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     const row = '[data-test-domain="www.example.org"]';
 
     assert
@@ -237,7 +237,7 @@ module('Acceptance | domains', function (hooks) {
       }),
     ];
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
 
     assert.dom('[data-test-domain-record]').exists({ count: 1 });
     assert.dom('[data-test-domain-pending]').doesNotIncludeText('どちらか一方');
@@ -254,7 +254,7 @@ module('Acceptance | domains', function (hooks) {
       }),
     );
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     await click('[data-test-domain-verify]');
 
     assert.dom('[data-test-domain-status]').hasText('確認待ち');
@@ -270,7 +270,7 @@ module('Acceptance | domains', function (hooks) {
   test('pending domains are re-read by polling until they are active', async function (assert) {
     domains = [makeDomain({ last_error: NO_HOST })];
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     const listReads = () => fakes.api.callsTo('GET', DOMAINS).length;
 
     await fakes.poller.tick();
@@ -298,7 +298,7 @@ module('Acceptance | domains', function (hooks) {
   test('force-activate and delete', async function (assert) {
     domains = [makeDomain()];
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     const row = '[data-test-domain="www.example.org"]';
 
     assert.dom(`${row} [data-test-domain-force-toggle]`).hasText('強制有効化');
@@ -337,7 +337,7 @@ module('Acceptance | domains', function (hooks) {
   test('an active domain offers no force switch, and deleting the primary one warns', async function (assert) {
     domains = [makeDomain({ status: 'active', is_primary: true })];
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
 
     assert.dom('[data-test-domain-force-toggle]').doesNotExist();
     assert.dom('[data-test-domain-pending]').doesNotExist();
@@ -352,7 +352,7 @@ module('Acceptance | domains', function (hooks) {
   test('changes are passed on to the app, for the header', async function (assert) {
     domains = [makeDomain({ status: 'active' })];
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     const before = fakes.api.callsTo('GET', '/api/apps/blog').length;
 
     await click('[data-test-domain-primary-toggle]');
@@ -365,7 +365,7 @@ module('Acceptance | domains', function (hooks) {
   });
 
   test('an empty hostname is refused before any request', async function (assert) {
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     await click('[data-test-domain-add]');
 
     assert
@@ -378,7 +378,7 @@ module('Acceptance | domains', function (hooks) {
   test('a taken or invalid hostname is reported at the input', async function (assert) {
     fakes.api.fail('POST', DOMAINS, 409, 'hostname_taken');
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     await fillIn('[data-test-domain-hostname]', 'www.example.org');
     await click('[data-test-domain-add]');
 
@@ -402,7 +402,7 @@ module('Acceptance | domains', function (hooks) {
   test('an add that fails for another reason is reported under the form', async function (assert) {
     fakes.api.fail('POST', DOMAINS, 500, 'internal');
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     await fillIn('[data-test-domain-hostname]', 'www.example.org');
     await click('[data-test-domain-add]');
 
@@ -417,7 +417,7 @@ module('Acceptance | domains', function (hooks) {
     domains = [makeDomain()];
     fakes.api.fail('PATCH', `${DOMAINS}/3`, 500, 'internal');
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     await click('[data-test-domain-force-toggle]');
 
     assert
@@ -433,7 +433,7 @@ module('Acceptance | domains', function (hooks) {
       is_primary: 'only an active domain can be the primary domain',
     });
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     await click('[data-test-domain-primary-toggle]');
 
     assert
@@ -449,7 +449,7 @@ module('Acceptance | domains', function (hooks) {
       () => new Promise((_resolve, reject) => (fail = reject)),
     );
 
-    const visiting = visit('/apps/blog/domains');
+    const visiting = visit('/apps/blog/settings?section=domains');
     await waitFor('[data-test-loading]');
 
     assert.dom('[data-test-loading] .skeleton').exists();
@@ -481,7 +481,7 @@ module('Acceptance | domains', function (hooks) {
   test('a failed refresh keeps the list and says it is stale', async function (assert) {
     domains = [makeDomain()];
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
 
     fakes.api.fail('GET', DOMAINS, 500, 'internal');
     await fakes.poller.tick();

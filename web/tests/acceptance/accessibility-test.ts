@@ -142,7 +142,7 @@ module('Acceptance | accessibility', function (hooks) {
     assert.deepEqual(accessibilityProblems(), [], 'restore a volume');
     await click('[data-test-dialog-cancel]');
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
     await click('[data-test-domain-delete]');
     assert.dom('[data-test-dialog]').exists();
     assert.deepEqual(accessibilityProblems(), [], 'delete a domain');
