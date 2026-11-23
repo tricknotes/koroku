@@ -679,7 +679,7 @@ blue/green のアプリ（ARCHITECTURE 7.2）では、`start` 以降が `start`�
 | 行 | 意味 |
 | --- | --- |
 | `==> <時刻> failed Deployment failed: <理由>` / `Deployment canceled: <理由>` | 直前の手順で失敗（またはキャンセル）した。`start` より前なら稼働中のコンテナには触れていない |
-| `Last output of the containers:` | `start` か `check` の手順で失敗したとき、その手順の末尾に入る。続く行は `docker compose logs --tail 30` の出力（`web-1  | ...`）。読めなかったときは `Reading the container output failed: ...` |
+| `Last output of the containers:` | `start` か `check` の手順で失敗したとき、その手順の末尾に入る。続く行は `docker compose logs --tail 30` の出力（`web-1  | ...`）。そのうちエラーらしい最後の 1 行（`error`・`exception`・`fatal`・`panic` を含み、字下げしたスタックの行と `from ...` を除く）を、デプロイの `error` の末尾に ` (container output: web-1: ...)` として添える（200 文字まで。該当する行がなければ添えない）。読めなかったときは `Reading the container output failed: ...` |
 | `==> <時刻> rollback Rolling back to deployment #<id>` | 直前の成功リリースへ戻し始めた |
 | `Rolled back: deployment #<id> is running again.` | 戻し終えた |
 | `Rollback failed: ...` / `Rollback is not possible: ...` | 戻せなかった |

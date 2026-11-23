@@ -289,8 +289,8 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		return false, fmt.Errorf("write env file: %w", err)
 	}
 	if err := e.upRelease(ctx, app, d.ID, dockerConfig, e.deployRun(log)); err != nil {
-		e.logContainerOutput(ctx, app, log)
-		return true, fmt.Errorf("start containers: %w", err)
+		line := e.logContainerOutput(ctx, app, log)
+		return true, withOutput(fmt.Errorf("start containers: %w", err), line)
 	}
 
 	return e.routeAndCheck(ctx, app, log)
@@ -313,8 +313,8 @@ func (e *Engine) routeAndCheck(ctx context.Context, app store.App, log *deployLo
 	url := healthURL(app)
 	log.Step(StepCheck, "Checking %s", url)
 	if err := e.opts.Health.Wait(ctx, url, e.opts.HealthTimeout); err != nil {
-		e.logContainerOutput(ctx, app, log)
-		return true, err
+		line := e.logContainerOutput(ctx, app, log)
+		return true, withOutput(err, line)
 	}
 	log.Printf("The app is answering.")
 	return true, nil
@@ -512,19 +512,70 @@ const containerOutputLines = 30
 // The output passes the deploy log's masking like everything else. Problems
 // are noted in the log and otherwise ignored: the deployment failed already.
 //
-// With services, only their output is copied.
-func (e *Engine) logContainerOutput(ctx context.Context, app store.App, log *deployLog, services ...string) {
+// With services, only their output is copied. It returns the line of that
+// output that most likely names the reason (see failureLine), "" when none
+// does; withOutput adds it to the deployment's error.
+func (e *Engine) logContainerOutput(ctx context.Context, app store.App, log *deployLog, services ...string) string {
 	if ctx.Err() != nil {
-		return // canceled or shutting down: nobody is waiting for the reason
+		return "" // canceled or shutting down: nobody is waiting for the reason
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	log.Printf("Last output of the containers:")
 	inv := compose.Invocation{ProjectName: app.ProjectName()}
 	tail := strconv.Itoa(containerOutputLines)
-	if err := e.compose(ctx, inv, "", log, append([]string{"logs", "--no-color", "--tail", tail}, services...)...); err != nil {
+	var output bytes.Buffer
+	args := append([]string{"logs", "--no-color", "--tail", tail}, services...)
+	if err := e.composeTo(ctx, inv, "", io.MultiWriter(log.Writer(), &output), args...); err != nil {
 		log.Printf("Reading the container output failed: %v", err)
+		return ""
 	}
+	return failureLine(output.String())
+}
+
+// failureLineMax caps the container line added to a deployment's error.
+const failureLineMax = 200
+
+// failureLine picks, from the output of docker compose logs, the last line
+// that reads like an error message, as "<container>: <message>". Stack
+// frames (indented lines and Ruby's "from ..." lines) are skipped: the
+// message that names the reason comes before them. It is "" when no line
+// mentions an error, so that an unrelated last line is never presented as
+// the reason.
+func failureLine(output string) string {
+	lines := strings.Split(output, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		container, message, found := strings.Cut(lines[i], " | ")
+		if !found {
+			container, message = "", lines[i]
+		}
+		if message == "" || message[0] == ' ' || message[0] == '\t' || strings.HasPrefix(message, "from ") {
+			continue
+		}
+		lower := strings.ToLower(message)
+		if !strings.Contains(lower, "error") && !strings.Contains(lower, "exception") &&
+			!strings.Contains(lower, "fatal") && !strings.Contains(lower, "panic") {
+			continue
+		}
+		message = strings.TrimSpace(message)
+		if r := []rune(message); len(r) > failureLineMax {
+			message = string(r[:failureLineMax]) + "…"
+		}
+		if container = strings.TrimSpace(container); container != "" {
+			return container + ": " + message
+		}
+		return message
+	}
+	return ""
+}
+
+// withOutput adds the container line from logContainerOutput to err, which
+// stays unwrappable.
+func withOutput(err error, line string) error {
+	if line == "" {
+		return err
+	}
+	return fmt.Errorf("%w (container output: %s)", err, line)
 }
 
 // rollback brings the previous successful release back up after a failed

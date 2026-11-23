@@ -59,7 +59,7 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 | `prepare` / `validate` | Compose の構文、ポリシー検査の違反（特権、ホストの名前空間、bind mount、`container_name` など）、`${VAR:?}` の必須変数が未設定。無停止デプロイのアプリでは、ルール `blue_green` の違反（公開サービスの `container_name`、`replicas`、ほかのサービスからの `depends_on`、`include:` した別ファイルの公開サービスなど。`cannot extend service "web-blue"` も同じ） | Compose ファイル。未設定の変数は利用者に管理画面で入れてもらう。`blue_green` は prepare-app の requirements.md の「無停止デプロイ」を見て直す（「検査を緩める」では許可されない） |
 | `build` | Dockerfile、依存の取得、`.dockerignore` の漏れ | Dockerfile とその周辺 |
 | `pull` | イメージ名やタグの誤り、private イメージ。`The registry has no image with that tag (manifest unknown)` は、CI がコミットごとにビルドするイメージがまだ push されていない（ワークフローの終了前にデプロイした） | Compose の `image:`。CI のイメージなら、ワークフローが終わってからデプロイし直す。自動デプロイなら koroku の設定タブの「先に待つワークフロー」にイメージを作るワークフローを入れる |
-| `start` | コンテナがすぐ終了する、ヘルスチェックが通らない、ワンショットのサービスが誰にも待たれていない | ログの `Last output of the containers:` に続く行を読む |
+| `start` | コンテナがすぐ終了する、ヘルスチェックが通らない、ワンショットのサービスが誰にも待たれていない | デプロイの `error` の末尾の `(container output: ...)` と、ログの `Last output of the containers:` に続く行を読む |
 | `check` | 公開サービスが `0.0.0.0:<port>` で待ち受けていない、ヘルスチェックパスが 5xx を返す | アプリの設定、ポート、ヘルスチェックパス |
 | `switch` | 無停止デプロイで、Caddy への切り替えの投入に失敗した（koroku 側の問題。旧色に戻している） | リポジトリでは直せない。利用者にデプロイし直してもらい、続くなら koroku の運用者に伝える |
 | `services` | 無停止デプロイで、切り替えのあとに作り直したワーカーなどが起動しない | `Last output of the containers:` を読む。そのサービスの Compose と起動コマンド |

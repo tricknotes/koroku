@@ -171,8 +171,8 @@ func (e *Engine) executeRollback(ctx context.Context, d store.Deployment, app st
 		}
 	}
 	if err := e.upRelease(ctx, app, src, dockerConfig, e.deployRun(log)); err != nil {
-		e.logContainerOutput(ctx, app, log)
-		return true, fmt.Errorf("start containers: %w", err)
+		line := e.logContainerOutput(ctx, app, log)
+		return true, withOutput(fmt.Errorf("start containers: %w", err), line)
 	}
 	return e.routeAndCheck(ctx, app, log)
 }
