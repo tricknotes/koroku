@@ -99,6 +99,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 - Go は常駐メモリが数十 MB で、配布と更新がバイナリ 1 つの差し替えで済む。プロセス実行と SSE は標準ライブラリで足りる。
 - Docker は `docker compose` CLI を呼んで操作する。Docker Engine の Go SDK は使わない。
 - SQLite ドライバは cgo 不要の [modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite) を使い、クロスコンパイルと単一バイナリを保つ。
+- YAML の読み取りには [go.yaml.in/yaml/v3](https://pkg.go.dev/go.yaml.in/yaml/v3) を使う。リポジトリの Compose ファイルの `include` と `extends.file` を、Compose に読ませる前に調べるため（6 章「Compose が読み込むファイル」）。標準ライブラリに YAML はなく、文字列の検索では、引用符やエスケープ、アンカーで書いたキーを見落とす。
 
 **構成の詳細**
 
@@ -353,18 +354,54 @@ Compose には上と同じ結果になる書き方がほかにもあるので、
 
 | ルール | 拒否する内容 | 理由 |
 | --- | --- | --- |
-| `volume_host_path` | `driver_opts` の `device` にホストのパスを指定した named volume | bind mount の検査を volume の形で回避できる |
-| `foreign_volume`、`foreign_network` | `external: true`、または名前が `koroku-<slug>_` で始まらない volume / ネットワーク | 他アプリの volume やネットワークを名前で指して使える（アプリ同士を分離するという前提が崩れる） |
-| `foreign_namespace` | `network_mode` / `pid` / `ipc` の `container:<名前>`、`volumes_from` の `container:<名前>` | 他アプリのコンテナの名前空間や volume に入れる。同じアプリ内の `service:<名前>` は許可 |
+| `volume_host_path` | `driver_opts` の `device` にホストのパスを指定した named volume。`type` が `nfs`・`nfs4`・`tmpfs` 以外の `driver_opts` | bind mount の検査を volume の形で回避できる。local ドライバは `driver_opts` をそのまま mount に渡すので、`type: overlay` の `o: lowerdir=...` のように `device` 以外にもホストのディレクトリを書ける（実際の Docker で、ホストのディレクトリがコンテナから読めることを確かめている） |
+| `foreign_volume`、`foreign_network` | `external: true`、または名前が `koroku-<slug>_` で始まらない volume / ネットワーク。`network_mode` に書いた、`none` と同じアプリの `service:<名前>` 以外の値 | 他アプリの volume やネットワークを名前で指して使える（アプリ同士を分離するという前提が崩れる）。`network_mode` は、`host` などの決まった値でなければホスト上のネットワークの名前として扱われ、他アプリのネットワークに入れる（実際の Docker で、他アプリのサービスに届くことを確かめている） |
+| `foreign_namespace` | `network_mode` / `pid` / `ipc` の `container:<名前>`、`volumes_from` の `container:<名前>`。`pid` / `ipc` / `uts` / `userns_mode` / `cgroup` の、アプリの中で完結する値（`ipc` の `none`・`private`・`shareable`、`cgroup` の `private`、`pid` / `ipc` の同じアプリの `service:<名前>`）以外 | 他アプリのコンテナの名前空間や volume に入れる。同じアプリ内の `service:<名前>` は許可 |
 | `host_namespace` | `ipc` / `uts` / `userns_mode` / `cgroup` の `host` | `pid: host` や `network_mode: host` と同類 |
 | `capability` | Docker の既定の権限と `IPC_LOCK`・`SYS_NICE` 以外の `cap_add` | `SYS_ADMIN` などは `privileged` に近い |
 | `device` | `devices`、`device_cgroup_rules` | ホストのデバイスに触れる |
-| `security_opt` | `seccomp` / `apparmor` の `unconfined`、ラベルの無効化など | コンテナの隔離を弱める |
-| `file_outside_release` | リリースディレクトリ外の `env_file`、`secrets` / `configs` の `file`、ビルドコンテキスト、Dockerfile | ホストのファイル（他アプリの env ファイルなど）をコンテナやイメージに取り込める。基盤が注入する env ファイルだけは例外 |
+| `security_opt` | `no-new-privileges` 以外の `security_opt` | `seccomp` / `apparmor` の `unconfined` やラベルの無効化はコンテナの隔離を弱める。プロファイルをリポジトリ内のファイルで指定する形（`seccomp=./profile.json`）も、中身しだいで何でも許可できる |
+| `file_outside_release` | リリースディレクトリ外の `env_file`、`secrets` / `configs` の `file`、ビルドコンテキスト、Dockerfile（コンテキストからの相対パスで `..` をたどるものを含む）、`include` と `extends.file` が読むファイル | ホストのファイル（他アプリの env ファイルなど）をコンテナやイメージに取り込める。基盤が注入する env ファイルだけは例外。Dockerfile は、ビルドが読めなかった行をそのままエラーに出すので、ホストのファイルを指すとその中身がデプロイログに出る |
+| `foreign_image` | `build` のないサービスの `image` が、koroku がビルドしたイメージの名前（`koroku-` で始まる）で、同じアプリのサービスのものでない | ホストの Docker のイメージは全アプリで共通なので、名前を書くだけで、ほかのアプリのビルド結果（private リポジトリのコードを含む）を動かせる |
+| `unsupported_setting` | 許可する設定の一覧にない設定と、一覧にある設定の、ほかのルールが扱わない値（下の「許可する設定の一覧」） | Compose の設定は多く、版ごとに増える。知らない設定を通すと、ホストやほかのアプリに届く設定が増えるたびに穴になる |
 | `bind_writable` | 読み取り専用（`:ro`）でない bind mount | 下記 |
 | `host_network`、`privileged`（ビルド） | `build.network: host`、`build.privileged: true` | ビルド中のコマンドが、ホストのループバックだけで待ち受けているもの（Caddy の admin API など）に届く |
 | `runtime` | `runc` 以外の `runtime` | 隔離の弱いランタイムを選べる |
 | `memory_guard` | `oom_kill_disable: true`、`memswap_limit: -1` | メモリ上限を実質的に無効にできる |
+
+**許可する設定の一覧（ルール `unsupported_setting`）**
+
+上の表は「危険だと分かっている設定」を値で判定する。それだけでは、表にない設定がそのまま通る。Compose には、表の設定と同じ結果になる設定がほかにもあり、版ごとに増える。実際の Docker と Compose で確かめた例:
+
+| 設定 | 起きること |
+| --- | --- |
+| サービスの `provider` | `up` のときに、`type` に書いたプログラム（リポジトリ内のスクリプトでもよい）が、コンテナの中ではなく `docker compose` を起動した側（`koroku`、つまりホストの root）で実行される |
+| `use_api_socket: true` | コンテナに Docker ソケットがマウントされる。正規化した結果の `volumes` には現れない |
+| `build.ssh` | ホスト上の鍵ファイルが ssh agent としてビルドに渡る |
+| `build.entitlements: [network.host]` | ビルドの `RUN --network=host` がホストのネットワークで動く（`build.network: host` と同じ） |
+| `build.tags` | ビルドしたイメージに、ほかのアプリのイメージの名前を付けられる |
+| `post_start` / `pre_stop` の `privileged: true` | フックが、サービス自身の設定によらず全ケーパビリティで実行される |
+
+そこで、正規化した JSON の全体を「koroku が許可する設定の一覧」と突き合わせ、一覧にない設定があればデプロイを拒否する。
+
+- 一覧は `internal/compose/schema.go` にあり、設定の名前は `docker compose config --format json` が出力するとおりに書く。対象は、トップレベル（`services`、`networks`、`volumes`、`secrets`、`configs`）、サービス、`build`、`deploy`、`logging`、フック、`volumes` の各項目、ネットワーク・volume・secret・config の定義。その先（`healthcheck` や `environment` の中身など）は見ない。
+- 一覧に入れるのは、何をする設定かを確かめて、ホストにもほかのアプリにも届かないと分かったもの。値によっては届くもの（`network_mode`、`security_opt`、`driver_opts` など）は一覧に入れ、上の表のルールが値を判定する。
+- 一覧に入れていない主な設定: サービスの `provider`、`use_api_socket`、`gpus`、`models`、`cgroup_parent`、`external_links`、`label_file`、`credential_spec`、`blkio_config`、`isolation`。`build` の `tags`、`ssh`、`entitlements`。フックの `privileged`。`deploy.resources.reservations` の `devices`。bind mount の `propagation`。ネットワークの `driver_opts`。secret / config の `driver`。トップレベルの `models`。
+- 同じルールで拒否する値: `volumes` の `type` が `bind`・`volume`・`tmpfs` 以外（`image` はホストにある任意のイメージを読める）、volume の `driver` が `local` 以外、ネットワークの `driver` が `bridge` 以外（`macvlan` などはコンテナをホストのネットワークに直接つなぐ）、`logging.driver` が `json-file`・`local`・`none` 以外（出力をホストの journal や外部へ送る。`koroku` のログ収集は Docker から読む）、`build.cache_from` / `build.cache_to` の `type=local`（ホストのディレクトリを root で読み書きする）、`build.network` の `default`・`none` 以外。
+- 値が空（`null`、`false`、`0`、空文字列、空の配列やマップ）の設定は、一覧になくても拒否しない。Compose は書いていない設定を空の値で出力することがあり、空の値は何もしない。`x-` で始まる拡張の項目は、Compose が無視するので拒否しない。
+- ほかのルールと同じく、「検査を緩める」フラグで許可できる。
+- 一覧にない設定を使うリポジトリは、害のない設定であっても、一覧に足すまでデプロイできない。この不便より、知らない設定を通さないことを取る。エラーには設定の名前を出す（`service "web": build.tags is not a setting koroku allows`）。
+- Compose の新しい版が、普通の設定を別の名前で出力したり、全サービスに新しい項目を足したりすると、どのアプリも検査を通らなくなる。普通の設定を集めた Compose ファイル（`testdata/compose/allowed.compose.yaml`）を、結合テストで手元の Compose に正規化させ、拒否される設定がないことを確かめる。
+
+**Compose が読み込むファイル（`include`、`extends.file`）**
+
+`include` はほかの Compose ファイルを読み込み、`extends.file` は別のファイルのサービスを写す。どちらも Compose がファイルを読む時点で済んでしまい、正規化した結果には残らない。そのため、`docker compose config` を実行する前に、`koroku` がファイルそのものを読んで調べる。
+
+- `include` の `env_file` は、読み込むファイルの `${VAR}` の補間に使う env ファイルを指す。ほかのアプリの env ファイルを指せば、その値がこのアプリのコンテナのコマンドや環境変数に入る（実際の Compose で確かめている）。`project_directory` と合わせて拒否する（`unsupported_setting`）。読み込まれるファイルは、読み込む側と同じくアプリの環境変数で補間される。
+- `include` と `extends.file` のパスは、チェックアウトの中のファイルだけを許可する（外は `file_outside_release`）。シンボリックリンクは解決してから判定する。ディレクトリ、`${VAR}` を含むパス（補間されるので、文字列からは読むファイルが分からない）、Git や OCI のアドレス（`https://`、`ssh://`、`git@host:`、`oci://` など）は拒否する（`unsupported_setting`）。外から取得するファイルは、検査の `config` とそのあとの `build`・`up` で別々に取得されるので、検査した内容と起動する内容が同じとは限らない。
+- 読み込まれるファイルも、同じ規則で順にたどる。
+- YAML として読めないファイル、4 MiB を超えるファイル、100 個を超える読み込みは拒否する。`koroku` が読めないものは、中に何があるか確かめられないため。
+- 検査は、デプロイの手順 3（`config` の前）と、リリースのファイルを再利用する前の再検査で行う。違反は「検査を緩める」フラグで許可できる。
 
 リポジトリが書いた `oom_score_adj` とメモリの予約は拒否しない。override が必ず上書きするので（6.2）、効かないだけで害がない。拒否すると、ほかの基盤向けにこれらを書いたリポジトリが koroku に載らなくなる。
 
@@ -372,6 +409,8 @@ Compose には上と同じ結果になる書き方がほかにもあるので、
 
 - `env_file` のパスを検査するため、`docker compose config` には `--no-env-resolution` を付ける（付けないと env ファイルの中身が `environment` に展開され、パスが消える）。この指定で、正規化した JSON にアプリの環境変数の値が入らなくなる利点もある。Compose 2.30 以上が要る。
 - リリースのファイルを再利用する `up`（アプリの起動、ロールバック）の直前にも、`config` とポリシー検査をやり直す。デプロイ時の検査のあとでファイルが書き換えられていたら、起動せずに拒否する（起動は 422 `policy_violation`、ロールバックは「戻せない」とログに書く）。
+- 再検査の `config` は、そのあとの `up` と同じ条件で実行する。Compose は `${VAR}` を、env ファイルと自分の環境変数で補間するので、条件が違うと、検査したものと起動するものが別の内容になりうる（`${DOCKER_CONFIG:+...}` のように、変数があるときだけ別のパスになる書き方ができる）。そのため、補間にはそのリリースが起動するときの環境変数（リリースごとのスナップショット）を使い、`DOCKER_CONFIG` もあとの `up` と同じにする（アプリのレジストリの認証があればそのディレクトリ、コマンドの実行のように認証なしで動かすものは指定なし）。
+- Compose を起動するときは、`koroku` 自身の環境変数のうち、動かすのに要るもの（`PATH`、`HOME`、ロケール、プロキシ、`DOCKER_` / `COMPOSE_` / `BUILDKIT_` / `BUILDX_` で始まるもの）だけを渡す。リポジトリの Compose ファイルが `${VAR}` で読めるのは、アプリの環境変数とこれらだけで、`koroku` のプロセスにあるほかの変数は読めない。
 - bind mount の元のパスがまだ存在しない場合（Docker が作る）も、存在する最も深い親までシンボリックリンクを解決してから内外を判定する。
 - override ファイルは一時ファイルに書いてから rename で置く。チェックアウトの中身はリポジトリ由来で、同名のシンボリックリンクが置かれていると、リンク先（ホスト上の任意のファイル）を root 権限で上書きしてしまうため。Compose ファイルのパスも、途中のディレクトリがシンボリックリンクでリリース外へ出ていないことを確かめる。
 
@@ -1661,7 +1700,7 @@ Heroku の Review Apps に当たるもの。staging アプリ（8.2）を親に�
 - **信頼モデル**: デプロイするのは自分のリポジトリだけ。他人のコードを動かす前提の隔離（gVisor 等）は持たない。
 - **認証**: GitHub ログイン後、ユーザー ID が `config.toml` のオーナーの ID か、ロールを 1 つ以上持つメンバーの ID と一致した場合のみセッションを発行する（10.7）。Cookie は `HttpOnly`、`Secure`、`SameSite=Lax`。変更系 API は `Origin` ヘッダーを検証する。GitHub の 2 段階認証の必須化、危険な操作の前の再ログイン、セッションの一覧とログイン履歴は 10.3。
 - **待受**: `koroku` と Caddy admin API は 127.0.0.1 のみ。外部公開は 22、80、443。
-- **前提と限界**: ポリシー検査は「自分のリポジトリを誤って危険な構成でデプロイしない」ための検査で、悪意あるリポジトリを安全に動かす隔離ではない。「検査を緩める」フラグを立てたアプリには、上の保護の多くが効かない（フラグは 1 つで、項目ごとには選べない）。Caddy の admin API は認証なしの TCP（ループバック）なので、ホストのネットワークに入れたコンテナからは設定を書き換えられる。ログのマスクは環境変数の値そのものとの一致だけで、3 文字未満の値や、base64 などに変換された値は隠せない。
+- **前提と限界**: ポリシー検査は「自分のリポジトリを誤って危険な構成でデプロイしない」ための検査で、悪意あるリポジトリを安全に動かす隔離ではない。Compose の設定は許可する一覧で絞る（6 章）が、コンテナの中で動くコードとカーネルの間には Docker の既定の隔離しかなく、Dockerfile の `FROM` に名前を書けば、ホストにあるほかのアプリのイメージを読める。ビルドと、`replicas` で増やしたコンテナの資源にも上限を掛けない。「検査を緩める」フラグを立てたアプリには、上の保護の多くが効かない（フラグは 1 つで、項目ごとには選べない）。Caddy の admin API は認証なしの TCP（ループバック）なので、ホストのネットワークに入れたコンテナからは設定を書き換えられる。ログのマスクは環境変数の値そのものとの一致だけで、3 文字未満の値や、base64 などに変換された値は隠せない。
 - **ポート公開の抑止**: Docker が publish したポートの通信は ufw の設定を通らずに届く（[Packet filtering and firewalls](https://docs.docker.com/network/packet-filtering-firewalls/)）。ufw に頼らず、6 章の override で全サービスの `ports` を消すか 127.0.0.1 に限定する。
 - **シークレット**: 環境変数の値とコンテナレジストリのトークン（6.1）は AES-256-GCM で暗号化して SQLite に保存する。マスターキーは `/etc/koroku/master.key`。UI は環境変数を既定でマスク表示し、レジストリのトークンは表示しない。
 

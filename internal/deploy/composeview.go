@@ -204,7 +204,7 @@ func (e *Engine) displayConfig(ctx context.Context, app store.App, id int64, com
 	out, err := runner.Output(ctx, e.opts.Runner, runner.Cmd{
 		Name: "docker",
 		Args: inv.Args("config", "--format", "json", "--no-interpolate", "--no-env-resolution"),
-		Dir:  e.ReleaseDir(app.Slug, id),
+		Dir:  e.ReleaseDir(app.Slug, id), CleanEnv: true,
 	})
 	if err != nil {
 		return "", fmt.Errorf("docker compose config: %w", err)
@@ -638,7 +638,7 @@ func (e *Engine) releaseExpectation(ctx context.Context, app store.App, id int64
 	hashCtx, cancel := context.WithTimeout(ctx, composeViewTimeout)
 	defer cancel()
 	out, err := runner.Output(hashCtx, e.opts.Runner, runner.Cmd{
-		Name: "docker", Args: inv.Args("config", "--hash", "*"), Dir: dir,
+		Name: "docker", Args: inv.Args("config", "--hash", "*"), Dir: dir, CleanEnv: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("docker compose config --hash: %w", err)

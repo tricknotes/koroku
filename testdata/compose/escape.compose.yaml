@@ -1,0 +1,54 @@
+# Settings that reach the host or another app without any of the settings
+# the original policy list names. Compose accepts all of them.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: ../../../../../../etc/koroku/master.key
+      tags: ["koroku-blog-web:r41"]
+      ssh: ["key=/etc/koroku/github-app.pem"]
+      entitlements: ["network.host"]
+      cache_to: ["type=local,dest=/etc/cron.d"]
+    security_opt:
+      - seccomp=./allow-all.json
+      - no-new-privileges:true
+    post_start:
+      - command: ["sh", "-c", "true"]
+        privileged: true
+        user: root
+    logging:
+      driver: syslog
+      options:
+        syslog-address: "udp://203.0.113.9:514"
+    volumes:
+      - hostfs:/hostfs:ro
+      - type: image
+        source: koroku-blog-web:r41
+        target: /other
+  socket:
+    image: docker:cli
+    use_api_socket: true
+  runner:
+    provider:
+      type: ./run-on-host.sh
+  spy:
+    image: busybox:1.37
+    network_mode: koroku-blog_default
+  thief:
+    image: koroku-blog-web:r41
+    pull_policy: never
+  gpu:
+    image: busybox:1.37
+    gpus: all
+    cgroup_parent: system.slice
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]
+volumes:
+  hostfs:
+    driver_opts:
+      type: overlay
+      device: overlay
+      o: "lowerdir=/etc/koroku:/usr"

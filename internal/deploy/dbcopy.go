@@ -501,7 +501,7 @@ func (j *copyJob) afterLoad(ctx context.Context) error {
 		dir = releaseDir
 		args = inv.Args("run", "--rm", "--no-deps", "-T", dst.PostLoadService, "sh", "-c", dst.PostLoadCommand)
 	}
-	err := e.opts.Runner.Run(ctx, runner.Cmd{Name: "docker", Args: args, Dir: dir, Stdout: out, Stderr: out})
+	err := e.opts.Runner.Run(ctx, runner.Cmd{Name: "docker", Args: args, CleanEnv: true, Dir: dir, Stdout: out, Stderr: out})
 	if err != nil {
 		return fmt.Errorf("the command after the copy failed: %w", err)
 	}

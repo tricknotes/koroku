@@ -1,0 +1,426 @@
+{
+  "configs": {
+    "appconfig": {
+      "name": "koroku-blog_appconfig",
+      "content": "key = value\n"
+    }
+  },
+  "name": "koroku-blog",
+  "networks": {
+    "backend": {
+      "name": "koroku-blog_backend",
+      "driver": "bridge",
+      "ipam": {
+        "config": [
+          {
+            "subnet": "172.28.0.0/16"
+          }
+        ]
+      },
+      "internal": true,
+      "labels": {
+        "com.example.net": "backend"
+      },
+      "enable_ipv6": false
+    },
+    "default": {
+      "name": "koroku-blog_default",
+      "ipam": {}
+    }
+  },
+  "secrets": {
+    "appsecret": {
+      "name": "koroku-blog_appsecret",
+      "environment": "SECRET_KEY_BASE"
+    },
+    "buildsecret": {
+      "name": "koroku-blog_buildsecret",
+      "file": "/var/lib/koroku/apps/blog/releases/43/secrets/build.txt"
+    },
+    "db_password": {
+      "name": "koroku-blog_db_password",
+      "file": "/var/lib/koroku/apps/blog/releases/43/secrets/db_password.txt"
+    }
+  },
+  "services": {
+    "db": {
+      "cgroup": "private",
+      "command": null,
+      "entrypoint": null,
+      "environment": {
+        "POSTGRES_PASSWORD_FILE": "/run/secrets/db_password"
+      },
+      "image": "postgres:17",
+      "networks": {
+        "backend": null
+      },
+      "secrets": [
+        {
+          "source": "db_password",
+          "target": "/run/secrets/db_password"
+        }
+      ],
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "pgdata",
+          "target": "/var/lib/postgresql/data",
+          "volume": {}
+        },
+        {
+          "type": "volume",
+          "source": "nfsdata",
+          "target": "/backups",
+          "volume": {}
+        }
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U postgres"
+        ]
+      }
+    },
+    "migrate": {
+      "restart": "no",
+      "command": [
+        "bin/rails",
+        "db:prepare"
+      ],
+      "entrypoint": null,
+      "image": "ghcr.io/octo/app:latest",
+      "network_mode": "none"
+    },
+    "web": {
+      "develop": {
+        "watch": [
+          {
+            "path": "/var/lib/koroku/apps/blog/releases/43/app",
+            "action": "sync",
+            "target": "/rails/app",
+            "exec": {
+              "command": null
+            }
+          }
+        ]
+      },
+      "restart": "unless-stopped",
+      "scale": 1,
+      "attach": true,
+      "container_name": "app-web",
+      "links": [
+        "db"
+      ],
+      "post_start": [
+        {
+          "command": [
+            "sh",
+            "-c",
+            "echo started"
+          ],
+          "user": "root",
+          "working_dir": "/tmp",
+          "environment": {
+            "STAGE": "post"
+          }
+        }
+      ],
+      "pre_stop": [
+        {
+          "command": [
+            "sh",
+            "-c",
+            "echo stopping"
+          ]
+        }
+      ],
+      "annotations": {
+        "com.example.note": "hello"
+      },
+      "cap_add": [
+        "NET_BIND_SERVICE"
+      ],
+      "cap_drop": [
+        "ALL"
+      ],
+      "cpus": 1.5,
+      "cpuset": "0",
+      "cpu_shares": 512,
+      "command": [
+        "bin/rails",
+        "server",
+        "-b",
+        "0.0.0.0"
+      ],
+      "configs": [
+        {
+          "source": "appconfig",
+          "target": "/etc/app.conf"
+        }
+      ],
+      "dns": [
+        "9.9.9.9"
+      ],
+      "dns_opt": [
+        "ndots:2"
+      ],
+      "dns_search": [
+        "example.com"
+      ],
+      "domainname": "example.com",
+      "entrypoint": [
+        "/usr/bin/tini",
+        "--"
+      ],
+      "environment": {
+        "RAILS_ENV": "production",
+        "SECRET_KEY_BASE": "x"
+      },
+      "env_file": [
+        {
+          "path": "/var/lib/koroku/apps/blog/releases/43/config/app.env",
+          "required": false
+        }
+      ],
+      "extra_hosts": [
+        "db.internal=203.0.113.7"
+      ],
+      "group_add": [
+        "2000"
+      ],
+      "hostname": "web",
+      "image": "ghcr.io/octo/app:latest",
+      "init": true,
+      "ipc": "shareable",
+      "labels": {
+        "com.example.role": "web"
+      },
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "10m"
+        }
+      },
+      "mem_limit": "536870912",
+      "mem_reservation": "134217728",
+      "memswap_limit": "536870912",
+      "mem_swappiness": "10",
+      "networks": {
+        "backend": {
+          "ipv4_address": "172.28.5.10"
+        },
+        "default": {
+          "aliases": [
+            "app"
+          ]
+        }
+      },
+      "oom_score_adj": 100,
+      "pids_limit": 200,
+      "platform": "linux/amd64",
+      "pull_policy": "build",
+      "read_only": true,
+      "secrets": [
+        {
+          "source": "appsecret",
+          "target": "app_secret",
+          "mode": "0440"
+        }
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "shm_size": "134217728",
+      "stop_grace_period": "30s",
+      "stop_signal": "SIGTERM",
+      "storage_opt": {
+        "size": "1G"
+      },
+      "sysctls": {
+        "net.core.somaxconn": "1024"
+      },
+      "tmpfs": [
+        "/run"
+      ],
+      "ulimits": {
+        "nofile": {
+          "soft": 1024,
+          "hard": 4096
+        },
+        "nproc": 512
+      },
+      "user": "1000:1000",
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "storage",
+          "target": "/rails/storage",
+          "volume": {}
+        },
+        {
+          "type": "bind",
+          "source": "/var/lib/koroku/apps/blog/releases/43/config/puma.rb",
+          "target": "/rails/config/puma.rb",
+          "read_only": true,
+          "bind": {}
+        },
+        {
+          "type": "tmpfs",
+          "target": "/rails/tmp",
+          "tmpfs": {
+            "size": "67108864",
+            "mode": 1023
+          }
+        },
+        {
+          "type": "volume",
+          "source": "storage",
+          "target": "/rails/public/uploads",
+          "volume": {
+            "nocopy": true,
+            "subpath": "uploads"
+          }
+        }
+      ],
+      "working_dir": "/rails",
+      "build": {
+        "context": "/var/lib/koroku/apps/blog/releases/43",
+        "dockerfile": "docker/Dockerfile",
+        "args": {
+          "RUBY_VERSION": "3.4"
+        },
+        "labels": {
+          "org.opencontainers.image.source": "https://example.com/octo/app"
+        },
+        "cache_from": [
+          "ghcr.io/octo/app:cache"
+        ],
+        "additional_contexts": {
+          "shared": "/var/lib/koroku/apps/blog/releases/43/shared"
+        },
+        "pull": true,
+        "extra_hosts": [
+          "build.internal=203.0.113.5"
+        ],
+        "network": "default",
+        "target": "runtime",
+        "secrets": [
+          {
+            "source": "buildsecret"
+          }
+        ],
+        "shm_size": "268435456",
+        "ulimits": {
+          "nofile": 4096
+        },
+        "platforms": [
+          "linux/amd64"
+        ]
+      },
+      "depends_on": {
+        "db": {
+          "condition": "service_healthy",
+          "restart": true,
+          "required": true
+        },
+        "migrate": {
+          "condition": "service_completed_successfully",
+          "required": true
+        }
+      },
+      "expose": [
+        "9394"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:3000/up"
+        ],
+        "timeout": "3s",
+        "interval": "10s",
+        "retries": 5,
+        "start_period": "30s",
+        "start_interval": "2s"
+      },
+      "ports": [
+        {
+          "mode": "ingress",
+          "target": 3000,
+          "published": "3000",
+          "protocol": "tcp"
+        }
+      ]
+    },
+    "worker": {
+      "deploy": {
+        "mode": "replicated",
+        "replicas": 1,
+        "labels": {
+          "com.example.tier": "worker"
+        },
+        "resources": {
+          "limits": {
+            "cpus": 0.5,
+            "memory": "268435456",
+            "pids": 100
+          },
+          "reservations": {
+            "cpus": 0.1,
+            "memory": "67108864"
+          }
+        },
+        "restart_policy": {
+          "condition": "on-failure",
+          "max_attempts": 3
+        },
+        "placement": {}
+      },
+      "restart": "on-failure:3",
+      "command": [
+        "bin/jobs"
+      ],
+      "entrypoint": null,
+      "image": "ghcr.io/octo/app:latest",
+      "init": true,
+      "ipc": "service:web",
+      "network_mode": "service:web",
+      "pid": "service:web",
+      "volumes_from": [
+        "web:ro"
+      ],
+      "depends_on": {
+        "web": {
+          "condition": "service_started",
+          "restart": true,
+          "required": true
+        }
+      }
+    }
+  },
+  "volumes": {
+    "nfsdata": {
+      "name": "koroku-blog_nfsdata",
+      "driver": "local",
+      "driver_opts": {
+        "device": ":/exports/app",
+        "o": "addr=203.0.113.20,rw",
+        "type": "nfs"
+      }
+    },
+    "pgdata": {
+      "name": "koroku-blog_pgdata",
+      "labels": {
+        "com.example.backup": "daily"
+      }
+    },
+    "storage": {
+      "name": "koroku-blog_storage"
+    }
+  },
+  "x-defaults": {
+    "init": true,
+    "restart": "unless-stopped"
+  }
+}

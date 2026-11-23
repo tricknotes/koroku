@@ -135,13 +135,12 @@ func (e *Engine) executeRollback(ctx context.Context, d store.Deployment, app st
 	log.Printf("Compose file: %s; images: %v", meta.ComposeFile, meta.Images)
 
 	log.Step(StepValidate, "Validating the release again")
-	project, err := e.revalidatedProject(ctx, app, src, meta.ComposeFile)
+	// The kept images are normally all there; a missing one is pulled.
+	dockerConfig, err := e.registryConfig(ctx, app, log.masker)
 	if err != nil {
 		return false, err
 	}
-
-	// The kept images are normally all there; a missing one is pulled.
-	dockerConfig, err := e.registryConfig(ctx, app, log.masker)
+	project, err := e.revalidatedProject(ctx, app, src, meta.ComposeFile, dockerConfig)
 	if err != nil {
 		return false, err
 	}
