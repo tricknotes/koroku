@@ -36,7 +36,17 @@ export type RollbackKind =
   /** It failed before the running containers were touched. */
   | 'untouched'
   /** koroku was shutting down and left the containers as they were. */
-  | 'skipped';
+  | 'skipped'
+  /**
+   * Blue/green (ARCHITECTURE 7.2): the new colour was removed before the
+   * switch; the previous release never stopped serving.
+   */
+  | 'kept'
+  /**
+   * Blue/green: after the switch, the requests went back to the old colour
+   * and the other services back to the previous release.
+   */
+  | 'switched-back';
 
 export interface RollbackOutcome {
   kind: RollbackKind;
@@ -63,7 +73,7 @@ type DeploymentTimes = Pick<
   Deployment,
   'status' | 'queued_at' | 'started_at' | 'finished_at'
 > &
-  Pick<Deployment, 'source_deployment_id'>;
+  Pick<Deployment, 'source_deployment_id' | 'web_color'>;
 
 /** Lines written before the first step: queueing, an early cancel. */
 export const QUEUE_KEY = 'queue';
@@ -80,6 +90,9 @@ const STEP_LABELS: Record<string, string> = {
   start: '起動',
   route: '経路',
   check: '確認',
+  switch: '切り替え',
+  services: 'ほかのサービスの作り直し',
+  drain: '旧色の停止',
   done: '完了',
   rollback: 'ロールバック',
   cleanup: '後片付け',
@@ -118,6 +131,19 @@ const ORDER = [
   'check',
   'done',
 ];
+
+/**
+ * A blue/green deployment (ARCHITECTURE 7.2) starts the new colour next to
+ * the old one, checks it, switches, recreates the other services and stops
+ * the old colour. With no old colour running it starts alone and routes,
+ * as in chapter 7.
+ */
+const BLUE_GREEN_STEPS = ['switch', 'services', 'drain'];
+
+function withBlueGreen(order: string[]): string[] {
+  const at = order.indexOf('check') + 1;
+  return [...order.slice(0, at), ...BLUE_GREEN_STEPS, ...order.slice(at)];
+}
 
 /**
  * Steps every deployment goes through. The others (build, pull, backup,
@@ -183,6 +209,13 @@ const ROLLBACK_DONE = /^Rolled back: /;
 const ROLLBACK_BROKEN =
   /^(Rollback failed|Rollback is not possible|Removing the containers failed)\b/;
 const ROLLBACK_NOTHING = /^No previous release/;
+// Blue/green (internal/deploy/bluegreen.go).
+const SWITCH_BACK_TARGET =
+  /^Switching back and restoring the other services of deployment #(\d+)/;
+const SWITCH_BACK_DONE = /^Restored .* of deployment #\d+\.$/;
+const SWITCH_BACK_BROKEN = /^Restoring\b.*\b(failed|is not possible)\b/;
+const NEW_COLOR_REMOVED = /; the previous release keeps serving\.$/;
+const NOT_ENOUGH_MEMORY = /^Not enough memory to run two /;
 const SHUTTING_DOWN = /^koroku is shutting down/;
 const CANCELED = /^Deployment canceled\b/;
 
@@ -203,6 +236,7 @@ function trimBlankEnd(lines: string[]): void {
 
 function rollbackOutcome(
   step: DeployStep | undefined,
+  failedStep: DeployStep | null,
   afterFailure: string[],
   started: boolean,
   active: boolean,
@@ -211,6 +245,15 @@ function rollbackOutcome(
     if (afterFailure.some((line) => SHUTTING_DOWN.test(line))) {
       return { kind: 'skipped', deploymentId: null, detail: '' };
     }
+    const failedLines = failedStep?.lines ?? [];
+    // Blue/green: short of memory, nothing was started.
+    if (failedLines.some((line) => NOT_ENOUGH_MEMORY.test(line))) {
+      return { kind: 'untouched', deploymentId: null, detail: '' };
+    }
+    // Blue/green: the new colour failed before the switch and was removed.
+    if (failedLines.some((line) => NEW_COLOR_REMOVED.test(line))) {
+      return { kind: 'kept', deploymentId: null, detail: '' };
+    }
     // Up to build / pull / backup the running containers are left alone.
     if (!started) return { kind: 'untouched', deploymentId: null, detail: '' };
     // Once `start` ran, the rollback headline is about to follow. If it
@@ -218,6 +261,17 @@ function rollbackOutcome(
     return active
       ? { kind: 'restoring', deploymentId: null, detail: '' }
       : null;
+  }
+
+  const switchBack = SWITCH_BACK_TARGET.exec(step.title);
+  if (switchBack) {
+    const deploymentId = Number(switchBack[1]);
+    const broken = step.lines.find((line) => SWITCH_BACK_BROKEN.test(line));
+    if (broken) return { kind: 'failed', deploymentId, detail: broken };
+    if (step.lines.some((line) => SWITCH_BACK_DONE.test(line))) {
+      return { kind: 'switched-back', deploymentId, detail: '' };
+    }
+    return { kind: active ? 'restoring' : 'failed', deploymentId, detail: '' };
   }
 
   const target = ROLLBACK_TARGET.exec(step.title);
@@ -246,6 +300,7 @@ function rollbackOutcome(
 export function parseDeployLog(
   lines: readonly string[],
   deployment: DeploymentTimes,
+  options: { blueGreen?: boolean } = {},
 ): ParsedDeployLog {
   const active = isActive(deployment.status);
   const steps: DeployStep[] = [];
@@ -255,6 +310,9 @@ export function parseDeployLog(
   let failedStep: DeployStep | null = null;
   let current: DeployStep | null = null;
   let inFailure = false;
+  // Blue/green writes its rollback before the `failed` headline: the step
+  // it rolls back from failed.
+  let failedBeforeRollback: DeployStep | null = null;
 
   const open = (
     key: string,
@@ -293,12 +351,20 @@ export function parseDeployLog(
 
     if (headline.key === 'failed') {
       failureTitle = headline.title;
-      failedStep = current;
-      if (current) {
-        current.state = CANCELED.test(headline.title) ? 'canceled' : 'failed';
+      const canceled = CANCELED.test(headline.title);
+      if (current?.key === 'rollback' && failedBeforeRollback) {
+        failedStep = failedBeforeRollback;
+        if (canceled) failedStep.state = 'canceled';
+      } else {
+        failedStep = current;
+        if (current) current.state = canceled ? 'canceled' : 'failed';
       }
       inFailure = true;
       continue;
+    }
+    if (headline.key === 'rollback' && failureTitle === null && current) {
+      current.state = 'failed';
+      failedBeforeRollback = current;
     }
     current = open(headline.key, headline.title, headline.time);
   }
@@ -310,12 +376,22 @@ export function parseDeployLog(
   const failure: DeployFailure | null =
     failureTitle === null ? null : { step: failedStep, title: failureTitle };
   const rollback = failure
-    ? rollbackOutcome(rollbackStep, afterFailure, seen.has('start'), active)
+    ? rollbackOutcome(
+        rollbackStep,
+        failedStep,
+        afterFailure,
+        seen.has('start'),
+        active,
+      )
     : null;
 
   if (rollbackStep && rollback) {
     if (rollback.kind === 'failed') rollbackStep.state = 'failed';
     if (rollback.kind === 'restoring') rollbackStep.state = 'running';
+  }
+  // A blue/green rollback that has not reached the `failed` headline yet.
+  if (rollbackStep && !failure && active && last === rollbackStep) {
+    rollbackStep.state = 'running';
   }
 
   if (last && last.state === 'done' && last !== rollbackStep) {
@@ -344,10 +420,20 @@ export function parseDeployLog(
     if (INSTANT.has(step.key)) step.endedAt = null;
   }
 
-  if (active && !failure) {
+  if (active && !failure && !rollbackStep) {
     const rollback = isRollback(deployment);
-    const order = rollback ? ROLLBACK_ORDER : ORDER;
-    const always = rollback ? ROLLBACK_ALWAYS : ALWAYS;
+    // Started alone (nothing to switch from), it routes instead.
+    const blueGreen =
+      (options.blueGreen === true ||
+        Boolean(deployment.web_color) ||
+        seen.has('switch')) &&
+      !seen.has('route');
+    let order = rollback ? ROLLBACK_ORDER : ORDER;
+    let always = rollback ? ROLLBACK_ALWAYS : ALWAYS;
+    if (blueGreen) {
+      order = withBlueGreen(order);
+      always = new Set([...always, ...BLUE_GREEN_STEPS]);
+    }
     const reached = Math.max(
       -1,
       ...steps.map((step) => order.indexOf(step.key)),

@@ -15,6 +15,12 @@ import {
   type RollbackKind,
   type RollbackOutcome,
 } from 'koroku-console/utils/deploy-steps';
+import {
+  MEMORY_SHORTAGE_TITLE,
+  memoryShortage,
+  colorSummary,
+  memoryShortageDetail,
+} from 'koroku-console/utils/blue-green';
 import { formatDateTimeJst } from 'koroku-console/utils/format';
 import { isRollback, releaseId } from 'koroku-console/utils/rollback';
 import { isPush, pushTitle } from 'koroku-console/utils/trigger';
@@ -81,12 +87,24 @@ const ROLLBACK_NOTICES: Record<
     title: '旧版には自動で戻していません',
     text: 'koroku の停止と重なったため、ロールバックを実行していません。アプリの状態を確認してください。',
   }),
+  kept: () => ({
+    tone: 'info',
+    title: '旧版が応答し続けています',
+    text: '切り替えの前に止まったため、起動した新しい版を削除しました。旧版、DB、ワーカーには触れていないので、ロールバックはしていません。',
+  }),
+  'switched-back': (outcome) => ({
+    tone: 'info',
+    title: '旧版に自動で戻しました',
+    text: `リクエストを旧版の色へ切り替え直し、ほかのサービスを${target(outcome)}に戻しました。旧版が応答し続けています。`,
+  }),
 };
 
 interface DeploymentDetailSignature {
   Element: HTMLDivElement;
   Args: {
     deployment: Deployment;
+    /** The app deploys blue/green (ARCHITECTURE 7.2): the steps to expect. */
+    blueGreen?: boolean;
     /** The log reached its end: the deployment has a final status now. */
     onLogEnd?: () => unknown;
   };
@@ -122,7 +140,9 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
 
   @cached
   get log(): ParsedDeployLog {
-    return parseDeployLog(this.buffer.lines, this.args.deployment);
+    return parseDeployLog(this.buffer.lines, this.args.deployment, {
+      blueGreen: this.args.blueGreen ?? false,
+    });
   }
 
   get streamLabel(): string {
@@ -163,6 +183,19 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
       ? `「${stepLabel(step.key, this.isRollback)}」の手順で失敗しました。`
       : '';
   }
+
+  /** "12:03:41 に green へ切り替え", or ''. */
+  get colorSummary(): string {
+    return colorSummary(this.args.deployment);
+  }
+
+  /** The failure for want of memory for a second copy, in plain words. */
+  get memoryShortage(): string {
+    const shortage = memoryShortage(this.args.deployment.error);
+    return shortage ? memoryShortageDetail(shortage) : '';
+  }
+
+  memoryShortageTitle = MEMORY_SHORTAGE_TITLE;
 
   get rollbackNotice():
     (Notice & { kind: RollbackKind; detail: string }) | null {
@@ -249,6 +282,12 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
               <dd>{{formatDateTimeJst @deployment.started_at}}</dd>
             </div>
           {{/if}}
+          {{#if this.colorSummary}}
+            <div>
+              <dt>公開サービス</dt>
+              <dd data-test-deployment-color>{{this.colorSummary}}</dd>
+            </div>
+          {{/if}}
           {{#if @deployment.commit_sha}}
             <div class="deploy-fact-sha">
               <dt>コミット</dt>
@@ -292,8 +331,22 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
       {{yield}}
 
       {{#if this.isFailed}}
-        <Banner @tone="error" @title="デプロイに失敗しました">
-          {{this.failedStepText}}
+        <Banner
+          @tone="error"
+          @title={{if
+            this.memoryShortage
+            this.memoryShortageTitle
+            "デプロイに失敗しました"
+          }}
+        >
+          {{#if this.memoryShortage}}
+            <span data-test-memory-shortage>
+              新しい版を並べて起動するには、公開サービスのメモリ上限 1
+              つ分の空きが要ります（{{this.memoryShortage}}）。何も起動していないので、アプリは動き続けています。メモリを空ける（ほかのアプリを止める・休止させる、上限を下げる）か、無停止デプロイを外してからデプロイし直してください。
+            </span>
+          {{else}}
+            {{this.failedStepText}}
+          {{/if}}
           <span
             class="deploy-error-reason"
             data-test-deployment-error
