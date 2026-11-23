@@ -42,13 +42,15 @@ const wakeManualTimeout = 10 * time.Minute
 // wakeDispatch hands the requests Caddy forwards for a sleeping app to the
 // wake handler, before the console's security headers: the answer is the
 // app's own. The header counts only on the hostname of the app it names;
-// the console host and the access protection paths never wake anything,
-// whatever headers they carry.
+// the console host and the access protection paths (in any spelling Caddy
+// routes as one, see isGatePath) never wake anything, whatever headers they
+// carry. A path with "." or ".." segments or repeated slashes is never
+// proxied to the app from here: koroku and Caddy must not come to read the
+// same request as two different paths.
 func (s *Server) wakeDispatch(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		slug := r.Header.Get(caddy.WakeHeader)
-		path := r.URL.Path
-		if slug == "" || path == caddy.GateCheckPath || strings.HasPrefix(path, caddy.ReservedPrefix) ||
+		if slug == "" || isGatePath(r.URL.Path) ||
 			requestHostname(r) == strings.ToLower(s.cfg.ConsoleHost) {
 			next.ServeHTTP(w, r)
 			return
@@ -61,6 +63,11 @@ func (s *Server) wakeDispatch(next http.Handler) http.Handler {
 		if err != nil {
 			s.log.Error("loading the app to wake failed", "error", err)
 			writeWakePage(w, r, http.StatusBadGateway, wakeFailedPage)
+			return
+		}
+		if !caddy.IsCleanPath(r.URL.Path) {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Error(w, "the request path must not contain . or .. segments or repeated slashes", http.StatusBadRequest)
 			return
 		}
 		s.handleWake(w, r, app)

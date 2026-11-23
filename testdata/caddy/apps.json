@@ -39,6 +39,13 @@
                 {
                   "flush_interval": -1,
                   "handler": "reverse_proxy",
+                  "headers": {
+                    "request": {
+                      "delete": [
+                        "X-Koroku-Wake"
+                      ]
+                    }
+                  },
                   "upstreams": [
                     {
                       "dial": "127.0.0.1:8080"

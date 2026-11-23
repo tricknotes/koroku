@@ -334,15 +334,61 @@ func TestGateCheckForOtherHosts(t *testing.T) {
 			t.Errorf("console %s: %d", target, rec.Code)
 		}
 	}
-	// Nothing else of koroku answers on an app host.
-	for _, target := range []string{"/api/apps", "/api/session", "/auth/gate?host=" + stagingHost, "/auth/github/login", "/"} {
-		if rec := f.onHost(stagingHost, http.MethodGet, target, nil, nil); rec.Code != http.StatusNotFound {
-			t.Errorf("app host %s: %d", target, rec.Code)
+	// Nothing else of koroku answers on an app host, an active custom
+	// domain included.
+	for _, host := range []string{stagingHost, customHost, publicHost} {
+		for _, target := range []string{"/api/apps", "/api/session", "/auth/gate?host=" + stagingHost, "/auth/github/login", "/"} {
+			if rec := f.onHost(host, http.MethodGet, target, nil, nil); rec.Code != http.StatusNotFound {
+				t.Errorf("%s%s: %d", host, target, rec.Code)
+			}
 		}
+	}
+	// A hostname that is no app's gets the console (the loopback address
+	// koroku listens on, for one).
+	if rec := f.onHost("unknown.example", http.MethodGet, "/api/session", nil, nil); rec.Code == http.StatusNotFound {
+		t.Errorf("unknown host: %d", rec.Code)
 	}
 	// The callback does nothing for an unprotected app.
 	if rec := f.onHost(publicHost, http.MethodGet, "/.koroku/auth/callback?code=x", nil, nil); rec.Code != http.StatusNotFound {
 		t.Errorf("callback on an unprotected app: %d", rec.Code)
+	}
+}
+
+// Caddy routes a request by its decoded, cleaned, lower-cased path and
+// forwards it as the client sent it. Whatever Caddy takes for a gate path is
+// one here too: another spelling is not found, on any hostname, and is never
+// handed to the console or answered by a gate handler.
+func TestGatePathsInAnotherSpellingAreNotFound(t *testing.T) {
+	f := newGateFixture(t)
+	cookie := f.enter(stagingHost, "/")
+	for _, host := range []string{stagingHost, customHost, publicHost, "console.dev.example.com", "unknown.example"} {
+		for _, target := range []string{
+			"/graphql/../.koroku/auth/callback?code=x",
+			"/graphql/..%2F.koroku/auth/logout",
+			"/%2e%2e/.koroku/auth/logout",
+			"/.KOROKU/auth/logout",
+			"/.koroku/Auth/Logout",
+			"//.koroku/auth/logout",
+			"/.koroku/./auth/logout",
+			"/.koroku",
+			"/.koroku/",
+			"/x/../.koroku",
+			"/AUTH/GATE/CHECK",
+			"/auth/gate/./check",
+			"/auth//gate/check",
+		} {
+			rec := f.onHost(host, http.MethodGet, target, cookie, map[string]string{"X-Forwarded-Method": http.MethodGet})
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("%s%s: %d %s", host, target, rec.Code, rec.Body)
+			}
+			if len(rec.Result().Cookies()) != 0 {
+				t.Errorf("%s%s was answered by a gate handler: %v", host, target, rec.Header())
+			}
+		}
+	}
+	// The grant is untouched: no spelling of the logout path ended it.
+	if rec := f.check(stagingHost, http.MethodGet, "/", cookie); rec.Code != http.StatusNoContent {
+		t.Errorf("check after the requests: %d", rec.Code)
 	}
 }
 

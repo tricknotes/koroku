@@ -584,8 +584,27 @@ func TestGenerateProtectedRoutes(t *testing.T) {
 	if m := compactJSON(t, sub[1].Match[0]["path"]); m != `["/.koroku","/.koroku/*"]` || !sub[1].Terminal {
 		t.Errorf("second subroute must refuse the rest of /.koroku: %s", m)
 	}
-	if m := compactJSON(t, sub[2].Match[0]["not"]); m != `[{"path":["/api/callback*","/webhooks/*"]}]` {
+	if h := compactJSON(t, sub[0].Handle[0]["headers"]); h != `{"request":{"delete":["X-Koroku-Wake"]}}` {
+		t.Errorf("the login endpoints must not pass a client's wake header on: %s", h)
+	}
+	var exempt []map[string]json.RawMessage
+	if err := json.Unmarshal(sub[2].Match[0]["not"], &exempt); err != nil || len(exempt) != 1 || len(exempt[0]) != 2 {
+		t.Fatalf("forward_auth must skip one matcher set of two matchers: %s", sub[2].Match[0]["not"])
+	}
+	if m := compactJSON(t, exempt[0]["path"]); m != `["/api/callback*","/webhooks/*"]` {
 		t.Errorf("forward_auth must skip exactly the exempt prefixes: %s", m)
+	}
+	var expr string
+	if err := json.Unmarshal(exempt[0]["expression"], &expr); err != nil {
+		t.Fatal(err)
+	}
+	wantExpr := `{http.request.orig_uri}.matches(r'^(?:/api/callback|/webhooks/)') && ` +
+		`!{http.request.orig_uri}.matches(r'` + ambiguousRawPath + `')`
+	if expr != wantExpr {
+		t.Errorf("the exemption must look at the request target as sent:\n got %s\nwant %s", expr, wantExpr)
+	}
+	if h := compactJSON(t, sub[2].Handle[0]["headers"]); !strings.Contains(h, `"delete":["X-Koroku-Wake"]`) {
+		t.Errorf("the gate check must not pass a client's wake header on: %s", h)
 	}
 	if sub[2].Terminal {
 		t.Error("the check must fall through to the app on success")
@@ -684,6 +703,155 @@ func TestGenerateSleepingRoutes(t *testing.T) {
 	}
 	if got := handlerNames(find("paused.dev.example.com")); !slices.Equal(got, []string{"static_response"}) {
 		t.Errorf("a stopped app answers the 503 page even when marked sleeping: %v", got)
+	}
+}
+
+// The two regular expressions of the exemption, as the expression matcher
+// applies them to the request target the client sent: only the plain
+// spelling of a path under an exempt prefix skips the gate.
+func TestExemptRawURI(t *testing.T) {
+	prefix := regexp.MustCompile(exemptRawPrefix([]string{"/api/v1.0/callback", "/webhooks/"}))
+	ambiguous := regexp.MustCompile(ambiguousRawPath)
+	for uri, want := range map[string]bool{
+		"/webhooks/":                             true,
+		"/webhooks/github":                       true,
+		"/webhooks/v1.2/..a/b..c/.well-known/x.": true,
+		"/webhooks/x%20y/%E3%81%82":              true,
+		"/webhooks/x?next=https%3A%2F%2Fexample.com%2F..%2F&dir=a//../b%5C": true,
+		"/webhooks/x?":           true,
+		"/api/v1.0/callback":     true,
+		"/api/v1.0/callback-two": true,
+
+		// Not the configured spelling of the prefix.
+		"/webhooks":                             false,
+		"/WEBHOOKS/x":                           false,
+		"/Webhooks/x":                           false,
+		"/%77ebhooks/x":                         false,
+		"/webhooks%2Fx":                         false,
+		"/api/v1x0/callback":                    false,
+		"/admin/../webhooks/x":                  false,
+		"/admin/..%2Fwebhooks/x":                false,
+		"//webhooks/x":                          false,
+		"https://example.com/webhooks/x":        false,
+		"/secret?/webhooks/":                    false,
+		"/{http.request.uri.query}/x?/webhooks": false,
+		// Ambiguous after the prefix.
+		"/webhooks/../admin":       false,
+		"/webhooks/..":             false,
+		"/webhooks/..?a=1":         false,
+		"/webhooks/.":              false,
+		"/webhooks/./x":            false,
+		"/webhooks//x":             false,
+		"/webhooks/x//":            false,
+		"/webhooks/%2e%2e/admin":   false,
+		"/webhooks/%2E%2E/admin":   false,
+		"/webhooks/.%2e/admin":     false,
+		"/webhooks/x%2e":           false,
+		"/webhooks/..%2fadmin":     false,
+		"/webhooks/..%2Fadmin":     false,
+		"/webhooks/a%2Fb":          false,
+		"/webhooks/..%5cadmin":     false,
+		"/webhooks/a%5Cb":          false,
+		`/webhooks/..\admin`:       false,
+		"/webhooks/..;/admin":      false,
+		"/webhooks/..;x=1/admin":   false,
+		"/webhooks/.;/admin":       false,
+		"/webhooks/x/..;":          false,
+		"/webhooks/x/%2e%2e?a=b":   false,
+		"/webhooks/x/..%2f..%2f?a": false,
+	} {
+		if got := prefix.MatchString(uri) && !ambiguous.MatchString(uri); got != want {
+			t.Errorf("exempt(%q) = %v, want %v", uri, got, want)
+		}
+	}
+}
+
+// koroku tells its own paths by the form of the path Caddy's path matcher
+// compares.
+func TestMatchedPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/":                          "/",
+		"/.koroku/auth/callback":     "/.koroku/auth/callback",
+		"/.KOROKU/Auth/x":            "/.koroku/auth/x",
+		"/graphql/../.koroku/auth/x": "/.koroku/auth/x",
+		"/a/./b//c/":                 "/a/b/c/",
+		"//.koroku//auth/":           "/.koroku/auth/",
+		"/a/..":                      "/",
+		"/../../.koroku":             "/.koroku",
+		"/Posts/1":                   "/posts/1",
+		"/auth/gate/check/../check":  "/auth/gate/check",
+	} {
+		if got := MatchedPath(in); got != want {
+			t.Errorf("MatchedPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+	for in, want := range map[string]bool{
+		"/": true, "/Posts/1": true, "/a/b/": true, "/a/..b/.c": true,
+		"/a/../b": false, "/a/./b": false, "/a//b": false, "//": false, "/a/..": false, "/a/.": false, "": false,
+	} {
+		if got := IsCleanPath(in); got != want {
+			t.Errorf("IsCleanPath(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+// The wake header tells koroku that Caddy forwarded a request for a
+// sleeping app. Every proxy to koroku either sets it (the wake route) or
+// deletes what the client sent (ARCHITECTURE 8.4).
+func TestGenerateWakeHeaderOnlyFromTheWakeRoute(t *testing.T) {
+	for name, in := range goldenInputs() {
+		t.Run(name, func(t *testing.T) {
+			out, err := Generate(in)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			var doc any
+			if err := json.Unmarshal(out, &doc); err != nil {
+				t.Fatal(err)
+			}
+			sleeping := 0
+			for _, app := range in.Apps {
+				if app.Sleeping && !app.Stopped {
+					sleeping++
+				}
+			}
+			toKoroku, wakes := 0, 0
+			var walk func(v any)
+			walk = func(v any) {
+				switch v := v.(type) {
+				case []any:
+					for _, e := range v {
+						walk(e)
+					}
+				case map[string]any:
+					if v["handler"] == "reverse_proxy" &&
+						v["upstreams"].([]any)[0].(map[string]any)["dial"] == in.ConsoleUpstream {
+						toKoroku++
+						headers, _ := v["headers"].(map[string]any)
+						request, _ := headers["request"].(map[string]any)
+						set, _ := request["set"].(map[string]any)
+						_, sets := set[WakeHeader]
+						deletes := reflect.DeepEqual(request["delete"], []any{WakeHeader})
+						switch {
+						case sets && !deletes:
+							wakes++
+						case sets || !deletes:
+							t.Errorf("a proxy to koroku must set or delete %s: %v", WakeHeader, headers)
+						}
+					}
+					for _, e := range v {
+						walk(e)
+					}
+				}
+			}
+			walk(doc)
+			if toKoroku == 0 {
+				t.Error("found no proxy to koroku")
+			}
+			if wakes != sleeping {
+				t.Errorf("%d wake routes, want %d (one per sleeping app)", wakes, sleeping)
+			}
+		})
 	}
 }
 
