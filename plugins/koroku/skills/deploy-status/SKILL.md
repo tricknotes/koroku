@@ -64,7 +64,7 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 
 - `rollback` の行があれば、koroku は直前の成功リリースに戻している（`Rolled back: deployment #N is running again.`）。本番が止まっているとは限らないので、そう伝える。
 - 実行ログ（`runtime`）は、起動はしたが動かない場合（エラーを出して再起動を繰り返す、DB に繋がらない）の手がかりになる。
-- デプロイは成功したのに動かないとき（落ちる、遅い、メモリが足りない）は、`containers` の印を見る。`oom_killed`（メモリ上限に当たって止められた）と `restarted` は、アプリのメモリの使い方か、koroku の設定タブのメモリ上限の問題。`outdated` はコンテナが稼働中のリリースと違う設定のまま残っている状態で、管理画面から再起動か再デプロイすると揃う。`memory_limit` などの違いも同じ。リポジトリの Compose に書いた値が効いているかは `compose` の重ねた結果で確かめる（`mem_limit`、`oom_score_adj`、予約は koroku が上書きする）。`status` は印のあるコンテナを自動で出す。
+- デプロイは成功したのに動かないとき（落ちる、遅い、メモリが足りない）は、`containers` の印を見る。`oom_killed`（メモリ上限に当たって止められた）と `restarted` は、アプリのメモリの使い方か、koroku のリソースタブのメモリ上限の問題。`outdated` はコンテナが稼働中のリリースと違う設定のまま残っている状態で、管理画面から再起動か再デプロイすると揃う。`memory_limit` などの違いも同じ。リポジトリの Compose に書いた値が効いているかは `compose` の重ねた結果で確かめる（`mem_limit`、`oom_score_adj`、予約は koroku が上書きする）。`status` は印のあるコンテナを自動で出す。
 
 koroku 側の前提（ポートの扱い、環境変数の注入、volume、ワンショットのサービス、ポリシー検査）は、同じプラグインの prepare-app の [requirements.md](../prepare-app/references/requirements.md) に書いてある。直す前に該当する項目を読む。
 

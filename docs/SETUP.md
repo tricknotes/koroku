@@ -134,7 +134,7 @@ App をインストールしていない public リポジトリ（OSS など）�
 curl -s https://api.github.com/users/<自分の login> | grep '"id"'
 ```
 
-この ID のユーザーが koroku のオーナーになる（`allowed_user_id`）。オーナーはすべての操作ができ、ほかの GitHub ユーザーを管理画面の「メンバー」から加えてアプリごとにロールを与えられる（ARCHITECTURE 10.7）。メンバーは `config.toml` には書かない。
+この ID のユーザーが koroku のオーナーになる（`allowed_user_id`）。オーナーはすべての操作ができ、ほかの GitHub ユーザーを管理画面の「システム」→「管理」の「メンバー」から加えてアプリごとにロールを与えられる（ARCHITECTURE 10.7）。メンバーは `config.toml` には書かない。
 
 このアカウントの 2 段階認証を、GitHub の Settings → Password and authentication で有効にしておく（メンバーにも同じことを頼む）。管理画面へのログインは GitHub へのサインインを経るので、2 段階認証は GitHub がそこで求める。koroku 自身はアカウントの 2 段階認証の状態を確かめられない（GitHub は GitHub App にそれを知らせない。ARCHITECTURE 10.3）。
 
@@ -155,7 +155,7 @@ rm github-app.pem
 
 ### 4.5 別の org のリポジトリを使う（任意）
 
-自分が管理する別の org の private リポジトリをデプロイするときだけ行う。管理画面のシステム画面の「GitHub App」にも、同じ手順とリンク、`config.toml` に書く行が出る。
+自分が管理する別の org の private リポジトリをデプロイするときだけ行う。管理画面の「システム」→「管理」の「GitHub App」にも、同じ手順とリンク、`config.toml` に書く行が出る。
 
 1. App の設定画面の **Advanced** → **Make public**（「Where can this GitHub App be installed?」を **Any account** にする）。App のページを知っていれば誰でもインストールできるようになるが、koroku は下の 3 で許したアカウントのインストールしか使わない。
 2. App のページ（`https://github.com/apps/<app 名>`）の **Install** から、その org を選んでインストールする。**Only select repositories** でデプロイしたいリポジトリだけを選ぶ。
@@ -168,7 +168,7 @@ rm github-app.pem
 4. `sudo koroku check` の `github.install` に org が出ることを確かめる。知らないアカウントにインストールされていれば警告が出るので、その場合は App の設定画面の **Install App** の一覧を確かめる。
 ### 4.6 push での自動デプロイ（任意）
 
-アプリの設定タブで「push されたら自動でデプロイする」を使うときだけ行う（ARCHITECTURE 5.2）。使わなければ Webhook はオフのままでよい。あとから行ってもよい。
+アプリのデプロイタブの「デプロイの設定」で「push されたら自動でデプロイする」を使うときだけ行う（ARCHITECTURE 5.2）。使わなければ Webhook はオフのままでよい。あとから行ってもよい。
 
 1. サーバーで secret を作る（20 文字以上）。
 
@@ -185,11 +185,11 @@ rm github-app.pem
    ```
 
 5. App の設定画面の **Advanced** → **Recent Deliveries** で、`ping` が 200 で届いていることを確かめる（2 で保存したときに送られる。届いていなければ **Redeliver**）。
-6. アプリの設定タブで自動デプロイを有効にし、追うブランチに push する。デプロイの履歴に「push で自動デプロイ」の行が出る。
+6. アプリのデプロイタブの「デプロイの設定」で自動デプロイを有効にし、追うブランチに push する。デプロイの履歴に「push で自動デプロイ」の行が出る。
 
-`webhook_secret` がない間、`koroku` はすべての配送を 403 で断る。管理画面の設定タブと `koroku check` の `github.webhook` が、足りない設定を知らせる。
+`webhook_secret` がない間、`koroku` はすべての配送を 403 で断る。管理画面のデプロイタブの「デプロイの設定」と `koroku check` の `github.webhook` が、足りない設定を知らせる。
 
-**ワークフローを待つ**: Compose が `image:` だけで、イメージを GitHub Actions がコミットごとにビルドするアプリは、push の直後にデプロイするとイメージがまだなく pull に失敗する。アプリの設定タブの「先に待つワークフロー」にイメージを作るワークフローのファイル（`.github/workflows/image.yml` など）を入れると、push ではなく、そのワークフローがブランチの最新のコミットで成功したときにデプロイする（ARCHITECTURE 5.2）。使うときは App に次を足す。
+**ワークフローを待つ**: Compose が `image:` だけで、イメージを GitHub Actions がコミットごとにビルドするアプリは、push の直後にデプロイするとイメージがまだなく pull に失敗する。アプリのデプロイタブの「デプロイの設定」の「先に待つワークフロー」にイメージを作るワークフローのファイル（`.github/workflows/image.yml` など）を入れると、push ではなく、そのワークフローがブランチの最新のコミットで成功したときにデプロイする（ARCHITECTURE 5.2）。使うときは App に次を足す。
 
 1. App の設定画面の **Permissions & events** → **Repository permissions** で **Actions** を **Read-only** にする。
 2. 同じ画面の **Subscribe to events** で **Workflow run** を選んで保存する（Actions の権限がないと選べない）。
