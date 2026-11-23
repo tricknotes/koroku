@@ -76,6 +76,12 @@ type Deployment struct {
 	// containers (reached the start step, ARCHITECTURE 9.5); nil when the
 	// run did not end normally.
 	ContainersReplaced *bool
+	// WebColor is the colour of the public service the deployment started
+	// (ARCHITECTURE 7.2); "" when it ran the public service as itself.
+	// SwitchedAt is when the requests were switched to that colour; nil
+	// when they were not (or were switched back after a failure).
+	WebColor   string
+	SwitchedAt *time.Time
 }
 
 // Deployment triggers.
@@ -92,7 +98,8 @@ const RollbackRef = "rollback"
 
 const deploymentColumns = `id, app_id, ref, commit_sha, commit_message, status, error,
 	queued_at, started_at, finished_at, source_deployment_id, promoted_from_deployment_id,
-	actor_user_id, actor_login, trigger_kind, pusher, containers_replaced`
+	actor_user_id, actor_login, trigger_kind, pusher, containers_replaced,
+	web_color, switched_at`
 
 func scanDeployment(row rowScanner) (Deployment, error) {
 	var (
@@ -105,9 +112,12 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 		actorID  sql.NullInt64
 		actor    string
 		replaced sql.NullBool
+		color    sql.NullString
+		switched sql.NullInt64
 	)
 	err := row.Scan(&d.ID, &d.AppID, &d.Ref, &d.CommitSHA, &d.CommitMessage, &d.Status, &d.Error,
-		&queued, &started, &finished, &source, &promoted, &actorID, &actor, &d.Trigger, &d.Pusher, &replaced)
+		&queued, &started, &finished, &source, &promoted, &actorID, &actor, &d.Trigger, &d.Pusher, &replaced,
+		&color, &switched)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -127,6 +137,8 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 	if replaced.Valid {
 		d.ContainersReplaced = &replaced.Bool
 	}
+	d.WebColor = color.String
+	d.SwitchedAt = fromNullMillis(switched)
 	return d, nil
 }
 
@@ -296,6 +308,31 @@ func (s *Store) SetDeploymentContainersReplaced(ctx context.Context, id int64, r
 		return fmt.Errorf("record replaced containers: %w", err)
 	}
 	return nil
+}
+
+// SetDeploymentWebColor records the colour of the public service a
+// deployment starts (ARCHITECTURE 7.2); "" stores NULL.
+func (s *Store) SetDeploymentWebColor(ctx context.Context, id int64, color string) error {
+	value := sql.NullString{String: color, Valid: color != ""}
+	res, err := s.db.ExecContext(ctx, `UPDATE deployments SET web_color = ? WHERE id = ?`, value, id)
+	if err != nil {
+		return fmt.Errorf("set deployment colour: %w", err)
+	}
+	return requireOneRow(res, "set deployment colour")
+}
+
+// SetDeploymentSwitchedAt records when a deployment switched the requests
+// to its colour; nil clears it (the switch was undone).
+func (s *Store) SetDeploymentSwitchedAt(ctx context.Context, id int64, at *time.Time) error {
+	var value sql.NullInt64
+	if at != nil {
+		value = sql.NullInt64{Int64: toMillis(*at), Valid: true}
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE deployments SET switched_at = ? WHERE id = ?`, value, id)
+	if err != nil {
+		return fmt.Errorf("set switch time: %w", err)
+	}
+	return requireOneRow(res, "set switch time")
 }
 
 // HasActiveDeployment reports whether the app has a queued or running deployment.
