@@ -556,8 +556,9 @@ func (s *Server) validateSlug(slug string) string {
 	switch {
 	case !slugPattern.MatchString(slug):
 		return "must be 1-40 lowercase letters, digits or hyphens, starting with a letter"
-	case reservedSlugs[slug], slug+"."+s.cfg.BaseDomain == s.cfg.ConsoleHost:
-		// The console's own hostname can be configured to anything.
+	case reservedSlugs[slug], strings.EqualFold(slug+"."+s.cfg.BaseDomain, s.cfg.ConsoleHost):
+		// The console's own hostname can be configured to anything, in any
+		// letter case; hostnames are compared without it.
 		return "is reserved"
 	}
 	return ""
