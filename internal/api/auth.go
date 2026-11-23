@@ -448,9 +448,11 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// Anyone can reach this endpoint with a made-up code and state; without
 	// a limit each such request would make koroku call GitHub with the App's
 	// client secret. Only requests that go on to GitHub count: one without
-	// the state cookie of a login started in that browser is refused above,
-	// so that it cannot use up the limit real logins share.
-	if !s.callbackLimiter.allow(s.clock.Now()) {
+	// the state cookie of a login started in that browser is refused above.
+	// A client that sends a cookie and a state of its own does count, but
+	// against its own address first, so that it cannot use up what real
+	// logins share (callbackLimiter).
+	if !s.callbackLimiter.allow(callbackClient(r), s.clock.Now()) {
 		loginErrorRedirect(w, r, "github_error")
 		return
 	}
@@ -565,6 +567,77 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.clearCookie(w, sessionCookie)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+const (
+	// callbackPerClient is how many OAuth code exchanges one client address
+	// may cause per callbackWindow. One person logs in a few times a week;
+	// ten a minute is generous.
+	callbackPerClient = 10
+	// callbackTotal is the ceiling for all clients together: the bound on
+	// the requests koroku sends to GitHub with the App's client secret. At
+	// one a second it stays a small, fixed number, and it is six times what
+	// one address gets, so that a client or two cannot use it up for the
+	// owner and the members (ARCHITECTURE 10).
+	callbackTotal  = 60
+	callbackWindow = time.Minute
+	// maxCallbackClients bounds the addresses remembered at a time. When
+	// that many have been seen within a window, the ceiling for all clients
+	// is long used up, so refusing another address loses nothing.
+	maxCallbackClients = 1024
+)
+
+// callbackLimiter bounds the OAuth code exchanges (handleCallback) per
+// client address and in total.
+type callbackLimiter struct {
+	mu      sync.Mutex
+	clients map[string]*rateLimiter
+	total   rateLimiter
+}
+
+func newCallbackLimiter() *callbackLimiter {
+	return &callbackLimiter{
+		clients: map[string]*rateLimiter{},
+		total:   rateLimiter{limit: callbackTotal, window: callbackWindow},
+	}
+}
+
+// allow counts one exchange for client. A client over its own limit does
+// not use up the total.
+func (l *callbackLimiter) allow(client string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	lim, ok := l.clients[client]
+	if !ok {
+		// An address whose window has passed starts from zero anyway:
+		// forget it, so that the map holds one window's addresses at most.
+		for key, other := range l.clients {
+			if now.Sub(other.start) >= callbackWindow {
+				delete(l.clients, key)
+			}
+		}
+		if len(l.clients) >= maxCallbackClients {
+			return false
+		}
+		lim = &rateLimiter{limit: callbackPerClient, window: callbackWindow}
+		l.clients[client] = lim
+	}
+	return lim.allow(now) && l.total.allow(now)
+}
+
+// callbackClient is what a client is counted under: its IPv4 address, or
+// the /64 of its IPv6 address, because one host usually has a whole /64 to
+// choose addresses from.
+func callbackClient(r *http.Request) string {
+	addr := clientIP(r)
+	ip := net.ParseIP(addr)
+	if ip == nil {
+		return addr
+	}
+	if v4 := ip.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 // rateLimiter allows a fixed number of events per window.
