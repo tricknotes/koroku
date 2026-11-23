@@ -821,7 +821,8 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, errs)
 		return
 	}
-	if (touchesSafeguards(before, app) || enablesProductionAutoDeploy(before, app)) && !s.requireRecentAuth(w, r) {
+	if (touchesSafeguards(before, app) || enablesProductionAutoDeploy(before, app) ||
+		changesProductionCommands(before, app)) && !s.requireRecentAuth(w, r) {
 		return
 	}
 	promoteBefore, err := s.promoteFromSlug(r.Context(), before)
@@ -941,6 +942,24 @@ func enablesProductionAutoDeploy(before, after store.App) bool {
 	}
 	return !before.AutoDeploy || before.EffectiveAutoDeployBranch() != after.EffectiveAutoDeployBranch() ||
 		before.AutoDeployWorkflow != after.AutoDeployWorkflow
+}
+
+// changesProductionCommands reports whether an update changes a command
+// that runs inside the containers of a production app: the dump hook (every
+// backup runs it), the load hook and the command after a load (they run in
+// database copies, once the app is a staging app). Saving one is a way to
+// run a command in the app, which needs a recent login like a one-off
+// command does (ARCHITECTURE 10.3).
+func changesProductionCommands(before, after store.App) bool {
+	if before.Environment != store.EnvironmentProduction && after.Environment != store.EnvironmentProduction {
+		return false
+	}
+	return before.DumpHookService != after.DumpHookService ||
+		before.DumpHookCommand != after.DumpHookCommand ||
+		before.LoadHookService != after.LoadHookService ||
+		before.LoadHookCommand != after.LoadHookCommand ||
+		before.PostLoadService != after.PostLoadService ||
+		before.PostLoadCommand != after.PostLoadCommand
 }
 
 // syncRoutes reloads the reverse proxy after a routing-relevant change. A

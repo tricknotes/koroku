@@ -373,6 +373,24 @@ route('PATCH', '/api/apps/:slug', (context) => {
   ) {
     throw new HttpError(403, 'reauth_required');
   }
+  // So does changing a command that runs in a production app's containers.
+  if (
+    context.scenario === 'stale-login' &&
+    target.environment === 'production' &&
+    [
+      'dump_hook_service',
+      'dump_hook_command',
+      'load_hook_service',
+      'load_hook_command',
+      'post_load_service',
+      'post_load_command',
+    ].some(
+      (field) =>
+        body[field] !== undefined && body[field] !== (target[field] ?? ''),
+    )
+  ) {
+    throw new HttpError(403, 'reauth_required');
+  }
   if (
     body.auto_deploy === true &&
     (!target.repo_full_name || target.repo_url)
