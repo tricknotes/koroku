@@ -13,6 +13,10 @@
 // text. The day of a file is the day of the entry's timestamp in
 // Options.Location.
 //
+// What one service writes into one day is bounded (Options.MaxDayBytes).
+// Lines beyond that are dropped, and an entry written by the collector
+// itself, starting with MarkerPrefix, says so in their place.
+//
 // Log lines are app output and may contain secrets. Nothing in this package
 // puts line content into errors or into koroku's own log.
 package logs
@@ -43,6 +47,19 @@ const (
 
 // MaxLineBytesLimit is the largest accepted Options.MaxLineBytes.
 const MaxLineBytesLimit = 256 << 10
+
+const (
+	// DefaultMaxDayBytes is Options.MaxDayBytes when it is not set.
+	DefaultMaxDayBytes = 100 << 20
+	// MaxDayBytesLimit is the largest accepted Options.MaxDayBytes. It
+	// keeps the content of a day below 4 GiB, where the size recorded in a
+	// gzip file wraps (see gzipContentSize).
+	MaxDayBytesLimit = 2 << 30
+)
+
+// MarkerPrefix starts the text of the entries the collector writes itself
+// where it drops lines.
+const MarkerPrefix = "[koroku] "
 
 // ErrInvalidName is returned when a slug or service name cannot be used as a
 // directory name.
@@ -114,6 +131,11 @@ type Options struct {
 	// MaxLineBytes bounds the text of one entry; longer lines are cut.
 	// Default 16 KiB, at most MaxLineBytesLimit.
 	MaxLineBytes int
+	// MaxDayBytes bounds what one service writes into one day, counted as
+	// the bytes of its day file before compression. The lines that would
+	// exceed it are dropped until the day changes. Default
+	// DefaultMaxDayBytes, at most MaxDayBytesLimit.
+	MaxDayBytes int64
 	// SubscriberBuffer is the channel capacity of a live subscriber.
 	// Default 1024: a burst larger than that outruns the subscriber.
 	SubscriberBuffer int
@@ -151,8 +173,11 @@ type Collector struct {
 	composePlugin func() string
 	onAccess      func(slug string, entry []byte)
 
-	retentionDays    int
-	maxLine          int
+	retentionDays int
+	maxLine       int
+	maxDayBytes   int64
+	// fullMarker is the text of the entry that ends a day at maxDayBytes.
+	fullMarker       string
 	subscriberBuffer int
 	reconcileEvery   time.Duration
 	restartDelay     time.Duration
@@ -183,6 +208,9 @@ func New(opts Options) (*Collector, error) {
 	if opts.RetentionDays < 0 {
 		return nil, errors.New("logs: RetentionDays must not be negative")
 	}
+	if opts.MaxDayBytes < 0 || opts.MaxDayBytes > MaxDayBytesLimit {
+		return nil, fmt.Errorf("logs: MaxDayBytes must be between 1 and %d", int64(MaxDayBytesLimit))
+	}
 	c := &Collector{
 		dir:              filepath.Clean(opts.Dir),
 		run:              opts.Runner,
@@ -194,6 +222,7 @@ func New(opts Options) (*Collector, error) {
 		log:              opts.Logger,
 		retentionDays:    orDefault(opts.RetentionDays, 14),
 		maxLine:          orDefault(opts.MaxLineBytes, 16<<10),
+		maxDayBytes:      orDefault(opts.MaxDayBytes, DefaultMaxDayBytes),
 		subscriberBuffer: orDefault(opts.SubscriberBuffer, 1024),
 		reconcileEvery:   orDefault(opts.ReconcileInterval, 15*time.Second),
 		restartDelay:     orDefault(opts.RestartDelay, 2*time.Second),
@@ -217,6 +246,8 @@ func New(opts Options) (*Collector, error) {
 	if c.maxRestartDelay < c.restartDelay {
 		c.maxRestartDelay = c.restartDelay
 	}
+	c.fullMarker = fmt.Sprintf("%sThe log of this service reached %s for this day. Further lines are dropped until the day changes ([logs] daily_limit_mb).",
+		MarkerPrefix, formatSize(c.maxDayBytes))
 	if err := os.MkdirAll(c.dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create log directory: %w", err)
 	}
@@ -224,6 +255,14 @@ func New(opts Options) (*Collector, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// formatSize writes a number of bytes for a marker entry.
+func formatSize(n int64) string {
+	if n >= 1<<20 && n%(1<<20) == 0 {
+		return fmt.Sprintf("%d MiB", n>>20)
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 func orDefault[T comparable](v, def T) T {

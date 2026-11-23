@@ -104,6 +104,7 @@ sudo ./deploy/provision.sh ./koroku
 | `[backup] restic_password_file` | `/etc/koroku/restic.key`（0600）。中身は自分で決めたパスワード 1 行。ファイルがない、または他人が読める権限だとバックアップは無効になる |
 | `[backup] hour`、`timezone` | 日次バックアップの時刻（既定は `Asia/Tokyo` の 3 時）。`timezone` は定期タスクの予定（ARCHITECTURE 9.6）とログの日付の区切りにも使う |
 | `[logs] retention_days`、`archive_interval_hours` | ログのローカル保持日数（既定 14）と退避の間隔（既定 4 時間） |
+| `[logs] daily_limit_mb` | 1 つのサービス（コンテナの出力、またはアプリのアクセスログ）が 1 日に残せるログの量（MiB。既定 100、1〜2048）。届くと、そのサービスの行は日付が変わるまで捨てられ、ログには `[koroku] The log of this service reached 100 MiB for this day. ...` という行が 1 行入る。捨てた行数は `journalctl -u koroku` に `dropping log lines` / `log lines were dropped`（アプリ、サービス、行数）として出る。上げて `koroku` を再起動すれば、その日のうちにまた残り始める。全サービスが毎日上限に届いたときのディスクの目安は ARCHITECTURE 10.1 |
 | `[tasks] timeout_minutes` | 管理 UI から実行するワンオフのコマンドと定期タスクの制限時間（既定 30 分、1〜1440） |
 
 `[github]` を書かないと誰もログインできない（API は 401 を返す）。`koroku serve --insecure-no-auth` は開発機専用で、unit ファイルには書かない。

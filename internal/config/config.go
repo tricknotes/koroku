@@ -83,6 +83,9 @@ type Logs struct {
 	RetentionDays int `toml:"retention_days"`
 	// ArchiveIntervalHours is how often logs are archived to object storage.
 	ArchiveIntervalHours int `toml:"archive_interval_hours"`
+	// DailyLimitMB is how many MiB of log lines one service of an app may
+	// write per day. The lines beyond it are dropped until the day changes.
+	DailyLimitMB int `toml:"daily_limit_mb"`
 }
 
 // Backup holds backup settings. Backups need [storage] as well.
@@ -181,7 +184,7 @@ func Default() Config {
 		GitHub:        GitHub{PrivateKeyFile: "/etc/koroku/github-app.pem"},
 		Timezone:      "Asia/Tokyo",
 		Storage:       Storage{Region: "auto"},
-		Logs:          Logs{RetentionDays: 14, ArchiveIntervalHours: 4},
+		Logs:          Logs{RetentionDays: 14, ArchiveIntervalHours: 4, DailyLimitMB: 100},
 		Backup:        Backup{ResticPasswordFile: "/etc/koroku/restic.key", Hour: 3},
 		Tasks:         Tasks{TimeoutMinutes: 30},
 		Caddy: Caddy{
@@ -314,6 +317,11 @@ func (c Config) Validate() error {
 	}
 	if c.Logs.RetentionDays < 1 {
 		errs = append(errs, fmt.Errorf("logs.retention_days %d must be at least 1", c.Logs.RetentionDays))
+	}
+	if mb := c.Logs.DailyLimitMB; mb < 1 || mb > 2048 {
+		// Above 2 GiB a day file gets close to the size a gzip file
+		// records only modulo 4 GiB, which the collector relies on.
+		errs = append(errs, fmt.Errorf("logs.daily_limit_mb %d must be between 1 and 2048", mb))
 	}
 	if h := c.Logs.ArchiveIntervalHours; h < 1 || h > 24 {
 		errs = append(errs, fmt.Errorf("logs.archive_interval_hours %d must be between 1 and 24", h))

@@ -98,6 +98,10 @@ access_log_dir = "/var/log/caddy/apps"
 retention_days = 14
 # How often logs are archived to object storage (1-24 hours).
 archive_interval_hours = 4
+# How many MiB of log lines one service of an app (its container output, or
+# the access log of the app) may write per day (1-2048). The lines beyond it
+# are dropped until the day changes, and one line in the log says so.
+daily_limit_mb = 100
 
 [backup]
 # restic repository password (mode 0600). Keep a copy outside this host:

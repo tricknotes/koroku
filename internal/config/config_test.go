@@ -191,7 +191,7 @@ func TestStorageLogsAndBackupConfig(t *testing.T) {
 	if cfg.Storage.Configured() {
 		t.Error("storage must not count as configured by default")
 	}
-	if cfg.Logs.Dir != "/var/lib/koroku/logs" || cfg.Logs.RetentionDays != 14 || cfg.Logs.ArchiveIntervalHours != 4 {
+	if cfg.Logs.Dir != "/var/lib/koroku/logs" || cfg.Logs.RetentionDays != 14 || cfg.Logs.ArchiveIntervalHours != 4 || cfg.Logs.DailyLimitMB != 100 {
 		t.Errorf("Logs = %+v", cfg.Logs)
 	}
 	if cfg.Backup.Hour != 3 || cfg.Backup.ResticPasswordFile != "/etc/koroku/restic.key" {
@@ -233,6 +233,8 @@ hour = 4
 		"plain http storage": "[storage]\nendpoint = \"http://s3.example.com\"\nbucket = \"koroku\"\naccess_key_id = \"a\"\nsecret_access_key = \"b\"",
 		"zero retention":     "[logs]\nretention_days = 0",
 		"archive too rare":   "[logs]\narchive_interval_hours = 48",
+		"no daily log limit": "[logs]\ndaily_limit_mb = 0",
+		"huge daily limit":   "[logs]\ndaily_limit_mb = 4096",
 		"bad backup hour":    "[backup]\nhour = 24",
 		"no task timeout":    "[tasks]\ntimeout_minutes = 0",
 		"task timeout > day": "[tasks]\ntimeout_minutes = 1441",

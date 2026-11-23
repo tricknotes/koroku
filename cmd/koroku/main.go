@@ -291,6 +291,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		ComposePlugin: logs.FindComposePlugin,
 		Logger:        logger,
 		RetentionDays: cfg.Logs.RetentionDays,
+		MaxDayBytes:   int64(cfg.Logs.DailyLimitMB) << 20,
 		OnAccess:      tracker.Observe,
 	})
 	if err != nil {
