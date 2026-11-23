@@ -14,8 +14,11 @@ interface ActionMenuSignature {
     label: string;
   };
   Blocks: {
-    /** The items: `<button class="menu-item">`; call `close` after acting. */
-    default: [close: () => void];
+    /**
+     * The items: `<button class="menu-item">` with their own click
+     * handler. The menu closes once the click has reached the item.
+     */
+    default: [];
   };
 }
 
@@ -23,6 +26,12 @@ interface ActionMenuSignature {
  * A "…" button that discloses a short list of actions. Like the user menu,
  * it closes on Escape (focus returns to the button), a press outside, or
  * once an item has run.
+ *
+ * The panel closes the menu from its own click listener, which the click
+ * reaches after the item's handler. Closing from a second listener on the
+ * item would not do: after each listener of a real click the browser runs
+ * the microtasks, the render removes the panel, and the item's later
+ * listeners are dropped with it.
  */
 export default class ActionMenu extends Component<ActionMenuSignature> {
   @tracked open = false;
@@ -35,8 +44,11 @@ export default class ActionMenu extends Component<ActionMenuSignature> {
     this.open = !this.open;
   };
 
-  close = () => {
-    this.open = false;
+  closeAfterItem = (event: MouseEvent) => {
+    // A disabled item fires no click, so any click on an item has run it.
+    if ((event.target as Element | null)?.closest('.menu-item')) {
+      this.open = false;
+    }
   };
 
   dismiss = (reason: DismissReason) => {
@@ -59,8 +71,14 @@ export default class ActionMenu extends Component<ActionMenuSignature> {
       ><Icon @name="more" /></button>
 
       {{#if this.open}}
-        <div class="menu-panel" id={{this.panelId}} data-test-action-menu-panel>
-          {{yield this.close}}
+        {{! template-lint-disable no-invalid-interactive }}
+        <div
+          class="menu-panel"
+          id={{this.panelId}}
+          data-test-action-menu-panel
+          {{on "click" this.closeAfterItem}}
+        >
+          {{yield}}
         </div>
       {{/if}}
     </div>
