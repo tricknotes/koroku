@@ -330,13 +330,12 @@ export default class AppTemplate extends Component<Signature> {
                 {{on "click" this.openDeploy}}
               >デプロイ</a>
               {{#if this.showsMenu}}
-                <ActionMenu @label="その他の操作" as |close|>
+                <ActionMenu @label="その他の操作">
                   <button
                     type="button"
                     class="menu-item"
                     disabled={{if this.controlling true false}}
                     data-test-control="restart"
-                    {{on "click" close}}
                     {{on "click" (fn this.control "restart")}}
                   >再起動</button>
                   <button
@@ -344,7 +343,6 @@ export default class AppTemplate extends Component<Signature> {
                     class="menu-item menu-item-danger"
                     disabled={{if this.controlling true false}}
                     data-test-control="stop"
-                    {{on "click" close}}
                     {{on "click" this.requestStop}}
                   >停止…</button>
                 </ActionMenu>
