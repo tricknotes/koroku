@@ -459,7 +459,14 @@ func (e *Engine) composeTo(ctx context.Context, inv compose.Invocation, dir stri
 // *RegistryAuthError. When the output says the registry has no image for a
 // tag, the log says so and the error wraps ErrImageNotFound.
 func (e *Engine) composePulling(ctx context.Context, inv compose.Invocation, dir string, log *deployLog, sub ...string) error {
-	auth := &lineWatcher{dst: log.Writer(), match: looksLikeRegistryAuthFailure}
+	var last string
+	tail := &lineWatcher{dst: log.Writer(), match: func(line string) bool {
+		if line = strings.TrimSpace(line); line != "" {
+			last = line
+		}
+		return false
+	}}
+	auth := &lineWatcher{dst: tail, match: looksLikeRegistryAuthFailure}
 	missing := &lineWatcher{dst: auth, match: looksLikeMissingImage}
 	err := e.composeTo(ctx, inv, dir, missing, sub...)
 	if err == nil || ctx.Err() != nil {
@@ -473,6 +480,11 @@ func (e *Engine) composePulling(ctx context.Context, inv compose.Invocation, dir
 	case missing.Seen():
 		logMissingImageHint(log)
 		return fmt.Errorf("%w: %w", ErrImageNotFound, err)
+	}
+	// Compose ends a failed run with the reason, such as
+	// `service "migrate" didn't complete successfully: exit 1`.
+	if last != "" {
+		return fmt.Errorf("%w: %s", err, capRunes(last, failureLineMax))
 	}
 	return err
 }
@@ -539,34 +551,49 @@ const failureLineMax = 200
 // failureLine picks, from the output of docker compose logs, the last line
 // that reads like an error message, as "<container>: <message>". Stack
 // frames (indented lines and Ruby's "from ..." lines) are skipped: the
-// message that names the reason comes before them. It is "" when no line
-// mentions an error, so that an unrelated last line is never presented as
-// the reason.
+// message that names the reason comes before them. Rake prints
+// "<task> aborted!" and the message on the next line; both are taken. It
+// is "" when no line mentions an error, so that an unrelated last line is
+// never presented as the reason.
 func failureLine(output string) string {
-	lines := strings.Split(output, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		container, message, found := strings.Cut(lines[i], " | ")
+	type line struct{ container, message string }
+	var lines []line
+	for _, raw := range strings.Split(output, "\n") {
+		container, message, found := strings.Cut(raw, " | ")
 		if !found {
-			container, message = "", lines[i]
+			container, message = "", raw
 		}
+		lines = append(lines, line{strings.TrimSpace(container), message})
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		container, message := lines[i].container, lines[i].message
 		if message == "" || message[0] == ' ' || message[0] == '\t' || strings.HasPrefix(message, "from ") {
 			continue
 		}
-		lower := strings.ToLower(message)
-		if !strings.Contains(lower, "error") && !strings.Contains(lower, "exception") &&
+		message = strings.TrimSpace(message)
+		if strings.HasSuffix(message, " aborted!") {
+			if i+1 < len(lines) && lines[i+1].container == container && strings.TrimSpace(lines[i+1].message) != "" {
+				message += " " + strings.TrimSpace(lines[i+1].message)
+			}
+		} else if lower := strings.ToLower(message); !strings.Contains(lower, "error") && !strings.Contains(lower, "exception") &&
 			!strings.Contains(lower, "fatal") && !strings.Contains(lower, "panic") {
 			continue
 		}
-		message = strings.TrimSpace(message)
-		if r := []rune(message); len(r) > failureLineMax {
-			message = string(r[:failureLineMax]) + "…"
-		}
-		if container = strings.TrimSpace(container); container != "" {
+		message = capRunes(message, failureLineMax)
+		if container != "" {
 			return container + ": " + message
 		}
 		return message
 	}
 	return ""
+}
+
+// capRunes cuts s to at most n characters, marking the cut with "…".
+func capRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
 
 // withOutput adds the container line from logContainerOutput to err, which

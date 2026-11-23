@@ -89,6 +89,14 @@ func TestFailureLinePicksTheErrorMessage(t *testing.T) {
 			want:   "api-1: ModuleNotFoundError: No module named 'flask'",
 		},
 		{
+			name: "rake aborted",
+			output: "migrate-1  | bin/rails aborted!\nmigrate-1  | this release does not boot\n" +
+				"migrate-1  | /rails/config/initializers/broken_boot.rb:3:in '<top (required)>'\n" +
+				"migrate-1  | Tasks: TOP => db:prepare => db:load_config => environment\n" +
+				"migrate-1  | (See full trace by running task with --trace)\n",
+			want: "migrate-1: bin/rails aborted! this release does not boot",
+		},
+		{
 			name:   "no error line",
 			output: "web-1  | Listening on http://0.0.0.0:3000\nweb-1  | Use Ctrl-C to stop\n",
 			want:   "",
@@ -144,5 +152,39 @@ func TestUnreadableContainerOutputDoesNotChangeTheOutcome(t *testing.T) {
 	}
 	if got.CurrentDeploymentID == nil || *got.CurrentDeploymentID != first.ID {
 		t.Errorf("current deployment must stay #%d, got %v", first.ID, got.CurrentDeploymentID)
+	}
+}
+
+// TestFailedUpNamesComposesReason: when up fails, the last line Compose
+// printed (which service failed and how) is part of the deployment's error,
+// next to the container's own error line.
+func TestFailedUpNamesComposesReason(t *testing.T) {
+	h := newHarness(t, nil)
+	h.createApp("blog")
+	h.start()
+	h.deploy("blog", shaA)
+
+	h.onCompose = func(_ context.Context, sub string, cmd runner.Cmd) error {
+		switch sub {
+		case "up":
+			_, _ = io.WriteString(cmd.Stdout, " Container koroku-blog-migrate-1 Waiting \n"+
+				"service \"migrate\" didn't complete successfully: exit 1\n")
+			return &runner.ExitError{Cmd: "docker", Code: 1}
+		case "logs":
+			_, _ = io.WriteString(cmd.Stdout, "migrate-1  | bin/rails aborted!\nmigrate-1  | this release does not boot\n")
+		}
+		return nil
+	}
+	d := h.deploy("blog", shaB)
+	if d.Status != store.StatusFailed {
+		t.Fatalf("deployment = %+v", d)
+	}
+	for _, want := range []string{
+		`service "migrate" didn't complete successfully: exit 1`,
+		"(container output: migrate-1: bin/rails aborted! this release does not boot)",
+	} {
+		if !strings.Contains(d.Error, want) {
+			t.Errorf("error = %q, want it to contain %q", d.Error, want)
+		}
 	}
 }
