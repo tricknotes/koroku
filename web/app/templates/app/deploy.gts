@@ -52,6 +52,10 @@ import SettingsEditor, {
 } from 'koroku-console/utils/settings-editor';
 import { can } from 'koroku-console/utils/roles';
 import {
+  repositoryMismatch,
+  repositoryMismatchTitle,
+} from 'koroku-console/utils/repository-mismatch';
+import {
   canRollBack,
   isReleaseGone,
   isRollback,
@@ -125,7 +129,8 @@ function detailId(deployment: Deployment): string {
 
 /**
  * The error of a history row: a failure for want of memory for a second
- * copy of the public service (ARCHITECTURE 7.2) and a commit that its ref
+ * copy of the public service (ARCHITECTURE 7.2), a repository name that
+ * denotes another repository (ARCHITECTURE 5) and a commit that its ref
  * does not reach (ARCHITECTURE 7) in plain words, any other as koroku
  * wrote it.
  */
@@ -134,6 +139,8 @@ function rowError(deployment: Deployment): string {
   if (shortage) {
     return `${MEMORY_SHORTAGE_TITLE}（${memoryShortageDetail(shortage)}）`;
   }
+  const mismatch = repositoryMismatch(deployment.error);
+  if (mismatch) return repositoryMismatchTitle(mismatch);
   const unreachable = unreachableCommit(deployment.error);
   return unreachable ? unreachableCommitTitle(unreachable) : deployment.error;
 }

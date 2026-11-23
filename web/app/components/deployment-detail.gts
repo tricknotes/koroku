@@ -22,6 +22,11 @@ import {
   memoryShortageDetail,
 } from 'koroku-console/utils/blue-green';
 import { formatDateTimeJst } from 'koroku-console/utils/format';
+import {
+  repositoryMismatch,
+  repositoryMismatchTitle,
+  type RepositoryMismatch,
+} from 'koroku-console/utils/repository-mismatch';
 import { isRollback, releaseId } from 'koroku-console/utils/rollback';
 import { isPush, pushTitle } from 'koroku-console/utils/trigger';
 import {
@@ -207,8 +212,15 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
     return unreachableCommit(this.args.deployment.error);
   }
 
+  /** The repository the fetch step refused because its name denotes another. */
+  get repositoryMismatch(): RepositoryMismatch | null {
+    return repositoryMismatch(this.args.deployment.error);
+  }
+
   get failureTitle(): string {
     if (this.memoryShortage) return this.memoryShortageTitle;
+    const mismatch = this.repositoryMismatch;
+    if (mismatch) return repositoryMismatchTitle(mismatch);
     const unreachable = this.unreachableCommit;
     return unreachable
       ? unreachableCommitTitle(unreachable)
@@ -354,6 +366,21 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
             <span data-test-memory-shortage>
               新しい版を並べて起動するには、公開サービスのメモリ上限 1
               つ分の空きが要ります（{{this.memoryShortage}}）。何も起動していないので、アプリは動き続けています。メモリを空ける（ほかのアプリを止める・休止させる、上限を下げる）か、無停止デプロイを外してからデプロイし直してください。
+            </span>
+          {{else if this.repositoryMismatch}}
+            <span data-test-repository-mismatch>
+              koroku はアプリのリポジトリを GitHub の ID
+              で覚えています。この名前のリポジトリの ID は
+              {{this.repositoryMismatch.found}}
+              で、アプリに設定した
+              {{this.repositoryMismatch.expected}}
+              と違います。リポジトリを消して同じ名前で作り直した、名前が別のアカウントのリポジトリに渡った、というときに起きます。何も取得していないので、アプリは動き続けています。心当たりがなければ、GitHub
+              でリポジトリを確かめてください。作り直したリポジトリをデプロイするなら、オーナーが
+              API でアプリの
+              <code>repo_id</code>
+              を
+              {{this.repositoryMismatch.found}}
+              に直します。
             </span>
           {{else if this.unreachableCommit}}
             <span data-test-unreachable-commit>

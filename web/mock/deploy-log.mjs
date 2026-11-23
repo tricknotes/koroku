@@ -268,8 +268,11 @@ function plan(entry, context) {
     // Only a commit that the deployment's branch or tag reaches is fetched
     // (ARCHITECTURE 7).
     const checking = `Checking that ${short} is on ${entry.ref || 'main'}`;
-    if (entry.mockFailure === 'fetch') {
-      step('fetch', `Fetching ${entry.commit_sha}`, [checking], 1 * SECOND);
+    // The repository's name is confirmed before that (ARCHITECTURE 5), so
+    // a name that denotes another repository fails without the line.
+    if (entry.mockFailure === 'fetch' || entry.mockFailure === 'repository') {
+      const lines = entry.mockFailure === 'fetch' ? [checking] : [];
+      step('fetch', `Fetching ${entry.commit_sha}`, lines, 1 * SECOND);
       out.push({ at, line: '' });
       out.push({
         at,
