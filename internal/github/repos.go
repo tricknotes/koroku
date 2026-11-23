@@ -165,6 +165,47 @@ func (c *Client) ListRepos(ctx context.Context) ([]Repo, error) {
 	return repos, nil
 }
 
+// GetRepo returns the repository GitHub has under owner/repo right now. The
+// ID is the repository's identity: a name can be given to another
+// repository, while the name of a renamed or transferred repository
+// redirects to the repository itself (GitHub answers 301 to
+// /repositories/{id} on the same host, which the HTTP client follows with
+// the same credentials). The result can therefore carry another full name
+// than the one asked for. InstallationID is not set.
+func (c *Client) GetRepo(ctx context.Context, owner, repo string) (Repo, error) {
+	if err := validateRepo(owner, repo); err != nil {
+		return Repo{}, err
+	}
+	in, err := c.repoCall(ctx, owner, repo, "", nil)
+	if err != nil {
+		return Repo{}, err
+	}
+	var item struct {
+		ID       int64  `json:"id"`
+		Name     string `json:"name"`
+		FullName string `json:"full_name"`
+		Private  bool   `json:"private"`
+		Owner    struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+		DefaultBranch string `json:"default_branch"`
+	}
+	if _, err := c.do(ctx, in, &item); err != nil {
+		return Repo{}, fmt.Errorf("github: repository %s/%s: %w", owner, repo, err)
+	}
+	if item.ID <= 0 {
+		return Repo{}, fmt.Errorf("github: repository %s/%s: response has no repository id", owner, repo)
+	}
+	return Repo{
+		ID:            item.ID,
+		FullName:      item.FullName,
+		Owner:         item.Owner.Login,
+		Name:          item.Name,
+		Private:       item.Private,
+		DefaultBranch: item.DefaultBranch,
+	}, nil
+}
+
 // ListBranches returns the branches of a repository. At most maxPages pages of
 // 100 are read.
 func (c *Client) ListBranches(ctx context.Context, owner, repo string) ([]Branch, error) {
