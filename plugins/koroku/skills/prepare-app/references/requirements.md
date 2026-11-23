@@ -50,7 +50,7 @@ services:
 | `restart: unless-stopped` が付く | マイグレーションなど終わって欲しいワンショットのサービスには `restart: "no"` を書く（書かないと終了後に再起動を繰り返す）。さらに、そのサービスは必ず別のサービスから `depends_on: { <名前>: { condition: service_completed_successfully } }` で待たれるようにする。誰も待っていないワンショットのサービスが終了すると、終了コードが 0 でも `up --wait` が失敗し、デプロイが失敗する（下の「起動順」） |
 | メモリ上限が付く | 既定 512m。リポジトリで `mem_limit` か `deploy.resources.limits.memory` を書けば、既定値以下なら尊重される。それより大きくしたいときは koroku のアプリ設定で上げる（リポジトリに書いても既定値で頭打ちになる） |
 | `oom_score_adj` は koroku が決める | 本番アプリ（`environment = production`）は `-400`、staging は `500`。ホスト全体でメモリが尽きたとき、staging のコンテナから止まり、本番は最後になる。リポジトリに書いた値は上書きされ、ポリシー検査では拒否されない。環境を切り替えると次のデプロイから変わる |
-| 本番はメモリを予約する | 本番アプリの各サービスに `mem_reservation`（cgroup の `memory.low`）が付き、メモリが足りないときに回収を後回しにされる。既定はそのサービスのメモリ上限の半分で、koroku のアプリ設定で全体とサービスごとに変えられる（`0` で予約しない）。上限を超える値は上限に切り詰められる。リポジトリの `deploy.resources` を使っていれば `deploy.resources.reservations.memory` に書かれる。リポジトリに書いた予約は使われない（本番は koroku の値、staging は消える） |
+| 本番はメモリを予約する | 本番アプリの各サービスに `mem_reservation`（cgroup の `memory.low`）が付き、メモリが足りないときに回収を後回しにされる。既定はそのサービスのメモリ上限の半分で、koroku のアプリ設定で全体とサービスごとに変えられる（`0` で予約しない）。ほかのサービスが `depends_on` の `condition: service_completed_successfully` で待つワンショットのサービス（マイグレーションなど）には、設定によらず付かない（終わったあとは何も使わないため）。上限を超える値は上限に切り詰められる。リポジトリの `deploy.resources` を使っていれば `deploy.resources.reservations.memory` に書かれる。リポジトリに書いた予約は使われない（本番は koroku の値、staging は消える） |
 | `build:` のイメージ名は上書きされる | `image:` と `build:` を両方書いてもよいが、その名前のイメージは作られない。別サービスがそのイメージ名を参照する構成（ビルドを 1 回にして使い回す）は動かないので、各サービスに同じ `build:` を書く |
 
 ## 環境変数

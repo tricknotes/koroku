@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tricknotes/koroku/internal/compose"
 	"github.com/tricknotes/koroku/internal/store"
 	"github.com/tricknotes/koroku/internal/system"
 )
@@ -57,7 +58,7 @@ func TestSystemMemoryReservation(t *testing.T) {
 	h := srv.Handler()
 	ctx := context.Background()
 	now := srv.clock.Now()
-	release := func(slug string, reservations map[string]int64) {
+	release := func(slug string, reservations map[string]int64, shapes ...map[string]compose.MemoryShape) {
 		t.Helper()
 		app, err := srv.store.GetApp(ctx, slug)
 		if err != nil {
@@ -72,6 +73,11 @@ func TestSystemMemoryReservation(t *testing.T) {
 		}
 		if err := srv.store.SetDeploymentMemoryReservations(ctx, d.ID, reservations); err != nil {
 			t.Fatal(err)
+		}
+		for _, s := range shapes {
+			if err := srv.store.SetDeploymentMemoryShapes(ctx, d.ID, s); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if err := srv.store.FinishDeployment(ctx, d.ID, store.StatusSucceeded, "", now); err != nil {
 			t.Fatal(err)
@@ -109,6 +115,78 @@ func TestSystemMemoryReservation(t *testing.T) {
 	got = decode[summary](t, request(t, h, http.MethodGet, "/api/system", "")).MemoryReservation
 	if got.TotalBytes != 3136<<20 || !got.Warning {
 		t.Errorf("summary = %+v, want a warning above 3 GiB + 1 GiB on a 4 GiB host", got)
+	}
+	if got.Apps[0].NextTotalBytes != nil || got.NextTotalBytes != got.TotalBytes {
+		t.Errorf("without recorded shapes the next reservations are unknown and count as now: %+v", got)
+	}
+}
+
+// TestSystemNextMemoryReservation: settings saved after a deployment show
+// what the next one reserves (ARCHITECTURE 6.2).
+func TestSystemNextMemoryReservation(t *testing.T) {
+	srv := newTestServer(t, func(o *Options) {
+		o.System = fakeProber{info: system.Info{Memory: &system.Memory{TotalBytes: 4 << 30, AvailableBytes: 1 << 30}}}
+	})
+	h := srv.Handler()
+	ctx := context.Background()
+	now := srv.clock.Now()
+	for _, slug := range []string{"shop", "wiki"} {
+		createApp(t, h, slug)
+	}
+	deployWith := func(slug string, reservations map[string]int64) {
+		t.Helper()
+		app, _ := srv.store.GetApp(ctx, slug)
+		d, _, err := srv.store.EnqueueDeployment(ctx, app.ID, "main", testSHA, "", now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := srv.store.StartDeployment(ctx, d.ID, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := srv.store.SetDeploymentMemoryReservations(ctx, d.ID, reservations); err != nil {
+			t.Fatal(err)
+		}
+		shapes := map[string]compose.MemoryShape{"web": {}, "db": {}, "migrate": {OneShot: true}}
+		if err := srv.store.SetDeploymentMemoryShapes(ctx, d.ID, shapes); err != nil {
+			t.Fatal(err)
+		}
+		if err := srv.store.FinishDeployment(ctx, d.ID, store.StatusSucceeded, "", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// shop ran as production with half of the default 512m everywhere;
+	// wiki ran as staging and has been switched to production since.
+	deployWith("shop", map[string]int64{"web": 256 << 20, "db": 256 << 20})
+	deployWith("wiki", map[string]int64{})
+	for _, req := range []struct{ slug, body string }{
+		{"shop", `{"environment": "production", "service_memory_reservations": {"db": "200m", "web": "100m"}}`},
+		{"wiki", `{"environment": "production"}`},
+	} {
+		if rec := request(t, h, http.MethodPatch, "/api/apps/"+req.slug, req.body); rec.Code != http.StatusOK {
+			t.Fatalf("patch %s: %d %s", req.slug, rec.Code, rec.Body)
+		}
+	}
+
+	type summary struct {
+		MemoryReservation *memoryReservationJSON `json:"memory_reservation"`
+	}
+	got := decode[summary](t, request(t, h, http.MethodGet, "/api/system", "")).MemoryReservation
+	if got.TotalBytes != 512<<20 || got.NextTotalBytes != 812<<20 {
+		t.Errorf("totals = %d now, %d next; want 512 MiB and 300 MiB + 512 MiB", got.TotalBytes>>20, got.NextTotalBytes>>20)
+	}
+	bySlug := map[string]appReservationJSON{}
+	for _, a := range got.Apps {
+		bySlug[a.Slug] = a
+	}
+	shop, wiki := bySlug["shop"], bySlug["wiki"]
+	if shop.NextTotalBytes == nil || *shop.NextTotalBytes != 300<<20 || shop.NextServices["db"] != 200<<20 {
+		t.Errorf("shop = %+v", shop)
+	}
+	if _, ok := shop.NextServices["migrate"]; ok {
+		t.Errorf("a one-shot service reserves nothing: %+v", shop.NextServices)
+	}
+	if wiki.TotalBytes != 0 || wiki.NextTotalBytes == nil || *wiki.NextTotalBytes != 512<<20 {
+		t.Errorf("an app that will reserve once deployed is listed: %+v", wiki)
 	}
 }
 

@@ -230,6 +230,26 @@ func (p Project) Dependencies(service string) []string {
 	return deps
 }
 
+// OneShot reports whether another service waits for this one to finish
+// (depends_on with condition service_completed_successfully): a migration
+// or seed that runs once per deployment and exits (ARCHITECTURE 7). It
+// uses no memory after that, so it gets no reservation (ARCHITECTURE 6.2).
+func (p Project) OneShot(service string) bool {
+	for _, other := range p.Services {
+		raw, ok := other.DependsOn[service]
+		if !ok {
+			continue
+		}
+		var dep struct {
+			Condition string `json:"condition"`
+		}
+		if json.Unmarshal(raw, &dep) == nil && dep.Condition == "service_completed_successfully" {
+			return true
+		}
+	}
+	return false
+}
+
 // NeedsBuild reports whether any service has a build section.
 func (p Project) NeedsBuild() bool {
 	for _, s := range p.Services {

@@ -99,29 +99,23 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		result := compose.CheckPolicy(repoProject, compose.PolicyParams{WebService: app.WebService, Relax: true})
 		return false, &compose.PolicyError{Violations: filterRule(result.Violations, compose.RuleWebServiceMissing)}
 	}
-	overrideParams := compose.OverrideParams{
-		Project:       repoProject,
-		WebService:    app.WebService,
-		WebPort:       app.WebPort,
-		HostPort:      app.HostPort,
-		EnvFile:       e.EnvFile(app.Slug),
-		DefaultMemory: e.opts.DefaultMemory,
-		AppMemory:     app.MemoryLimit,
-		ServiceMemory: app.ServiceMemoryLimits,
-		// The environment decides which apps a host-wide memory shortage
-		// hits first (ARCHITECTURE 6.2).
-		Production:         app.Environment == store.EnvironmentProduction,
-		AppReservation:     app.MemoryReservation,
-		ServiceReservation: app.ServiceMemoryReservations,
-		ProjectName:        app.ProjectName(),
-		ReleaseTag:         "r" + strconv.FormatInt(d.ID, 10),
-	}
+	overrideParams := memoryParams(app, e.opts.DefaultMemory)
+	overrideParams.Project = repoProject
+	overrideParams.WebService = app.WebService
+	overrideParams.WebPort = app.WebPort
+	overrideParams.HostPort = app.HostPort
+	overrideParams.EnvFile = e.EnvFile(app.Slug)
+	overrideParams.ProjectName = app.ProjectName()
+	overrideParams.ReleaseTag = "r" + strconv.FormatInt(d.ID, 10)
 	override, err := compose.Override(overrideParams)
 	if err != nil {
 		return false, err
 	}
 	reservations := overrideParams.Reservations()
 	if err := e.opts.Store.SetDeploymentMemoryReservations(ctx, d.ID, reservations); err != nil {
+		return false, err
+	}
+	if err := e.opts.Store.SetDeploymentMemoryShapes(ctx, d.ID, repoProject.MemoryShapes()); err != nil {
 		return false, err
 	}
 	if overrideParams.Production {
@@ -519,6 +513,29 @@ func ensureFile(path string) error {
 		return nil
 	}
 	return writeFileAtomic(path, nil, 0o600)
+}
+
+// memoryParams holds the app settings that decide memory limits and
+// reservations (ARCHITECTURE 6.2).
+func memoryParams(app store.App, defaultMemory string) compose.OverrideParams {
+	return compose.OverrideParams{
+		DefaultMemory: defaultMemory,
+		AppMemory:     app.MemoryLimit,
+		ServiceMemory: app.ServiceMemoryLimits,
+		// The environment decides which apps a host-wide memory shortage
+		// hits first.
+		Production:         app.Environment == store.EnvironmentProduction,
+		AppReservation:     app.MemoryReservation,
+		ServiceReservation: app.ServiceMemoryReservations,
+	}
+}
+
+// NextReservations is what the next deployment of the app reserves for
+// each service (ARCHITECTURE 6.2): the app's current settings applied to
+// the services of its running release, whose shapes the deployment
+// recorded. Services without a reservation are left out.
+func NextReservations(app store.App, defaultMemory string, shapes map[string]compose.MemoryShape) map[string]int64 {
+	return memoryParams(app, defaultMemory).ReservationsFor(shapes)
 }
 
 // describeReservations renders per-service reservations for the deploy

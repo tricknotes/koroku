@@ -8,7 +8,16 @@
       ],
       "mem_limit": "402653184",
       "mem_reservation": "314572800",
-      "oom_score_adj": -1000
+      "oom_score_adj": -1000,
+      "depends_on": {
+        "migrate": {"condition": "service_completed_successfully", "required": true}
+      }
+    },
+    "migrate": {
+      "image": "ghcr.io/example/shop:latest",
+      "command": ["bin/rails", "db:prepare"],
+      "restart": "no",
+      "mem_reservation": "134217728"
     },
     "db": {
       "image": "postgres:17",
