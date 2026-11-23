@@ -172,6 +172,29 @@ func TestDeploymentWithoutARefRecordsTheBranchOfTheApp(t *testing.T) {
 	}
 }
 
+// A queued row without a ref (written by a koroku that does not record
+// one) is not exempt: the fetch step checks it against the branch the app
+// follows.
+func TestQueuedDeploymentWithoutARefIsCheckedAgainstTheBranchOfTheApp(t *testing.T) {
+	h := newHarness(t, nil)
+	app := h.createApp("blog")
+	h.branches = map[string][]string{"main": {shaB, shaA}}
+	foreign := strings.Repeat("f", 40)
+	d, _, err := h.store.EnqueueDeployment(context.Background(), app.ID, "", foreign, "", h.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+
+	d = h.wait(d.ID)
+	if d.Status != store.StatusFailed || !strings.Contains(d.Error, `commit ffffffff is not reachable from "main"`) {
+		t.Errorf("deployment = %s %q", d.Status, d.Error)
+	}
+	if calls := h.dockerCalls(); len(calls) > 0 {
+		t.Errorf("docker ran: %v", calls)
+	}
+}
+
 // A promotion fetches the commit again and is checked like any deployment,
 // against the ref the promoted release was deployed from (ARCHITECTURE
 // 9.7): staging may follow a branch that production never deploys itself.
