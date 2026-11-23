@@ -1,0 +1,5 @@
+[blue_green] service "proxy": refers to the public service web (depends_on), which blue/green deploys disable
+[blue_green] service "sidecar": refers to the public service web (depends_on, network_mode, volumes_from), which blue/green deploys disable
+[blue_green] service "web": container_name shop-web would be used by both colours at once; remove it
+[blue_green] service "web": the public service runs 2 containers; blue/green replaces one
+[blue_green] service "web-green": the service name web-green is used for a colour of the public service

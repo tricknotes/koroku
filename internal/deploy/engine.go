@@ -267,6 +267,18 @@ type releaseMeta struct {
 	// example). They are removed with the release when nothing else uses
 	// them (removeUnusedPulledImages).
 	PulledImages []string `json:"pulled_images,omitempty"`
+	// BlueGreen marks a release in the blue/green form (ARCHITECTURE 7.2);
+	// Services are the services of its merged project, the public service
+	// and its coloured copies included, and ReleaseEnvServices the ones
+	// that read the release env file.
+	BlueGreen          bool     `json:"blue_green,omitempty"`
+	Services           []string `json:"services,omitempty"`
+	ReleaseEnvServices []string `json:"release_env_services,omitempty"`
+	// BlueGreenProblems are the findings of compose.CheckBlueGreen on the
+	// release's Compose file, recorded whether or not the app uses
+	// blue/green, so that its settings can warn before it is turned on
+	// (ARCHITECTURE 7.2); nil for releases from before the check.
+	BlueGreenProblems *[]compose.Violation `json:"blue_green_problems,omitempty"`
 }
 
 func (e *Engine) writeMeta(slug string, id int64, meta releaseMeta) error {
@@ -296,7 +308,12 @@ func (e *Engine) invocation(app store.App, id int64, composeFile string, withOve
 	if withOverride {
 		files = append(files, filepath.Join(dir, compose.OverrideFileName))
 	}
-	return compose.Invocation{ProjectName: app.ProjectName(), Files: files, EnvFile: e.EnvFile(app.Slug)}
+	inv := compose.Invocation{ProjectName: app.ProjectName(), Files: files, EnvFile: e.EnvFile(app.Slug)}
+	if e.releaseIsBlueGreen(app.Slug, id) {
+		// Interpolation also sees the commit variables (ARCHITECTURE 7.2).
+		inv.ReleaseEnvFile = e.ReleaseEnvFile(app.Slug)
+	}
+	return inv
 }
 
 // --- accepting and canceling ---
@@ -482,6 +499,9 @@ func (e *Engine) Run(ctx context.Context) error {
 			}
 		}
 	}
+	// A blue/green deploy that koroku's stop interrupted may have left a
+	// colour that receives no requests (ARCHITECTURE 7.2).
+	e.CleanUpColors(ctx)
 	for {
 		if ctx.Err() != nil {
 			return nil
@@ -592,7 +612,11 @@ func (e *Engine) process(ctx context.Context, d store.Deployment) {
 		status, message = e.classify(ctx, jobCtx, runErr, masker)
 		log.Printf("%s", "")
 		log.Step(StepFailed, "Deployment %s: %s", status, message)
-		if touched {
+		var handled *blueGreenFailure
+		if errors.As(runErr, &handled) {
+			// A blue/green deploy cleaned up after itself (ARCHITECTURE 7.2).
+			rolledBack = handled.restored
+		} else if touched {
 			if ctx.Err() != nil {
 				log.Printf("koroku is shutting down; the previous release is not restored automatically.")
 			} else {

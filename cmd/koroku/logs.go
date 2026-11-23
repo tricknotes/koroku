@@ -137,6 +137,9 @@ func collectedApps(st *store.Store, accessLogDir string) func(ctx context.Contex
 		out := make([]logs.App, 0, len(apps))
 		for _, app := range apps {
 			entry := logs.App{Slug: app.Slug, Project: app.ProjectName()}
+			if app.UsesColors() {
+				entry.PublicService = app.WebService
+			}
 			if accessLogDir != "" {
 				entry.AccessLogPath = filepath.Join(accessLogDir, app.Slug+".log")
 			}

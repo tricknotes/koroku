@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -72,6 +73,16 @@ type Service struct {
 	// configuration always prints the long form (a map of conditions);
 	// only the names matter here.
 	DependsOn map[string]json.RawMessage `json:"depends_on"`
+
+	// ContainerName, Scale and Networks matter to blue/green deploys
+	// (ARCHITECTURE 7.2): a fixed name or more than one container cannot
+	// run twice side by side, and the coloured copies join the networks
+	// of the public service under its name.
+	ContainerName string `json:"container_name"`
+	Scale         *int   `json:"scale"`
+	// Networks are the networks the service joins, by key; the values
+	// (aliases and addresses) are not read.
+	Networks map[string]json.RawMessage `json:"networks"`
 }
 
 // Build is the build section of a service.
@@ -162,9 +173,11 @@ type Mount struct {
 	ReadOnly bool   `json:"read_only"`
 }
 
-// Deploy mirrors the part of the deploy section that carries resource limits.
+// Deploy mirrors the part of the deploy section that carries resource
+// limits and the number of containers.
 type Deploy struct {
 	Resources *Resources `json:"resources"`
+	Replicas  *int       `json:"replicas"`
 }
 
 // Resources holds resource limits and reservations.
@@ -248,6 +261,30 @@ func (p Project) OneShot(service string) bool {
 		}
 	}
 	return false
+}
+
+// WithoutServices returns a copy of the project without the named
+// services. The services map is new; the services themselves are shared.
+func (p Project) WithoutServices(names ...string) Project {
+	out := p
+	out.Services = make(map[string]Service, len(p.Services))
+	for name, svc := range p.Services {
+		if !slices.Contains(names, name) {
+			out.Services[name] = svc
+		}
+	}
+	return out
+}
+
+// BuiltServices lists, sorted, the services with a build section.
+func (p Project) BuiltServices() []string {
+	var out []string
+	for _, name := range p.ServiceNames() {
+		if p.Services[name].HasBuild() {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // NeedsBuild reports whether any service has a build section.
@@ -334,6 +371,14 @@ type Invocation struct {
 	// EnvFile is passed with --env-file for ${VAR} interpolation. With this
 	// flag Compose does not read the repository's own .env for interpolation.
 	EnvFile string
+	// ReleaseEnvFile, when set, is passed with a second --env-file: the
+	// commit variables of a blue/green app live in a file of their own
+	// (ARCHITECTURE 7.2), and interpolation sees both.
+	ReleaseEnvFile string
+	// Profiles are passed with --profile. Configuration, build and pull
+	// calls of a blue/green release name DisabledProfile, so that the
+	// public service the override disables is part of the project.
+	Profiles []string
 	// DockerConfig is the Docker client config directory holding the
 	// app's registry credential (ARCHITECTURE 6.1). Empty means the
 	// default config of the user koroku runs as.
@@ -358,6 +403,12 @@ func (i Invocation) Args(sub ...string) []string {
 	}
 	if i.EnvFile != "" {
 		args = append(args, "--env-file", i.EnvFile)
+	}
+	if i.ReleaseEnvFile != "" {
+		args = append(args, "--env-file", i.ReleaseEnvFile)
+	}
+	for _, profile := range i.Profiles {
+		args = append(args, "--profile", profile)
 	}
 	return append(args, sub...)
 }

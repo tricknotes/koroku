@@ -94,48 +94,80 @@ type appJSON struct {
 	// from this app; ReviewApps counts them, null on a review app.
 	ReviewAppsAllowed bool               `json:"review_apps_allowed"`
 	ReviewApps        *reviewSummaryJSON `json:"review_apps"`
+	// Blue/green deploys of the public service (ARCHITECTURE 7.2).
+	// AltHostPort is the second port (null until first turned on), WebColor
+	// the colour that receives the requests (null while the public service
+	// runs as itself). BlueGreenProblems lists what keeps the running
+	// release's Compose file from blue/green deploys; null when unknown
+	// (not deployed, or deployed before the check).
+	BlueGreen             bool                 `json:"blue_green"`
+	BlueGreenDrainSeconds int                  `json:"blue_green_drain_seconds"`
+	AltHostPort           *int                 `json:"alt_host_port"`
+	WebColor              *string              `json:"web_color"`
+	BlueGreenProblems     *[]compose.Violation `json:"blue_green_problems"`
+}
+
+// blueGreenChecker tells what keeps an app's running release from
+// blue/green deploys. *deploy.Engine implements it.
+type blueGreenChecker interface {
+	BlueGreenProblems(app store.App) ([]compose.Violation, bool)
 }
 
 func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 	out := appJSON{
-		Slug:                 app.Slug,
-		RepoFullName:         app.RepoFullName,
-		RepoURL:              app.RepoURL,
-		DefaultBranch:        app.DefaultBranch,
-		ComposePath:          app.ComposePath,
-		WebService:           app.WebService,
-		WebPort:              app.WebPort,
-		HostPort:             app.HostPort,
-		HealthcheckPath:      app.HealthcheckPath,
-		DesiredState:         app.DesiredState,
-		Environment:          app.Environment,
-		RelaxPolicy:          app.RelaxPolicy,
-		MemoryLimit:          app.MemoryLimit,
-		ServiceMemoryLimits:  app.ServiceMemoryLimits,
-		MemoryReservation:    app.MemoryReservation,
-		ServiceReservations:  app.ServiceMemoryReservations,
-		BackupExcludeVolumes: app.BackupExcludeVolumes,
-		DumpHookService:      app.DumpHookService,
-		DumpHookCommand:      app.DumpHookCommand,
-		BackupBeforeDeploy:   app.BackupBeforeDeploy,
-		LoadHookService:      app.LoadHookService,
-		LoadHookCommand:      app.LoadHookCommand,
-		PostLoadService:      app.PostLoadService,
-		PostLoadCommand:      app.PostLoadCommand,
-		EnvSource:            app.EnvSource,
-		EnvExamplePath:       app.EnvExamplePath,
-		AccessProtection:     app.AccessProtection,
-		ProtectionExempt:     app.ProtectionExemptPaths,
-		AutoDeploy:           app.AutoDeploy,
-		AutoDeployBranch:     app.AutoDeployBranch,
-		AutoDeployWorkflow:   app.AutoDeployWorkflow,
-		IdleSleep:            app.IdleSleep,
-		IdleSleepMinutes:     app.IdleSleepMinutes,
-		SleepingSince:        app.SleepingSince,
-		ReviewAppsAllowed:    app.ReviewAppsAllowed,
-		URL:                  "https://" + app.Slug + "." + s.cfg.BaseDomain,
-		CreatedAt:            app.CreatedAt,
-		UpdatedAt:            app.UpdatedAt,
+		Slug:                  app.Slug,
+		RepoFullName:          app.RepoFullName,
+		RepoURL:               app.RepoURL,
+		DefaultBranch:         app.DefaultBranch,
+		ComposePath:           app.ComposePath,
+		WebService:            app.WebService,
+		WebPort:               app.WebPort,
+		HostPort:              app.HostPort,
+		HealthcheckPath:       app.HealthcheckPath,
+		DesiredState:          app.DesiredState,
+		Environment:           app.Environment,
+		RelaxPolicy:           app.RelaxPolicy,
+		MemoryLimit:           app.MemoryLimit,
+		ServiceMemoryLimits:   app.ServiceMemoryLimits,
+		MemoryReservation:     app.MemoryReservation,
+		ServiceReservations:   app.ServiceMemoryReservations,
+		BackupExcludeVolumes:  app.BackupExcludeVolumes,
+		DumpHookService:       app.DumpHookService,
+		DumpHookCommand:       app.DumpHookCommand,
+		BackupBeforeDeploy:    app.BackupBeforeDeploy,
+		LoadHookService:       app.LoadHookService,
+		LoadHookCommand:       app.LoadHookCommand,
+		PostLoadService:       app.PostLoadService,
+		PostLoadCommand:       app.PostLoadCommand,
+		EnvSource:             app.EnvSource,
+		EnvExamplePath:        app.EnvExamplePath,
+		AccessProtection:      app.AccessProtection,
+		ProtectionExempt:      app.ProtectionExemptPaths,
+		AutoDeploy:            app.AutoDeploy,
+		AutoDeployBranch:      app.AutoDeployBranch,
+		AutoDeployWorkflow:    app.AutoDeployWorkflow,
+		IdleSleep:             app.IdleSleep,
+		IdleSleepMinutes:      app.IdleSleepMinutes,
+		SleepingSince:         app.SleepingSince,
+		ReviewAppsAllowed:     app.ReviewAppsAllowed,
+		BlueGreen:             app.BlueGreen,
+		BlueGreenDrainSeconds: app.BlueGreenDrainSeconds,
+		WebColor:              optionalString(app.WebColor),
+		URL:                   "https://" + app.Slug + "." + s.cfg.BaseDomain,
+		CreatedAt:             app.CreatedAt,
+		UpdatedAt:             app.UpdatedAt,
+	}
+	if app.AltHostPort != 0 {
+		port := app.AltHostPort
+		out.AltHostPort = &port
+	}
+	if checker, ok := s.deployer.(blueGreenChecker); ok {
+		if problems, known := checker.BlueGreenProblems(app); known {
+			if problems == nil {
+				problems = []compose.Violation{}
+			}
+			out.BlueGreenProblems = &problems
+		}
 	}
 	lvl, err := s.appLevel(r, app)
 	if err != nil {
@@ -229,6 +261,8 @@ type appInput struct {
 	AutoDeployWorkflow   *string            `json:"auto_deploy_workflow"`
 	IdleSleep            *bool              `json:"idle_sleep"`
 	IdleSleepMinutes     *int               `json:"idle_sleep_minutes"`
+	BlueGreen            *bool              `json:"blue_green"`
+	BlueGreenDrain       *int               `json:"blue_green_drain_seconds"`
 	// ReviewAppsAllowed is read by PATCH only (ARCHITECTURE 9.9).
 	ReviewAppsAllowed *bool `json:"review_apps_allowed"`
 }
@@ -408,6 +442,16 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	}
 	if m := app.IdleSleepMinutes; m < store.MinIdleSleepMinutes || m > store.MaxIdleSleepMinutes {
 		errs.add("idle_sleep_minutes", fmt.Sprintf("must be between %d and %d", store.MinIdleSleepMinutes, store.MaxIdleSleepMinutes))
+	}
+
+	if in.BlueGreen != nil {
+		app.BlueGreen = *in.BlueGreen
+	}
+	if in.BlueGreenDrain != nil {
+		app.BlueGreenDrainSeconds = *in.BlueGreenDrain
+	}
+	if d := app.BlueGreenDrainSeconds; d < 0 || d > store.MaxBlueGreenDrainSeconds {
+		errs.add("blue_green_drain_seconds", fmt.Sprintf("must be between 0 and %d", store.MaxBlueGreenDrainSeconds))
 	}
 
 	if app.RepoFullName == "" && app.RepoURL == "" {
@@ -658,6 +702,11 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.checkIdleSleep(store.App{}, app, errs)
+	if app.BlueGreen {
+		// It is set on the deploy tab of an existing app, which gives it
+		// its second port (ARCHITECTURE 7.2).
+		errs.add("blue_green", "turn it on once the app exists")
+	}
 	sealEnv := s.sealCreateEnv(body.Env, errs)
 	if len(errs) > 0 {
 		writeValidationError(w, errs)
@@ -778,6 +827,19 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.internalError(w, r, err)
 		return
+	}
+	if app.BlueGreen && app.AltHostPort == 0 {
+		// The second port is kept from the first time on (ARCHITECTURE 7.2).
+		port, err := s.store.AllocateAltHostPort(r.Context(), app.ID, s.cfg.Deploy.PortRangeStart, s.cfg.Deploy.PortRangeEnd)
+		if errors.Is(err, store.ErrNoFreePort) {
+			writeValidationError(w, fieldErrors{"blue_green": "no host port is free for the second copy of the public service"})
+			return
+		}
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		app.AltHostPort = port
 	}
 	if err := s.store.UpdateApp(r.Context(), app, s.clock.Now()); err != nil {
 		s.internalError(w, r, err)

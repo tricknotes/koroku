@@ -295,7 +295,7 @@ func (j *copyJob) run(ctx context.Context) (bytes int64, err error) {
 	if err != nil {
 		return 0, err
 	}
-	if !slices.Contains(running, dst.LoadHookService) {
+	if !slices.Contains(running, dst.LiveService(dst.LoadHookService)) {
 		return 0, fmt.Errorf("the load hook service %s of %s is not running", dst.LoadHookService, dst.Slug)
 	}
 
@@ -323,7 +323,7 @@ func (j *copyJob) run(ctx context.Context) (bytes int64, err error) {
 	j.log.Step(StepStop, "Stopping the other services of %s", dst.Slug)
 	var others []string
 	for _, name := range running {
-		if name != dst.LoadHookService {
+		if name != dst.LiveService(dst.LoadHookService) {
 			others = append(others, name)
 		}
 	}
@@ -550,9 +550,10 @@ func (w *limitWriter) Write(p []byte) (int, error) {
 }
 
 // hookArgs runs a hook's command line with `sh -c` inside the service's
-// container; no shell runs on the host.
+// container; no shell runs on the host. The public service of a blue/green
+// app runs in its colour (ARCHITECTURE 7.2).
 func hookArgs(app store.App, service, command string) []string {
-	return []string{"compose", "-p", app.ProjectName(), "exec", "-T", service, "sh", "-c", command}
+	return []string{"compose", "-p", app.ProjectName(), "exec", "-T", app.LiveService(service), "sh", "-c", command}
 }
 
 // runningServices lists the services of the app that have a running

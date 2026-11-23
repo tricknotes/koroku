@@ -164,6 +164,8 @@ var settingFields = []settingField{
 	{name: "auto_deploy_workflow", get: func(a store.App) any { return a.AutoDeployWorkflow }},
 	{name: "idle_sleep", get: func(a store.App) any { return a.IdleSleep }},
 	{name: "idle_sleep_minutes", get: func(a store.App) any { return a.IdleSleepMinutes }},
+	{name: "blue_green", get: func(a store.App) any { return a.BlueGreen }},
+	{name: "blue_green_drain_seconds", get: func(a store.App) any { return a.BlueGreenDrainSeconds }},
 	{name: "review_apps_allowed", get: func(a store.App) any { return a.ReviewAppsAllowed }},
 }
 

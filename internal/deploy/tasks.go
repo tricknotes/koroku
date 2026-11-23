@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tricknotes/koroku/internal/compose"
 	"github.com/tricknotes/koroku/internal/runner"
 	"github.com/tricknotes/koroku/internal/secrets"
 	"github.com/tricknotes/koroku/internal/store"
@@ -38,6 +39,20 @@ type UnknownServiceError struct {
 
 func (e *UnknownServiceError) Error() string {
 	return fmt.Sprintf("service %q is not in the current release (services: %v)", e.Service, e.Services)
+}
+
+// checkTaskService returns an *UnknownServiceError unless commands can run
+// in service of the release. The coloured copies of a blue/green release's
+// public service are not offered: commands run in the public service
+// itself, which the override keeps for that (ARCHITECTURE 7.2).
+func checkTaskService(app store.App, meta releaseMeta, project compose.Project, service string) error {
+	if meta.BlueGreen {
+		project = project.WithoutServices(compose.ColoredNames(app.WebService)...)
+	}
+	if _, ok := project.Services[service]; !ok {
+		return &UnknownServiceError{Service: service, Services: project.ServiceNames()}
+	}
+	return nil
 }
 
 type runningTask struct {
@@ -118,8 +133,8 @@ func (e *Engine) startTask(ctx context.Context, app store.App, spec TaskSpec, re
 	if err != nil {
 		return store.TaskRun{}, err
 	}
-	if _, ok := project.Services[spec.Service]; !ok {
-		return store.TaskRun{}, &UnknownServiceError{Service: spec.Service, Services: project.ServiceNames()}
+	if err := checkTaskService(app, meta, project, spec.Service); err != nil {
+		return store.TaskRun{}, err
 	}
 	var deps []string
 	if spec.Scheduled {
@@ -419,8 +434,8 @@ func (e *Engine) ConsoleCmd(ctx context.Context, app store.App, service string, 
 	if err != nil {
 		return runner.Cmd{}, err
 	}
-	if _, ok := project.Services[service]; !ok {
-		return runner.Cmd{}, &UnknownServiceError{Service: service, Services: project.ServiceNames()}
+	if err := checkTaskService(app, meta, project, service); err != nil {
+		return runner.Cmd{}, err
 	}
 	if len(command) == 0 {
 		command = []string{"sh"}

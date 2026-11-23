@@ -93,3 +93,18 @@ func TestDiskUsageError(t *testing.T) {
 		t.Error("expected an error for a missing directory")
 	}
 }
+
+func TestAvailableMemory(t *testing.T) {
+	h := Host{MeminfoPath: writeMeminfo(t, meminfo+"SwapTotal:       2097148 kB\nSwapFree:        1048576 kB\n")}
+	got, err := h.AvailableMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := uint64(2513204+1048576) * 1024; got != want {
+		t.Errorf("AvailableMemory = %d, want %d", got, want)
+	}
+	h = Host{MeminfoPath: writeMeminfo(t, meminfo)}
+	if got, err := h.AvailableMemory(); err != nil || got != 2513204*1024 {
+		t.Errorf("without swap: %d, %v", got, err)
+	}
+}

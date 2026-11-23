@@ -102,9 +102,9 @@ func (m *MemorySampler) Sample(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list apps: %w", err)
 	}
-	appIDs := map[string]int64{}
+	byProject := map[string]store.App{}
 	for _, app := range apps {
-		appIDs[app.ProjectName()] = app.ID
+		byProject[app.ProjectName()] = app
 	}
 
 	type key struct {
@@ -120,18 +120,22 @@ func (m *MemorySampler) Sample(ctx context.Context) error {
 			continue // removed since docker stats ran
 		}
 		seen[row.ID] = meta.restarts
-		appID, ok := appIDs[meta.project]
+		app, ok := byProject[meta.project]
 		if !ok || meta.service == "" {
 			continue
 		}
+		appID := app.ID
+		// Both colours of a blue/green app's public service are the public
+		// service; while they run side by side the larger one counts.
+		service, _ := app.PublicServiceOf(meta.service)
 		restarts := 0
 		if prev, ok := m.restarts[row.ID]; ok && meta.restarts > prev {
 			restarts = meta.restarts - prev
 		}
-		k := key{appID, meta.service}
+		k := key{appID, service}
 		sample := byService[k]
 		if sample == nil {
-			sample = &store.MemorySample{AppID: appID, Service: meta.service, Bytes: -1}
+			sample = &store.MemorySample{AppID: appID, Service: service, Bytes: -1}
 			byService[k] = sample
 			order = append(order, k)
 		}

@@ -141,5 +141,9 @@ func listVolumes(ctx context.Context, docker dockerFunc, project string) ([]volu
 // dumpArgs is the dump hook as a docker command. The hook's command line is
 // one argument of `sh -c` inside the container; no shell runs on the host.
 func dumpArgs(app App) []string {
-	return []string{"compose", "-p", app.Project, "exec", "-T", app.DumpService, "sh", "-c", app.DumpCommand}
+	service := app.DumpService
+	if app.DumpExecService != "" {
+		service = app.DumpExecService
+	}
+	return []string{"compose", "-p", app.Project, "exec", "-T", service, "sh", "-c", app.DumpCommand}
 }

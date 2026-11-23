@@ -64,6 +64,12 @@ type deploymentJSON struct {
 	// ContainersReplaced says whether the run touched the running
 	// containers (ARCHITECTURE 9.5); null when the run did not end normally.
 	ContainersReplaced *bool `json:"containers_replaced"`
+	// WebColor is the colour of the public service the deployment started
+	// (ARCHITECTURE 7.2), null when it ran the public service as itself;
+	// SwitchedAt is when the requests were switched to it, null when they
+	// were not (or were switched back).
+	WebColor   *string    `json:"web_color"`
+	SwitchedAt *time.Time `json:"switched_at"`
 }
 
 // actorJSON names the user who started an operation.
@@ -122,7 +128,17 @@ func deploymentToJSON(d store.Deployment, slug string) deploymentJSON {
 		Trigger:            d.Trigger,
 		Pusher:             d.Pusher,
 		ContainersReplaced: d.ContainersReplaced,
+		WebColor:           optionalString(d.WebColor),
+		SwitchedAt:         d.SwitchedAt,
 	}
+}
+
+// optionalString is nil for "".
+func optionalString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,23 @@
+{
+  "name": "koroku-shop",
+  "services": {
+    "web": {
+      "image": "ghcr.io/octo/shop:sha-0123abc",
+      "container_name": "shop-web",
+      "scale": 2,
+      "ports": [{"mode": "ingress", "target": 3000, "published": "3000", "protocol": "tcp"}]
+    },
+    "web-green": {"image": "busybox:1.37"},
+    "proxy": {
+      "image": "nginx:1.29-alpine",
+      "depends_on": {"web": {"condition": "service_started", "required": true}}
+    },
+    "sidecar": {
+      "image": "busybox:1.37",
+      "network_mode": "service:web",
+      "volumes_from": ["web:ro"],
+      "depends_on": {"web": {"condition": "service_started", "restart": true, "required": true}}
+    },
+    "db": {"image": "postgres:17"}
+  }
+}

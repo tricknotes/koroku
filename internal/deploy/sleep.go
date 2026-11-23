@@ -177,7 +177,10 @@ func (e *Engine) wakeLocked(ctx context.Context, appID int64, say func(format st
 	}
 	// The containers the sleep stopped start as they were: no new
 	// containers, no image or policy check (ARCHITECTURE 8.4).
-	err = e.runCompose(ctx, e.projectOnly(app), "", "start", "--wait", "--wait-timeout", e.waitSeconds())
+	// A blue/green app names its services: `start` would also try the
+	// colour without a container (ARCHITECTURE 7.2).
+	start := append([]string{"start", "--wait", "--wait-timeout", e.waitSeconds()}, e.liveServices(app)...)
+	err = e.runCompose(ctx, e.projectOnly(app), "", start...)
 	if err != nil && ctx.Err() == nil && !e.hasContainers(ctx, app) {
 		// Someone removed the containers: start the release again.
 		err = e.upCurrent(ctx, app)
@@ -254,6 +257,12 @@ func (e *Engine) withServicesRunning(ctx context.Context, appID int64, services 
 		}
 		return fn(ctx)
 	}
+	// The public service of a blue/green app runs in its colour.
+	live := make([]string, len(services))
+	for i, name := range services {
+		live[i] = app.LiveService(name)
+	}
+	services = live
 	if say != nil {
 		say("The app is asleep and stays asleep; starting only %s.", strings.Join(services, ", "))
 	}
@@ -309,5 +318,5 @@ func (e *Engine) endSleep(ctx context.Context, app store.App, log *deployLog) er
 }
 
 func healthURL(app store.App) string {
-	return fmt.Sprintf("http://127.0.0.1:%d%s", app.HostPort, app.HealthcheckPath)
+	return fmt.Sprintf("http://127.0.0.1:%d%s", app.LivePort(), app.HealthcheckPath)
 }

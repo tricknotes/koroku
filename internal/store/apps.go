@@ -108,7 +108,20 @@ type App struct {
 	SleepingSince *time.Time
 	// ReviewAppsAllowed lets review apps be created from this app; only
 	// the owner changes it (ARCHITECTURE 9.9).
-	ReviewAppsAllowed   bool
+	ReviewAppsAllowed bool
+	// BlueGreen deploys the public service side by side with the running
+	// one and switches the proxy once the new one answers (ARCHITECTURE
+	// 7.2). BlueGreenDrainSeconds is how long the old colour keeps running
+	// after the switch.
+	BlueGreen             bool
+	BlueGreenDrainSeconds int
+	// AltHostPort is the second host port (the green colour); 0 until
+	// blue/green was first turned on. Set by AllocateAltHostPort.
+	AltHostPort int
+	// WebColor is the colour that receives the requests (ColorBlue on
+	// HostPort, ColorGreen on AltHostPort); "" while the public service
+	// runs as itself on HostPort. Set by the deploy engine.
+	WebColor            string
 	CurrentDeploymentID *int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
@@ -143,6 +156,72 @@ func (a App) UsesGitHubApp() bool { return a.RepoFullName != "" && a.RepoURL == 
 // containers, networks and volumes.
 func (a App) ProjectName() string { return "koroku-" + a.Slug }
 
+// Colours of the public service of a blue/green app (ARCHITECTURE 7.2).
+const (
+	ColorBlue  = "blue"
+	ColorGreen = "green"
+)
+
+// Bounds and default of App.BlueGreenDrainSeconds (ARCHITECTURE 7.2).
+const (
+	DefaultBlueGreenDrainSeconds = 10
+	MaxBlueGreenDrainSeconds     = 300
+)
+
+// OtherColor returns the colour opposite to color; "" (the public service
+// running as itself) counts as blue, so its opposite is green.
+func OtherColor(color string) string {
+	if color == ColorGreen {
+		return ColorBlue
+	}
+	return ColorGreen
+}
+
+// ColorPort is the host port the given colour listens on: blue (and the
+// public service running as itself) on HostPort, green on AltHostPort.
+func (a App) ColorPort(color string) int {
+	if color == ColorGreen {
+		return a.AltHostPort
+	}
+	return a.HostPort
+}
+
+// LivePort is the host port the proxy sends the app's requests to.
+func (a App) LivePort() int { return a.ColorPort(a.WebColor) }
+
+// ColoredService is the name of the public service's copy of one colour
+// (ARCHITECTURE 7.2): <web>-blue or <web>-green.
+func (a App) ColoredService(color string) string { return a.WebService + "-" + color }
+
+// LiveService maps a service name of the app to the one whose container
+// runs: the public service runs as its WebColor copy while the app has a
+// colour. Other names are returned as they are.
+func (a App) LiveService(service string) string {
+	if a.WebColor != "" && service == a.WebService {
+		return a.ColoredService(a.WebColor)
+	}
+	return service
+}
+
+// UsesColors reports whether coloured copies of the public service may
+// exist for the app: blue/green is on, or the public service still runs
+// in a colour.
+func (a App) UsesColors() bool { return a.BlueGreen || a.WebColor != "" }
+
+// PublicServiceOf maps the service of a container to the service it is
+// shown as: a coloured copy of the public service is the public service,
+// with its colour. Other services are returned as they are, with no colour.
+func (a App) PublicServiceOf(service string) (name, color string) {
+	if a.UsesColors() && a.WebService != "" {
+		for _, c := range []string{ColorBlue, ColorGreen} {
+			if service == a.ColoredService(c) {
+				return a.WebService, c
+			}
+		}
+	}
+	return service, ""
+}
+
 const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 	web_service, web_port, host_port, healthcheck_path, desired_state, environment,
 	relax_policy, memory_limit, service_memory_limits, memory_reservation, service_memory_reservations,
@@ -152,7 +231,8 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	load_hook_service, load_hook_command, post_load_service, post_load_command,
 	access_protection, protection_exempt_paths, promote_from_app_id,
 	auto_deploy, auto_deploy_branch, auto_deploy_workflow,
-	idle_sleep, idle_sleep_minutes, sleeping_since, review_apps_allowed`
+	idle_sleep, idle_sleep_minutes, sleeping_since, review_apps_allowed,
+	blue_green, blue_green_drain_seconds, alt_host_port, web_color`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -165,6 +245,8 @@ func scanApp(row rowScanner) (App, error) {
 		currentID        sql.NullInt64
 		promoteFrom      sql.NullInt64
 		sleeping         sql.NullInt64
+		altPort          sql.NullInt64
+		webColor         sql.NullString
 		limitsJSON       string
 		reservationsJSON string
 		excludeJSON      string
@@ -181,7 +263,8 @@ func scanApp(row rowScanner) (App, error) {
 		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand,
 		&a.AccessProtection, &exemptJSON, &promoteFrom,
 		&a.AutoDeploy, &a.AutoDeployBranch, &a.AutoDeployWorkflow,
-		&a.IdleSleep, &a.IdleSleepMinutes, &sleeping, &a.ReviewAppsAllowed)
+		&a.IdleSleep, &a.IdleSleepMinutes, &sleeping, &a.ReviewAppsAllowed,
+		&a.BlueGreen, &a.BlueGreenDrainSeconds, &altPort, &webColor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -198,6 +281,8 @@ func scanApp(row rowScanner) (App, error) {
 		a.PromoteFromAppID = &promoteFrom.Int64
 	}
 	a.SleepingSince = fromNullMillis(sleeping)
+	a.AltHostPort = int(altPort.Int64)
+	a.WebColor = webColor.String
 	a.ServiceMemoryLimits = map[string]string{}
 	if limitsJSON != "" {
 		if err := json.Unmarshal([]byte(limitsJSON), &a.ServiceMemoryLimits); err != nil {
@@ -321,6 +406,9 @@ func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, 
 	if app.IdleSleepMinutes == 0 {
 		app.IdleSleepMinutes = DefaultIdleSleepMinutes
 	}
+	if app.BlueGreenDrainSeconds == 0 {
+		app.BlueGreenDrainSeconds = DefaultBlueGreenDrainSeconds
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO apps (
 			slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 			web_service, web_port, host_port, healthcheck_path, desired_state, environment,
@@ -330,8 +418,8 @@ func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, 
 			load_hook_service, load_hook_command, post_load_service, post_load_command,
 			access_protection, protection_exempt_paths, promote_from_app_id,
 			auto_deploy, auto_deploy_branch, auto_deploy_workflow,
-			idle_sleep, idle_sleep_minutes)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			idle_sleep, idle_sleep_minutes, blue_green_drain_seconds)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, app.MemoryReservation, reservations, toMillis(now), toMillis(now),
@@ -340,7 +428,7 @@ func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, 
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
 		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow,
-		app.IdleSleep, app.IdleSleepMinutes)
+		app.IdleSleep, app.IdleSleepMinutes, app.BlueGreenDrainSeconds)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -383,8 +471,11 @@ func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, 
 }
 
 func allocatePort(ctx context.Context, tx *sql.Tx, start, end int) (int, error) {
+	// The second ports of blue/green apps (ARCHITECTURE 7.2) come from
+	// the same range.
 	rows, err := tx.QueryContext(ctx,
-		`SELECT host_port FROM apps WHERE host_port BETWEEN ? AND ? ORDER BY host_port`, start, end)
+		`SELECT port FROM (SELECT host_port AS port FROM apps UNION SELECT alt_host_port FROM apps WHERE alt_host_port IS NOT NULL)
+		WHERE port BETWEEN ? AND ? ORDER BY port`, start, end)
 	if err != nil {
 		return 0, fmt.Errorf("allocate port: %w", err)
 	}
@@ -440,9 +531,9 @@ func (s *Store) ListApps(ctx context.Context) ([]App, error) {
 	return apps, nil
 }
 
-// UpdateApp saves the user-editable settings of an app. Slug, host port,
-// desired state, the sleeping state and the current deployment are not
-// changed here.
+// UpdateApp saves the user-editable settings of an app. Slug, host ports,
+// desired state, the sleeping state, the colour of the public service and
+// the current deployment are not changed here.
 func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 	limits, err := encodeLimits(app.ServiceMemoryLimits)
 	if err != nil {
@@ -470,7 +561,8 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?,
 			access_protection = ?, protection_exempt_paths = ?, promote_from_app_id = ?,
 			auto_deploy = ?, auto_deploy_branch = ?, auto_deploy_workflow = ?,
-			idle_sleep = ?, idle_sleep_minutes = ?, review_apps_allowed = ?
+			idle_sleep = ?, idle_sleep_minutes = ?, review_apps_allowed = ?,
+			blue_green = ?, blue_green_drain_seconds = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
@@ -481,11 +573,63 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
 		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow,
-		app.IdleSleep, app.IdleSleepMinutes, app.ReviewAppsAllowed, app.ID)
+		app.IdleSleep, app.IdleSleepMinutes, app.ReviewAppsAllowed,
+		app.BlueGreen, app.BlueGreenDrainSeconds, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}
 	return requireOneRow(res, "update app")
+}
+
+// AllocateAltHostPort gives the app its second host port (ARCHITECTURE
+// 7.2), the lowest port in [portStart, portEnd] that no app uses as either
+// port, and returns it. An app that has one keeps it.
+func (s *Store) AllocateAltHostPort(ctx context.Context, appID int64, portStart, portEnd int) (int, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("allocate second port: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var current sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT alt_host_port FROM apps WHERE id = ?`, appID).Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("allocate second port: %w", ErrNotFound)
+		}
+		return 0, fmt.Errorf("allocate second port: %w", err)
+	}
+	if current.Valid {
+		return int(current.Int64), nil
+	}
+	port, err := allocatePort(ctx, tx, portStart, portEnd)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE apps SET alt_host_port = ? WHERE id = ?`, port, appID); err != nil {
+		return 0, fmt.Errorf("allocate second port: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("allocate second port: %w", err)
+	}
+	return port, nil
+}
+
+// SetAppWebColor records the colour that receives the app's requests
+// (ARCHITECTURE 7.2); "" stores NULL, for a public service running as
+// itself. The proxy configuration is built from it.
+func (s *Store) SetAppWebColor(ctx context.Context, appID int64, color string) error {
+	var value sql.NullString
+	switch color {
+	case "":
+	case ColorBlue, ColorGreen:
+		value = sql.NullString{String: color, Valid: true}
+	default:
+		return fmt.Errorf("set web colour: unknown colour %q", color)
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE apps SET web_color = ? WHERE id = ?`, value, appID)
+	if err != nil {
+		return fmt.Errorf("set web colour: %w", err)
+	}
+	return requireOneRow(res, "set web colour")
 }
 
 // SetAppDesiredState records whether the app should be running or stopped.
