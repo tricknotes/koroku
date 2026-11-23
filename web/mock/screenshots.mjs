@@ -413,6 +413,19 @@ const SHOTS = [
     ...PHONE,
   },
   {
+    // A commit that the deployment's branch does not reach (ARCHITECTURE 7).
+    name: 'deploy-unreachable',
+    path: '/apps/blog-staging/deploy?scenario=unreachable-commit',
+    wait: '[data-test-unreachable-commit]',
+    fullPage: true,
+  },
+  {
+    name: 'deploy-unreachable-phone',
+    path: '/apps/blog-staging/deploy?scenario=unreachable-commit',
+    wait: '[data-test-unreachable-commit]',
+    ...PHONE,
+  },
+  {
     name: 'deploy-empty-phone',
     path: '/apps/notes/deploy?scenario=undeployed',
     wait: '[data-test-no-deployments]',

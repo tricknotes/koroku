@@ -264,10 +264,23 @@ function plan(entry, context) {
     );
   } else {
     out.push({ at: -1, line: `Queued deployment of ${entry.commit_sha}.` });
+    const short = entry.commit_sha.slice(0, 7);
+    // Only a commit that the deployment's branch or tag reaches is fetched
+    // (ARCHITECTURE 7).
+    const checking = `Checking that ${short} is on ${entry.ref || 'main'}`;
+    if (entry.mockFailure === 'fetch') {
+      step('fetch', `Fetching ${entry.commit_sha}`, [checking], 1 * SECOND);
+      out.push({ at, line: '' });
+      out.push({
+        at,
+        line: `==> ${stamp(started + at)} failed Deployment failed: ${entry.error}`,
+      });
+      return out;
+    }
     step(
       'fetch',
       `Fetching ${entry.commit_sha}`,
-      [`Checked out ${entry.commit_sha.slice(0, 7)} ${entry.commit_message}`],
+      [checking, `Checked out ${short} ${entry.commit_message}`],
       2 * SECOND * scale,
     );
     step(

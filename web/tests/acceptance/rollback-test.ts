@@ -306,4 +306,28 @@ module('Acceptance | rollback', function (hooks) {
       .dom('[data-test-deployment="45"] [data-test-log]')
       .includesText('ビルドせずに起動し直すロールバック');
   });
+
+  test('redeploying a rollback record deploys from the ref of its release', async function (assert) {
+    deployments = [
+      makeDeployment({
+        id: 46,
+        ref: 'rollback',
+        commit_sha: SHA_B,
+        commit_message: 'Add search',
+        source_deployment_id: 43,
+        rollback_available: true,
+      }),
+      ...deployments.map((d) => (d.id === 43 ? { ...d, ref: 'release' } : d)),
+    ];
+    current = deployments[2] as Deployment;
+    serveApp({ slug: 'blog-staging' });
+    await visit('/apps/blog-staging/deploy');
+
+    await click('[data-test-deployment="46"] [data-test-redeploy]');
+    assert.deepEqual(
+      fakes.api.callsTo('POST', '/api/apps/blog-staging/deployments')[0]?.body,
+      { ref: 'release', sha: SHA_B },
+      'the marker of the rollback is not sent as a branch',
+    );
+  });
 });
