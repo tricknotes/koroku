@@ -58,7 +58,7 @@ func patchCaddyPorts(t *testing.T, config []byte, httpPort, httpsPort, adminPort
 // portLoader loads configurations into a test Caddy through its admin API,
 // with the ports moved like the configuration it started with.
 type portLoader struct {
-	t                             *testing.T
+	t                              *testing.T
 	httpPort, httpsPort, adminPort int
 }
 
