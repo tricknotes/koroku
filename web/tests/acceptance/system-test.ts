@@ -260,7 +260,7 @@ module('Acceptance | system', function (hooks) {
       assert
         .dom(`${shop} [data-test-container-app]`)
         .hasText('shop')
-        .hasAttribute('href', '/apps/shop');
+        .hasAttribute('href', '/apps/shop/resources');
       assert.dom(`${shop} [data-test-container-memory]`).hasText('920.0 MB');
       assert
         .dom(`${shop} [data-test-container-limit]`)

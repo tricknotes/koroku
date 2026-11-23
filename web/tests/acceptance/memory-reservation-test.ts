@@ -86,6 +86,28 @@ module('Acceptance | memory reservation', function (hooks) {
       assert.dom('[data-test-reservation-flag]').doesNotExist();
     });
 
+    test('an app link covers its own row, not the page', async function (assert) {
+      await visit('/system');
+
+      // The link is stretched over its row with a positioned ::after. Without
+      // a positioned row it covered the whole page, header included, so the
+      // header's アプリ opened this app's settings.
+      const nav = document.querySelector('[data-test-nav="apps"]')!;
+      const box = nav.getBoundingClientRect();
+      const hit = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      );
+      assert.ok(nav.contains(hit), 'the header link is on top at its place');
+
+      const row = document.querySelector('[data-test-reservation-app="shop"]')!;
+      assert.strictEqual(
+        getComputedStyle(row).position,
+        'relative',
+        'the row contains the stretched link',
+      );
+    });
+
     test('saved settings show what the next deployment reserves', async function (assert) {
       system = makeSystem({
         memory: { total_bytes: 4 * GB, available_bytes: 2 * GB },
