@@ -189,21 +189,29 @@ func TestDeployLogCannotInjectEvents(t *testing.T) {
 }
 
 func TestSlugAndDomainCannotTakeTheConsoleHost(t *testing.T) {
-	srv := newTestServer(t, func(o *Options) {
-		o.Config.ConsoleHost = "admin.dev.example.com"
-	})
-	h := srv.Handler()
-	rec := request(t, h, http.MethodPost, "/api/apps", `{"slug": "admin", "repo_full_name": "octo/admin", "web_port": 3000}`)
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "reserved") {
-		t.Errorf("slug equal to the console host: %d %s", rec.Code, rec.Body)
+	// Hostnames are compared without letter case, however console_host is
+	// spelled in the configuration.
+	for _, consoleHost := range []string{"admin.dev.example.com", "Admin.Dev.Example.COM"} {
+		srv := newTestServer(t, func(o *Options) {
+			o.Config.ConsoleHost = consoleHost
+		})
+		h := srv.Handler()
+		rec := request(t, h, http.MethodPost, "/api/apps", `{"slug": "admin", "repo_full_name": "octo/admin", "web_port": 3000}`)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "reserved") {
+			t.Errorf("console_host %q, slug equal to the console host: %d %s", consoleHost, rec.Code, rec.Body)
+		}
 	}
 
-	outside := newTestServer(t, func(o *Options) {
-		o.Config.ConsoleHost = "console.example.org"
-	}).Handler()
-	createApp(t, outside, "blog")
-	rec = request(t, outside, http.MethodPost, "/api/apps/blog/domains", fmt.Sprintf(`{"hostname": %q}`, "console.example.org"))
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "console") {
-		t.Errorf("custom domain equal to the console host: %d %s", rec.Code, rec.Body)
+	for _, consoleHost := range []string{"console.example.org", "Console.Example.ORG"} {
+		outside := newTestServer(t, func(o *Options) {
+			o.Config.ConsoleHost = consoleHost
+		}).Handler()
+		createApp(t, outside, "blog")
+		for _, hostname := range []string{"console.example.org", "CONSOLE.example.org"} {
+			rec := request(t, outside, http.MethodPost, "/api/apps/blog/domains", fmt.Sprintf(`{"hostname": %q}`, hostname))
+			if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "console") {
+				t.Errorf("console_host %q, custom domain %q: %d %s", consoleHost, hostname, rec.Code, rec.Body)
+			}
+		}
 	}
 }

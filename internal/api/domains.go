@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/tricknotes/koroku/internal/domains"
 	"github.com/tricknotes/koroku/internal/routing"
@@ -79,7 +80,7 @@ func (s *Server) handleAddDomain(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, fieldErrors{"hostname": message})
 		return
 	}
-	if hostname == s.cfg.ConsoleHost {
+	if strings.EqualFold(hostname, s.cfg.ConsoleHost) {
 		writeValidationError(w, fieldErrors{"hostname": "is the hostname of the console"})
 		return
 	}
