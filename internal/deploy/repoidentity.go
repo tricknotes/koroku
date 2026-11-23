@@ -22,8 +22,16 @@ const repoLookupTimeout = 30 * time.Second
 // variables and data. The repository's numeric ID does not change, so the
 // app's repo_id is compared with the ID GitHub reports for the name.
 //
-// authenticated says whether the GitHub App has a token for the name. The
-// check covers apps fetched from GitHub by full name; apps with an
+// authenticated says whether the GitHub App has a token for the name. When
+// it has none (the App is not installed on the repository, or only on an
+// account koroku does not use), git fetches the repository without
+// credentials, which works for a public one. That is exactly where a name
+// lands that another account took over, so an app with a known ID is
+// confirmed there too, by reading the public repository without
+// credentials. An app without an ID is fetched unconfirmed in that case and
+// records none: its repository was never one the App vouched for.
+//
+// The check covers apps fetched from GitHub by full name; apps with an
 // explicit URL are fetched as they are.
 func (e *Engine) confirmRepository(ctx context.Context, app store.App, authenticated bool, log *deployLog) error {
 	if e.opts.Repos == nil {
@@ -34,25 +42,26 @@ func (e *Engine) confirmRepository(ctx context.Context, app store.App, authentic
 		return nil
 	}
 	name := app.RepoFullName
-	if !authenticated {
-		// The App is not installed on the repository (or not on an account
-		// koroku uses): git fetches it as a public repository.
-		log.Printf("The GitHub App cannot see %s: fetching it as a public repository, without confirming which repository has that name.", name)
-		return nil
-	}
 	want, err := e.expectedRepoID(ctx, app)
 	if err != nil {
 		return err
 	}
+	if !authenticated && want == nil {
+		log.Printf("The GitHub App cannot see %s: fetching it as a public repository, without confirming which repository has that name.", name)
+		return nil
+	}
 
 	lookupCtx, cancel := context.WithTimeout(ctx, repoLookupTimeout)
-	found, err := e.opts.Repos.Repository(lookupCtx, owner, repo, false)
+	found, err := e.opts.Repos.Repository(lookupCtx, owner, repo, !authenticated)
 	cancel()
 	switch {
 	case errors.Is(err, github.ErrNotFound) && want == nil:
 		// Nothing to compare with and nothing to record. git reports what
 		// is wrong with the repository.
 		return nil
+	case errors.Is(err, github.ErrNotFound) && !authenticated:
+		return fmt.Errorf("fetch source: cannot confirm that %s is the repository this app was set up with (repository %d): "+
+			"the GitHub App cannot see a repository of that name and no public one has it. Nothing was fetched", name, *want)
 	case errors.Is(err, github.ErrNotFound):
 		return fmt.Errorf("fetch source: cannot confirm that %s is the repository this app was set up with (repository %d): "+
 			"GitHub shows koroku no repository of that name. Nothing was fetched", name, *want)
@@ -63,6 +72,7 @@ func (e *Engine) confirmRepository(ctx context.Context, app store.App, authentic
 			"Nothing was fetched; deploy again once GitHub answers", name, err)
 	}
 
+	inherited := want != nil && app.RepoID == nil
 	if want == nil {
 		// Trust on first use: the first ID read for the name is recorded
 		// and every later fetch is held to it.
@@ -82,13 +92,17 @@ func (e *Engine) confirmRepository(ctx context.Context, app store.App, authentic
 			"If the app should deploy the repository that has the name now, the owner sets the app's repository again (repo_id %d)",
 			name, found.ID, *want, found.ID)
 	}
-	if app.RepoID == nil {
-		// A review app that takes its parent's ID keeps it.
+	if inherited {
+		// A review app that was held to its parent's ID keeps it.
 		if _, err := e.opts.Store.RecordAppRepoID(ctx, app.ID, found.ID); err != nil {
 			return err
 		}
 	}
-	log.Printf("Confirmed that %s is repository %d, the one the app was set up with.", name, found.ID)
+	if authenticated {
+		log.Printf("Confirmed that %s is repository %d, the one the app was set up with.", name, found.ID)
+	} else {
+		log.Printf("Confirmed that %s is repository %d, the one the app was set up with. The GitHub App cannot see it: fetching it as a public repository.", name, found.ID)
+	}
 	if found.FullName != "" && !strings.EqualFold(found.FullName, name) {
 		// A renamed or transferred repository: GitHub redirects the old
 		// name. The settings are the owner's to change.

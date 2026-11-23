@@ -11,14 +11,19 @@ import (
 
 // newIdentityHarness is a harness whose engine fetches through a fake
 // GitHub App: the tokens and the repository lookups both come from api.
-func newIdentityHarness(t *testing.T, api *fakeGitHubAPI) *harness {
+// public, when given, is GitHub as read without credentials.
+func newIdentityHarness(t *testing.T, api *fakeGitHubAPI, public ...*fakeGitHubAPI) *harness {
 	t.Helper()
 	if api.token == "" {
 		api.token = "ghs_exampleInstallationToken123"
 	}
 	return newHarness(t, func(o *Options) {
 		o.Tokens = GitHubTokens{Client: api}
-		o.Repos = GitHubRepos{Client: api}
+		repos := GitHubRepos{Client: api}
+		if len(public) > 0 {
+			repos.Public = public[0]
+		}
+		o.Repos = repos
 	})
 }
 
@@ -305,11 +310,13 @@ func TestDeployFailsWhenTheRepositoryCannotBeConfirmed(t *testing.T) {
 }
 
 // Repositories the check does not cover are fetched as they are: a
-// repository the GitHub App cannot see (git fetches it without
-// credentials, as a public repository) and an explicit URL.
-func TestDeployWithoutTheAppIsNotConfirmed(t *testing.T) {
+// repository the GitHub App cannot see and whose ID was never known (git
+// fetches it without credentials, as a public repository) and an explicit
+// URL.
+func TestDeployWithoutTheAppAndWithoutAnIDIsNotConfirmed(t *testing.T) {
 	api := &fakeGitHubAPI{tokenErr: github.ErrNotFound, repos: map[string]github.Repo{"octo/blog": {ID: 200, FullName: "octo/blog"}}}
-	h := newIdentityHarness(t, api)
+	public := &fakeGitHubAPI{repos: map[string]github.Repo{"octo/blog": {ID: 200, FullName: "octo/blog"}}}
+	h := newIdentityHarness(t, api, public)
 	h.createAppWithRepo("blog", 0)
 	byURL := h.createAppWithRepo("mirror", 100)
 	byURL.RepoURL = "https://git.example.com/octo/mirror.git"
@@ -326,12 +333,80 @@ func TestDeployWithoutTheAppIsNotConfirmed(t *testing.T) {
 	if !strings.Contains(log, "The GitHub App cannot see octo/blog") {
 		t.Errorf("the log does not say that the repository was not confirmed:\n%s", log)
 	}
-	if api.lookups() != 0 || h.repoID("blog") != 0 {
-		t.Errorf("lookups = %d, repo_id = %d; want neither a lookup nor a recorded ID", api.lookups(), h.repoID("blog"))
+	if api.lookups()+public.lookups() != 0 || h.repoID("blog") != 0 {
+		t.Errorf("lookups = %d, repo_id = %d; want neither a lookup nor a recorded ID",
+			api.lookups()+public.lookups(), h.repoID("blog"))
 	}
 
 	d = h.deploy("mirror", shaA)
-	if d.Status != store.StatusSucceeded || api.lookups() != 0 {
-		t.Errorf("explicit URL: deployment = %s %q, lookups %d", d.Status, d.Error, api.lookups())
+	if d.Status != store.StatusSucceeded || api.lookups()+public.lookups() != 0 {
+		t.Errorf("explicit URL: deployment = %s %q, lookups %d", d.Status, d.Error, api.lookups()+public.lookups())
 	}
+}
+
+// The name of an app's repository is taken over by another account: the
+// repository of the app's ID is gone from under the name, and the GitHub
+// App is not installed on the public repository that has the name now
+// (or only on an account koroku does not use). git would fetch that
+// repository without credentials, so an app with a known ID is confirmed
+// without the App as well.
+func TestDeployRefusesATakenOverNameTheAppCannotSee(t *testing.T) {
+	api := &fakeGitHubAPI{tokenErr: github.ErrNotFound}
+	public := &fakeGitHubAPI{repos: map[string]github.Repo{"octo/blog": {ID: 200, FullName: "octo/blog"}}}
+	h := newIdentityHarness(t, api, public)
+	h.createAppWithRepo("blog", 100)
+	h.start()
+
+	h.runner.Reset()
+	d := h.deploy("blog", shaA)
+	h.assertNothingFetched("taken over", "blog", d, "GitHub has repository 200 under that name, the app was set up with repository 100")
+	if api.lookups() != 0 || public.lookups() != 1 {
+		t.Errorf("lookups: %d through the App, %d without; want 0 and 1", api.lookups(), public.lookups())
+	}
+
+	// Its own repository, made public and taken out of the installation
+	// (or moved to another account, which GitHub redirects), still deploys.
+	public.set(func(f *fakeGitHubAPI) { f.repos["octo/blog"] = github.Repo{ID: 100, FullName: "my-org/blog"} })
+	d = h.deploy("blog", shaA)
+	log := h.log("blog", d.ID)
+	if d.Status != store.StatusSucceeded {
+		t.Fatalf("its own public repository: deployment = %s %q\n%s", d.Status, d.Error, log)
+	}
+	for _, want := range []string{
+		"Confirmed that octo/blog is repository 100",
+		"The GitHub App cannot see it: fetching it as a public repository",
+		"GitHub calls this repository my-org/blog now",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("the log lacks %q:\n%s", want, log)
+		}
+	}
+
+	// No public repository has the name: nothing can be confirmed, and
+	// git could not fetch it either.
+	public.set(func(f *fakeGitHubAPI) { delete(f.repos, "octo/blog") })
+	h.runner.Reset()
+	d = h.deploy("blog", shaB)
+	h.assertNothingFetched("not public", "blog", d, "the GitHub App cannot see a repository of that name and no public one has it")
+
+	// The unauthenticated API is rate limited: the check is not skipped.
+	public.set(func(f *fakeGitHubAPI) {
+		f.repoErr = &github.APIError{Status: 403, Message: "API rate limit exceeded", RateLimited: true}
+	})
+	h.runner.Reset()
+	d = h.deploy("blog", shaB)
+	h.assertNothingFetched("rate limited", "blog", d, "cannot confirm that octo/blog is the repository this app was set up with")
+}
+
+// Without a client that reads public repositories, an app with a known ID
+// that the App cannot see is not fetched.
+func TestDeployFailsWithoutAWayToConfirm(t *testing.T) {
+	api := &fakeGitHubAPI{tokenErr: github.ErrNotFound}
+	h := newIdentityHarness(t, api)
+	h.createAppWithRepo("blog", 100)
+	h.start()
+
+	h.runner.Reset()
+	d := h.deploy("blog", shaA)
+	h.assertNothingFetched("no public client", "blog", d, "cannot confirm that octo/blog is the repository this app was set up with")
 }
