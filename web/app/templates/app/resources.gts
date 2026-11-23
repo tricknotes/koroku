@@ -4,6 +4,7 @@ import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
 import AsyncView from 'koroku-console/components/async-view';
 import ComposeSection from 'koroku-console/components/compose-section';
+import CurrentReleaseLine from 'koroku-console/components/current-release-line';
 import Banner from 'koroku-console/components/banner';
 import EmptyState from 'koroku-console/components/empty-state';
 import Icon from 'koroku-console/components/icon';
@@ -135,6 +136,7 @@ export default class AppResourcesTemplate extends Component<Signature> {
             ステージングのアプリにはメモリの予約は付きません。
           {{/if}}
         </p>
+        <CurrentReleaseLine @app={{this.app}} />
         {{#if this.app.sleeping_since}}
           <Banner data-test-resources-sleeping>
             アクセスがないため休止中で、サービスは止まっています。休止の間はメモリの履歴も記録しません。

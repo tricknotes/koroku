@@ -13,6 +13,7 @@ import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import EmptyState from 'koroku-console/components/empty-state';
 import ErrorMessage from 'koroku-console/components/error-message';
 import Icon from 'koroku-console/components/icon';
+import DeployMarkers from 'koroku-console/components/deploy-markers';
 import MemoryChart from 'koroku-console/components/memory-chart';
 import type ApiService from 'koroku-console/services/api';
 import { formatBytes } from 'koroku-console/utils/format';
@@ -24,8 +25,16 @@ import {
   formatHours,
   shareOfLimit,
 } from 'koroku-console/utils/memory-history';
+import {
+  MARKER_LIMIT,
+  deployMarkers,
+  liveDeploymentId,
+  rangeStart,
+  type DeployMarker,
+} from 'koroku-console/utils/deploy-markers';
 import type {
   App,
+  Deployment,
   MemoryHistory as History,
   MemoryRange,
   MemoryServiceHistory,
@@ -91,6 +100,18 @@ export default class MemoryHistory extends Component<Signature> {
     this.api.getMemoryHistory(this.args.app.slug, this.range),
   );
 
+  /**
+   * The deployments of the range, read alongside the history. Without
+   * them the charts show no markers and are otherwise the same.
+   */
+  deployments = new Loadable<Deployment[]>(() =>
+    this.api.listDeploymentsFinishedSince(
+      this.args.app.slug,
+      rangeStart(this.range, Date.now()),
+      MARKER_LIMIT,
+    ),
+  );
+
   get canSave(): boolean {
     return can(this.args.app, 'manage');
   }
@@ -98,6 +119,7 @@ export default class MemoryHistory extends Component<Signature> {
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
     void this.history.load();
+    void this.deployments.load();
   }
 
   /** Keeps the charts on screen while the new range loads. */
@@ -105,7 +127,26 @@ export default class MemoryHistory extends Component<Signature> {
     if (range === this.range) return;
     this.range = range;
     void this.history.load({ quiet: true });
+    void this.deployments.load({ quiet: true });
   };
+
+  markersOf = (history: History): DeployMarker[] =>
+    deployMarkers(this.deployments.value ?? [], history);
+
+  get liveId(): number | null {
+    return liveDeploymentId(
+      this.deployments.value ?? [],
+      this.args.app.current_deployment,
+    );
+  }
+
+  /** The API gave as many as it gives at once: older ones may be missing. */
+  get truncated(): boolean {
+    return (this.deployments.value?.length ?? 0) >= MARKER_LIMIT;
+  }
+
+  hasReverted = (markers: DeployMarker[]): boolean =>
+    markers.some((m) => m.kind === 'reverted');
 
   /** Saved as the service's limit, waiting for the next deployment. */
   isSaved = (service: MemoryServiceHistory): boolean => {
@@ -182,130 +223,169 @@ export default class MemoryHistory extends Component<Signature> {
         as |history|
       >
         {{#if history.services.length}}
-          <ul class="memory-history-legend" aria-label="凡例">
-            <li><span class="memory-chart-key is-usage"></span>使用量（5
-              分ごとの最大）</li>
-            <li><span class="memory-chart-key is-limit"></span>上限</li>
-          </ul>
-          <ul
-            class="memory-services {{if this.history.loading 'is-refreshing'}}"
-            aria-busy={{if this.history.loading "true"}}
-          >
-            {{#each history.services key="name" as |svc|}}
-              <li class="memory-service" data-test-memory-service={{svc.name}}>
-                <div class="memory-service-header">
-                  <span class="memory-service-name mono">{{svc.name}}</span>
-                  {{#if (isNearLimit svc)}}
-                    <Badge @tone="warn" data-test-memory-flag="near_limit">
-                      <Icon @name="warning" />
-                      上限に近い
-                    </Badge>
-                  {{else if (isGenerous svc)}}
-                    <Badge @tone="info" data-test-memory-flag="generous">
-                      <Icon @name="info" />
-                      余裕が大きい
-                    </Badge>
-                  {{/if}}
-                </div>
-                <dl class="memory-service-stats">
-                  <div>
-                    <dt>ピーク</dt>
-                    <dd data-test-memory-peak>
-                      {{formatBytes svc.peak_bytes}}
-                      {{#if svc.limit_bytes}}
-                        <span class="muted">（上限の
-                          {{shareOfLimit
-                            svc.peak_bytes
-                            svc.limit_bytes
-                          }}）</span>
-                      {{/if}}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>上限</dt>
-                    <dd data-test-memory-limit>
-                      {{#if svc.limit_bytes}}
-                        {{formatBytes svc.limit_bytes}}
-                      {{else}}
-                        なし
-                      {{/if}}
-                    </dd>
-                  </div>
-                  {{#if svc.restarts}}
-                    <div>
-                      <dt>自動の再起動</dt>
-                      <dd data-test-memory-restarts>{{svc.restarts}} 回</dd>
-                    </div>
-                  {{/if}}
-                </dl>
-
-                <MemoryChart @service={{svc}} @history={{history}} />
-
-                <div class="memory-suggestion" data-test-memory-suggestion>
-                  {{#if svc.suggestion.ready}}
-                    <p class="memory-suggestion-text">
-                      目安
-                      <strong
-                        class="mono"
-                        data-test-memory-suggested
-                      >{{svc.suggestion.limit}}</strong>
-                      <span class="muted">（{{basisText svc}}）</span>
-                      {{#if (isNearLimit svc)}}
-                        <span
-                          class="memory-suggestion-why"
-                        >上限に当たると、コンテナが止められて再起動します。</span>
-                      {{else if (isGenerous svc)}}
-                        <span class="memory-suggestion-why">7
-                          日以上、ピークが上限の 30%
-                          未満です。下げた分をほかのアプリに回せます。</span>
-                      {{/if}}
-                    </p>
-                    {{#if (isCurrent svc)}}
-                      <span
-                        class="memory-suggestion-state"
-                        data-test-memory-current
-                      >
-                        <Icon @name="check" />
-                        いまの上限で足りています
-                      </span>
-                    {{else if (this.isSaved svc)}}
-                      <span
-                        class="memory-suggestion-state"
-                        data-test-memory-saved
-                      >
-                        <Icon @name="check" />
-                        上限に保存しました。次のデプロイから反映されます
-                      </span>
-                    {{else if this.canSave}}
-                      <Button
-                        @size="small"
-                        aria-label="{{svc.name}} の上限を {{svc.suggestion.limit}} にする"
-                        data-test-memory-apply={{svc.name}}
-                        {{on "click" (fn this.confirm svc)}}
-                      >上限を {{svc.suggestion.limit}} にする</Button>
+          {{#let (this.markersOf history) as |markers|}}
+            <ul class="memory-history-legend" aria-label="凡例">
+              <li><span class="memory-chart-key is-usage"></span>使用量（5
+                分ごとの最大）</li>
+              <li><span class="memory-chart-key is-limit"></span>上限</li>
+              {{#if markers.length}}
+                <li data-test-legend-deploy><svg
+                    class="deploy-marker-key"
+                    viewBox="0 0 10 8"
+                    aria-hidden="true"
+                  ><path d="M1 1h8L5 7z" /></svg>デプロイ</li>
+                {{#if (this.hasReverted markers)}}
+                  <li data-test-legend-reverted><svg
+                      class="deploy-marker-key is-reverted"
+                      viewBox="0 0 10 8"
+                      aria-hidden="true"
+                    ><path d="M1 1h8L5 7z" /></svg>失敗して戻したデプロイ</li>
+                {{/if}}
+              {{/if}}
+            </ul>
+            {{#if markers.length}}
+              <DeployMarkers
+                @slug={{@app.slug}}
+                @markers={{markers}}
+                @liveId={{this.liveId}}
+              />
+              {{#if this.truncated}}
+                <p
+                  class="field-hint deploy-markers-note"
+                  data-test-deploy-markers-truncated
+                >
+                  新しい 200 件のデプロイだけを表示しています。
+                </p>
+              {{/if}}
+            {{/if}}
+            <ul
+              class="memory-services
+                {{if this.history.loading 'is-refreshing'}}"
+              aria-busy={{if this.history.loading "true"}}
+            >
+              {{#each history.services key="name" as |svc|}}
+                <li
+                  class="memory-service"
+                  data-test-memory-service={{svc.name}}
+                >
+                  <div class="memory-service-header">
+                    <span class="memory-service-name mono">{{svc.name}}</span>
+                    {{#if (isNearLimit svc)}}
+                      <Badge @tone="warn" data-test-memory-flag="near_limit">
+                        <Icon @name="warning" />
+                        上限に近い
+                      </Badge>
+                    {{else if (isGenerous svc)}}
+                      <Badge @tone="info" data-test-memory-flag="generous">
+                        <Icon @name="info" />
+                        余裕が大きい
+                      </Badge>
                     {{/if}}
-                  {{else}}
-                    <p
-                      class="memory-suggestion-text"
-                      data-test-memory-collecting
-                    >
-                      <Badge>記録中</Badge>
-                      {{collectingText svc}}
-                      {{#if (isNearLimit svc)}}
-                        <span class="memory-suggestion-why">すでに上限の 90%
-                          を超えたことがあります。</span>
+                  </div>
+                  <dl class="memory-service-stats">
+                    <div>
+                      <dt>ピーク</dt>
+                      <dd data-test-memory-peak>
+                        {{formatBytes svc.peak_bytes}}
+                        {{#if svc.limit_bytes}}
+                          <span class="muted">（上限の
+                            {{shareOfLimit
+                              svc.peak_bytes
+                              svc.limit_bytes
+                            }}）</span>
+                        {{/if}}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>上限</dt>
+                      <dd data-test-memory-limit>
+                        {{#if svc.limit_bytes}}
+                          {{formatBytes svc.limit_bytes}}
+                        {{else}}
+                          なし
+                        {{/if}}
+                      </dd>
+                    </div>
+                    {{#if svc.restarts}}
+                      <div>
+                        <dt>自動の再起動</dt>
+                        <dd data-test-memory-restarts>{{svc.restarts}} 回</dd>
+                      </div>
+                    {{/if}}
+                  </dl>
+
+                  <MemoryChart
+                    @service={{svc}}
+                    @history={{history}}
+                    @markers={{markers}}
+                  />
+
+                  <div class="memory-suggestion" data-test-memory-suggestion>
+                    {{#if svc.suggestion.ready}}
+                      <p class="memory-suggestion-text">
+                        目安
+                        <strong
+                          class="mono"
+                          data-test-memory-suggested
+                        >{{svc.suggestion.limit}}</strong>
+                        <span class="muted">（{{basisText svc}}）</span>
+                        {{#if (isNearLimit svc)}}
+                          <span
+                            class="memory-suggestion-why"
+                          >上限に当たると、コンテナが止められて再起動します。</span>
+                        {{else if (isGenerous svc)}}
+                          <span class="memory-suggestion-why">7
+                            日以上、ピークが上限の 30%
+                            未満です。下げた分をほかのアプリに回せます。</span>
+                        {{/if}}
+                      </p>
+                      {{#if (isCurrent svc)}}
+                        <span
+                          class="memory-suggestion-state"
+                          data-test-memory-current
+                        >
+                          <Icon @name="check" />
+                          いまの上限で足りています
+                        </span>
+                      {{else if (this.isSaved svc)}}
+                        <span
+                          class="memory-suggestion-state"
+                          data-test-memory-saved
+                        >
+                          <Icon @name="check" />
+                          上限に保存しました。次のデプロイから反映されます
+                        </span>
+                      {{else if this.canSave}}
+                        <Button
+                          @size="small"
+                          aria-label="{{svc.name}} の上限を {{svc.suggestion.limit}} にする"
+                          data-test-memory-apply={{svc.name}}
+                          {{on "click" (fn this.confirm svc)}}
+                        >上限を {{svc.suggestion.limit}} にする</Button>
                       {{/if}}
-                    </p>
-                  {{/if}}
-                </div>
-              </li>
-            {{/each}}
-          </ul>
-          <p class="field-hint">
-            目安は、いまの上限になってからの直近 14 日のピーク × 1.5 を 64m
-            単位に切り上げた値です（128m
-            以上）。上限の変更は次のデプロイから反映されます。目安と違う値は「メモリの上限と予約」で入れられます。
-          </p>
+                    {{else}}
+                      <p
+                        class="memory-suggestion-text"
+                        data-test-memory-collecting
+                      >
+                        <Badge>記録中</Badge>
+                        {{collectingText svc}}
+                        {{#if (isNearLimit svc)}}
+                          <span class="memory-suggestion-why">すでに上限の 90%
+                            を超えたことがあります。</span>
+                        {{/if}}
+                      </p>
+                    {{/if}}
+                  </div>
+                </li>
+              {{/each}}
+            </ul>
+            <p class="field-hint">
+              目安は、いまの上限になってからの直近 14 日のピーク × 1.5 を 64m
+              単位に切り上げた値です（128m
+              以上）。上限の変更は次のデプロイから反映されます。目安と違う値は「メモリの上限と予約」で入れられます。
+            </p>
+          {{/let}}
         {{else}}
           <EmptyState
             @title="まだ記録がありません"

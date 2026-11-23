@@ -68,6 +68,16 @@
   --chart-grid: var(--gray-300);
 
   /*
+   * Deployments on the chart: a neutral mark and a faint line, so they
+   * annotate the usage without competing with it. One that failed and
+   * rolled back is drawn hollow and dashed in the failure colour; the shape
+   * tells it apart without the colour.
+   */
+  --chart-marker: var(--gray-800);
+  --chart-marker-line: var(--gray-500);
+  --chart-marker-reverted: var(--color-failed);
+
+  /*
    * The five states, used the same way on every screen:
    * running, deploying, failed, stopped, pending.
    * `--color-<state>` is the text/icon colour (AA on the page and on its own

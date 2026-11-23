@@ -1,6 +1,40 @@
 /* Resources tab (ARCHITECTURE 9.5): what the services use now, and the
    memory history. */
 
+/* The release the numbers below belong to (ARCHITECTURE 9.5). */
+.current-release {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  align-items: baseline;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.current-release-title {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.current-release-sha {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.current-release-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.current-release-meta {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.current-release-link {
+  font-size: var(--text-xs);
+}
+
 /* What each service uses now: the overview's service rows, with CPU. */
 .resource-rows {
   --row-columns: minmax(0, 1fr) minmax(0, 0.6fr) minmax(0, 1.4fr);
@@ -331,6 +365,21 @@
   stroke-width: 1.5px;
 }
 
+/* A deployment (ARCHITECTURE 9.5): under the usage, above the grid. */
+.memory-chart-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px solid var(--chart-marker-line);
+  pointer-events: none;
+}
+
+.memory-chart-marker.is-reverted {
+  border-left: 1px dashed var(--chart-marker-reverted);
+  opacity: 0.7;
+}
+
 .memory-chart-crosshair {
   position: absolute;
   top: 0;
@@ -413,6 +462,230 @@
   color: var(--color-text-tertiary);
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
+}
+
+/* The deployments of the range (ARCHITECTURE 9.5): one row of buttons on
+   the charts' time axis, above the services. Same columns as a chart, so
+   each button stands over its lines. */
+.deploy-markers {
+  display: grid;
+  grid-template-columns: 3.75rem minmax(0, 1fr);
+  margin-bottom: var(--space-1);
+}
+
+.deploy-markers-label {
+  align-self: end;
+  padding: 0 var(--space-2) 0.25rem 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1;
+  text-align: right;
+}
+
+.deploy-markers-track {
+  position: relative;
+  height: 1.5rem;
+  margin: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--chart-grid);
+  list-style: none;
+}
+
+.deploy-markers-note {
+  margin: 0 0 var(--space-2) 3.75rem;
+}
+
+/* 24px square, the smallest target to press; markers closer than that
+   share one (utils/deploy-markers.ts). */
+.deploy-marker {
+  position: absolute;
+  top: 0;
+  left: var(--at);
+  display: grid;
+  place-items: end center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0 0.25rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--chart-marker);
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.deploy-marker:hover,
+.deploy-marker[aria-expanded="true"] {
+  background: var(--color-bg-hover);
+}
+
+.deploy-marker:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: 0;
+}
+
+.deploy-marker.is-reverted {
+  color: var(--chart-marker-reverted);
+}
+
+.deploy-marker-glyph,
+.deploy-marker-key {
+  display: block;
+  flex: none;
+  width: 0.625rem;
+  height: 0.5rem;
+  fill: var(--chart-marker);
+  stroke: var(--chart-marker);
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.deploy-marker-glyph.is-reverted,
+.deploy-marker-key.is-reverted,
+.deploy-marker.is-reverted .deploy-marker-glyph {
+  fill: var(--color-bg);
+  stroke: var(--chart-marker-reverted);
+}
+
+.deploy-marker-count {
+  min-width: 1.125rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  border-radius: var(--radius-full);
+  background: var(--chart-marker);
+  color: var(--color-bg);
+  font-size: 0.6875rem;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1rem;
+}
+
+.deploy-marker.is-reverted .deploy-marker-count {
+  background: var(--color-bg);
+  box-shadow: inset 0 0 0 1px currentcolor;
+  color: currentcolor;
+}
+
+.deploy-marker-popup {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 0.25rem);
+  left: var(--at);
+  width: max-content;
+  max-width: min(24rem, 100%);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-xs);
+}
+
+/* Bridges the gap to the button, so the pointer can move into the popup. */
+.deploy-marker-popup::before {
+  position: absolute;
+  top: -0.375rem;
+  right: 0;
+  left: 0;
+  height: 0.375rem;
+  content: "";
+}
+
+.deploy-marker-popup.is-start {
+  transform: translateX(-0.75rem);
+}
+
+.deploy-marker-popup.is-middle {
+  transform: translateX(-50%);
+}
+
+.deploy-marker-popup.is-end {
+  transform: translateX(calc(-100% + 0.75rem));
+}
+
+.deploy-marker-list {
+  display: grid;
+  gap: var(--space-3);
+  max-height: 20rem;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.deploy-marker-item + .deploy-marker-item {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.deploy-marker-head {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  margin: 0 0 var(--space-2);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.deploy-marker-head .deploy-marker-key {
+  align-self: center;
+}
+
+.deploy-marker-sha {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.deploy-marker-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.deploy-marker-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px var(--space-3);
+  margin: 0 0 var(--space-2);
+}
+
+.deploy-marker-fact {
+  display: contents;
+}
+
+.deploy-marker-facts dt {
+  color: var(--color-text-tertiary);
+}
+
+.deploy-marker-facts dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin: 0;
+  color: var(--color-text);
+}
+
+.deploy-marker-facts dd.is-reverted {
+  color: var(--color-failed);
+}
+
+.memory-history-legend .deploy-marker-key {
+  align-self: center;
+}
+
+/* On a phone the popup takes the width of the chart, label column too. */
+@media (width <= 40rem) {
+  .deploy-marker-popup,
+  .deploy-marker-popup.is-start,
+  .deploy-marker-popup.is-middle,
+  .deploy-marker-popup.is-end {
+    right: 0;
+    left: -3.75rem;
+    width: auto;
+    max-width: none;
+    transform: none;
+  }
 }
 
 .memory-suggestion {
