@@ -163,10 +163,8 @@ export default class ComposeSection extends Component<Signature> {
           >{{if this.open "閉じる" "表示"}}</Button>
         </header>
         <p class="pane-description">
-          koroku がリポジトリの Compose
-          に重ねている設定と、いま動いているコンテナです。読み取り専用で、表示したときに
-          Docker
-          から読みます。環境変数の値はどこにも出しません（キーだけを出します）。
+          koroku が Compose
+          に重ねている設定と、いま動いているコンテナです（読み取り専用。環境変数はキーだけ）。
         </p>
         <div id="{{id}}-body">
           {{#if this.open}}

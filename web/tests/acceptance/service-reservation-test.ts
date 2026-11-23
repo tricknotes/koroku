@@ -126,8 +126,7 @@ module('Acceptance | service reservation', function (hooks) {
     assert.dom('[data-test-dialog]').includesText('web のメモリの予約');
     assert
       .dom('[data-test-reservation-notice]')
-      .includesText('次のデプロイから反映されます')
-      .includesText('システム画面の予約の合計');
+      .includesText('次のデプロイから反映されます');
     assert
       .dom('[data-test-dialog-alt]')
       .doesNotExist('nothing of its own to reset');

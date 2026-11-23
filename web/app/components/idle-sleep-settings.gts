@@ -111,7 +111,7 @@ export default class IdleSleepSettings extends Component<Signature> {
         <h2 class="pane-title" id="idle-sleep-title">アクセスがない間の休止</h2>
       </header>
       <p class="pane-description">
-        決めた時間アクセスがなければアプリのコンテナを止め、ホストのメモリを空けます。次のアクセスで起動して応答します。たまにしか開かないステージングのアプリ向けです。
+        アクセスがなければコンテナを止めてメモリを空け、次のアクセスで起動します。
       </p>
       {{#if this.readOnly}}
         <RoleNote @needed="manage" @what="休止の設定の変更" />
@@ -138,9 +138,8 @@ export default class IdleSleepSettings extends Component<Signature> {
             <span class="option-body">
               <span class="option-label">アクセスがない間は止める</span>
               <span class="option-hint" id="idle-sleep-hint">
-                休止のあとの最初のアクセスは、アプリの起動を待ちます（Rails なら
-                5〜15
-                秒ほど）。クローラーや外部の死活監視が定期的にアクセスしていると休止しません。
+                最初のアクセスは起動を待ちます（Rails なら 5〜15
+                秒）。死活監視などの定期的なアクセスがあると休止しません。
               </span>
             </span>
           </label>
