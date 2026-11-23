@@ -425,6 +425,25 @@
 }
 
 /* GitHub App: where it is installed, and how to add another org. */
+
+/* The account's login with, under it, the ID that config.toml lists. */
+.github-account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.github-account-id {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+}
+
 .github-guide {
   margin-top: var(--space-6);
 }

@@ -206,20 +206,37 @@ route('GET', '/api/system', ({ state, scenario }) => ({
   // Owner only: it names other apps (ARCHITECTURE 6.2).
   memory_reservation: scenario === 'member' ? null : memoryReservation(state),
 }));
-route('GET', '/api/system/github', () => ({
-  configured: true,
-  app: {
-    slug: 'koroku-octo',
-    html_url: 'https://github.com/apps/koroku-octo',
-    settings_url: 'https://github.com/settings/apps/koroku-octo',
-    install_url: 'https://github.com/apps/koroku-octo/installations/new',
-  },
-  installations: [
-    { account: 'octo', repository_selection: 'selected', used: true },
-    { account: 'example-org', repository_selection: 'all', used: false },
-  ],
-  installation_accounts: [],
-}));
+route('GET', '/api/system/github', ({ scenario }) => {
+  // `warnings`: an org that is used through its login alone.
+  const byLogin = scenario === 'warnings';
+  return {
+    configured: true,
+    app: {
+      slug: 'koroku-octo',
+      html_url: 'https://github.com/apps/koroku-octo',
+      settings_url: 'https://github.com/settings/apps/koroku-octo',
+      install_url: 'https://github.com/apps/koroku-octo/installations/new',
+    },
+    installations: [
+      {
+        account: 'octo',
+        account_id: 1001,
+        repository_selection: 'selected',
+        used: true,
+        login_only: false,
+      },
+      {
+        account: 'example-org',
+        account_id: 2002,
+        repository_selection: 'all',
+        used: byLogin,
+        login_only: byLogin,
+      },
+    ],
+    installation_account_ids: [],
+    installation_accounts: byLogin ? ['example-org'] : [],
+  };
+});
 route('GET', '/api/system/docker', ({ state }) => {
   if (state.backupsDown) throw new HttpError(500, 'internal');
   return dockerUsage(state);
