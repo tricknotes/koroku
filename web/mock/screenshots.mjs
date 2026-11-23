@@ -208,23 +208,23 @@ const SHOTS = [
   // what a member sees.
   {
     name: 'members',
-    path: '/members?scenario=healthy',
+    path: '/system/admin?scenario=healthy',
     wait: '[data-test-members]',
   },
   {
     name: 'members-phone',
-    path: '/members?scenario=healthy',
+    path: '/system/admin?scenario=healthy',
     wait: '[data-test-members]',
     ...PHONE,
   },
   {
     name: 'members-empty',
-    path: '/members?scenario=empty',
+    path: '/system/admin?scenario=empty',
     wait: '[data-test-no-members]',
   },
   {
     name: 'members-remove',
-    path: '/members?scenario=healthy',
+    path: '/system/admin?scenario=healthy',
     wait: '[data-test-members]',
     click: '[data-test-member-remove]',
     themes: ['light'],
@@ -461,7 +461,7 @@ const SHOTS = [
   },
   {
     name: 'promote-settings',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/deploy?scenario=healthy',
     wait: '[data-test-field="promote_from"] option[value="blog-staging"]',
     fullPage: true,
   },
@@ -1113,18 +1113,18 @@ SHOTS.push(
 const AUTO_DEPLOY = '[data-test-auto-deploy-group]';
 const TURN_ON_AUTO_DEPLOY = `(() => {
   document.querySelector('[data-test-field="auto_deploy"]').click();
-  setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 300);
+  setTimeout(() => document.querySelector('[data-test-deploy-settings-save]').click(), 300);
 })()`;
 SHOTS.push(
   {
     name: 'autodeploy-settings',
-    path: '/apps/blog-staging/settings?scenario=healthy',
+    path: '/apps/blog-staging/deploy?scenario=healthy',
     wait: '[data-test-webhook-url]',
     script: scrollTo(AUTO_DEPLOY),
   },
   {
     name: 'autodeploy-settings-phone',
-    path: '/apps/blog-staging/settings?scenario=healthy',
+    path: '/apps/blog-staging/deploy?scenario=healthy',
     wait: '[data-test-webhook-url]',
     script: scrollTo(AUTO_DEPLOY),
     ...PHONE,
@@ -1132,20 +1132,20 @@ SHOTS.push(
   },
   {
     name: 'autodeploy-settings-off',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/deploy?scenario=healthy',
     wait: AUTO_DEPLOY,
     script: scrollTo(AUTO_DEPLOY),
     themes: ['light'],
   },
   {
     name: 'autodeploy-secret-missing',
-    path: '/apps/blog-staging/settings?scenario=webhook-unset',
+    path: '/apps/blog-staging/deploy?scenario=webhook-unset',
     wait: '[data-test-webhook-secret-missing]',
     script: scrollTo(AUTO_DEPLOY),
   },
   {
     name: 'autodeploy-secret-missing-phone',
-    path: '/apps/blog-staging/settings?scenario=webhook-unset',
+    path: '/apps/blog-staging/deploy?scenario=webhook-unset',
     wait: '[data-test-webhook-secret-missing]',
     script: scrollTo(AUTO_DEPLOY),
     ...PHONE,
@@ -1154,14 +1154,14 @@ SHOTS.push(
   },
   {
     name: 'autodeploy-production-confirm',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/deploy?scenario=healthy',
     wait: AUTO_DEPLOY,
     script: TURN_ON_AUTO_DEPLOY,
     then: '[data-test-auto-deploy-confirm]',
   },
   {
     name: 'autodeploy-production-confirm-phone',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/deploy?scenario=healthy',
     wait: AUTO_DEPLOY,
     script: TURN_ON_AUTO_DEPLOY,
     then: '[data-test-auto-deploy-confirm]',
@@ -1173,13 +1173,13 @@ SHOTS.push(
   // production confirmation and the failed run in the activity.
   {
     name: 'autodeploy-workflow',
-    path: '/apps/blog-staging/settings?scenario=workflow-gated',
+    path: '/apps/blog-staging/deploy?scenario=workflow-gated',
     wait: '[data-test-workflow-setup]',
     script: scrollTo(AUTO_DEPLOY),
   },
   {
     name: 'autodeploy-workflow-phone',
-    path: '/apps/blog-staging/settings?scenario=workflow-gated',
+    path: '/apps/blog-staging/deploy?scenario=workflow-gated',
     wait: '[data-test-workflow-setup]',
     script: scrollTo(AUTO_DEPLOY),
     ...PHONE,
@@ -1187,13 +1187,13 @@ SHOTS.push(
   },
   {
     name: 'autodeploy-workflow-invalid',
-    path: '/apps/blog-staging/settings?scenario=healthy',
+    path: '/apps/blog-staging/deploy?scenario=healthy',
     wait: '[data-test-field="auto_deploy_workflow"]',
     script: `(() => {
       const field = document.querySelector('[data-test-field="auto_deploy_workflow"]');
       field.value = 'image.yml';
       field.dispatchEvent(new Event('input', { bubbles: true }));
-      setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 300);
+      setTimeout(() => document.querySelector('[data-test-deploy-settings-save]').click(), 300);
       setTimeout(() => document.querySelector('${AUTO_DEPLOY}').scrollIntoView(), 800);
     })()`,
     then: '[data-test-field-group="auto_deploy_workflow"] [data-test-field-error]',
@@ -1201,7 +1201,7 @@ SHOTS.push(
   },
   {
     name: 'autodeploy-workflow-production-confirm',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/deploy?scenario=healthy',
     wait: AUTO_DEPLOY,
     script: `(() => {
       document.querySelector('[data-test-field="auto_deploy"]').click();
@@ -1210,7 +1210,7 @@ SHOTS.push(
         field.value = '.github/workflows/image.yml';
         field.dispatchEvent(new Event('input', { bubbles: true }));
       }, 300);
-      setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 600);
+      setTimeout(() => document.querySelector('[data-test-deploy-settings-save]').click(), 600);
     })()`,
     then: '[data-test-auto-deploy-confirm]',
   },
@@ -1382,36 +1382,6 @@ SHOTS.push(
     fullPage: true,
   },
   {
-    name: 'settings-env-source',
-    path: '/apps/blog/settings?scenario=env-dotenv',
-    wait: '[data-test-env-source-group]',
-    script: `document.querySelector('[data-test-env-source-group]').scrollIntoView()`,
-  },
-  {
-    name: 'settings-env-source-phone',
-    path: '/apps/blog/settings?scenario=env-dotenv',
-    wait: '[data-test-env-source-group]',
-    script: `document.querySelector('[data-test-env-source-group]').scrollIntoView()`,
-    ...PHONE,
-    fullPage: false,
-    themes: ['light'],
-  },
-  {
-    name: 'settings-env-requirements',
-    path: '/apps/blog/settings?scenario=healthy',
-    wait: '[data-test-settings-requirements]',
-    script: `document.querySelector('[data-test-env-source-group]').scrollIntoView()`,
-  },
-  {
-    name: 'settings-env-requirements-phone',
-    path: '/apps/blog/settings?scenario=healthy',
-    wait: '[data-test-settings-requirements]',
-    script: `document.querySelector('[data-test-env-source-group]').scrollIntoView()`,
-    ...PHONE,
-    fullPage: false,
-    themes: ['light'],
-  },
-  {
     name: 'settings-unsaved-dialog',
     path: '/apps/blog/settings?scenario=healthy',
     wait: SETTINGS,
@@ -1438,14 +1408,7 @@ SHOTS.push(
     fullPage: false,
     themes: ['light'],
   },
-  {
-    name: 'settings-relaxed',
-    path: '/apps/blog-staging/settings?scenario=healthy',
-    wait: SETTINGS,
-    click: '[data-test-field="relax_policy"]',
-    fullPage: true,
-    themes: ['light'],
-  },
+
   {
     name: 'settings-stopped',
     path: '/apps/wiki/settings?scenario=warnings',
@@ -1473,13 +1436,7 @@ SHOTS.push(
     wait: SETTINGS,
     click: '[data-test-delete]',
   },
-  {
-    name: 'settings-stop-dialog',
-    path: '/apps/blog/settings?scenario=healthy',
-    wait: SETTINGS,
-    click: '[data-test-control="stop"]',
-    themes: ['light'],
-  },
+
   {
     name: 'settings-focus',
     path: '/apps/blog/settings?scenario=healthy',
@@ -1840,13 +1797,13 @@ SHOTS.push(
   },
   {
     name: 'system-github',
-    path: '/system?scenario=healthy',
+    path: '/system/admin?scenario=healthy',
     wait: '[data-test-github-guide]',
     script: `document.querySelector('[data-test-github-app]').scrollIntoView()`,
   },
   {
     name: 'system-github-phone',
-    path: '/system?scenario=healthy',
+    path: '/system/admin?scenario=healthy',
     wait: '[data-test-github-guide]',
     script: `document.querySelector('[data-test-github-app]').scrollIntoView()`,
     ...PHONE,
@@ -1874,7 +1831,7 @@ SHOTS.push(
   },
   {
     name: 'system-partial-error',
-    path: '/system?scenario=backups-down',
+    path: '/system/jobs?scenario=backups-down',
     wait: '[data-test-backup-load-error]',
     fullPage: true,
     themes: ['light'],
@@ -1927,6 +1884,116 @@ SHOTS.push(
     themes: ['dark'],
   },
 );
+
+// Settings in the tabs they act on, the header's actions and the system
+// screen's tabs (ARCHITECTURE 9.1).
+const DEPLOY_SETTINGS = '[data-test-deploy-settings]';
+const IDLE_SLEEP_SECTION = '[data-test-idle-sleep-group]';
+const ENV_SOURCE = '[data-test-env-source-group]';
+for (const [suffix, extra] of [
+  ['', {}],
+  ['-phone', { ...PHONE, fullPage: false }],
+]) {
+  SHOTS.push(
+    {
+      name: `menus-deploy-settings${suffix}`,
+      path: '/apps/blog/deploy?section=deploy-settings&scenario=healthy',
+      wait: DEPLOY_SETTINGS,
+      settle: 800,
+      ...extra,
+    },
+    {
+      name: `menus-deploy-settings-auto${suffix}`,
+      path: '/apps/blog-staging/deploy?section=auto-deploy&scenario=healthy',
+      wait: DEPLOY_SETTINGS,
+      clicks: [
+        '[data-test-field="auto_deploy"]',
+        '[data-test-field="relax_policy"]',
+      ],
+      settle: 800,
+      ...extra,
+    },
+    {
+      name: `menus-deploy-unsaved${suffix}`,
+      path: '/apps/blog-staging/deploy?scenario=healthy',
+      wait: DEPLOY_SETTINGS,
+      clicks: ['[data-test-field="relax_policy"]', '[data-test-deploy-submit]'],
+      then: '[data-test-unsaved-dialog]',
+      ...extra,
+    },
+    {
+      name: `menus-resources-idle-sleep${suffix}`,
+      path: '/apps/blog-staging/resources?section=idle-sleep&scenario=healthy',
+      wait: IDLE_SLEEP_SECTION,
+      settle: 800,
+      ...extra,
+    },
+    {
+      name: `menus-env-source${suffix}`,
+      path: '/apps/blog/env?section=env-requirements&scenario=env-dotenv',
+      wait: ENV_SOURCE,
+      settle: 800,
+      ...extra,
+    },
+    {
+      name: `menus-header-menu${suffix}`,
+      path: '/apps/blog?scenario=healthy',
+      wait: '[data-test-action-menu]',
+      click: '[data-test-action-menu]',
+      then: '[data-test-action-menu-panel]',
+      ...extra,
+    },
+    {
+      name: `menus-stop-dialog${suffix}`,
+      path: '/apps/blog/logs?scenario=healthy',
+      wait: '[data-test-action-menu]',
+      clicks: ['[data-test-action-menu]', '[data-test-control="stop"]'],
+      then: '[data-test-stop-dialog]',
+      ...extra,
+    },
+    {
+      name: `menus-stopped-start${suffix}`,
+      path: '/apps/wiki?scenario=warnings',
+      wait: '[data-test-control="start"]',
+      ...extra,
+    },
+    {
+      name: `menus-settings${suffix}`,
+      path: '/apps/blog/settings?scenario=healthy',
+      wait: SETTINGS,
+      ...extra,
+      fullPage: true,
+    },
+    {
+      name: `menus-system-state${suffix}`,
+      path: '/system?scenario=healthy',
+      wait: RESOURCES,
+      ...extra,
+      fullPage: true,
+    },
+    {
+      name: `menus-system-jobs${suffix}`,
+      path: '/system/jobs?scenario=healthy',
+      wait: '[data-test-job="backup"] [data-test-backup-state]',
+      ...extra,
+      fullPage: true,
+    },
+    {
+      name: `menus-system-admin${suffix}`,
+      path: '/system/admin?scenario=healthy',
+      wait: '[data-test-members]',
+      ...extra,
+      fullPage: true,
+    },
+    {
+      name: `menus-user-menu${suffix}`,
+      path: '/?scenario=healthy',
+      wait: LIST,
+      click: '[data-test-user-menu]',
+      ...extra,
+    },
+  );
+}
 
 // App creation, login, not found.
 const REPOSITORY = '[data-test-field="repo_full_name"]';
@@ -2672,13 +2739,13 @@ SHOTS.push(
   },
   {
     name: 'sleep-settings',
-    path: '/apps/blog-staging/settings?scenario=sleeping',
+    path: '/apps/blog-staging/resources?scenario=sleeping',
     wait: '[data-test-field="idle_sleep_minutes"]',
     script: scrollTo(IDLE_SLEEP),
   },
   {
     name: 'sleep-settings-phone',
-    path: '/apps/blog-staging/settings?scenario=sleeping',
+    path: '/apps/blog-staging/resources?scenario=sleeping',
     wait: '[data-test-field="idle_sleep_minutes"]',
     script: scrollTo(IDLE_SLEEP),
     ...PHONE,
@@ -2686,27 +2753,27 @@ SHOTS.push(
   },
   {
     name: 'sleep-settings-unavailable',
-    path: '/apps/blog-staging/settings?scenario=unconfigured',
+    path: '/apps/blog-staging/resources?scenario=unconfigured',
     wait: '[data-test-idle-sleep-unavailable]',
     script: scrollTo(IDLE_SLEEP),
   },
   {
     name: 'sleep-production-confirm',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?scenario=healthy',
     wait: '[data-test-field="idle_sleep"]',
     script: `(() => {
       document.querySelector('[data-test-field="idle_sleep"]').click();
-      setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 300);
+      setTimeout(() => document.querySelector('[data-test-idle-sleep-save]').click(), 300);
     })()`,
     then: '[data-test-idle-sleep-confirm]',
   },
   {
     name: 'sleep-production-confirm-phone',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?scenario=healthy',
     wait: '[data-test-field="idle_sleep"]',
     script: `(() => {
       document.querySelector('[data-test-field="idle_sleep"]').click();
-      setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 300);
+      setTimeout(() => document.querySelector('[data-test-idle-sleep-save]').click(), 300);
     })()`,
     then: '[data-test-idle-sleep-confirm]',
     ...PHONE,

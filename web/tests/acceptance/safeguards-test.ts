@@ -365,7 +365,8 @@ module('Acceptance | safeguards', function (hooks) {
       const restarting = click('[data-test-control="restart"]');
       await waitUntil(() => find('[data-test-control-busy]'));
 
-      await click('[data-test-action-menu]');
+      (find('[data-test-action-menu]') as HTMLButtonElement).click();
+      await waitUntil(() => find('[data-test-control="restart"]'));
       assert.dom('[data-test-control="restart"]').isDisabled();
       assert.dom('[data-test-control="stop"]').isDisabled();
       (find('[data-test-control="restart"]') as HTMLButtonElement).click();
@@ -374,7 +375,7 @@ module('Acceptance | safeguards', function (hooks) {
       await restarting;
 
       assert.strictEqual(sent('POST', `${APP}/restart`), 1);
-      await click('[data-test-action-menu]');
+      // The menu opened while it ran is still open.
       assert.dom('[data-test-control="restart"]').isNotDisabled();
       assert.dom('[data-test-control="stop"]').isNotDisabled();
     });

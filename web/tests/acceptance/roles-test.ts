@@ -91,6 +91,11 @@ module('Acceptance | roles', function (hooks) {
     assert.dom('[data-test-env-add]').doesNotExist();
     assert.dom('[data-test-env-edit]').doesNotExist();
     assert.dom('[data-test-env-key]').exists({ count: 2 }, 'the keys show');
+    assert.dom('[data-test-env-source-form] fieldset').isDisabled();
+    assert
+      .dom('[data-test-env-source-group] [data-test-role-note="manage"]')
+      .exists();
+    assert.dom('[data-test-env-source-save]').doesNotExist();
 
     await visit('/apps/blog/settings?section=domains');
     assert.dom('[data-test-domains]').exists('the domains can be read');
@@ -99,12 +104,6 @@ module('Acceptance | roles', function (hooks) {
     assert
       .dom('[data-test-domains] [data-test-copy]')
       .isNotDisabled('copying a record is reading');
-
-    assert.dom('[data-test-env-source-form] fieldset').isDisabled();
-    assert
-      .dom('[data-test-env-source-group] [data-test-role-note="manage"]')
-      .exists();
-    assert.dom('[data-test-env-source-save]').doesNotExist();
 
     await visit('/apps/blog/settings');
     assert.dom('[data-test-settings-form] fieldset').isDisabled();

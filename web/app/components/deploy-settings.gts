@@ -205,7 +205,7 @@ export default class DeploySettings extends Component<Signature> {
             <div>
               <h3
                 class="form-group-title"
-                id="auto-deploy-title"
+                id="deploy-settings-auto-deploy-title"
               >自動デプロイ</h3>
               <p class="form-group-description">
                 GitHub にブランチが push
@@ -361,7 +361,10 @@ export default class DeploySettings extends Component<Signature> {
               {{focusSection (this.focuses "promotion")}}
             >
               <div>
-                <h3 class="form-group-title" id="promotion-title">昇格元</h3>
+                <h3
+                  class="form-group-title"
+                  id="deploy-settings-promotion-title"
+                >昇格元</h3>
                 <p class="form-group-description">
                   同じリポジトリのステージングアプリを選ぶと、このタブの上の欄から、そのアプリで稼働中のリリースを本番へ昇格できます。ビルド引数が同じなら、ビルドしたイメージも再利用します。
                 </p>
@@ -431,7 +434,7 @@ export default class DeploySettings extends Component<Signature> {
             <div>
               <h3
                 class="form-group-title"
-                id="safeguards-title"
+                id="deploy-settings-safeguards-title"
               >デプロイの安全装置</h3>
               <p class="form-group-description">
                 危険な構成や、起動しないリリースからアプリを守るしくみです。
