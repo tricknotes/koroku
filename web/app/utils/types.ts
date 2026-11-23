@@ -361,7 +361,7 @@ export interface App {
    * backends, where the only user is the owner.
    */
   role?: AppRole;
-  // Added by the backend in M5; absent before that.
+  // Backup settings (ARCHITECTURE 10.2). Absent from older backends.
   backup_exclude_volumes?: string[] | null;
   dump_hook_service?: string;
   dump_hook_command?: string;
