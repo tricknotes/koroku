@@ -548,7 +548,7 @@ export default class SystemTemplate extends Component {
                     <span class="usage-app">
                       {{#if row.app}}
                         <LinkTo
-                          @route="app"
+                          @route="app.resources"
                           @model={{row.app}}
                           class="row-link usage-name"
                           data-test-container-app
