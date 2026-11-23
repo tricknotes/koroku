@@ -267,6 +267,7 @@ type appInfo struct {
 
 type deployment struct {
 	ID     int64  `json:"id"`
+	Ref    string `json:"ref"`
 	Status string `json:"status"`
 	Error  string `json:"error"`
 }
@@ -359,8 +360,10 @@ func newRepo(t *testing.T, sample string) *repo {
 	t.Helper()
 	r := &repo{t: t, dir: t.TempDir()}
 	r.git("init", "--quiet", "--initial-branch", "main")
-	// Let clients fetch any commit by SHA, as GitHub does.
+	// Let clients fetch any commit by SHA, as GitHub does, and the history
+	// of a branch without its files.
 	r.git("config", "uploadpack.allowAnySHA1InWant", "true")
+	r.git("config", "uploadpack.allowFilter", "true")
 	if sample != "" {
 		if err := os.CopyFS(r.dir, os.DirFS(filepath.Join(samples, sample))); err != nil {
 			t.Fatal(err)

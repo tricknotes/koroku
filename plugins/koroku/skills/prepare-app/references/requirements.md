@@ -4,7 +4,7 @@ koroku の設計（`docs/ARCHITECTURE.md` の 6〜8 章と 10 章）から、デ
 
 ## デプロイで koroku がすること
 
-1. 指定したコミットを `git fetch --depth 1` で取得し、`.git` を消す。submodule と Git LFS のファイルは取得しない。
+1. 指定したコミットを `git fetch --depth 1` で取得し、`.git` を消す。submodule と Git LFS のファイルは取得しない。取得するのは、デプロイに指定したブランチかタグ（SHA だけの指定なら、koroku のアプリが追うブランチ）の先頭か、その祖先のコミットだけ。force-push でブランチから外れたコミットや、pull request にしかないコミットは、SHA を指定してもこの手順で失敗する。
 2. 画面で設定した環境変数を env ファイルに、デプロイするコミット（`KOROKU_COMMIT_SHA`、`KOROKU_COMMIT_SHORT`）を別の env ファイル `env.release` に書き、override を生成する（下の「コミットの変数を受け取るサービス」）。
 3. Compose ファイルと、そこから `include` / `extends.file` でたどれるファイルを読んで調べたうえで、`docker compose -p koroku-<slug> -f <Compose ファイル> -f koroku.override.yaml --env-file <env> --env-file <env.release> config` で正規化し、ポリシー検査をかける。Compose ファイルの `${VAR}` が読めるのは、koroku で設定した環境変数とコミットの変数（と `PATH`、`HOME` など動かすのに要るもの）だけ。
 4. `build:` を持つサービスはホスト（x86_64）でビルドし、`image:` だけのサービスは pull する。

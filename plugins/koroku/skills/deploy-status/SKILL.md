@@ -56,6 +56,7 @@ koroku は GitHub リポジトリの Docker Compose アプリをデプロイす�
 | 失敗した手順 | よくある原因 | 直す場所 |
 | --- | --- | --- |
 | `fetch` | コミットが push されていない、submodule や LFS に頼っている | push する。submodule / LFS をやめる |
+| `fetch`（`is not reachable from "<ref>"`、`has no branch or tag named "<ref>"`） | コミットが、デプロイに指定したブランチかタグ（SHA だけの指定なら koroku のアプリが追うブランチ）の先頭でも祖先でもない。force-push でブランチから外れた、別のブランチのコミット、pull request のコミット（`pull/12/head` は ref に使えない）。koroku はブランチかタグからたどれるコミットしかデプロイしない | そのコミットを含むブランチかタグを指定してデプロイし直してもらう。どこにも残っていなければ、そのコミットを指すブランチかタグを push する |
 | `prepare` / `validate` | Compose の構文、ポリシー検査の違反（特権、ホストの名前空間、bind mount、`container_name` など。`unsupported_setting` は koroku が許可していない設定や、`include` の書き方で、エラーに設定の名前が出る）、`${VAR:?}` の必須変数が未設定。無停止デプロイのアプリでは、ルール `blue_green` の違反（公開サービスの `container_name`、`replicas`、ほかのサービスからの `depends_on`、`include:` した別ファイルの公開サービスなど。`cannot extend service "web-blue"` も同じ） | Compose ファイル。未設定の変数は利用者に管理画面で入れてもらう。`blue_green` は prepare-app の requirements.md の「無停止デプロイ」を見て直す（「検査を緩める」では許可されない） |
 | `build` | Dockerfile、依存の取得、`.dockerignore` の漏れ | Dockerfile とその周辺 |
 | `pull` | イメージ名やタグの誤り、private イメージ。`The registry has no image with that tag (manifest unknown)` は、CI がコミットごとにビルドするイメージがまだ push されていない（ワークフローの終了前にデプロイした） | Compose の `image:`。CI のイメージなら、ワークフローが終わってからデプロイし直す。自動デプロイなら koroku の設定タブの「先に待つワークフロー」にイメージを作るワークフローを入れる |

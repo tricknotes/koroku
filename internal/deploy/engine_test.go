@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -116,6 +117,12 @@ type harness struct {
 	buildOutput string
 	// onFetch lets a test add files to the checkout, as a repository would.
 	onFetch func(dir string) error
+	// branches, when set, is what the repository's branches reach: the
+	// commits of each, newest first. Without it every commit is the tip of
+	// the ref it is deployed from.
+	branches map[string][]string
+	// historyOf is the ref whose history git fetched last, per directory.
+	historyOf map[string]string
 	// psOutput, when set, prints `docker compose ps` (the app's containers).
 	psOutput func() string
 }
@@ -170,8 +177,36 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 	switch cmd.Name {
 	case "git":
 		switch cmd.Args[0] {
+		case "ls-remote":
+			// The check that the ref reaches the commit (ARCHITECTURE 7).
+			name := cmd.Args[3]
+			h.mu.Lock()
+			branches := h.branches
+			h.mu.Unlock()
+			if branches == nil {
+				return h.deployingSHA(cmd.Dir) + "\t" + name + "\n", nil
+			}
+			if commits := branches[strings.TrimPrefix(name, "refs/heads/")]; len(commits) > 0 {
+				return commits[0] + "\t" + name + "\n", nil
+			}
+			return "", nil
+		case "rev-list":
+			h.mu.Lock()
+			commits := h.branches[h.historyOf[cmd.Dir]]
+			h.mu.Unlock()
+			return strings.Join(commits, "\n") + "\n", nil
 		case "fetch":
 			sha := cmd.Args[len(cmd.Args)-1]
+			if slices.Contains(cmd.Args, "--filter=tree:0") {
+				// The history of a ref, not a checkout.
+				h.mu.Lock()
+				defer h.mu.Unlock()
+				if h.historyOf == nil {
+					h.historyOf = map[string]string{}
+				}
+				h.historyOf[cmd.Dir] = strings.TrimPrefix(sha, "refs/heads/")
+				return "", nil
+			}
 			if err := os.WriteFile(filepath.Join(cmd.Dir, "compose.yaml"), []byte("# "+sha+"\n"), 0o644); err != nil {
 				return "", err
 			}
@@ -232,6 +267,20 @@ func (h *harness) handle(ctx context.Context, cmd runner.Cmd) (string, error) {
 		return "", nil
 	}
 	return "", fmt.Errorf("unexpected command %s", cmd.Name)
+}
+
+// deployingSHA is the commit of the deployment whose release directory is
+// dir.
+func (h *harness) deployingSHA(dir string) string {
+	id, err := strconv.ParseInt(filepath.Base(dir), 10, 64)
+	if err != nil {
+		return ""
+	}
+	d, err := h.store.GetDeployment(context.Background(), id)
+	if err != nil {
+		return ""
+	}
+	return d.CommitSHA
 }
 
 // loopbackPort finds the host port the override publishes the web service on.
