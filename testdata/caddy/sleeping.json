@@ -41,6 +41,13 @@
                 {
                   "flush_interval": -1,
                   "handler": "reverse_proxy",
+                  "headers": {
+                    "request": {
+                      "delete": [
+                        "X-Koroku-Wake"
+                      ]
+                    }
+                  },
                   "upstreams": [
                     {
                       "dial": "127.0.0.1:8080"
@@ -180,6 +187,13 @@
                       "handle": [
                         {
                           "handler": "reverse_proxy",
+                          "headers": {
+                            "request": {
+                              "delete": [
+                                "X-Koroku-Wake"
+                              ]
+                            }
+                          },
                           "upstreams": [
                             {
                               "dial": "127.0.0.1:8080"
@@ -237,6 +251,9 @@
                           "handler": "reverse_proxy",
                           "headers": {
                             "request": {
+                              "delete": [
+                                "X-Koroku-Wake"
+                              ],
                               "set": {
                                 "X-Forwarded-Method": [
                                   "{http.request.method}"
@@ -262,6 +279,7 @@
                         {
                           "not": [
                             {
+                              "expression": "{http.request.orig_uri}.matches(r'^(?:/webhooks/)') && !{http.request.orig_uri}.matches(r'^[^?]*(?://|[\\\\]|%2[eEfF]|%5[cC]|/[.][.]?(?:[/;?]|$))')",
                               "path": [
                                 "/webhooks/*"
                               ]

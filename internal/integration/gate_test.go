@@ -16,7 +16,9 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -260,6 +262,89 @@ func TestAccessProtectionThroughCaddy(t *testing.T) {
 		}
 	}
 
+	// Caddy routes on the decoded, cleaned, lower-cased path and forwards
+	// the request as it was sent. No spelling of a path gets a request
+	// without a login to the app, with or without the header of the wake
+	// route (ARCHITECTURE 8.4), and only the plain spelling of an exempt
+	// path skips the gate.
+	crafted := func(target string, wake bool) result {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, "https://"+appHost+"/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.URL.Opaque = target
+		if wake {
+			req.Header.Set(caddy.WakeHeader, "shop-staging")
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST %s: %v\n--- caddy ---\n%s", target, err, caddyLog.String())
+		}
+		defer func() { _ = res.Body.Close() }()
+		body, _ := io.ReadAll(res.Body)
+		return result{res.StatusCode, res.Header, string(body)}
+	}
+	for _, c := range []struct {
+		target string
+		wake   bool
+		want   int
+	}{
+		// Other spellings of koroku's own paths.
+		{"/graphql/../.koroku/auth/x?q=1", true, http.StatusNotFound},
+		{"/graphql/..%2F.koroku/auth/x?q=1", true, http.StatusNotFound},
+		{"/.KOROKU/auth/x", true, http.StatusNotFound},
+		{"/graphql/../.koroku/auth/x?q=1", false, http.StatusNotFound},
+		{"/.KOROKU/auth/x", false, http.StatusNotFound},
+		{"/.koroku/auth/x", true, http.StatusNotFound},
+		{"/x/../.koroku", true, http.StatusNotFound},
+		// The header alone opens nothing.
+		{"/secret", true, http.StatusUnauthorized},
+		{"/auth/gate/check", true, http.StatusUnauthorized},
+		{"/AUTH/GATE/CHECK", true, http.StatusUnauthorized},
+		// Paths that only resolve to an exempt prefix, or reach it in
+		// another spelling.
+		{"/admin/..%2Fwebhooks/x", false, http.StatusUnauthorized},
+		{"/admin/../webhooks/x", false, http.StatusUnauthorized},
+		{"/admin/..%2Fwebhooks/x", true, http.StatusUnauthorized},
+		{"/admin/../webhooks/x", true, http.StatusUnauthorized},
+		{"/WEBHOOKS/x", false, http.StatusUnauthorized},
+		{"/Webhooks/x", true, http.StatusUnauthorized},
+		{"/%77ebhooks/x", false, http.StatusUnauthorized},
+		{"/webhooks%2Fx", false, http.StatusUnauthorized},
+		// An exempt prefix followed by something an app could resolve to
+		// another path.
+		{"/webhooks/../webhooks/x", false, http.StatusUnauthorized},
+		{"/webhooks/./x", false, http.StatusUnauthorized},
+		{"/webhooks//x", false, http.StatusUnauthorized},
+		{"/webhooks/x/..", false, http.StatusUnauthorized},
+		{"/webhooks/x/..?a=1", false, http.StatusUnauthorized},
+		{"/webhooks/%2E%2E/secret", false, http.StatusUnauthorized},
+		{"/webhooks/x%2e", false, http.StatusUnauthorized},
+		{"/webhooks/a%2Fb", false, http.StatusUnauthorized},
+		{"/webhooks/a%2fb", false, http.StatusUnauthorized},
+		{"/webhooks/a%5Cb", false, http.StatusUnauthorized},
+		{"/webhooks/a%5cb", false, http.StatusUnauthorized},
+		{`/webhooks/a\..\b`, false, http.StatusUnauthorized},
+		{"/webhooks/..;/secret", false, http.StatusUnauthorized},
+		{"/webhooks/.;x/secret", false, http.StatusUnauthorized},
+		{"/webhooks/{http.request.uri.query}/..%2Fx?a", false, http.StatusUnauthorized},
+		// The plain spelling: dots inside a segment, other escapes and
+		// anything in the query are the app's business.
+		{"/webhooks/x", true, http.StatusOK},
+		{"/webhooks/v1.2/..a/b..c/x%20y", false, http.StatusOK},
+		{"/webhooks/x?next=https%3A%2F%2Fexample.com%2F..%2F&dir=a//../b%5C", false, http.StatusOK},
+	} {
+		r := crafted(c.target, c.wake)
+		reached := strings.Contains(r.body, "app path=")
+		if r.status != c.want || reached != (c.want == http.StatusOK) {
+			t.Errorf("POST %s (wake header %v): %d %q, want %d", c.target, c.wake, r.status, r.body, c.want)
+		}
+		if reached && !strings.Contains(r.body, "path="+c.target+" ") {
+			t.Errorf("POST %s reached the app as another path: %s", c.target, r.body)
+		}
+	}
+
 	// The console hands out a one-time code for the app host.
 	sessionCookie := "__Host-koroku_session=" + sessionToken
 	r = do(http.MethodGet, wantLoc, "", sessionCookie)
@@ -326,5 +411,119 @@ func TestAccessProtectionThroughCaddy(t *testing.T) {
 	}
 	if r := do(http.MethodGet, "https://"+appHost+"/secret", "", gate); r.status != http.StatusFound {
 		t.Errorf("after console logout: %d", r.status)
+	}
+}
+
+// TestWakeHeaderReachesKorokuOnlyFromTheWakeRoute runs a real Caddy with a
+// stand-in for koroku that records the wake header of every request it
+// gets: the header of a client is deleted on the console route, the login
+// endpoints and the gate check, and replaced on the wake route
+// (ARCHITECTURE 8.4).
+func TestWakeHeaderReachesKorokuOnlyFromTheWakeRoute(t *testing.T) {
+	t.Parallel()
+	const image = "caddy:2"
+	if err := exec.Command("docker", "image", "inspect", image).Run(); err != nil {
+		if out, err := exec.Command("docker", "pull", "--quiet", image).CombinedOutput(); err != nil {
+			t.Skipf("the %s image is not available: %v: %s", image, err, out)
+		}
+	}
+
+	type seen struct{ host, uri, wake string }
+	var mu sync.Mutex
+	var got []seen
+	korokuPort := serveOn(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = append(got, seen{r.Host, r.URL.RequestURI(), strings.Join(r.Header.Values(caddy.WakeHeader), ",")})
+		mu.Unlock()
+		if r.URL.Path == caddy.GateCheckPath {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_, _ = io.WriteString(w, "koroku")
+	}))
+	appPort := serveOn(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "app")
+	}))
+
+	const (
+		consoleHost   = "console.dev.example.com"
+		protectedHost = "shop-staging.dev.example.com"
+		sleepingHost  = "blog.dev.example.com"
+	)
+	config, err := caddy.Generate(caddy.Input{
+		ConsoleHost:     consoleHost,
+		ConsoleUpstream: fmt.Sprintf("127.0.0.1:%d", korokuPort),
+		ListenIP:        "127.0.0.1",
+		InternalCA:      true,
+		Apps: []caddy.App{
+			{Slug: "shop-staging", HostPort: appPort, Hostnames: []string{protectedHost}, Protected: true},
+			{Slug: "blog", HostPort: freePort(t), Hostnames: []string{sleepingHost}, Sleeping: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpsPort, caddyLog := startCaddy(t, image, "wake-header", config)
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, fmt.Sprintf("127.0.0.1:%d", httpsPort))
+			},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // Caddy's local CA
+		},
+	}
+	get := func(host, target string) (int, string, error) {
+		req, err := http.NewRequest(http.MethodGet, "https://"+host+target, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set(caddy.WakeHeader, "from-the-client")
+		res, err := client.Do(req)
+		if err != nil {
+			return 0, "", err
+		}
+		defer func() { _ = res.Body.Close() }()
+		body, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(body), nil
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		status, _, err := get(consoleHost, "/")
+		if err == nil && status == http.StatusOK {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("caddy did not come up: %v\n%s", err, caddyLog.String())
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	mu.Lock()
+	got = nil
+	mu.Unlock()
+
+	for _, c := range []struct{ host, target, body string }{
+		{consoleHost, "/api/apps", "koroku"},
+		{protectedHost, "/.koroku/auth/callback?code=x", "koroku"},
+		{protectedHost, "/page", "app"},
+		{sleepingHost, "/page", "koroku"},
+	} {
+		status, body, err := get(c.host, c.target)
+		if err != nil || status != http.StatusOK || body != c.body {
+			t.Fatalf("GET %s%s: %d %q %v\n--- caddy ---\n%s", c.host, c.target, status, body, err, caddyLog.String())
+		}
+	}
+	want := []seen{
+		{consoleHost, "/api/apps", ""},
+		{protectedHost, "/.koroku/auth/callback?code=x", ""},
+		{protectedHost, caddy.GateCheckPath, ""},
+		{sleepingHost, "/page", "blog"},
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(got, want) {
+		t.Errorf("koroku received %+v, want %+v", got, want)
 	}
 }

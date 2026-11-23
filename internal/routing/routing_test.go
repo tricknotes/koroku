@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -483,15 +484,18 @@ func TestBuildSleepingApp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Only the wake route sets the header; the other routes to koroku
+	// delete it.
+	wake := regexp.MustCompile(`"set": \{\s*"X-Koroku-Wake": \[\s*"blog"\s*\]`)
 	text := string(config)
-	if strings.Contains(text, "127.0.0.1:20000") || !strings.Contains(text, `"X-Koroku-Wake"`) {
+	if strings.Contains(text, "127.0.0.1:20000") || !wake.MatchString(text) {
 		t.Errorf("a sleeping app must be routed to koroku:\n%s", text)
 	}
 	if _, err := st.MarkAppAwake(ctx, blog.ID); err != nil {
 		t.Fatal(err)
 	}
 	config, _ = router.Build(ctx)
-	if text := string(config); !strings.Contains(text, "127.0.0.1:20000") || strings.Contains(text, "X-Koroku-Wake") {
+	if text := string(config); !strings.Contains(text, "127.0.0.1:20000") || wake.MatchString(text) {
 		t.Errorf("an awake app must be routed to its port:\n%s", text)
 	}
 }

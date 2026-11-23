@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/url"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -119,7 +120,8 @@ type App struct {
 	// are sent to the console to log in (ARCHITECTURE 8.3). koroku, at
 	// Input.ConsoleUpstream, decides. It does not apply to a stopped app.
 	Protected bool
-	// ExemptPaths are path prefixes of a protected app that skip the gate.
+	// ExemptPaths are path prefixes of a protected app that skip the gate,
+	// for requests that spell them exactly as written here (exemptMatcher).
 	ExemptPaths []string
 	// NoIndex adds X-Robots-Tag: noindex to every response (staging apps).
 	NoIndex bool
@@ -321,6 +323,7 @@ func consoleRoute(in Input) obj {
 		"handle": []obj{{
 			"handler":   "reverse_proxy",
 			"upstreams": []obj{{"dial": in.ConsoleUpstream}},
+			"headers":   dropWakeHeader(),
 			// The console streams deploy logs over SSE: never buffer responses.
 			"flush_interval": -1,
 		}},
@@ -420,13 +423,18 @@ const (
 // gateRoutes put a protected app behind koroku: its own login endpoints go
 // to koroku, the rest of /.koroku/ is refused, every other request outside
 // the exempt prefixes is checked with forward_auth, and what passes is
-// proxied to the app without the gate cookie.
+// proxied to the app without the gate cookie. Nothing a client sends in
+// WakeHeader reaches koroku through the login endpoints or the check.
 func gateRoutes(app App, gateUpstream string) []obj {
 	toKoroku := []obj{{"dial": gateUpstream}}
 	routes := []obj{
 		{
-			"match":    []obj{{"path": []string{GateAuthPrefix + "*"}}},
-			"handle":   []obj{{"handler": "reverse_proxy", "upstreams": toKoroku}},
+			"match": []obj{{"path": []string{GateAuthPrefix + "*"}}},
+			"handle": []obj{{
+				"handler":   "reverse_proxy",
+				"upstreams": toKoroku,
+				"headers":   dropWakeHeader(),
+			}},
 			"terminal": true,
 		},
 		{
@@ -444,10 +452,13 @@ func gateRoutes(app App, gateUpstream string) []obj {
 		"handler":   "reverse_proxy",
 		"upstreams": toKoroku,
 		"rewrite":   obj{"method": "GET", "uri": GateCheckPath},
-		"headers": obj{"request": obj{"set": obj{
-			"X-Forwarded-Method": []string{"{http.request.method}"},
-			"X-Forwarded-Uri":    []string{"{http.request.uri}"},
-		}}},
+		"headers": obj{"request": obj{
+			"set": obj{
+				"X-Forwarded-Method": []string{"{http.request.method}"},
+				"X-Forwarded-Uri":    []string{"{http.request.uri}"},
+			},
+			"delete": []string{WakeHeader},
+		}},
 		"handle_response": []obj{{
 			"match":  obj{"status_code": []int{2}},
 			"routes": []obj{{"handle": []obj{{"handler": "vars"}}}},
@@ -455,13 +466,7 @@ func gateRoutes(app App, gateUpstream string) []obj {
 	}
 	checkRoute := obj{"handle": []obj{check}}
 	if len(app.ExemptPaths) > 0 {
-		prefixes := make([]string, 0, len(app.ExemptPaths))
-		for _, p := range app.ExemptPaths {
-			prefixes = append(prefixes, p+"*")
-		}
-		// Caddy matches the cleaned path (.., //), so /webhooks/../admin
-		// is not exempt.
-		checkRoute["match"] = []obj{{"not": []obj{{"path": prefixes}}}}
+		checkRoute["match"] = []obj{{"not": []obj{exemptMatcher(app.ExemptPaths)}}}
 	}
 	routes = append(routes, checkRoute)
 
@@ -478,10 +483,90 @@ func gateRoutes(app App, gateUpstream string) []obj {
 	return append(routes, obj{"handle": []obj{strip, upstream(app, gateUpstream)}})
 }
 
+// rawURI is the Caddy placeholder of the request target exactly as the
+// client sent it: still percent-encoded, with its dot segments and its
+// query.
+const rawURI = "{http.request.orig_uri}"
+
+// ambiguousRawPath is a regular expression that matches a request target
+// whose path the servers it passes could read in more than one way: a "."
+// or ".." segment (also with path parameters, as in "..;x"), an empty
+// segment ("//"), a backslash, or a percent-encoded ".", "/" or "\". The
+// query is not looked at. Such a request never skips the access protection.
+const ambiguousRawPath = `^[^?]*(?://|[\\]|%2[eEfF]|%5[cC]|/[.][.]?(?:[/;?]|$))`
+
+// exemptRawPrefix is the regular expression of the request targets that
+// start with one of the exempt path prefixes, spelled exactly as configured.
+func exemptRawPrefix(paths []string) string {
+	quoted := make([]string, 0, len(paths))
+	for _, p := range paths {
+		quoted = append(quoted, regexp.QuoteMeta(p))
+	}
+	return "^(?:" + strings.Join(quoted, "|") + ")"
+}
+
+// exemptMatcher matches the requests that skip the access protection. Three
+// conditions must hold together:
+//
+//   - the path as Caddy reads it (decoded, cleaned, compared without case)
+//     is under an exempt prefix;
+//   - the request target as sent starts with that prefix in the configured
+//     spelling, so /WEBHOOKS/ and /%77ebhooks/ are not exempt for /webhooks/;
+//   - the path as sent is not ambiguous (ambiguousRawPath). Caddy forwards
+//     the target as sent, and the app may resolve /admin/..%2Fwebhooks/x to
+//     another path than Caddy did.
+//
+// The expression reads the raw target through the placeholder function of
+// CEL, which returns the value as it is; the vars_regexp matcher would
+// expand placeholders that a client wrote into the URI. Exempt paths never
+// contain a quote, a brace or a backslash (CheckExemptPath), so they are safe
+// inside the raw string literal and are not taken for placeholders.
+func exemptMatcher(paths []string) obj {
+	prefixes := make([]string, 0, len(paths))
+	for _, p := range paths {
+		prefixes = append(prefixes, p+"*")
+	}
+	return obj{
+		"path": prefixes,
+		"expression": rawURI + ".matches(r'" + exemptRawPrefix(paths) + "') && !" +
+			rawURI + ".matches(r'" + ambiguousRawPath + "')",
+	}
+}
+
+// MatchedPath returns the decoded request path p the way Caddy's path
+// matcher compares it: lower-cased, with "." and ".." segments resolved and
+// repeated slashes merged, keeping a trailing slash. koroku uses it to tell
+// which of its own paths Caddy routed a request as.
+func MatchedPath(p string) string {
+	return cleanPath(strings.ToLower(p))
+}
+
+// IsCleanPath reports whether the decoded request path p has no "." or ".."
+// segments and no repeated slashes.
+func IsCleanPath(p string) bool {
+	return cleanPath(p) == p
+}
+
+// cleanPath is path.Clean that keeps a trailing slash.
+func cleanPath(p string) string {
+	cleaned := path.Clean(p)
+	if cleaned != "/" && strings.HasSuffix(p, "/") {
+		cleaned += "/"
+	}
+	return cleaned
+}
+
 // WakeHeader names the app a request forwarded to koroku is for, while
-// the app sleeps (ARCHITECTURE 8.4). Caddy sets it, replacing whatever the
-// client sent.
+// the app sleeps (ARCHITECTURE 8.4). Only wakeProxy sets it, replacing
+// whatever the client sent; every other route to koroku deletes it.
 const WakeHeader = "X-Koroku-Wake"
+
+// dropWakeHeader is the header manipulation of the proxies to koroku that
+// are not the wake route: a client cannot make koroku take its request for
+// one Caddy forwarded for a sleeping app.
+func dropWakeHeader() obj {
+	return obj{"request": obj{"delete": []string{WakeHeader}}}
+}
 
 // upstream is where the requests that pass everything in front of the app
 // go: the app itself, or koroku while the app sleeps.

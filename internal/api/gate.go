@@ -330,25 +330,41 @@ func (s *Server) gateMux() http.Handler {
 	return mux
 }
 
+// isGatePath reports whether Caddy routes the decoded request path p as one
+// of the access protection paths: the gate check, or anything under
+// /.koroku. Caddy decides on the cleaned, lower-cased path and forwards the
+// request as the client sent it, so koroku decides on the same form:
+// /x/../.koroku/auth/y and /.KOROKU/auth/y are gate paths, never paths of
+// an app.
+func isGatePath(p string) bool {
+	matched := caddy.MatchedPath(p)
+	return matched == caddy.GateCheckPath || matched == strings.TrimSuffix(caddy.ReservedPrefix, "/") ||
+		strings.HasPrefix(matched, caddy.ReservedPrefix)
+}
+
 // hostDispatch sends the access protection paths to the gate handlers and
 // refuses everything else on app hostnames, so that a request for an app
-// host can never reach the console, its API or its session cookie. The
-// console host never serves the gate paths.
+// host can never reach the console, its API or its session cookie.
+// The gate handlers answer only the exact spelling of their paths; another
+// spelling of a gate path is not found. The console host never serves the
+// gate paths.
 func (s *Server) hostDispatch(console, gate http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		isGate := path == caddy.GateCheckPath || strings.HasPrefix(path, caddy.ReservedPrefix)
 		host := requestHostname(r)
-		switch {
-		case isGate && host == strings.ToLower(s.cfg.ConsoleHost):
-			http.NotFound(w, r)
-		case isGate:
+		if isGatePath(path) {
+			if host == strings.ToLower(s.cfg.ConsoleHost) || path != caddy.MatchedPath(path) {
+				http.NotFound(w, r)
+				return
+			}
 			gate.ServeHTTP(w, r)
-		case s.isAppHostname(host):
-			http.NotFound(w, r)
-		default:
-			console.ServeHTTP(w, r)
+			return
 		}
+		if s.isAppHostname(host) {
+			http.NotFound(w, r)
+			return
+		}
+		console.ServeHTTP(w, r)
 	})
 }
 

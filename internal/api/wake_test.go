@@ -233,6 +233,73 @@ func TestWakeHeaderIsHonouredOnlyWhereCaddySendsIt(t *testing.T) {
 	}
 }
 
+// Caddy routes a request by its decoded, cleaned, lower-cased path and
+// forwards it as the client sent it. A request Caddy sent to koroku as a
+// gate path must never be taken for one of the wake route, whatever its
+// spelling and its headers; and the wake route proxies no path that could
+// be read in two ways.
+func TestWakeNeverProxiesAnotherSpellingOfAPath(t *testing.T) {
+	f := newWakeFixture(t, nil)
+	if _, err := f.srv.store.MarkAppAwake(context.Background(), f.app.ID); err != nil {
+		t.Fatal(err)
+	}
+	for target, want := range map[string]int{
+		// Gate paths in another spelling.
+		"/graphql/../.koroku/auth/x?q=1":   http.StatusNotFound,
+		"/graphql/..%2F.koroku/auth/x?q=1": http.StatusNotFound,
+		"/%2e%2e/.koroku/auth/x":           http.StatusNotFound,
+		"/.KOROKU/auth/x":                  http.StatusNotFound,
+		"/.koroku":                         http.StatusNotFound,
+		"/x/../.koroku":                    http.StatusNotFound,
+		"//.koroku/auth/x":                 http.StatusNotFound,
+		"/AUTH/GATE/CHECK":                 http.StatusNotFound,
+		"/auth/gate/../gate/check":         http.StatusNotFound,
+		// Paths of the app that are not in their cleaned form.
+		"/admin/../webhooks/x":   http.StatusBadRequest,
+		"/admin/..%2Fwebhooks/x": http.StatusBadRequest,
+		"/admin/%2E%2E/x":        http.StatusBadRequest,
+		"/a/./b":                 http.StatusBadRequest,
+		"/a//b":                  http.StatusBadRequest,
+		"//":                     http.StatusBadRequest,
+	} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			rec := f.forwarded(method, target, "", "blog", nil)
+			if rec.Code != want {
+				t.Errorf("%s %s: %d %s, want %d", method, target, rec.Code, rec.Body, want)
+			}
+		}
+	}
+	select {
+	case seen := <-f.seen:
+		t.Errorf("the app received %+v", seen)
+	default:
+	}
+
+	// Cleaned paths reach the app as they were sent.
+	for _, target := range []string{"/Posts/1?q=../x", "/files/a%2Fb", "/a/..b/.c/"} {
+		if rec := f.forwarded(http.MethodGet, target, "", "blog", nil); rec.Code != http.StatusOK {
+			t.Errorf("%s: %d", target, rec.Code)
+			continue
+		}
+		if seen := <-f.seen; seen.path != target {
+			t.Errorf("%s reached the app as %s", target, seen.path)
+		}
+	}
+
+	// A sleeping app is not woken by any of them either.
+	if _, err := f.srv.store.MarkAppSleeping(context.Background(), f.app.ID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"/graphql/../.koroku/auth/x", "/.KOROKU/auth/x", "/admin/../webhooks/x", "/a//b"} {
+		if rec := f.forwarded(http.MethodGet, target, "", "blog", nil); rec.Code == http.StatusOK {
+			t.Errorf("%s: %d", target, rec.Code)
+		}
+	}
+	if f.waker.count() != 0 {
+		t.Errorf("woken %d times", f.waker.count())
+	}
+}
+
 func TestWakeAppFromTheConsole(t *testing.T) {
 	f := newWakeFixture(t, nil)
 	rec := request(t, f.h, http.MethodPost, "/api/apps/blog/wake", "")
