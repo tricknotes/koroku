@@ -234,6 +234,49 @@ module('Acceptance | deploy', function (hooks) {
       );
     });
 
+    test('a commit its branch does not reach says so and what to do', async function (assert) {
+      const error =
+        'fetch source: commit bbbbbbbb is not reachable from "main": a deployment only takes commits on its branch or tag (the commit may have been removed by a force-push, or belong to another branch or to a pull request); deploy from a branch or tag that contains the commit';
+      deployments = [
+        makeDeployment({
+          id: 44,
+          commit_sha: SHA_B,
+          commit_message: '',
+          status: 'failed',
+          error,
+        }),
+        makeDeployment({ id: 42 }),
+      ];
+      serveApp();
+
+      await visit('/apps/blog/deploy');
+      assert
+        .dom('[data-test-deployment="44"] [data-test-row-error]')
+        .hasText(
+          'コミット bbbbbbbb は「main」からたどれないため、デプロイできません',
+        )
+        .hasAttribute('title', error);
+
+      // The latest failed deployment opens by itself.
+      const stream = fakes.eventSource.last;
+      stream.emit(`Queued deployment of ${SHA_B}.`);
+      stream.emit(head(1, 'fetch', `Fetching ${SHA_B}`));
+      stream.emit('Checking that bbbbbbb is on main');
+      stream.emit('');
+      stream.emit(head(2, 'failed', `Deployment failed: ${error}`));
+      stream.end('failed');
+      await settled();
+
+      assert
+        .dom('[data-test-deployment="44"] [data-test-unreachable-commit]')
+        .includesText('ブランチかタグからたどれるコミットだけ')
+        .includesText('pull request')
+        .includesText('デプロイし直してください');
+      assert
+        .dom('[data-test-deployment="44"] [data-test-deployment-error]')
+        .hasText(error, 'the reason koroku wrote stays');
+    });
+
     test('a refused deployment explains why', async function (assert) {
       serveApp();
       fakes.api.fail('POST', '/api/apps/blog/deployments', 507, 'disk_full', {

@@ -636,6 +636,8 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 
 `actor` はデプロイを始めたユーザー（ロールバックと昇格も同じ）。koroku 自身が始めたものと、記録する前の古いデプロイは `null`。`login` は始めた時点のもの。
 
+`ref` は、そのコミットを出したブランチかタグの名前（ARCHITECTURE 7「デプロイできるコミット」）。`sha` だけで始めたデプロイでは照合したブランチ（アプリの追うブランチ）、昇格では昇格元のデプロイの `ref`、ロールバックの記録では `rollback` が入る。
+
 `status` は `queued` / `running` / `succeeded` / `failed` / `canceled`。`source_deployment_id` は、ロールバック（ARCHITECTURE 7.1）の記録なら戻す先のデプロイの ID（`ref` は `rollback`）、通常のデプロイなら `null`。`rollback_available` は、そのデプロイのリリースへ再ビルドなしで戻せるか（成功していて、ファイルが残っている。ロールバックの記録なら戻す先について）。
 
 `trigger` は何がデプロイを始めたか（ARCHITECTURE 5.2）。`manual`（管理 UI か API。ロールバックと昇格を含む）か `push`（GitHub への push による自動デプロイ。待つワークフローの成功で始まったものも `push`）。`pusher` は `push` のとき push した GitHub の login（ワークフローを待ったものは実行の `actor`）、それ以外は空文字。`push` のデプロイの `ref` は push されたブランチ名。
@@ -664,7 +666,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/deployments?limit=50&finished_since=<RFC 3339>` | `{"deployments": [デプロイ, ...], "pending_auto_deploy": 預かっている自動デプロイ}`（新しい順、`limit` は 1〜200）。`finished_since` を付けると、その時刻以降に終わったデプロイだけを返す（終わっていないものは含まない。形が違えば `400 invalid_finished_since`）。メモリの履歴の期間内のデプロイを読むため（ARCHITECTURE 9.5）。`pending_auto_deploy` はコマンドの実行中に届いた push を預かっているときだけ（下記）、なければ `null` |
-| `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}` か `{"sha": "<40 桁>"}`（両方あれば `sha` をデプロイし `ref` は表示用）。202 でデプロイ。保持しているリリースへ再ビルドなしで戻すときは `{"rollback_to": <デプロイの ID>}`（ほかのフィールドと同時には指定できない）。戻せなければ `422 release_unavailable`、別のアプリのデプロイなら `422 validation_failed`（`details.rollback_to`）。保持していない古い版へは、過去の `sha` を指定して再デプロイする。そのアプリでコマンドを実行中なら `409 busy`。昇格は `{"promote_from_deployment": <昇格元のデプロイ ID>}`（下記） |
+| `POST /api/apps/{slug}/deployments` | ボディ `{"ref": "main"}`（ブランチかタグの名前。その先頭をデプロイする）か `{"sha": "<40 桁>"}`、または両方（`ref` からたどれる `sha` をデプロイする）。202 でデプロイ。デプロイできるのは、`ref` のブランチかタグの先頭か、その祖先のコミットだけ（ARCHITECTURE 7「デプロイできるコミット」）。`sha` だけなら、アプリの追うブランチ（自動デプロイが有効なら `auto_deploy_branch`、それが空か自動デプロイが無効なら `default_branch`）と照合し、応答の `ref` にそのブランチが入る。`ref` に 40 桁の SHA を書いたものは `sha` として扱う。照合はデプロイの `fetch` の手順で行うので、たどれないコミットも 202 で受け付けたあと、何も取得せずに `failed` になる（`error` は `fetch source: commit <SHA の頭 8 桁> is not reachable from "<ref>": ...`、`ref` のブランチもタグもなければ `fetch source: the repository has no branch or tag named "<ref>" ...`）。fork からの pull request のコミット、force-push でブランチから外れたコミット、`pull/12/head` のような ref がこれに当たる。保持しているリリースへ再ビルドなしで戻すときは `{"rollback_to": <デプロイの ID>}`（ほかのフィールドと同時には指定できない）。戻せなければ `422 release_unavailable`、別のアプリのデプロイなら `422 validation_failed`（`details.rollback_to`）。保持していない古い版へは、過去の `sha` を（そのデプロイの `ref` と一緒に）指定して再デプロイする。そのアプリでコマンドを実行中なら `409 busy`。昇格は `{"promote_from_deployment": <昇格元のデプロイ ID>}`（下記） |
 | `GET /api/apps/{slug}/promotion` | 昇格の確認に出す差分（下記） |
 | `GET /api/deployments/{id}` | デプロイ |
 | `POST /api/deployments/{id}/cancel` | 202 でその時点のデプロイ。実行中のものは非同期に止まる。終了済みは `409 not_cancelable` |
@@ -707,7 +709,7 @@ blue/green のアプリ（ARCHITECTURE 7.2）では、`start` 以降が `start`�
 
 staging アプリの稼働中のリリースを、組み合わせた本番アプリ（`promote_from`）へ出す（ARCHITECTURE 9.7）。
 
-`POST /api/apps/{slug}/deployments` に `{"promote_from_deployment": 12}` を送ると、昇格元のデプロイの SHA を通常のデプロイとして積み、202 でデプロイ（`promoted_from` 付き）を返す。`ref`・`sha` と一緒には送れない（422）。本番アプリなので直近 10 分以内のログインが要る。
+`POST /api/apps/{slug}/deployments` に `{"promote_from_deployment": 12}` を送ると、昇格元のデプロイの SHA を通常のデプロイとして積み、202 でデプロイ（`promoted_from` 付き）を返す。`ref`・`sha` と一緒には送れない（422）。昇格のデプロイの `ref` は昇格元のデプロイの `ref` で、通常のデプロイと同じく、コミットがそこからたどれなければ `fetch` の手順で失敗する（ARCHITECTURE 9.7）。本番アプリなので直近 10 分以内のログインが要る。
 
 | エラー | 意味 |
 | --- | --- |

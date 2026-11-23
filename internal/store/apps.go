@@ -147,6 +147,16 @@ func (a App) EffectiveAutoDeployBranch() string {
 	return a.DefaultBranch
 }
 
+// DeployBranch is the branch a deployment is checked against when its
+// request names no ref (ARCHITECTURE 7): the branch automatic deployments
+// follow when they are on, otherwise the default branch.
+func (a App) DeployBranch() string {
+	if a.AutoDeploy {
+		return a.EffectiveAutoDeployBranch()
+	}
+	return a.DefaultBranch
+}
+
 // UsesGitHubApp reports whether the app's repository is fetched through
 // the GitHub App (repo_full_name without an explicit repo_url). Only such
 // apps are mirrored to GitHub deployments and can deploy on push.

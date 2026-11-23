@@ -337,7 +337,9 @@ func (e *Engine) CheckDisk() error {
 }
 
 // Enqueue records a deployment of the given commit and wakes the worker.
-// Older queued deployments of the same app are canceled.
+// Older queued deployments of the same app are canceled. ref is the branch
+// or tag the commit is deployed from: the fetch step refuses a commit that
+// it does not reach. An empty ref means the branch the app follows.
 func (e *Engine) Enqueue(ctx context.Context, app store.App, ref, sha, message string) (store.Deployment, error) {
 	return e.enqueue(ctx, app, ref, sha, message, nil, store.Origin{})
 }
@@ -359,6 +361,12 @@ func (e *Engine) EnqueueWorkflowRun(ctx context.Context, app store.App, branch, 
 func (e *Engine) enqueue(ctx context.Context, app store.App, ref, sha, message string, promotedFrom *int64, origin store.Origin) (store.Deployment, error) {
 	if !gitrepo.IsFullSHA(sha) {
 		return store.Deployment{}, fmt.Errorf("commit %q is not a full SHA", sha)
+	}
+	// The record names the branch the commit is checked against, so that
+	// it stays the same when the app follows another one by the time the
+	// deployment runs.
+	if ref == "" {
+		ref = app.DeployBranch()
 	}
 	if err := e.CheckDisk(); err != nil {
 		return store.Deployment{}, err

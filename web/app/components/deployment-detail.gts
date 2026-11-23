@@ -24,6 +24,11 @@ import {
 import { formatDateTimeJst } from 'koroku-console/utils/format';
 import { isRollback, releaseId } from 'koroku-console/utils/rollback';
 import { isPush, pushTitle } from 'koroku-console/utils/trigger';
+import {
+  unreachableCommit,
+  unreachableCommitTitle,
+  type UnreachableCommit,
+} from 'koroku-console/utils/unreachable-commit';
 import { isActiveDeployment } from 'koroku-console/utils/status';
 import type { Deployment } from 'koroku-console/utils/types';
 import Banner, { type BannerTone } from './banner';
@@ -197,6 +202,19 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
 
   memoryShortageTitle = MEMORY_SHORTAGE_TITLE;
 
+  /** The commit the fetch step refused because its ref does not reach it. */
+  get unreachableCommit(): UnreachableCommit | null {
+    return unreachableCommit(this.args.deployment.error);
+  }
+
+  get failureTitle(): string {
+    if (this.memoryShortage) return this.memoryShortageTitle;
+    const unreachable = this.unreachableCommit;
+    return unreachable
+      ? unreachableCommitTitle(unreachable)
+      : 'デプロイに失敗しました';
+  }
+
   get rollbackNotice():
     (Notice & { kind: RollbackKind; detail: string }) | null {
     const outcome = this.log.rollback;
@@ -331,18 +349,18 @@ export default class DeploymentDetail extends Component<DeploymentDetailSignatur
       {{yield}}
 
       {{#if this.isFailed}}
-        <Banner
-          @tone="error"
-          @title={{if
-            this.memoryShortage
-            this.memoryShortageTitle
-            "デプロイに失敗しました"
-          }}
-        >
+        <Banner @tone="error" @title={{this.failureTitle}}>
           {{#if this.memoryShortage}}
             <span data-test-memory-shortage>
               新しい版を並べて起動するには、公開サービスのメモリ上限 1
               つ分の空きが要ります（{{this.memoryShortage}}）。何も起動していないので、アプリは動き続けています。メモリを空ける（ほかのアプリを止める・休止させる、上限を下げる）か、無停止デプロイを外してからデプロイし直してください。
+            </span>
+          {{else if this.unreachableCommit}}
+            <span data-test-unreachable-commit>
+              デプロイできるのは、指定したブランチかタグからたどれるコミットだけです。force-push
+              でブランチから外れたコミット、ほかのブランチのコミット、pull
+              request
+              にしかないコミットは取得しません。このコミットを含むブランチかタグを選んで、デプロイし直してください。
             </span>
           {{else}}
             {{this.failedStepText}}

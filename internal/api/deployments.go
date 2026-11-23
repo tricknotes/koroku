@@ -210,7 +210,10 @@ type createDeploymentInput struct {
 }
 
 // handleCreateDeployment starts a deployment of {sha}, or of the commit that
-// {ref} points at right now. Rolling back is deploying an older SHA.
+// {ref} points at right now. Rolling back is deploying an older SHA. The
+// deployment only takes a commit that the branch or tag {ref} reaches (the
+// branch the app follows when only {sha} is given); the fetch step checks
+// it (ARCHITECTURE 7).
 func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.loadApp(w, r)
 	if !ok {
@@ -238,6 +241,10 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// A full SHA names a commit, not the branch or tag to deploy it from.
+	if lower := strings.ToLower(in.Ref); in.SHA == "" && gitrepo.IsFullSHA(lower) {
+		in.Ref, in.SHA = "", lower
+	}
 	errs := fieldErrors{}
 	if in.SHA != "" && !gitrepo.IsFullSHA(in.SHA) {
 		errs.add("sha", "must be a full commit SHA")

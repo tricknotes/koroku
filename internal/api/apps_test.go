@@ -482,6 +482,26 @@ func TestCreateDeployment(t *testing.T) {
 	if len(list.Deployments) != 2 || list.Deployments[0].ID != second.ID {
 		t.Errorf("list = %+v", list)
 	}
+
+	// A full SHA in ref is the commit, not a branch or tag to deploy it
+	// from: the engine then checks it against the branch the app follows.
+	other := strings.Repeat("d", 40)
+	shaAsRef := request(t, h, http.MethodPost, "/api/apps/blog/deployments", `{"ref": "`+strings.ToUpper(other)+`"}`)
+	if shaAsRef.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", shaAsRef.Code, shaAsRef.Body)
+	}
+	if d := decode[deploymentJSON](t, shaAsRef); d.CommitSHA != other || d.Ref != "" || d.CommitMessage != "" {
+		t.Errorf("deployment = %+v", d)
+	}
+	both := request(t, h, http.MethodPost, "/api/apps/blog/deployments", `{"ref": "release", "sha": "`+other+`"}`)
+	if d := decode[deploymentJSON](t, both); both.Code != http.StatusAccepted || d.CommitSHA != other || d.Ref != "release" {
+		t.Errorf("ref and sha: %d %+v", both.Code, d)
+	}
+	second = decode[deploymentJSON](t, request(t, h, http.MethodPost, "/api/apps/blog/deployments", `{"ref": "main"}`))
+	list = decode[struct{ Deployments []deploymentJSON }](t, request(t, h, http.MethodGet, "/api/apps/blog/deployments", ""))
+	if len(list.Deployments) != 5 || list.Deployments[0].ID != second.ID {
+		t.Errorf("list = %+v", list)
+	}
 	limited := decode[struct{ Deployments []deploymentJSON }](t, request(t, h, http.MethodGet, "/api/apps/blog/deployments?limit=1", ""))
 	if len(limited.Deployments) != 1 {
 		t.Errorf("limit ignored: %+v", limited)

@@ -64,8 +64,17 @@ var ErrSourceReleaseMissing = errors.New("the promoted release is no longer on d
 // EnqueuePromotion queues a deployment of source's commit to app, recorded
 // as a promotion of source (ARCHITECTURE 9.7). The caller checks that the
 // apps are paired and that source is the source app's current release.
+//
+// A promotion fetches the commit, so it is checked like any deployment:
+// against the branch or tag the source release was deployed from (the apps
+// share the repository), or the branch app follows when the source records
+// none.
 func (e *Engine) EnqueuePromotion(ctx context.Context, app store.App, source store.Deployment) (store.Deployment, error) {
-	return e.enqueue(ctx, app, "", source.CommitSHA, source.CommitMessage, &source.ID, store.Origin{})
+	ref := source.Ref
+	if ref == store.RollbackRef {
+		ref = ""
+	}
+	return e.enqueue(ctx, app, ref, source.CommitSHA, source.CommitMessage, &source.ID, store.Origin{})
 }
 
 // sourceProject reads the normalized configuration of a stored release's

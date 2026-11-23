@@ -60,6 +60,11 @@ import {
 } from 'koroku-console/utils/rollback';
 import { isPush, pushTitle } from 'koroku-console/utils/trigger';
 import {
+  redeployRef,
+  unreachableCommit,
+  unreachableCommitTitle,
+} from 'koroku-console/utils/unreachable-commit';
+import {
   DEPLOYMENT_STATUS_KINDS,
   DEPLOYMENT_STATUS_LABELS,
   isActiveDeployment,
@@ -120,13 +125,17 @@ function detailId(deployment: Deployment): string {
 
 /**
  * The error of a history row: a failure for want of memory for a second
- * copy of the public service in plain words (ARCHITECTURE 7.2), any other
- * as koroku wrote it.
+ * copy of the public service (ARCHITECTURE 7.2) and a commit that its ref
+ * does not reach (ARCHITECTURE 7) in plain words, any other as koroku
+ * wrote it.
  */
 function rowError(deployment: Deployment): string {
   const shortage = memoryShortage(deployment.error);
-  if (!shortage) return deployment.error;
-  return `${MEMORY_SHORTAGE_TITLE}（${memoryShortageDetail(shortage)}）`;
+  if (shortage) {
+    return `${MEMORY_SHORTAGE_TITLE}（${memoryShortageDetail(shortage)}）`;
+  }
+  const unreachable = unreachableCommit(deployment.error);
+  return unreachable ? unreachableCommitTitle(unreachable) : deployment.error;
 }
 
 /** "9fceb02 Fix login": the commit of a deployment, in one line. */
@@ -463,9 +472,14 @@ export default class AppDeployTemplate extends Component<Signature> {
     return { ref: this.branch, label: `${this.branch} の先頭` };
   }
 
+  /**
+   * Deploys the commit of a history row again, from the branch or tag the
+   * row was deployed from: the server only takes a commit that its ref
+   * reaches (ARCHITECTURE 7).
+   */
   redeploy = (deployment: Deployment) => {
     this.requestDeploy({
-      ref: deployment.ref || undefined,
+      ref: redeployRef(deployment, this.deployments),
       sha: deployment.commit_sha,
       label: `${shortSha(deployment.commit_sha)} ${firstLine(deployment.commit_message)}`,
     });

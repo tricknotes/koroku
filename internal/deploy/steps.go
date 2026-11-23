@@ -40,7 +40,15 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	if repoURL == "" {
 		return false, errors.New("the app has no repository configured")
 	}
-	commit, err := e.opts.Fetcher.Checkout(ctx, repoURL, d.CommitSHA, releaseDir, auth, log.Writer())
+	// Only a commit that a branch or tag of the repository reaches is
+	// deployed (ARCHITECTURE 7). Deployments are queued with their ref; one
+	// without is checked against the branch the app follows.
+	ref := d.Ref
+	if ref == "" {
+		ref = app.DeployBranch()
+	}
+	log.Printf("Checking that %s is on %s", shortSHA(d.CommitSHA), ref)
+	commit, err := e.opts.Fetcher.Checkout(ctx, repoURL, d.CommitSHA, ref, releaseDir, auth, log.Writer())
 	if err != nil {
 		return false, fmt.Errorf("fetch source: %w", err)
 	}

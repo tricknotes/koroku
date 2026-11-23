@@ -54,6 +54,8 @@ export const SCENARIOS = {
     "blog's web was killed for memory and restarted, its worker is left from the release before, its db keeps restarting with another OOM score; the merged configuration of its previous release fails",
   rollback:
     'blog and blog-staging were rolled back to a kept release after a bad deploy; older releases are kept or already removed',
+  'unreachable-commit':
+    'everything fine, but the last deployment of blog-staging named a commit that its branch does not reach and was refused',
   'copy-running':
     'everything fine, and a copy of the production database into blog-staging is running',
   'copy-failed':
@@ -420,6 +422,27 @@ function scenario(apps, extra = {}) {
     markKept(state, slug);
   }
   return state;
+}
+
+/**
+ * The last deployment of an app named a commit that its branch does not
+ * reach (ARCHITECTURE 7): the fetch step refused it, and what ran before
+ * keeps running.
+ */
+function refusedCommit(state, slug) {
+  const refused = deployment(slug, '', 4 * MINUTE, {
+    status: 'failed',
+    containers_replaced: false,
+    mockFailure: 'fetch',
+  });
+  refused.started_at = ago(4 * MINUTE + 1000);
+  refused.queued_at = ago(4 * MINUTE + 2000);
+  refused.error =
+    `fetch source: commit ${refused.commit_sha.slice(0, 8)} is not reachable from "main": ` +
+    'a deployment only takes commits on its branch or tag (the commit may have been removed by a force-push, ' +
+    'or belong to another branch or to a pull request); deploy from a branch or tag that contains the commit';
+  state.apps.get(slug).latest_deployment = refused;
+  state.deployments.get(slug).unshift(refused);
 }
 
 /**
@@ -1375,6 +1398,11 @@ export function buildScenario(name) {
       const state = scenario(healthyApps());
       rolledBack(state, 'blog');
       rolledBack(state, 'blog-staging');
+      return state;
+    }
+    case 'unreachable-commit': {
+      const state = scenario(healthyApps());
+      refusedCommit(state, 'blog-staging');
       return state;
     }
     default:
