@@ -240,8 +240,7 @@ export default class EnvPresetsEditor extends Component<EnvPresetsEditorSignatur
           data-test-env-presets-reauth
         >
           <:default>
-            秘密の値を守るため、環境変数の保存には直近 10
-            分以内のログインが要ります。再ログインすると入力中の内容は消えるので、先に再ログインしてから入力するか、変数をすべて外して作成し、あとで「環境変数」タブで追加してください。
+            再ログインすると入力が消えるので、先に再ログインするか、変数を外して作成し、あとで「環境変数」タブで足してください。
           </:default>
           <:actions>
             <Button

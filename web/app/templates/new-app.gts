@@ -486,8 +486,8 @@ export default class NewAppTemplate extends Component {
           先に GitHub で再ログインしてください
         </h2>
         <p class="pane-description">
-          アプリと一緒に環境変数（秘密の値を含む）を保存するには、直近 10
-          分以内のログインが要ります。入力のあとで再ログインすると入力した内容が消えるので、先に再ログインしてから入力します。再ログインのあとはこの画面に戻ります。
+          環境変数を一緒に保存するには、直近 10
+          分以内のログインが要ります。入力が消えないよう、先に再ログインしてください。
         </p>
         <div class="new-app-login-actions">
           <Button
