@@ -93,3 +93,7 @@ The documents below are in Japanese.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design |
 | [docs/API.md](docs/API.md) | HTTP API |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Developing koroku itself |
+
+## License
+
+koroku is released under the [MIT License](LICENSE).
