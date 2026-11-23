@@ -47,7 +47,7 @@ function line(item: AttentionItem): Line {
         subject: '',
         text: 'バックアップが 24 時間以上成功していません。',
         time: item.lastSuccessAt,
-        route: 'system',
+        route: 'system.jobs',
         models: [],
         link: 'システムを確認',
       };
@@ -57,7 +57,7 @@ function line(item: AttentionItem): Line {
         kind: item.kind,
         subject: '',
         text: '直近のバックアップの実行が、取得の前に失敗しました。どのアプリも取得できていません。',
-        route: 'system',
+        route: 'system.jobs',
         models: [],
         link: 'システムを確認',
       };
@@ -67,7 +67,7 @@ function line(item: AttentionItem): Line {
         kind: item.kind,
         subject: '',
         text: '基盤（koroku の DB と設定）の直近のバックアップが失敗しました。',
-        route: 'system',
+        route: 'system.jobs',
         models: [],
         link: 'システムを確認',
       };
@@ -112,7 +112,9 @@ function line(item: AttentionItem): Line {
 function lines(items: AttentionItem[], owner: boolean | undefined): Line[] {
   return items.map((item) => {
     const l = line(item);
-    return owner === false && l.route === 'system' ? { ...l, route: '' } : l;
+    return owner === false && l.route.startsWith('system')
+      ? { ...l, route: '' }
+      : l;
   });
 }
 

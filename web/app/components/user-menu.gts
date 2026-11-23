@@ -13,10 +13,8 @@ interface UserMenuSignature {
   Element: HTMLDivElement;
   Args: {
     user: SessionUser;
-    /** The owner also manages the members. */
+    /** Shown as the role: オーナー or メンバー. */
     owner?: boolean;
-    /** The route on screen, to mark the menu item that leads there. */
-    currentRoute?: string;
     /** Disables "log out" while the request runs. */
     busy?: boolean;
     /** The security page is the one on screen. */
@@ -27,13 +25,6 @@ interface UserMenuSignature {
 
 function initial(login: string): string {
   return login.slice(0, 1);
-}
-
-function currentIf(
-  route: string | undefined,
-  name: string,
-): string | undefined {
-  return route === name ? 'page' : undefined;
 }
 
 /**
@@ -95,15 +86,6 @@ export default class UserMenu extends Component<UserMenuSignature> {
               }}</span>
           </p>
           <hr class="menu-separator" />
-          {{#if @owner}}
-            <LinkTo
-              @route="members"
-              class="menu-item"
-              aria-current={{currentIf @currentRoute "members"}}
-              data-test-menu-members
-              {{on "click" this.close}}
-            >メンバー</LinkTo>
-          {{/if}}
           <LinkTo
             @route="security"
             class="menu-item"

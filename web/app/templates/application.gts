@@ -28,7 +28,7 @@ export default class ApplicationTemplate extends Component {
    */
   get section(): 'apps' | 'system' | null {
     const route = this.router.currentRouteName ?? '';
-    if (route === 'system') return 'system';
+    if (/^system(\.|$)/.test(route)) return 'system';
     if (/^(index|new-app|app)(\.|$)/.test(route)) return 'apps';
     return null;
   }
@@ -37,13 +37,9 @@ export default class ApplicationTemplate extends Component {
     return this.section === 'apps' ? 'page' : undefined;
   }
 
-  /** The system and members screens are the owner's (ARCHITECTURE 10.7). */
+  /** The system screen is the owner's (ARCHITECTURE 10.7). */
   get isOwner(): boolean {
     return this.session.isOwner;
-  }
-
-  get currentRoute(): string | undefined {
-    return this.router.currentRouteName ?? undefined;
   }
 
   get systemCurrent(): 'page' | undefined {
@@ -104,7 +100,6 @@ export default class ApplicationTemplate extends Component {
               <UserMenu
                 @user={{this.session.user}}
                 @owner={{this.isOwner}}
-                @currentRoute={{this.currentRoute}}
                 @current={{this.securityCurrent}}
                 @busy={{this.loggingOut}}
                 @onLogout={{this.logout}}

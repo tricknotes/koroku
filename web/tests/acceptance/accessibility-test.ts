@@ -130,6 +130,19 @@ module('Acceptance | accessibility', function (hooks) {
     assert.deepEqual(accessibilityProblems(), [], 'deploy to production');
     await click('[data-test-dialog-cancel]');
 
+    await click('[data-test-action-menu]');
+    assert.deepEqual(accessibilityProblems(), [], 'the header menu');
+    await click('[data-test-control="stop"]');
+    assert.dom('[data-test-stop-dialog]').exists();
+    assert.deepEqual(accessibilityProblems(), [], 'stop the app');
+    await click('[data-test-dialog-cancel]');
+
+    await click('[data-test-field="relax_policy"]');
+    await click('[data-test-deploy-submit]');
+    assert.dom('[data-test-unsaved-dialog]').exists();
+    assert.deepEqual(accessibilityProblems(), [], 'unsaved deploy settings');
+    await click('[data-test-dialog-cancel]');
+
     await visit('/apps/blog/settings');
     await click('[data-test-delete]');
     assert.dom('[data-test-dialog-input]').exists();

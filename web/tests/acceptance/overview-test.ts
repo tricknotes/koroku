@@ -1,5 +1,11 @@
 import { module, test } from 'qunit';
-import { click, currentURL, visit, waitFor } from '@ember/test-helpers';
+import {
+  click,
+  currentURL,
+  settled,
+  visit,
+  waitFor,
+} from '@ember/test-helpers';
 import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   SHA_A,
@@ -449,9 +455,9 @@ module('Acceptance | overview', function (hooks) {
       .doesNotExist('nothing answers while the app is stopped');
     assert
       .dom('[data-test-control]')
-      .exists({ count: 1 })
-      .hasText('起動')
-      .doesNotHaveClass('button-primary', 'the header holds the main button');
+      .exists({ count: 1 }, 'one way to start it, in the header')
+      .hasText('起動');
+    assert.dom('[data-test-overview] [data-test-control]').doesNotExist();
 
     await click('[data-test-control="start"]');
 
@@ -459,12 +465,15 @@ module('Acceptance | overview', function (hooks) {
       fakes.api.callsTo('POST', '/api/apps/blog/start').length,
       1,
     );
+    // The overview reads its services again on its next look at the app.
+    await fakes.poller.tick();
+    await settled();
     assert.dom('[data-test-app-state]').hasText('稼働中');
     assert.dom('[data-test-release]').includesText('稼働中のリリース');
     assert.dom('[data-test-live]').exists();
     assert.dom('[data-test-notice]').hasText('起動しました。');
     assert.dom('[data-test-service="web"]').exists();
-    assert.dom('[data-test-control]').doesNotExist();
+    assert.dom('[data-test-control="start"]').doesNotExist();
     assert.dom('[data-test-stopped-hint]').doesNotExist();
   });
 

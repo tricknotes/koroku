@@ -248,10 +248,10 @@ sudo koroku run blog db psql -U postgres app < dump.sql   # 端末でない入�
 
 ### 10.2 アクセスがない間の休止
 
-アプリの設定タブで「アクセスがない間は止める」を有効にしたアプリは、決めた時間 Caddy を通るリクエストがなければ koroku がコンテナを止め、次のリクエストで起こす（ARCHITECTURE 8.4）。
+アプリのリソースタブで「アクセスがない間は止める」を有効にしたアプリは、決めた時間 Caddy を通るリクエストがなければ koroku がコンテナを止め、次のリクエストで起こす（ARCHITECTURE 8.4）。
 
 - アクセスは Caddy のアプリ別のアクセスログ（`[caddy] access_log_dir`、既定 `/var/log/caddy/apps`）から数える。このディレクトリがない設定（`access_log_dir = ""` か Caddy を使わない）では有効にできない。
-- 休止中のアプリのコンテナは `docker ps -a` に `Exited` として残る。手で `docker compose start` や `docker start` で起動しないで、管理 UI の「起こす」か、アプリの URL を開く（koroku の DB が休止中のままだと、Caddy は起こす経路のままになる。起こす処理は動いているコンテナを見つけると、そのまま休止を解く）。
+- 休止中のアプリのコンテナは `docker ps -a` に `Exited` として残る。手で `docker compose start` や `docker start` で起動しないで、管理 UI のアプリのヘッダーの「起こす」か、アプリの URL を開く（koroku の DB が休止中のままだと、Caddy は起こす経路のままになる。起こす処理は動いているコンテナを見つけると、そのまま休止を解く）。
 - 休止中のアプリのコンテナを手で消した場合は、次のリクエストで koroku が稼働中のリリースのファイルから作り直す。
 - 休止させた・起こしたことは `journalctl -u koroku` に `app went to sleep` / `app woke up` として出る。起こせなかったときは `waking the app failed` と理由が出る。
 - 休止と起こすたびに Caddy の設定を投入するので、ほかのアプリの WebSocket は最長 5 分後に 1 回切れる（アプリの起動・停止と同じ）。
@@ -395,7 +395,7 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 - [ ] **事業者側のファイアウォール**: 既定で有効か、80/443 を開ける操作が要るか（事業者による）。
 - [ ] **swap**: OS イメージに最初から swap があるか。`/swapfile` が再起動後も有効か。
 - [ ] **zswap**: 事業者のカーネルに zswap と `zstd` があるか。スクリプトの実行直後と再起動後に `grep -r . /sys/module/zswap/parameters` が `enabled:Y`、`compressor:zstd` になるか。swap が使われたとき `/sys/kernel/debug/zswap/stored_pages` が増えるか。
-- [ ] **Caddy の `GOGC`**: `sudo cat /proc/$(pidof caddy)/environ | tr '\0' '\n' | grep GOGC` で効いているか。システム画面で Caddy のメモリが減ったか。
+- [ ] **Caddy の `GOGC`**: `sudo cat /proc/$(pidof caddy)/environ | tr '\0' '\n' | grep GOGC` で効いているか。システムの「状態」タブで Caddy のメモリが減ったか。
 - [ ] **OOM の順序**: 公式パッケージの dockerd が `-500`、containerd が `-999` で動いているか（`systemctl show -p OOMScoreAdjust docker containerd`）。Caddy が `-450` か。本番と staging のアプリを並べてホスト全体のメモリを使い切らせたとき、staging のコンテナから止まるか、本番のコンテナの `memory.low`（`/sys/fs/cgroup/system.slice/docker-<id>.scope/memory.low`）が予約の値か。
 - [ ] **Docker のログ設定**: 実際のデーモンが `daemon.json` を読み、新しいコンテナのログが 10MB × 3 で回るか（コンテナではデーモンを起動していない）。
 - [ ] **証明書**: Let's Encrypt（staging、本番）での発行。`443/udp` を閉じた状態でブラウザが支障なく HTTP/2 で通信するか。

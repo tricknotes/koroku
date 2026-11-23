@@ -52,6 +52,11 @@ export const DEFAULT_IDLE_MINUTES = 30;
 /** The idle times the settings offer (the API takes 10 to 1440). */
 export const IDLE_MINUTES_CHOICES = [15, 30, 60, 180];
 
+/** "30 分", "3 時間": an idle time as the settings show it. */
+export function minutesLabel(minutes: number): string {
+  return minutes % 60 === 0 ? `${minutes / 60} 時間` : `${minutes} 分`;
+}
+
 const MEMORY_PATTERN = /^[0-9]+[bkmg]$/;
 
 /** Empty (use the default) or digits plus one of `b` `k` `m` `g`. */
@@ -67,8 +72,9 @@ export function isValidReservation(value: string): boolean {
 /**
  * Editable copy of an app's settings (the backup settings have their own
  * form on the backups tab, the memory limits and reservations are saved one
- * value at a time on the resources tab). `patch` returns only what differs from the app,
- * because `PATCH` updates just the fields it is sent.
+ * value at a time on the resources tab). `patch` returns only what differs
+ * from the app, because `PATCH` updates just the fields it is sent. Each tab
+ * saves its own fields of it (utils/settings-editor).
  */
 export default class SettingsForm {
   @tracked defaultBranch: string;

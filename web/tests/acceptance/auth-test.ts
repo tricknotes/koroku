@@ -130,6 +130,7 @@ module('Acceptance | auth', function (hooks) {
       .fail('POST', '/api/apps/blog/restart', 401, 'unauthenticated');
     await visit('/apps/blog/settings');
 
+    await click('[data-test-action-menu]');
     await click('[data-test-control="restart"]');
 
     assert.strictEqual(currentURL(), '/login');

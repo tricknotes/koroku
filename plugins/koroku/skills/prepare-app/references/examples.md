@@ -170,7 +170,7 @@ jobs:
 ```
 
 - private なイメージなら、koroku の設定タブの「コンテナレジストリの認証」に読み取り専用のトークンを入れる。
-- push での自動デプロイを使うなら、設定タブの「先に待つワークフロー」に `.github/workflows/image.yml` を入れる。入れないと push の直後にイメージがまだなく、デプロイログに `The registry has no image with that tag (manifest unknown)` と出て失敗する（稼働中の版はそのまま）。
+- push での自動デプロイを使うなら、デプロイタブの「デプロイの設定」の「先に待つワークフロー」に `.github/workflows/image.yml` を入れる。入れないと push の直後にイメージがまだなく、デプロイログに `The registry has no image with that tag (manifest unknown)` と出て失敗する（稼働中の版はそのまま）。
 
 ## Node.js（Express、Next.js など）
 

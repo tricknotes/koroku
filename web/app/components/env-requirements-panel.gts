@@ -1,6 +1,6 @@
 import Component from '@glimmer/component';
 import { on } from '@ember/modifier';
-import { fn } from '@ember/helper';
+import { fn, hash } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import Badge from 'koroku-console/components/badge';
 import Banner from 'koroku-console/components/banner';
@@ -145,7 +145,12 @@ export default class EnvRequirementsPanel extends Component<Signature> {
             の
             <span class={{if this.hasPath "mono"}}>{{this.file}}</span>
             と照合できませんでした。{{this.reason}}
-            <LinkTo @route="app.settings" @model={{@slug}}>照合元の設定</LinkTo>
+            <LinkTo
+              @route="app.env"
+              @model={{@slug}}
+              @query={{hash section="env-requirements"}}
+              data-test-env-reqs-source-link
+            >照合元の設定</LinkTo>
           </span>
         </p>
       {{else if this.isOk}}

@@ -68,8 +68,9 @@ export const SCREENS: Screen[] = [
     url: '/apps/blog/settings?section=domains',
     tab: 'settings',
   },
-  { name: 'system', url: '/system' },
-  { name: 'members', url: '/members' },
+  { name: 'system state', url: '/system' },
+  { name: 'system jobs', url: '/system/jobs' },
+  { name: 'system admin', url: '/system/admin' },
 ];
 
 /**

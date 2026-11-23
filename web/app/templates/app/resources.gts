@@ -7,18 +7,23 @@ import ComposeSection from 'koroku-console/components/compose-section';
 import Banner from 'koroku-console/components/banner';
 import EmptyState from 'koroku-console/components/empty-state';
 import Icon from 'koroku-console/components/icon';
+import IdleSleepSettings from 'koroku-console/components/idle-sleep-settings';
 import MemoryHistory from 'koroku-console/components/memory-history';
 import MemorySettings from 'koroku-console/components/memory-settings';
 import Meter from 'koroku-console/components/meter';
 import RowList from 'koroku-console/components/row-list';
 import ServiceReservation from 'koroku-console/components/service-reservation';
 import TabSection from 'koroku-console/components/tab-section';
+import UnsavedSettingsGuard from 'koroku-console/components/unsaved-settings-guard';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
 import type AppResourcesController from 'koroku-console/controllers/app/resources';
 import type AppContext from 'koroku-console/utils/app-context';
 import { formatPercent } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
+import SettingsEditor, {
+  IDLE_SLEEP_FIELDS,
+} from 'koroku-console/utils/settings-editor';
 import { memoryUsage, type MemoryUsage } from 'koroku-console/utils/services';
 import type { App, ServiceStatus } from 'koroku-console/utils/types';
 
@@ -52,7 +57,7 @@ interface Signature {
 /**
  * Memory and containers in one tab (ARCHITECTURE 9.1): what the services
  * use now, their limits and reservations (changed here and nowhere else),
- * the memory history with a suggested limit (ARCHITECTURE 9.5), and the
+ * idle sleep (which frees memory), the memory history with a suggested limit (ARCHITECTURE 9.5), and the
  * Compose setup behind them (ARCHITECTURE 9.10). Anyone who can see the app
  * can see this; changing a limit or a reservation needs the manage role.
  */
@@ -64,8 +69,16 @@ export default class AppResourcesTemplate extends Component<Signature> {
     this.api.listServices(this.app.slug),
   );
 
+  /** Idle sleep, saved on its own (ARCHITECTURE 8.4, 9.1). */
+  idleEditor: SettingsEditor;
+
   constructor(owner: Owner, args: Signature['Args']) {
     super(owner, args);
+    this.idleEditor = new SettingsEditor(
+      this.api,
+      args.model,
+      IDLE_SLEEP_FIELDS,
+    );
     void this.services.load();
     this.poller.every(this, POLL_INTERVAL, () =>
       this.services.load({ quiet: this.services.loaded }),
@@ -82,6 +95,10 @@ export default class AppResourcesTemplate extends Component<Signature> {
 
   get focusMemory(): boolean {
     return this.section === 'memory';
+  }
+
+  get focusIdleSleep(): boolean {
+    return this.section === 'idle-sleep';
   }
 
   get focusCompose(): boolean {
@@ -239,11 +256,17 @@ export default class AppResourcesTemplate extends Component<Signature> {
         @onSaved={{this.saved}}
       />
 
+      <IdleSleepSettings
+        @editor={{this.idleEditor}}
+        @focus={{this.focusIdleSleep}}
+      />
+
       <div class="pane">
         <MemoryHistory @app={{this.app}} @onSaved={{this.saved}} />
       </div>
 
       <ComposeSection @app={{this.app}} @focus={{this.focusCompose}} />
     </div>
+    <UnsavedSettingsGuard @editor={{this.idleEditor}} @what="休止の設定" />
   </template>
 }

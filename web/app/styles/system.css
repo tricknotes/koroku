@@ -1,3 +1,17 @@
+/* The system screen's tabs (ARCHITECTURE 9.1), under its title. */
+.system-header {
+  margin-bottom: var(--space-4);
+}
+
+.system-tabs {
+  margin-bottom: var(--space-6);
+}
+
+.system-tabs + .pane,
+.system-tabs + .pane-notices + .pane {
+  margin-top: 0;
+}
+
 /* System screen: host resources, Docker usage, background jobs. */
 
 .system-note {

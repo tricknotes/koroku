@@ -860,6 +860,11 @@ input[type="radio"] {
   background: var(--color-bg-hover);
 }
 
+/* An item that stops or removes something. */
+.menu-item-danger {
+  color: var(--color-failed);
+}
+
 .menu-item:disabled {
   opacity: 0.5;
   cursor: not-allowed;
