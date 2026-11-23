@@ -3,16 +3,19 @@ import { service } from '@ember/service';
 import type Owner from '@ember/owner';
 import { pageTitle } from 'ember-page-title';
 import AsyncView from 'koroku-console/components/async-view';
+import ComposeSection from 'koroku-console/components/compose-section';
 import Banner from 'koroku-console/components/banner';
 import EmptyState from 'koroku-console/components/empty-state';
 import Icon from 'koroku-console/components/icon';
 import MemoryHistory from 'koroku-console/components/memory-history';
+import MemorySettings from 'koroku-console/components/memory-settings';
 import Meter from 'koroku-console/components/meter';
 import RowList from 'koroku-console/components/row-list';
 import ServiceReservation from 'koroku-console/components/service-reservation';
 import TabSection from 'koroku-console/components/tab-section';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
+import type AppResourcesController from 'koroku-console/controllers/app/resources';
 import type AppContext from 'koroku-console/utils/app-context';
 import { formatPercent } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
@@ -43,13 +46,15 @@ function reserves(service: ServiceStatus): boolean {
 }
 
 interface Signature {
-  Args: { model: AppContext };
+  Args: { model: AppContext; controller: AppResourcesController };
 }
 
 /**
- * What the app's services use: CPU and memory now, and the memory history
- * with a suggested limit (ARCHITECTURE 9.5). Anyone who can see the app can
- * see this; saving a suggested limit needs the manage role.
+ * Memory and containers in one tab (ARCHITECTURE 9.1): what the services
+ * use now, their limits and reservations (changed here and nowhere else),
+ * the memory history with a suggested limit (ARCHITECTURE 9.5), and the
+ * Compose setup behind them (ARCHITECTURE 9.10). Anyone who can see the app
+ * can see this; changing a limit or a reservation needs the manage role.
  */
 export default class AppResourcesTemplate extends Component<Signature> {
   @service declare api: ApiService;
@@ -69,6 +74,18 @@ export default class AppResourcesTemplate extends Component<Signature> {
 
   get app(): App {
     return this.args.model.app;
+  }
+
+  get section(): string {
+    return this.args.controller.section;
+  }
+
+  get focusMemory(): boolean {
+    return this.section === 'memory';
+  }
+
+  get focusCompose(): boolean {
+    return this.section === 'compose';
   }
 
   get production(): boolean {
@@ -215,9 +232,18 @@ export default class AppResourcesTemplate extends Component<Signature> {
         </AsyncView>
       </TabSection>
 
+      <MemorySettings
+        @app={{this.app}}
+        @services={{this.services.value}}
+        @focus={{this.focusMemory}}
+        @onSaved={{this.saved}}
+      />
+
       <div class="pane">
         <MemoryHistory @app={{this.app}} @onSaved={{this.saved}} />
       </div>
+
+      <ComposeSection @app={{this.app}} @focus={{this.focusCompose}} />
     </div>
   </template>
 }

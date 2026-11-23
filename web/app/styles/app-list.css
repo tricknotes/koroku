@@ -143,7 +143,7 @@
 }
 
 /* The parent's row counts its review apps (ARCHITECTURE 9.9); the count
-   leads to the parent's review apps tab, above the row's own link. */
+   leads to the parent's review apps section, above the row's own link. */
 .app-review-count {
   display: flex;
   flex-wrap: wrap;

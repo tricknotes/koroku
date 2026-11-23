@@ -96,7 +96,7 @@ const MESSAGES: Record<string, string> = {
   not_review_parent:
     'このアプリにはレビューアプリを作れません。staging で、GitHub App で取得するアプリだけが親になれます。',
   review_apps_not_allowed:
-    'このアプリではレビューアプリが許可されていません。オーナーがレビューアプリのタブで許可すると作れます。',
+    'このアプリではレビューアプリが許可されていません。オーナーがデプロイタブの「レビューアプリ」で許可すると作れます。',
   review_app_exists: 'この pull request のレビューアプリはすでにあります。',
   pull_request_not_found: 'pull request が見つかりません。',
   pull_request_not_open: 'この pull request は閉じられています。',

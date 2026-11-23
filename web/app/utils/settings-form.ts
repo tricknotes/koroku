@@ -6,19 +6,6 @@ import type {
   Environment,
 } from 'koroku-console/utils/types';
 
-let nextLimitId = 0;
-
-export class LimitRow {
-  readonly id = `limit-${nextLimitId++}`;
-  @tracked service: string;
-  @tracked limit: string;
-
-  constructor(service = '', limit = '') {
-    this.service = service;
-    this.limit = limit;
-  }
-}
-
 let nextExemptId = 0;
 
 export class ExemptRow {
@@ -77,19 +64,10 @@ export function isValidReservation(value: string): boolean {
   return value === '0' || isValidMemoryLimit(value);
 }
 
-function sameRecord(
-  a: Record<string, string>,
-  b: Record<string, string>,
-): boolean {
-  const keys = Object.keys(a);
-  return (
-    keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
-  );
-}
-
 /**
  * Editable copy of an app's settings (the backup settings have their own
- * form on the backups tab). `patch` returns only what differs from the app,
+ * form on the backups tab, the memory limits and reservations are saved one
+ * value at a time on the resources tab). `patch` returns only what differs from the app,
  * because `PATCH` updates just the fields it is sent.
  */
 export default class SettingsForm {
@@ -100,11 +78,6 @@ export default class SettingsForm {
   @tracked healthcheckPath: string;
   @tracked environment: Environment;
   @tracked relaxPolicy: boolean;
-  @tracked memoryLimit: string;
-  @tracked limits: LimitRow[];
-  /** Memory reserved by a production app (ARCHITECTURE 6.2). */
-  @tracked memoryReservation: string;
-  @tracked reservations: LimitRow[];
   @tracked envSource: EnvSource;
   @tracked envExamplePath: string;
   @tracked accessProtection: boolean;
@@ -128,14 +101,6 @@ export default class SettingsForm {
     this.healthcheckPath = app.healthcheck_path;
     this.environment = app.environment;
     this.relaxPolicy = app.relax_policy;
-    this.memoryLimit = app.memory_limit;
-    this.limits = Object.entries(app.service_memory_limits ?? {}).map(
-      ([service, limit]) => new LimitRow(service, limit),
-    );
-    this.memoryReservation = app.memory_reservation ?? '';
-    this.reservations = Object.entries(
-      app.service_memory_reservations ?? {},
-    ).map(([service, value]) => new LimitRow(service, value));
     this.envSource = app.env_source ?? 'compose';
     this.envExamplePath = app.env_example_path ?? '';
     this.accessProtection = app.access_protection ?? false;
@@ -165,52 +130,12 @@ export default class SettingsForm {
     return paths;
   }
 
-  get serviceLimits(): Record<string, string> {
-    const limits: Record<string, string> = {};
-    for (const row of this.limits) {
-      const service = row.service.trim();
-      if (service) limits[service] = row.limit.trim();
-    }
-    return limits;
-  }
-
-  get serviceReservations(): Record<string, string> {
-    const values: Record<string, string> = {};
-    for (const row of this.reservations) {
-      const service = row.service.trim();
-      if (service) values[service] = row.limit.trim();
-    }
-    return values;
-  }
-
   /** Field name (as in the API) → problem found before sending. */
   validate(): Record<string, string> {
     const errors: Record<string, string> = {};
     const port = Number(this.webPort);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       errors['web_port'] = '1〜65535 の整数を入力してください。';
-    }
-    const memoryHint =
-      '数字と単位 b / k / m / g で入力してください（例 512m）。';
-    if (!isValidMemoryLimit(this.memoryLimit.trim())) {
-      errors['memory_limit'] = memoryHint;
-    }
-    for (const row of this.limits) {
-      const limit = row.limit.trim();
-      if (row.service.trim() && (limit === '' || !isValidMemoryLimit(limit))) {
-        errors['service_memory_limits'] = memoryHint;
-      }
-    }
-    const reservationHint =
-      '0（予約しない）か、数字と単位 b / k / m / g で入力してください（例 256m）。';
-    if (!isValidReservation(this.memoryReservation.trim())) {
-      errors['memory_reservation'] = reservationHint;
-    }
-    for (const row of this.reservations) {
-      const value = row.limit.trim();
-      if (row.service.trim() && (value === '' || !isValidReservation(value))) {
-        errors['service_memory_reservations'] = reservationHint;
-      }
     }
     const exempt = this.exemptList;
     if (exempt.length > MAX_EXEMPT_PATHS) {
@@ -248,20 +173,6 @@ export default class SettingsForm {
     }
     if (this.relaxPolicy !== app.relax_policy) {
       patch.relax_policy = this.relaxPolicy;
-    }
-    const memoryLimit = this.memoryLimit.trim();
-    if (memoryLimit !== app.memory_limit) patch.memory_limit = memoryLimit;
-    const limits = this.serviceLimits;
-    if (!sameRecord(limits, app.service_memory_limits ?? {})) {
-      patch.service_memory_limits = limits;
-    }
-    const memoryReservation = this.memoryReservation.trim();
-    if (memoryReservation !== (app.memory_reservation ?? '')) {
-      patch.memory_reservation = memoryReservation;
-    }
-    const reservations = this.serviceReservations;
-    if (!sameRecord(reservations, app.service_memory_reservations ?? {})) {
-      patch.service_memory_reservations = reservations;
     }
     if (this.envSource !== (app.env_source ?? 'compose')) {
       patch.env_source = this.envSource;

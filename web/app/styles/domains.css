@@ -1,5 +1,5 @@
 /*
- * Domains tab: one block per hostname. A pending one opens up to show the
+ * Domains, in the 公開 section of the settings tab: one block per hostname. A pending one opens up to show the
  * DNS records to set and what the last check found.
  */
 
@@ -228,7 +228,24 @@
   color: var(--color-text-secondary);
 }
 
+/* In the 公開 section of the settings, apart from the form's fields above. */
+.domain-section {
+  margin-top: var(--space-8);
+  padding-top: var(--space-6);
+  border-top: 1px solid var(--color-border);
+}
+
 /* Add form */
+
+.domain-add {
+  margin-top: var(--space-6);
+}
+
+.domain-add-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
 
 .domain-form {
   max-width: 36rem;

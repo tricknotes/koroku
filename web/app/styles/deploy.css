@@ -113,6 +113,13 @@
   margin: var(--space-1) 0 0;
 }
 
+/* Review apps (ARCHITECTURE 9.9) under the history, set apart from it. */
+.deploy-review {
+  margin-top: var(--space-12);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--color-border);
+}
+
 /* History: one row per deployment, opening into its steps. */
 
 .deploy-history > h2 {

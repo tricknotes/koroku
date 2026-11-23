@@ -109,7 +109,7 @@ module('Acceptance | navigation', function (hooks) {
   test('the tabs keep the app when moving between them', async function (assert) {
     await visit('/apps/blog/settings');
 
-    const order = ['index', 'deploy', 'logs', 'env', 'domains', 'backups'];
+    const order = ['index', 'deploy', 'logs', 'resources', 'env', 'backups'];
     const urls: string[] = [];
     for (const tab of order) {
       await click(`[data-test-tab="${tab}"]`);
@@ -121,8 +121,8 @@ module('Acceptance | navigation', function (hooks) {
       '/apps/blog',
       '/apps/blog/deploy',
       '/apps/blog/logs',
+      '/apps/blog/resources',
       '/apps/blog/env',
-      '/apps/blog/domains',
       '/apps/blog/backups',
     ]);
     assert.strictEqual(

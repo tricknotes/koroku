@@ -329,7 +329,7 @@ module('Acceptance | app list', function (hooks) {
 
     await click('[data-test-attention-item="domains:shop"] a');
 
-    assert.strictEqual(currentURL(), '/apps/shop/domains');
+    assert.strictEqual(currentURL(), '/apps/shop/settings?section=domains');
   });
 
   test('a failed backup of an app stands out above the list and links to it', async function (assert) {

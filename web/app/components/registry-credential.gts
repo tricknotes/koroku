@@ -31,6 +31,7 @@ const FIELD_MESSAGES: Record<string, string> = {
 };
 
 interface RegistryCredentialSignature {
+  Element: HTMLElement;
   Args: {
     slug: string;
     /** The user may change it (manage or owner). */
@@ -190,6 +191,7 @@ export default class RegistryCredentialPanel extends Component<RegistryCredentia
       class="pane settings-registry"
       aria-labelledby="registry-title"
       data-test-registry
+      ...attributes
     >
       <div class="pane-header">
         <h2 class="pane-title" id="registry-title">コンテナレジストリの認証</h2>

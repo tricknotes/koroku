@@ -133,7 +133,7 @@ module('Acceptance | review apps', function (hooks) {
     assert
       .dom('[data-test-app="blog-staging"] [data-test-review-count-link]')
       .hasText('レビューアプリ 3')
-      .hasAttribute('href', '/apps/blog-staging/review-apps');
+      .hasAttribute('href', '/apps/blog-staging/deploy?section=review-apps');
     assert
       .dom('[data-test-app="blog-staging"] [data-test-review-count-failed]')
       .hasText('1 件失敗');
@@ -153,7 +153,10 @@ module('Acceptance | review apps', function (hooks) {
       .hasText('レビューアプリ 2');
 
     await click('[data-test-app="blog-staging"] [data-test-review-count-link]');
-    assert.strictEqual(currentURL(), '/apps/blog-staging/review-apps');
+    assert.strictEqual(
+      currentURL(),
+      '/apps/blog-staging/deploy?section=review-apps',
+    );
   });
 
   test('the tab lists review apps and creates one', async function (assert) {
@@ -166,8 +169,16 @@ module('Acceptance | review apps', function (hooks) {
       ...created,
       dns_warning: true,
     }));
-    await visit('/apps/blog-staging/review-apps');
-    assert.dom('[data-test-tab="review-apps"]').hasClass('active');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
+    assert.strictEqual(
+      currentURL(),
+      '/apps/blog-staging/deploy?section=review-apps',
+    );
+    assert.dom('[data-test-tab="deploy"]').hasClass('active');
+    assert
+      .dom('[data-test-review-tab]')
+      .exists('the review apps follow the deploy history');
+    assert.dom('#review-apps').isFocused();
     await waitFor('[data-test-review-app]');
     assert
       .dom('[data-test-review-app="blog-staging-pr-42"]')
@@ -210,7 +221,7 @@ module('Acceptance | review apps', function (hooks) {
         Object.assign(parent, body as Partial<App>);
         return { ...parent };
       });
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     assert
       .dom('[data-test-review-allow]')
       .hasAttribute('aria-checked', 'false');
@@ -247,7 +258,7 @@ module('Acceptance | review apps', function (hooks) {
 
   test('existing review apps stay when they are no longer allowed', async function (assert) {
     parent.review_apps_allowed = false;
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     await waitFor('[data-test-review-app]');
     assert.dom('[data-test-review-app="blog-staging-pr-42"]').exists();
     assert.dom('[data-test-review-create]').isDisabled();
@@ -260,7 +271,7 @@ module('Acceptance | review apps', function (hooks) {
     fakes.api.on('GET', '/api/apps/blog-staging/review-apps', {
       review_apps: [],
     });
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     assert.dom('[data-test-review-allow]').doesNotExist();
     assert
       .dom('[data-test-review-allowed-state]')
@@ -294,7 +305,10 @@ module('Acceptance | review apps', function (hooks) {
       .dom('[data-test-review-app]')
       .doesNotExist('no list on the overview');
     await click('[data-test-review-line-link]');
-    assert.strictEqual(currentURL(), '/apps/blog-staging/review-apps');
+    assert.strictEqual(
+      currentURL(),
+      '/apps/blog-staging/deploy?section=review-apps',
+    );
   });
 
   test('the overview line is hidden when not allowed and there are none', async function (assert) {
@@ -302,7 +316,8 @@ module('Acceptance | review apps', function (hooks) {
     parent.review_apps = { count: 0, failed: 0, deploying: 0 };
     await visit('/apps/blog-staging');
     assert.dom('[data-test-review-line]').doesNotExist();
-    assert.dom('[data-test-tab="review-apps"]').exists('the tab stays');
+    await visit('/apps/blog-staging/deploy');
+    assert.dom('[data-test-review-tab]').exists('the section stays');
   });
 
   test('the overview line says when there are none yet', async function (assert) {
@@ -313,7 +328,7 @@ module('Acceptance | review apps', function (hooks) {
 
   test('a parent without hooks creates without data', async function (assert) {
     parent.dump_hook_command = '';
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     await click('[data-test-review-create]');
     assert.dom('[data-test-review-copy]').isNotChecked().isDisabled();
     assert.dom('[data-test-review-copy-hint]').includesText('ダンプフック');
@@ -326,7 +341,7 @@ module('Acceptance | review apps', function (hooks) {
       502,
       'github_permission_missing',
     );
-    await visit('/apps/blog-staging/review-apps');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
     await click('[data-test-review-create]');
     await waitFor('[data-test-review-permission]');
     assert
@@ -334,14 +349,17 @@ module('Acceptance | review apps', function (hooks) {
       .includesText('Pull requests: Read-only');
   });
 
-  test('a production app has no review apps tab', async function (assert) {
+  test('a production app has no review apps section', async function (assert) {
     parent.environment = 'production';
     parent.review_apps = { count: 0, failed: 0, deploying: 0 };
     await visit('/apps/blog-staging');
-    assert.dom('[data-test-tab="review-apps"]').doesNotExist();
     assert.dom('[data-test-review-line]').doesNotExist();
-    await visit('/apps/blog-staging/review-apps');
-    assert.strictEqual(currentURL(), '/apps/blog-staging');
+    await visit('/apps/blog-staging/deploy?section=review-apps');
+    assert.strictEqual(
+      currentURL(),
+      '/apps/blog-staging/deploy?section=review-apps',
+    );
+    assert.dom('[data-test-review-tab]').doesNotExist();
   });
 
   test('a review app links to its parent on every tab', async function (assert) {
@@ -355,10 +373,15 @@ module('Acceptance | review apps', function (hooks) {
         .dom('[data-test-app-parent]')
         .includesText('blog-staging')
         .includesText('PR #42');
-      assert.dom('[data-test-tab="review-apps"]').doesNotExist(url);
+      if (url.endsWith('/deploy')) {
+        assert.dom('[data-test-review-tab]').doesNotExist(url);
+      }
     }
     await click('[data-test-app-parent-link]');
-    assert.strictEqual(currentURL(), '/apps/blog-staging/review-apps');
+    assert.strictEqual(
+      currentURL(),
+      '/apps/blog-staging/deploy?section=review-apps',
+    );
   });
 
   test('a review app shows its pull request and data', async function (assert) {

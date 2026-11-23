@@ -398,7 +398,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 
 ### Compose の構成とコンテナ
 
-管理 UI の「構成」タブの API（ARCHITECTURE 9.10）。読み取り専用で、呼ばれたときに Docker に問い合わせる。`view` 以上と API トークンで使える。環境変数の値はどの応答にも入らない。
+管理 UI のリソースタブにある「構成」の API（ARCHITECTURE 9.10）。読み取り専用で、呼ばれたときに Docker に問い合わせる。`view` 以上と API トークンで使える。環境変数の値はどの応答にも入らない。
 
 `GET /api/apps/{slug}/compose?deployment=<id>`: リリースの override と、重ねた結果。`deployment` を省くと稼働中のリリース。
 

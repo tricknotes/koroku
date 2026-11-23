@@ -309,7 +309,7 @@ module('Acceptance | overview', function (hooks) {
     assert.dom('[data-test-pending]').exists({ count: 1 });
 
     await click('[data-test-overview-domains] a');
-    assert.strictEqual(currentURL(), '/apps/blog/domains');
+    assert.strictEqual(currentURL(), '/apps/blog/settings?section=domains');
   });
 
   test('backup: the newest snapshot of this app and the next run', async function (assert) {

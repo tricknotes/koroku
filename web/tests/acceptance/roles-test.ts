@@ -87,15 +87,29 @@ module('Acceptance | roles', function (hooks) {
     assert.dom('[data-test-env-edit]').doesNotExist();
     assert.dom('[data-test-env-key]').exists({ count: 2 }, 'the keys show');
 
-    await visit('/apps/blog/domains');
+    await visit('/apps/blog/settings?section=domains');
+    assert.dom('[data-test-domains]').exists('the domains can be read');
     assert.dom('[data-test-domain-form]').doesNotExist();
     assert.dom('[data-test-domain-delete]').doesNotExist();
+    assert
+      .dom('[data-test-domains] [data-test-copy]')
+      .isNotDisabled('copying a record is reading');
 
     await visit('/apps/blog/settings');
     assert.dom('[data-test-settings-form] fieldset').isDisabled();
     assert.dom('[data-test-role-note="manage"]').exists();
     assert.dom('[data-test-control="restart"]').doesNotExist();
     assert.dom('[data-test-delete]').doesNotExist();
+    assert.dom('[data-test-memory-summary-limit]').exists();
+    assert.dom('[data-test-settings-resources-link]').exists();
+
+    await visit('/apps/blog/resources');
+    assert.dom('[data-test-memory-settings]').exists();
+    assert.dom('[data-test-memory-setting-edit]').doesNotExist();
+    assert.dom('[data-test-memory-setting-add]').doesNotExist();
+    assert
+      .dom('[data-test-memory-settings] [data-test-role-note="manage"]')
+      .exists();
   });
 
   test('the manage role cannot touch the owner-only settings', async function (assert) {
@@ -104,6 +118,7 @@ module('Acceptance | roles', function (hooks) {
 
     assert.dom('[data-test-settings-form] fieldset').isNotDisabled();
     assert.dom('[data-test-field="relax_policy"]').isDisabled();
+    assert.dom('[data-test-domain-form]').exists('manage changes the domains');
     assert.dom('[data-test-owner-only-note]').exists();
     assert
       .dom('[data-test-environment-option="production"]')

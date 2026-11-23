@@ -1,5 +1,5 @@
-/* Review apps of pull requests (ARCHITECTURE 9.9): the parent's review apps
-   tab (the owner's permission, the list, the create dialog), the line on the
+/* Review apps of pull requests (ARCHITECTURE 9.9): the review apps section
+   of the parent's deploy tab (the list, the create dialog, the owner's permission), the line on the
    parent's overview, the summary on a review app's overview. */
 
 .review-permission {

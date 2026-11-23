@@ -895,35 +895,35 @@ function appTabShots() {
     // Domains
     {
       name: 'domains-active',
-      path: '/apps/blog/domains?scenario=healthy',
+      path: '/apps/blog/settings?section=domains&scenario=healthy',
       wait: DOMAIN,
     },
     {
       name: 'domains-pending',
-      path: '/apps/blog/domains?scenario=warnings',
+      path: '/apps/blog/settings?section=domains&scenario=warnings',
       wait: PENDING,
     },
     {
       name: 'domains-pending-phone',
-      path: '/apps/blog/domains?scenario=warnings',
+      path: '/apps/blog/settings?section=domains&scenario=warnings',
       wait: PENDING,
       ...PHONE,
     },
     {
       name: 'domains-empty',
-      path: '/apps/notes/domains?scenario=fresh',
+      path: '/apps/notes/settings?section=domains&scenario=fresh',
       wait: '[data-test-no-domains]',
     },
     {
       name: 'domains-invalid',
-      path: '/apps/blog/domains?scenario=healthy',
+      path: '/apps/blog/settings?section=domains&scenario=healthy',
       wait: DOMAIN,
       clicks: ['[data-test-domain-add]'],
       themes: ['light'],
     },
     {
       name: 'domains-delete',
-      path: '/apps/blog/domains?scenario=healthy',
+      path: '/apps/blog/settings?section=domains&scenario=healthy',
       wait: DOMAIN,
       clicks: [
         '[data-test-domain="www.example.org"] [data-test-domain-delete]',
@@ -932,7 +932,7 @@ function appTabShots() {
     },
     {
       name: 'domains-error',
-      path: '/apps/blog/domains?scenario=tab-error',
+      path: '/apps/blog/settings?section=domains&scenario=tab-error',
       wait: '[data-test-error]',
       themes: ['light'],
     },
@@ -1458,8 +1458,8 @@ SHOTS.push(
     path: '/apps/blog-staging/settings?scenario=healthy',
     wait: SETTINGS,
     script: `(() => {
-      const input = document.querySelector('[data-test-field="memory_limit"]');
-      input.value = '512 MB';
+      const input = document.querySelector('[data-test-field="web_port"]');
+      input.value = '0';
       input.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector('[data-test-settings-save]').click();
     })()`,
@@ -1503,26 +1503,26 @@ SHOTS.push(
   },
 );
 
-// The Compose tab (ARCHITECTURE 9.10): containers compared with the current
+// The Compose section of the resources tab (ARCHITECTURE 9.10): containers compared with the current
 // release, and the override and merged configuration of a release.
 const COMPOSE = '[data-test-compose-override]';
 const toComposeFiles = `document.querySelector('[data-test-compose-files]').scrollIntoView()`;
 SHOTS.push(
   {
     name: 'compose',
-    path: '/apps/blog/compose?scenario=healthy',
+    path: '/apps/blog/resources?section=compose&scenario=healthy',
     wait: COMPOSE,
     fullPage: true,
   },
   {
     name: 'compose-mismatch',
-    path: '/apps/blog/compose?scenario=compose-mismatch',
+    path: '/apps/blog/resources?section=compose&scenario=compose-mismatch',
     wait: '[data-test-compose-trouble]',
     fullPage: true,
   },
   {
     name: 'compose-past-release-error',
-    path: '/apps/blog/compose?scenario=compose-mismatch',
+    path: '/apps/blog/resources?section=compose&scenario=compose-mismatch',
     wait: COMPOSE,
     script: `(() => {
       const select = document.querySelector('[data-test-compose-release]');
@@ -1535,30 +1535,30 @@ SHOTS.push(
   },
   {
     name: 'compose-staging',
-    path: '/apps/blog-staging/compose?scenario=healthy',
+    path: '/apps/blog-staging/resources?section=compose&scenario=healthy',
     wait: COMPOSE,
     script: toComposeFiles,
     themes: ['light'],
   },
   {
     name: 'compose-not-deployed',
-    path: '/apps/notes/compose?scenario=undeployed',
+    path: '/apps/notes/resources?section=compose&scenario=undeployed',
     wait: '[data-test-compose-not-deployed]',
   },
   {
     name: 'compose-error',
-    path: '/apps/blog/compose?scenario=tab-error',
+    path: '/apps/blog/resources?section=compose&scenario=tab-error',
     wait: '[data-test-compose-files] [data-test-error]',
   },
   {
     name: 'compose-phone',
-    path: '/apps/blog/compose?scenario=healthy',
+    path: '/apps/blog/resources?section=compose&scenario=healthy',
     wait: COMPOSE,
     ...PHONE,
   },
   {
     name: 'compose-mismatch-phone',
-    path: '/apps/blog/compose?scenario=compose-mismatch',
+    path: '/apps/blog/resources?section=compose&scenario=compose-mismatch',
     wait: '[data-test-compose-trouble]',
     ...PHONE,
   },
@@ -1748,16 +1748,14 @@ SHOTS.push(
     fullPage: false,
   },
   {
-    name: 'reservation-pending-settings',
-    path: '/apps/blog/settings?scenario=reservations-pending',
-    wait: '[data-test-reservation-changes]',
-    script: `document.querySelector('[data-test-reservation-group]').scrollIntoView()`,
+    name: 'reservation-pending-resources',
+    path: '/apps/blog/resources?scenario=reservations-pending',
+    wait: '[data-test-reservation-next]',
   },
   {
-    name: 'reservation-pending-settings-phone',
-    path: '/apps/blog/settings?scenario=reservations-pending',
-    wait: '[data-test-reservation-changes]',
-    script: `document.querySelector('[data-test-reservation-group]').scrollIntoView()`,
+    name: 'reservation-pending-resources-phone',
+    path: '/apps/blog/resources?scenario=reservations-pending',
+    wait: '[data-test-reservation-next]',
     ...PHONE,
     fullPage: false,
   },
@@ -2232,13 +2230,15 @@ SHOTS.push(
 // system screen (fine, and above what the host can keep), per service on
 // the resources tab, and the settings of a production and a staging app.
 const RESERVATION = '[data-test-reservation]';
-const RESERVATION_SETTINGS = '[data-test-reservation-group]';
+const RESERVATION_SETTINGS = '[data-test-memory-settings]';
 const BAD_RESERVATION = `(() => {
-  const input = document.querySelector('[data-test-field="memory_reservation"]');
-  input.value = 'たくさん';
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  document.querySelector('[data-test-settings-save]').click();
-  setTimeout(() => document.querySelector('${RESERVATION_SETTINGS}').scrollIntoView(), 300);
+  document.querySelector('[data-test-memory-setting-edit="reservation"]').click();
+  setTimeout(() => {
+    const input = document.querySelector('[data-test-memory-value-input]');
+    input.value = 'たくさん';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    document.querySelector('[data-test-dialog-confirm]').click();
+  }, 300);
 })()`;
 SHOTS.push(
   {
@@ -2275,13 +2275,13 @@ SHOTS.push(
   },
   {
     name: 'reservation-settings',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?section=memory&scenario=healthy',
     wait: RESERVATION_SETTINGS,
     script: scrollTo(RESERVATION_SETTINGS),
   },
   {
     name: 'reservation-settings-phone',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?section=memory&scenario=healthy',
     wait: RESERVATION_SETTINGS,
     script: scrollTo(RESERVATION_SETTINGS),
     ...PHONE,
@@ -2289,17 +2289,152 @@ SHOTS.push(
   },
   {
     name: 'reservation-settings-staging',
-    path: '/apps/blog-staging/settings?scenario=healthy',
-    wait: '[data-test-reservation-staging-note]',
-    script: scrollTo(RESERVATION_SETTINGS),
+    path: '/apps/blog-staging/resources?section=memory&scenario=healthy',
+    wait: '[data-test-memory-limits]',
   },
   {
     name: 'reservation-settings-error',
-    path: '/apps/blog/settings?scenario=healthy',
+    path: '/apps/blog/resources?section=memory&scenario=healthy',
     wait: RESERVATION_SETTINGS,
     script: BAD_RESERVATION,
-    then: '[data-test-field-group="memory_reservation"] [data-test-field-error], [data-test-field-group="memory_reservation"] .field-error',
+    then: '[data-test-field-group="memory-value"] [data-test-field-error]',
     settle: 600,
+  },
+);
+
+// The app detail's tabs and their sections (ARCHITECTURE 9.1): the tab bar
+// on a phone, the resources tab with the limits and reservations and the
+// Compose section, the deploy tab with the review apps, and the settings
+// with their index, the domains in 公開 and the read-only memory summary.
+const openDialog = (selector) =>
+  `setTimeout(() => document.querySelector(${JSON.stringify(selector)}).click(), 300)`;
+SHOTS.push(
+  {
+    name: 'tabs-bar-phone',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: '[data-test-resources-now] [data-test-resource-service]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'tabs-resources',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: '[data-test-memory-history] [data-test-memory-service]',
+    fullPage: true,
+  },
+  {
+    name: 'tabs-resources-phone',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: '[data-test-memory-history] [data-test-memory-service]',
+    ...PHONE,
+  },
+  {
+    name: 'tabs-resources-memory',
+    path: '/apps/blog/resources?section=memory&scenario=healthy',
+    wait: '[data-test-memory-settings]',
+  },
+  {
+    name: 'tabs-resources-memory-phone',
+    path: '/apps/blog/resources?section=memory&scenario=healthy',
+    wait: '[data-test-memory-settings]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'tabs-resources-memory-dialog',
+    path: '/apps/blog/resources?section=memory&scenario=healthy',
+    wait: '[data-test-memory-settings]',
+    script: openDialog('[data-test-memory-setting-add="limit"]'),
+    then: '[data-test-memory-service-input]',
+  },
+  {
+    name: 'tabs-resources-memory-view',
+    path: '/apps/shop/resources?section=memory&scenario=member',
+    wait: '[data-test-memory-settings]',
+    themes: ['light'],
+  },
+  {
+    name: 'tabs-resources-compose',
+    path: '/apps/blog/resources?section=compose&scenario=healthy',
+    wait: '[data-test-compose-override]',
+  },
+  {
+    name: 'tabs-resources-compose-closed',
+    path: '/apps/blog/resources?scenario=healthy',
+    wait: '[data-test-compose-section]',
+    script: scrollTo('[data-test-compose-section]'),
+  },
+  {
+    name: 'tabs-resources-compose-phone',
+    path: '/apps/blog/resources?section=compose&scenario=healthy',
+    wait: '[data-test-compose-override]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'tabs-deploy-review',
+    path: '/apps/blog-staging/deploy?section=review-apps&scenario=review-apps',
+    wait: '[data-test-review-app]',
+  },
+  {
+    name: 'tabs-deploy-review-full',
+    path: '/apps/blog-staging/deploy?scenario=review-apps',
+    wait: '[data-test-review-app]',
+    fullPage: true,
+  },
+  {
+    name: 'tabs-deploy-review-phone',
+    path: '/apps/blog-staging/deploy?section=review-apps&scenario=review-apps',
+    wait: '[data-test-review-app]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'tabs-settings',
+    path: '/apps/blog/settings?scenario=healthy',
+    wait: '[data-test-settings-index]',
+  },
+  {
+    name: 'tabs-settings-full',
+    path: '/apps/blog/settings?scenario=warnings',
+    wait: '[data-test-domain][data-status="pending"]',
+    fullPage: true,
+  },
+  {
+    name: 'tabs-settings-scrolled',
+    path: '/apps/blog/settings?section=protection&scenario=healthy',
+    wait: '[data-test-settings-index]',
+  },
+  {
+    name: 'tabs-settings-phone',
+    path: '/apps/blog/settings?section=environment&scenario=healthy',
+    wait: '[data-test-settings-jump]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'tabs-settings-domains',
+    path: '/apps/blog/settings?section=domains&scenario=warnings',
+    wait: '[data-test-domain][data-status="pending"]',
+  },
+  {
+    name: 'tabs-settings-domains-phone',
+    path: '/apps/blog/settings?section=domains&scenario=warnings',
+    wait: '[data-test-domain][data-status="pending"]',
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'tabs-settings-memory',
+    path: '/apps/blog/settings?section=memory&scenario=healthy',
+    wait: '[data-test-memory-summary]',
+  },
+  {
+    name: 'tabs-settings-memory-phone',
+    path: '/apps/blog/settings?section=memory&scenario=healthy',
+    wait: '[data-test-memory-summary]',
+    ...PHONE,
+    fullPage: false,
   },
 );
 
@@ -2882,7 +3017,7 @@ async function capture(browser, shot, theme) {
 // allowed for the owner and for a member, allowed and empty), the create
 // dialog (also without the GitHub permission), the owner's confirmation,
 // the overview line, and a review app with its parent in the header.
-const REVIEW_TAB = '/apps/blog-staging/review-apps';
+const REVIEW_TAB = '/apps/blog-staging/deploy?section=review-apps';
 const REVIEW_PULLS = '[data-test-review-pulls]';
 SHOTS.push(
   { name: 'review-list', path: '/?scenario=review-apps', wait: LIST },
@@ -2894,44 +3029,44 @@ SHOTS.push(
   },
   {
     name: 'review-tab',
-    path: `${REVIEW_TAB}?scenario=review-apps`,
+    path: `${REVIEW_TAB}&scenario=review-apps`,
     wait: '[data-test-review-app]',
   },
   {
     name: 'review-tab-phone',
-    path: `${REVIEW_TAB}?scenario=review-apps`,
+    path: `${REVIEW_TAB}&scenario=review-apps`,
     wait: '[data-test-review-app]',
     ...PHONE,
   },
   {
     name: 'review-tab-failed',
-    path: '/apps/shop-staging/review-apps?scenario=review-apps',
+    path: '/apps/shop-staging/deploy?section=review-apps&scenario=review-apps',
     wait: '[data-test-review-app]',
   },
   {
     name: 'review-tab-not-allowed',
-    path: `${REVIEW_TAB}?scenario=healthy`,
+    path: `${REVIEW_TAB}&scenario=healthy`,
     wait: '[data-test-review-empty]',
   },
   {
     name: 'review-tab-member',
-    path: `${REVIEW_TAB}?scenario=review-member`,
+    path: `${REVIEW_TAB}&scenario=review-member`,
     wait: '[data-test-review-app]',
   },
   {
     name: 'review-tab-member-phone',
-    path: `${REVIEW_TAB}?scenario=member`,
+    path: `${REVIEW_TAB}&scenario=member`,
     wait: '[data-test-review-empty]',
     ...PHONE,
   },
   {
     name: 'review-tab-empty',
-    path: `${REVIEW_TAB}?scenario=review-allowed`,
+    path: `${REVIEW_TAB}&scenario=review-allowed`,
     wait: '[data-test-review-empty]',
   },
   {
     name: 'review-allow-confirm',
-    path: `${REVIEW_TAB}?scenario=healthy`,
+    path: `${REVIEW_TAB}&scenario=healthy`,
     wait: '[data-test-review-allow]',
     click: '[data-test-review-allow]',
     then: '[data-test-review-allow-confirm]',
@@ -2949,14 +3084,14 @@ SHOTS.push(
   },
   {
     name: 'review-create',
-    path: `${REVIEW_TAB}?scenario=review-apps`,
+    path: `${REVIEW_TAB}&scenario=review-apps`,
     wait: '[data-test-review-create]',
     click: '[data-test-review-create]',
     then: REVIEW_PULLS,
   },
   {
     name: 'review-create-phone',
-    path: `${REVIEW_TAB}?scenario=review-apps`,
+    path: `${REVIEW_TAB}&scenario=review-apps`,
     wait: '[data-test-review-create]',
     click: '[data-test-review-create]',
     then: REVIEW_PULLS,
@@ -2965,14 +3100,14 @@ SHOTS.push(
   },
   {
     name: 'review-create-permission',
-    path: `${REVIEW_TAB}?scenario=review-permission`,
+    path: `${REVIEW_TAB}&scenario=review-permission`,
     wait: '[data-test-review-create]',
     click: '[data-test-review-create]',
     then: '[data-test-review-permission]',
   },
   {
     name: 'review-created',
-    path: `${REVIEW_TAB}?scenario=review-apps`,
+    path: `${REVIEW_TAB}&scenario=review-apps`,
     wait: '[data-test-review-create]',
     // The pull requests take a moment to load, and the creation too.
     script: `(async () => {

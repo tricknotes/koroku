@@ -1,6 +1,6 @@
 import Component from '@glimmer/component';
 import { service } from '@ember/service';
-import { array } from '@ember/helper';
+import { array, hash } from '@ember/helper';
 import { on } from '@ember/modifier';
 import { LinkTo } from '@ember/routing';
 import type RouterService from '@ember/routing/router-service';
@@ -21,7 +21,6 @@ import type PollerService from 'koroku-console/services/poller';
 import type AppContext from 'koroku-console/utils/app-context';
 import { errorMessage } from 'koroku-console/utils/errors';
 import { hostOf } from 'koroku-console/utils/format';
-import { hasReviewTab } from 'koroku-console/utils/review';
 import { can } from 'koroku-console/utils/roles';
 import {
   APP_STATE_HINTS,
@@ -198,8 +197,9 @@ export default class AppTemplate extends Component<Signature> {
                 <span class="app-header-parent" data-test-app-parent>
                   <span class="app-header-parent-label">親</span>
                   <LinkTo
-                    @route="app.review-apps"
+                    @route="app.deploy"
                     @model={{@model.app.review.parent}}
+                    @query={{hash section="review-apps"}}
                     data-test-app-parent-link
                   >{{@model.app.review.parent}}</LinkTo>
                   <span class="app-header-parent-pr">PR #{{@model.app.review.pr_number}}</span>
@@ -233,13 +233,6 @@ export default class AppTemplate extends Component<Signature> {
             @model={{@model.slug}}
             data-test-tab="deploy"
           >デプロイ</tabs.Tab>
-          {{#if (hasReviewTab @model.app)}}
-            <tabs.Tab
-              @route="app.review-apps"
-              @model={{@model.slug}}
-              data-test-tab="review-apps"
-            >レビューアプリ</tabs.Tab>
-          {{/if}}
           <tabs.Tab
             @route="app.logs"
             @model={{@model.slug}}
@@ -251,11 +244,6 @@ export default class AppTemplate extends Component<Signature> {
             data-test-tab="resources"
           >リソース</tabs.Tab>
           <tabs.Tab
-            @route="app.compose"
-            @model={{@model.slug}}
-            data-test-tab="compose"
-          >構成</tabs.Tab>
-          <tabs.Tab
             @route="app.tasks"
             @model={{@model.slug}}
             data-test-tab="tasks"
@@ -265,11 +253,6 @@ export default class AppTemplate extends Component<Signature> {
             @model={{@model.slug}}
             data-test-tab="env"
           >環境変数</tabs.Tab>
-          <tabs.Tab
-            @route="app.domains"
-            @model={{@model.slug}}
-            data-test-tab="domains"
-          >ドメイン</tabs.Tab>
           <tabs.Tab
             @route="app.backups"
             @model={{@model.slug}}

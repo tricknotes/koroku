@@ -71,7 +71,7 @@ export function parentCanCopy(app: App): string | null {
 }
 
 /**
- * Whether the app has the review apps tab: an app review apps can be made
+ * Whether the app's deploy tab has the review apps section: an app review apps can be made
  * from, or one that still has some (it was made production since).
  */
 export function hasReviewTab(app: App): boolean {

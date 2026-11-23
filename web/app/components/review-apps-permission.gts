@@ -83,7 +83,11 @@ export default class ReviewAppsPermission extends Component<Signature> {
   }
 
   <template>
-    <TabSection @title="許可" data-test-review-permission-section ...attributes>
+    <TabSection
+      @title="レビューアプリの許可"
+      data-test-review-permission-section
+      ...attributes
+    >
       <div class="box review-permission">
         {{#if this.isOwner}}
           <ToggleSwitch

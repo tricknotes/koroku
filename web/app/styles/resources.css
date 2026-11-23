@@ -451,3 +451,67 @@
 .memory-suggestion-state svg {
   color: var(--color-running);
 }
+
+/* The limits and reservations (ARCHITECTURE 9.5): app-wide and per service,
+   one value per row, side by side while there is room. */
+.memory-settings-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-4) var(--space-8);
+}
+
+.memory-settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.memory-settings-group > .field-hint {
+  margin: 0;
+}
+
+.memory-settings-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.memory-settings-list {
+  align-self: stretch;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  list-style: none;
+}
+
+.memory-settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  min-height: calc(var(--control-height) + var(--space-3));
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.memory-settings-row + .memory-settings-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.memory-settings-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-settings-value {
+  font-variant-numeric: tabular-nums;
+}
+
+/* What applies without a value of its own reads as a default, not a size. */
+.memory-settings-value.is-default {
+  color: var(--color-text-secondary);
+  font-family: inherit;
+}

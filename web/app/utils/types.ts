@@ -912,7 +912,7 @@ export interface ActivityPage {
   next_before: number | null;
 }
 
-/** A kept release the Compose tab can show (ARCHITECTURE 9.10). */
+/** A kept release the Compose section can show (ARCHITECTURE 9.10). */
 export interface ComposeRelease {
   deployment_id: number;
   commit_sha: string;

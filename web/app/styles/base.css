@@ -112,3 +112,10 @@ time {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* A section a link led to takes the focus (modifiers/focus-section) so that
+   reading and Tab go on from there. It is not a control and sits at the top
+   of the window already, so it draws no ring. */
+[tabindex="-1"]:focus {
+  outline: none;
+}

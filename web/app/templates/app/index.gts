@@ -195,7 +195,7 @@ export default class AppOverviewTemplate extends Component<Signature> {
   }
 
   /**
-   * The line that leads to the review apps tab: where review apps are
+   * The line that leads to the review apps section: where review apps are
    * allowed, or where there are some.
    */
   get showReviewLine(): boolean {
@@ -835,8 +835,9 @@ export default class AppOverviewTemplate extends Component<Signature> {
         <TabSection @title="ドメイン" data-test-overview-domains>
           <:actions>
             <LinkTo
-              @route="app.domains"
+              @route="app.settings"
               @model={{this.slug}}
+              @query={{hash section="domains"}}
               class="overview-more"
             >{{if this.canManage "管理" "開く"}}</LinkTo>
           </:actions>

@@ -1,5 +1,5 @@
 import { module, test } from 'qunit';
-import { click, fillIn, visit } from '@ember/test-helpers';
+import { click, currentURL, fillIn, visit } from '@ember/test-helpers';
 import { setupApplicationTest } from 'koroku-console/tests/helpers';
 import {
   installFakes,
@@ -186,7 +186,7 @@ module('Acceptance | memory reservation', function (hooks) {
     });
   });
 
-  module('settings', function (hooks) {
+  module('limits and reservations', function (hooks) {
     let app: App;
 
     hooks.beforeEach(function () {
@@ -206,56 +206,156 @@ module('Acceptance | memory reservation', function (hooks) {
         });
     });
 
-    test('a production app saves its reservations', async function (assert) {
-      await visit('/apps/blog/settings');
+    const PATCHES = () =>
+      fakes.api.callsTo('PATCH', '/api/apps/blog').map((call) => call.body);
 
-      assert.dom('[data-test-reservation-staging-note]').doesNotExist();
-      assert.dom('[data-test-reservation-service]').hasValue('worker');
-      assert.dom('[data-test-reservation-value]').hasValue('0');
+    test('the resources tab saves the app-wide and per-service values one at a time', async function (assert) {
+      await visit('/apps/blog/resources?section=memory');
 
-      await fillIn('[data-test-field="memory_reservation"]', '192m');
-      await click('[data-test-reservation-add]');
-      const rows = document.querySelectorAll('[data-test-reservation-row]');
-      const last = rows[rows.length - 1]!;
-      await fillIn(
-        last.querySelector('[data-test-reservation-service]')!,
-        'db',
-      );
-      await fillIn(
-        last.querySelector('[data-test-reservation-value]')!,
-        '512m',
-      );
-      await click('[data-test-settings-save]');
+      assert.dom('#memory').isFocused('a link to the section focuses it');
+      assert
+        .dom(
+          '[data-test-memory-setting="limit"] [data-test-memory-setting-value]',
+        )
+        .hasText('基盤の既定値');
+      assert
+        .dom(
+          '[data-test-memory-setting="reservation"] [data-test-memory-setting-value]',
+        )
+        .hasText('各サービスの上限の半分');
+      assert
+        .dom(
+          '[data-test-memory-setting="reservation:worker"] [data-test-memory-setting-value]',
+        )
+        .hasText('0（予約しない）');
+      assert.dom('[data-test-memory-reservation-staging]').doesNotExist();
 
-      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
-        memory_reservation: '192m',
+      // The app-wide reservation.
+      await click('[data-test-memory-setting-edit="reservation"]');
+      assert
+        .dom('[data-test-dialog]')
+        .includesText('全サービス共通のメモリの予約');
+      assert
+        .dom('[data-test-memory-setting-notice]')
+        .includesText('次のデプロイから');
+      await fillIn('[data-test-memory-value-input]', ' 192M ');
+      await click('[data-test-dialog-confirm]');
+      assert.deepEqual(PATCHES(), [{ memory_reservation: '192m' }]);
+      assert.dom('[data-test-dialog]').doesNotExist();
+      assert
+        .dom(
+          '[data-test-memory-setting="reservation"] [data-test-memory-setting-value]',
+        )
+        .hasText('192m');
+
+      // A per-service reservation is added; the others stay.
+      await click('[data-test-memory-setting-add="reservation"]');
+      await fillIn('[data-test-memory-service-input]', 'db');
+      await fillIn('[data-test-memory-value-input]', '512m');
+      await click('[data-test-dialog-confirm]');
+      assert.deepEqual(PATCHES()[1], {
         service_memory_reservations: { worker: '0', db: '512m' },
       });
-      assert.dom('[data-test-settings-saved]').includesText('次のデプロイから');
+
+      // The app-wide limit, and back to the default.
+      await click('[data-test-memory-setting-edit="limit"]');
+      await fillIn('[data-test-memory-value-input]', '1g');
+      await click('[data-test-dialog-confirm]');
+      assert.deepEqual(PATCHES()[2], { memory_limit: '1g' });
+      await click('[data-test-memory-setting-edit="limit"]');
+      assert.dom('[data-test-memory-value-input]').hasValue('1g');
+      assert.dom('[data-test-dialog-alt]').hasText('既定に戻す');
+      await click('[data-test-dialog-alt]');
+      assert.deepEqual(PATCHES()[3], { memory_limit: '' });
+
+      // A per-service limit, then removed.
+      await click('[data-test-memory-setting-add="limit"]');
+      await fillIn('[data-test-memory-service-input]', 'web');
+      await fillIn('[data-test-memory-value-input]', '768m');
+      await click('[data-test-dialog-confirm]');
+      assert.deepEqual(PATCHES()[4], {
+        service_memory_limits: { web: '768m' },
+      });
+      await click('[data-test-memory-setting-edit="limit:web"]');
+      assert.dom('[data-test-dialog-alt]').hasText('外す');
+      await click('[data-test-dialog-alt]');
+      assert.deepEqual(PATCHES()[5], { service_memory_limits: {} });
     });
 
     test('a bad value is caught before sending', async function (assert) {
-      await visit('/apps/blog/settings');
+      await visit('/apps/blog/resources');
 
-      await fillIn('[data-test-field="memory_reservation"]', 'たくさん');
-      await click('[data-test-settings-save]');
-
+      await click('[data-test-memory-setting-edit="reservation"]');
+      await fillIn('[data-test-memory-value-input]', 'たくさん');
+      await click('[data-test-dialog-confirm]');
       assert
-        .dom(
-          '[data-test-field-group="memory_reservation"] [data-test-field-error]',
-        )
+        .dom('[data-test-field-group="memory-value"] [data-test-field-error]')
         .includesText('0（予約しない）');
-      assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
+      assert.dom('[data-test-dialog]').exists('the dialog stays open');
+
+      await click('[data-test-dialog-cancel]');
+      await click('[data-test-memory-setting-add="limit"]');
+      await fillIn('[data-test-memory-value-input]', '1g');
+      await click('[data-test-dialog-confirm]');
+      assert
+        .dom('[data-test-dialog]')
+        .includesText('サービス名を入力してください', 'a service is named');
+      assert.deepEqual(PATCHES(), []);
+    });
+
+    test('a refused value keeps the dialog with the reason', async function (assert) {
+      fakes.api.fail('PATCH', '/api/apps/blog', 422, 'validation_failed', {
+        memory_reservation: '上限を超えています。',
+      });
+      await visit('/apps/blog/resources');
+
+      await click('[data-test-memory-setting-edit="reservation"]');
+      await fillIn('[data-test-memory-value-input]', '4g');
+      await click('[data-test-dialog-confirm]');
+      assert
+        .dom('[data-test-field-group="memory-value"] [data-test-field-error]')
+        .hasText('上限を超えています。');
     });
 
     test('a staging app is told it reserves nothing', async function (assert) {
       app = { ...app, environment: 'staging' };
 
+      await visit('/apps/blog/resources');
+      assert
+        .dom('[data-test-memory-reservation-staging]')
+        .includesText('ステージングのアプリには付きません');
+
+      app = { ...app, service_memory_reservations: null };
+      await visit('/');
+      await visit('/apps/blog/resources');
+      assert
+        .dom('[data-test-memory-reservations]')
+        .doesNotExist('nothing set, nothing to show');
+      assert.dom('[data-test-memory-limits]').exists();
+    });
+
+    test('the settings tab only shows the values and leads to the resources tab', async function (assert) {
+      app = {
+        ...app,
+        memory_limit: '512m',
+        service_memory_limits: { db: '1g' },
+      };
       await visit('/apps/blog/settings');
 
+      assert.dom('[data-test-field="memory_limit"]').doesNotExist();
+      assert.dom('[data-test-field="memory_reservation"]').doesNotExist();
       assert
-        .dom('[data-test-reservation-staging-note]')
-        .includesText('ステージングのアプリには付きません');
+        .dom('[data-test-memory-summary-limit]')
+        .hasText('512m（全サービス共通）、db 1g');
+      assert
+        .dom('[data-test-memory-summary-reservation]')
+        .hasText(
+          '各サービスの上限の半分（全サービス共通）、worker 0（予約しない）',
+        );
+
+      await click('[data-test-settings-resources-link]');
+      assert.strictEqual(currentURL(), '/apps/blog/resources?section=memory');
+      assert.dom('#memory').isFocused();
     });
   });
 
