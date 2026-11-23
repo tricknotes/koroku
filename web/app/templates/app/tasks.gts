@@ -520,10 +520,10 @@ export default class AppTasksTemplate extends Component<Signature> {
       {{/unless}}
       {{#if this.isStopped}}
         <Banner @tone="warning" data-test-tasks-stopped>
-          アプリは停止中です。コマンドは実行できますが、DB
-          など依存するサービスも止まっているため、つながらずに失敗することがあります。
+          アプリは停止中です。DB
+          なども止まっているため、コマンドが失敗することがあります。
           {{#if this.hasSchedules}}
-            定期実行の予定は、停止している間は見送ります。
+            定期実行は見送ります。
           {{/if}}
         </Banner>
       {{/if}}
@@ -797,9 +797,8 @@ export default class AppTasksTemplate extends Component<Signature> {
     {{#if this.canManage}}
       <TabSection @title="コマンドを実行" data-test-command-section>
         <p class="pane-description">
-          稼働中のリリースと同じイメージ・環境変数・メモリ上限の新しいコンテナで
-          1
-          回だけ実行します。端末と入力はありません。出力の環境変数の値は伏せて記録しますが、コマンドの文字列はそのまま残るので、秘密はコマンドに書かず環境変数で渡してください。
+          稼働中のリリースと同じ設定の新しいコンテナで 1
+          回だけ実行します。コマンドの文字列は記録に残るので、秘密は環境変数で渡してください。
         </p>
         <form
           class="task-form"
@@ -857,9 +856,8 @@ export default class AppTasksTemplate extends Component<Signature> {
               <code>bin/rails console</code>
               や
               <code>psql</code>
-              のように対話的に使うコマンドは、ホストに SSH して次の 1
-              行で実行します。上で選んだサービスと入力したコマンドが入ります（空なら
-              <code>sh</code>）。履歴には残りません。
+              のような対話的なコマンドは、ホストに SSH して次の 1
+              行で実行します。
             </p>
             <div class="task-console-command">
               <pre

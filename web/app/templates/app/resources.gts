@@ -133,13 +133,10 @@ export default class AppResourcesTemplate extends Component<Signature> {
     <div class="resources" data-test-resources>
       <TabSection @title="今の使用量" data-test-resources-now>
         <p class="pane-description">
-          稼働中のコンテナを数秒ごとに測った値です。CPU は Docker と同じく 1
-          コアを 100% とします。
-          {{#if this.production}}
-            予約は、ホストのメモリが足りなくなっても後回しに回収される量です。変更は次のデプロイから反映されます。
-          {{else}}
+          稼働中のコンテナを数秒ごとに測った値です（CPU は 1 コア = 100%）。
+          {{#unless this.production}}
             ステージングのアプリにはメモリの予約は付きません。
-          {{/if}}
+          {{/unless}}
         </p>
         <CurrentReleaseLine @app={{this.app}} />
         {{#if this.app.sleeping_since}}

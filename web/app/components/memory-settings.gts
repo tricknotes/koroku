@@ -236,8 +236,7 @@ export default class MemorySettings extends Component<Signature> {
           <h2 class="pane-title" id="{{id}}-title">メモリの上限と予約</h2>
         </header>
         <p class="pane-description">
-          koroku
-          が各サービスに付けるメモリの上限と、本番アプリで回収から守る量（予約）です。変更は保存するとすぐ設定に残り、動いているコンテナには次のデプロイから反映されます。
+          各サービスのメモリの上限と、本番アプリで回収から守る量（予約）です。変更は次のデプロイから反映されます。
         </p>
         {{#unless this.canEdit}}
           <RoleNote @needed="manage" @what="上限と予約の変更" />

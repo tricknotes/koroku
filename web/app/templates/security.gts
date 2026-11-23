@@ -178,8 +178,7 @@ export default class SecurityTemplate extends Component {
           {{/unless}}
         </div>
         <p class="security-note">
-          アプリの削除、本番アプリのデプロイ、環境変数の値の表示と保存、リストア、ダンプのダウンロード、環境やリポジトリの変更、API
-          トークンの作成、メンバーの追加とロールの付与には、直近 10
+          削除や本番のデプロイ、秘密の値の表示など、重要な操作には直近 10
           分以内のログインが必要です。
         </p>
         <p class="security-reauth" data-test-reauth-state>
@@ -212,10 +211,10 @@ export default class SecurityTemplate extends Component {
       </div>
       <p class="security-note">
         {{#if this.isOwner}}
-          ログインしているブラウザーです。オーナーには、メンバーのセッションも表示します。心当たりのないものがあれば終了し、GitHub
+          メンバーのものを含む、ログイン中のブラウザーです。心当たりのないものは終了し、GitHub
           のパスワードも変えてください。
         {{else}}
-          このアカウントでログインしているブラウザーです。心当たりのないものがあれば終了し、GitHub
+          ログイン中のブラウザーです。心当たりのないものは終了し、GitHub
           のパスワードも変えてください。
         {{/if}}
       </p>
@@ -319,11 +318,9 @@ export default class SecurityTemplate extends Component {
       </div>
       <p class="security-note">
         {{#if this.isOwner}}
-          GitHub
-          の認証まで進んだログインの記録です（メンバーのものを含め、新しい順に最大
-          50 件）。断ったログインも残ります。
+          メンバーのものと断ったものを含む、直近 50 件です。
         {{else}}
-          あなたのアカウントのログインの記録です（新しい順に最大 50 件）。
+          直近 50 件です。
         {{/if}}
       </p>
 

@@ -381,15 +381,13 @@ export default class MemoryHistory extends Component<Signature> {
               {{/each}}
             </ul>
             <p class="field-hint">
-              目安は、いまの上限になってからの直近 14 日のピーク × 1.5 を 64m
-              単位に切り上げた値です（128m
-              以上）。上限の変更は次のデプロイから反映されます。目安と違う値は「メモリの上限と予約」で入れられます。
+              目安は直近 14 日のピーク × 1.5 です（64m 単位に切り上げ）。
             </p>
           {{/let}}
         {{else}}
           <EmptyState
             @title="まだ記録がありません"
-            @description="稼働中のサービスのメモリ使用量を 1 分ごとに測り、5 分ごとにまとめて 14 日間残します。24 時間分たまると上限の目安を出します。"
+            @description="メモリ使用量を 1 分ごとに測って 14 日間残します。24 時間分たまると上限の目安を出します。"
             data-test-memory-empty
           >
             <:action>

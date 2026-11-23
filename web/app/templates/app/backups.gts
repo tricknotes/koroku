@@ -686,8 +686,8 @@ export default class AppBackupsTemplate extends Component<Signature> {
                   <div>
                     <h3 class="form-group-title">対象の volume</h3>
                     <p class="form-group-description">
-                      named volume は、外したもの以外すべて取ります。稼働中の DB
-                      のデータディレクトリはコピーしても整合しないので、対象から外してダンプフックで取ります。
+                      外したもの以外の named volume をすべて取ります。DB
+                      のデータはダンプフックで取ります。
                     </p>
                   </div>
                   <div class="form-group-body">
@@ -791,7 +791,7 @@ export default class AppBackupsTemplate extends Component<Signature> {
 
                     <FormField
                       @label="一覧にない volume を名前で外す"
-                      @hint="まだ作られていない volume を、先に対象から外しておけます。Compose ファイルに書いた volume 名を入力します。"
+                      @hint="まだ作られていない volume も外しておけます。"
                       @error={{this.errors.backup_exclude_volumes}}
                       data-test-field-group="backup_exclude_volumes"
                       as |field|
@@ -823,9 +823,8 @@ export default class AppBackupsTemplate extends Component<Signature> {
                   <div>
                     <h3 class="form-group-title">ダンプフック</h3>
                     <p class="form-group-description">
-                      バックアップのたびに、指定したサービスのコンテナでコマンドを実行し、標準出力をダンプとして保存します。staging
-                      アプリへの DB
-                      のコピーでも、コピー元としてこのコマンドを使います。使わないときは両方を空にします。
+                      コマンドの標準出力をダンプとして保存します。DB
+                      のコピーのコピー元にも使います。
                     </p>
                   </div>
                   <div class="form-group-body">
@@ -890,7 +889,7 @@ export default class AppBackupsTemplate extends Component<Signature> {
                   <div>
                     <h3 class="form-group-title">デプロイの前</h3>
                     <p class="form-group-description">
-                      コンテナを入れ替える直前に、このアプリだけのバックアップを取ります。失敗したらデプロイを中止します。
+                      失敗したらデプロイを中止します。
                     </p>
                   </div>
                   <div class="form-group-body">

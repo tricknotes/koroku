@@ -234,7 +234,7 @@ export default class ServiceReservation extends Component<Signature> {
         @onAlt={{this.reset}}
       >
         <p>
-          ホストのメモリが足りなくなったとき、予約した量まではほかのアプリより後に回収されます。設定のサービス別の予約に保存します。
+          メモリが足りなくなったとき、予約した量まではほかのアプリより後に回収されます。
         </p>
         <dl class="reservation-facts" data-test-reservation-facts>
           <div>
@@ -292,7 +292,7 @@ export default class ServiceReservation extends Component<Signature> {
           </p>
         {{/if}}
         <p class="field-hint" data-test-reservation-notice>
-          動いているコンテナはそのままで、次のデプロイから反映されます。システム画面の予約の合計はデプロイするまで稼働中のリリースの値のままで、次のデプロイの値はその横に並びます。
+          次のデプロイから反映されます。
         </p>
         {{#unless this.fieldError}}
           <ErrorMessage @error={{this.error}} />

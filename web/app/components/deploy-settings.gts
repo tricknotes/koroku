@@ -203,10 +203,6 @@ export default class DeploySettings extends Component<Signature> {
       <header class="pane-header">
         <h2 class="pane-title" id="deploy-settings-title">デプロイの設定</h2>
       </header>
-      <p class="pane-description">
-        push
-        で自動でデプロイするか、何を本番へ昇格するか、公開サービスをどう入れ替えるか、どのリリースを通すかの設定です。
-      </p>
       {{#if this.readOnly}}
         <RoleNote @needed="manage" @what="デプロイの設定の変更" />
       {{else if this.memberManages}}
@@ -238,8 +234,7 @@ export default class DeploySettings extends Component<Signature> {
                 id="deploy-settings-auto-deploy-title"
               >自動デプロイ</h3>
               <p class="form-group-description">
-                GitHub にブランチが push
-                されたら、そのコミットを自動でデプロイします。結果は手動のデプロイと同じく履歴に残ります。
+                push されたコミットを自動でデプロイします。
               </p>
             </div>
             <div class="form-group-body">
@@ -257,11 +252,10 @@ export default class DeploySettings extends Component<Signature> {
                   <span class="option-hint" id="auto-deploy-hint">
                     {{#if this.canAutoDeploy}}
                       続けて push
-                      したときは、待っているデプロイを新しいコミットに置き換えます。停止中のアプリはデプロイしません。
+                      されたら最新のコミットだけをデプロイします。停止中のアプリはデプロイしません。
                     {{else}}
-                      GitHub App
-                      で取得するリポジトリ（作成画面の一覧から選んだもの）だけで使えます。URL
-                      で指定したリポジトリには push が届きません。
+                      作成画面の一覧から選んだリポジトリだけで使えます（URL
+                      で指定したものには push が届きません）。
                     {{/if}}
                   </span>
                 </span>
@@ -293,7 +287,7 @@ export default class DeploySettings extends Component<Signature> {
 
                 <FormField
                   @label="先に待つワークフロー（任意）"
-                  @hint="GitHub Actions でイメージを作るなら、そのワークフローのファイルを入れます。push ではなく、そのワークフローがこのブランチの最新のコミットで成功したときにデプロイします。空なら push の直後にデプロイします。"
+                  @hint="イメージを作る GitHub Actions のワークフローです。その成功を待ってデプロイします。空なら push の直後にデプロイします。"
                   @error={{@editor.errors.auto_deploy_workflow}}
                   data-test-field-group="auto_deploy_workflow"
                   as |field|
@@ -396,7 +390,7 @@ export default class DeploySettings extends Component<Signature> {
                   id="deploy-settings-promotion-title"
                 >昇格元</h3>
                 <p class="form-group-description">
-                  同じリポジトリのステージングアプリを選ぶと、このタブの上の欄から、そのアプリで稼働中のリリースを本番へ昇格できます。ビルド引数が同じなら、ビルドしたイメージも再利用します。
+                  選んだステージングアプリのリリースを、このタブの上の欄から本番へ昇格できます。
                 </p>
               </div>
               <div class="form-group-body">
@@ -468,8 +462,7 @@ export default class DeploySettings extends Component<Signature> {
               >無停止デプロイ</h3>
               <p class="form-group-description">
                 公開サービス（<code
-                >{{this.app.web_service}}</code>）の新しい版を、動いている版と並べて起動し、確認が通ってから切り替えます。DB
-                やワーカーなどほかのサービスは、これまでどおり作り直します。
+                >{{this.app.web_service}}</code>）の新しい版を並べて起動し、確認が通ってから切り替えます。
               </p>
             </div>
             <div class="form-group-body">
@@ -486,7 +479,7 @@ export default class DeploySettings extends Component<Signature> {
                     class="option-label"
                   >公開サービスを無停止で入れ替える</span>
                   <span class="option-hint" id="blue-green-hint">
-                    設定の変更は次のデプロイから効きます。保存してもコンテナは動かしません。
+                    次のデプロイから効きます。
                   </span>
                 </span>
               </label>
@@ -495,7 +488,7 @@ export default class DeploySettings extends Component<Signature> {
                 <FormField
                   class="field-narrow"
                   @label="旧色を止めるまでの待ち時間（秒）"
-                  @hint="切り替えのあと、処理中のリクエストを古い版で終えるための待ち時間です。0〜{{this.maxDrain}} 秒。長い処理を抱えるリクエストが多いアプリは延ばします。"
+                  @hint="切り替えのあと、処理中のリクエストを古い版で終える時間です（0〜{{this.maxDrain}} 秒）。"
                   @error={{@editor.errors.blue_green_drain_seconds}}
                   data-test-field-group="blue_green_drain_seconds"
                   as |field|
@@ -562,7 +555,11 @@ export default class DeploySettings extends Component<Signature> {
                 </p>
               {{/if}}
 
-              <div class="blue-green-notes" data-test-blue-green-notes>
+              <details
+                class="disclosure blue-green-notes"
+                data-test-blue-green-notes
+              >
+                <summary>条件と注意</summary>
                 <p
                   class="field-hint"
                 >有効にする条件（デプロイの検証で確かめます）:</p>
@@ -586,30 +583,30 @@ export default class DeploySettings extends Component<Signature> {
                 <ul class="blue-green-list">
                   <li
                     data-test-blue-green-note="migration"
-                  >古い版と新しい版が並ぶので、マイグレーションは古い版のコードでも動く形にします。公開サービスは状態を持たないようにします。</li>
+                  >マイグレーションは古い版のコードでも動く形にします。公開サービスは状態を持たないようにします。</li>
                   <li
                     data-test-blue-green-note="memory"
                   >デプロイの間は、公開サービスのメモリ上限 1
-                    つ分が余分に要ります。ホストの空きが足りなければ、新しい版を起動せずにデプロイを失敗にします（アプリは動き続けます）。</li>
+                    つ分が余分に要ります。足りなければデプロイを失敗にします（アプリは動き続けます）。</li>
                   <li
                     data-test-blue-green-note="env"
                   >環境変数を変えたあとのデプロイは、DB
-                    などのサービスも作り直すため、その回は無停止になりません。</li>
+                    なども作り直すので無停止になりません。</li>
                   <li
                     data-test-blue-green-note="restart"
-                  >再起動・起動・停止は無停止にはなりません。ふつうの再起動と同じく数秒止まります。</li>
+                  >再起動・起動・停止は無停止になりません。</li>
                 </ul>
-                <p class="field-hint">
-                  <a
-                    href={{this.guideUrl}}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    data-test-blue-green-guide
-                  >リポジトリの準備（prepare-app Skill の案内）<Icon
-                      @name="external"
-                    /></a>
-                </p>
-              </div>
+              </details>
+              <p class="field-hint">
+                <a
+                  href={{this.guideUrl}}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-test-blue-green-guide
+                >リポジトリの準備（prepare-app Skill の案内）<Icon
+                    @name="external"
+                  /></a>
+              </p>
             </div>
           </div>
 
@@ -635,7 +632,7 @@ export default class DeploySettings extends Component<Signature> {
                 <dd data-test-auto-rollback>
                   有効
                   <span class="readout-note">
-                    （起動やヘルスチェックに失敗したら、直前に成功したリリースへ自動で戻します。常に有効です）
+                    （起動や確認に失敗したら、直前の成功したリリースへ戻します）
                   </span>
                 </dd>
               </dl>
@@ -652,9 +649,7 @@ export default class DeploySettings extends Component<Signature> {
                 <span class="option-body">
                   <span class="option-label">Compose のポリシー検査を緩める</span>
                   <span class="option-hint" id="relax-hint">
-                    特権コンテナ、ホストのネットワーク、Docker
-                    ソケットやリリース外の bind mount
-                    など、通常は拒否する指定を通します。項目ごとには選べません。
+                    特権コンテナやホストのネットワークなど、通常は拒否する指定を通します。
                   </span>
                 </span>
               </label>

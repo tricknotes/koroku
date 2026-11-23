@@ -436,7 +436,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
             <div>
               <h2 class="form-group-title" id="settings-publish-title">公開</h2>
               <p class="form-group-description">
-                外からのリクエストを受けるサービスとそのホスト名、デプロイ後に応答を確かめるパスです。
+                外からのリクエストを受けるサービスとホスト名です。
               </p>
             </div>
             <div class="form-group-body">
@@ -551,7 +551,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                     id="settings-environment-title"
                   >環境</h2>
                   <p class="form-group-description">
-                    本番とステージングを取り違えないための目印です。ホストのメモリが足りなくなったときの優先度も決まり、こちらは次のデプロイから反映されます。
+                    取り違えないための目印です。メモリの優先度は次のデプロイから変わります。
                   </p>
                 </div>
                 <div class="form-group-body">
@@ -583,7 +583,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                         <span class="option-label">ステージング</span>
                         <span
                           class="option-hint"
-                        >デプロイは確認なしで始まります。メモリが足りなくなると、本番より先に止まります。</span>
+                        >確認なしでデプロイします。メモリが足りないと先に止まります。</span>
                       </span>
                     </label>
                     <label class="option">
@@ -602,7 +602,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                       <span class="option-body">
                         <span class="option-label">本番</span>
                         <span class="option-hint">
-                          バッジで目立たせ、デプロイの前に確認します。メモリが足りなくなっても最後まで止まらず、メモリを予約します。
+                          デプロイの前に確認します。メモリを予約し、最後まで止まりません。
                         </span>
                       </span>
                     </label>
@@ -624,7 +624,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                     id="settings-protection-title"
                   >アクセスの保護</h2>
                   <p class="form-group-description">
-                    このアプリのアドレス（独自ドメインを含む）を開けるのを、この管理画面にログインしている人だけにします。アプリには手を入れず、保存するとすぐに反映されます。
+                    アプリを開けるのを、管理画面にログインしている人だけにします。保存するとすぐ反映されます。
                   </p>
                 </div>
                 <div class="form-group-body">
@@ -644,7 +644,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                         class="option-label"
                       >管理画面にログインしている人だけに公開する</span>
                       <span class="option-hint" id="settings-protection-hint">
-                        ログインしていない人が開くと、管理画面のログインを経て元のページに戻ります。ステージングのアプリは最初から有効です。ブラウザー以外（API
+                        ブラウザー以外（API
                         の呼び出しや監視サービス）は通れません。
                       </span>
                     </span>
@@ -662,9 +662,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                         保護を外すパス
                       </span>
                       <p class="field-hint" id="settings-exempt-hint">
-                        Webhook
-                        など、ログインできない呼び出し元のためのパスです。前方一致で、大文字と小文字は区別しません。ディレクトリは末尾を
-                        / にします（例
+                        Webhook などのためのパスです（前方一致。例
                         <code
                         >/webhooks/</code>）。外したパスは、アプリ自身で認証してください。
                       </p>
@@ -743,7 +741,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                     id="settings-memory-title"
                   >メモリの上限と予約</h2>
                   <p class="form-group-description">
-                    各サービスのメモリ上限と、本番アプリで回収から守る量です。使用量の履歴と並べて決められるよう、変えるのはリソースタブです。
+                    変えるのはリソースタブです。
                   </p>
                 </div>
                 <div class="form-group-body">

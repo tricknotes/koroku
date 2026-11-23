@@ -22,8 +22,7 @@ export default class ReauthDialog extends Component {
         @onCancel={{this.cancel}}
       >
         <p data-test-reauth-dialog>
-          この操作には、直近 10 分以内のログインが必要です。セッションの Cookie
-          だけが盗まれた場合に、削除や秘密の値の読み出しをされないようにするためです。
+          この操作には、直近 10 分以内のログインが必要です。
         </p>
         <p
         >再ログインすると、この画面に戻ります。操作はもう一度行ってください。</p>

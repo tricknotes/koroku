@@ -267,7 +267,7 @@ export default class DomainsPanel extends Component<Signature> {
       {{focusSection @focus}}
     >
       <p class="pane-description">
-        このアプリに届くホスト名です。プライマリを決めると、ほかのホスト名へのアクセスはプライマリへリダイレクトされます。追加や削除は、押したときにすぐ反映されます（保存は要りません）。
+        ほかのホスト名へのアクセスは、プライマリへリダイレクトされます。追加と削除はすぐ反映されます。
       </p>
 
       {{#if this.list.stale}}
@@ -542,7 +542,7 @@ export default class DomainsPanel extends Component<Signature> {
           >
             <FormField
               @label="ホスト名"
-              @hint="追加すると「確認待ち」になり、設定する DNS レコードが表示されます（サブドメインは CNAME、apex は A レコード）。"
+              @hint="追加すると、設定する DNS レコードが表示されます。"
               @error={{this.hostnameError}}
               as |field|
             >

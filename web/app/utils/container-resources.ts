@@ -103,7 +103,6 @@ export interface ContainerTotals {
   cpu: string;
   /** What CPU use reaches with every core busy: `200%`. */
   cpuMax: string;
-  hostMemory: string;
   cpuCount: number;
 }
 
@@ -122,7 +121,6 @@ export function containerTotals(
     memoryPercent: formatPercent(share(memory, resources.memory_total_bytes)),
     cpu: formatPercent(cpu),
     cpuMax: formatPercent(resources.cpu_count * 100),
-    hostMemory: formatBytes(resources.memory_total_bytes),
     cpuCount: resources.cpu_count,
   };
 }

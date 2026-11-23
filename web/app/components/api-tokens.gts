@@ -197,7 +197,7 @@ export default class ApiTokens extends Component {
       </div>
       <p class="security-note">
         手元の Claude Code
-        などから、デプロイの結果とログを読むための読み取り専用のトークンです。デプロイや設定の変更、環境変数の値の表示には使えません。
+        などから、デプロイの結果とログを読むための読み取り専用のトークンです。
       </p>
 
       <div class="pane-notices" aria-live="polite">
