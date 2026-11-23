@@ -91,3 +91,7 @@ koroku は Docker を操作できるので、サーバーの root と同じ力�
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 設計 |
 | [docs/API.md](docs/API.md) | HTTP API |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | koroku 自体の開発 |
+
+## ライセンス
+
+[MIT License](LICENSE) で公開しています。
