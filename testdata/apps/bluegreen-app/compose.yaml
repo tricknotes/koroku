@@ -1,0 +1,32 @@
+# Sample app for blue/green deploys (ARCHITECTURE 7.2), used by the
+# integration tests: a public service that takes a while to start, a
+# database stand-in, and a one-shot migration the public service waits for.
+services:
+  web:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - data:/data
+  migrate:
+    build: .
+    command: ["sh", "/app/migrate.sh"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - data:/data
+  db:
+    image: busybox:1.37
+    command: ["sh", "-c", "touch /tmp/ready && exec sleep infinity"]
+    stop_signal: SIGKILL
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 1s
+
+volumes:
+  data:

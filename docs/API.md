@@ -272,7 +272,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 - `groups` はアプリごと（`app` は slug）にメモリの多い順。koroku のアプリでないコンテナは `app: null` の 1 グループにまとめて最後に置く。稼働中のコンテナがなければ空の配列。
 - `cpu_percent` は `docker stats` の `CPUPerc` と同じく **1 コアを 100% とする値**で、0〜`cpu_count` × 100。計測の瞬間値。
 - `memory_bytes` は `docker stats` の使用量。`memory_limit_bytes` はコンテナのメモリ上限で、上限がなければ `null`。グループの `memory_limit_bytes` は、全コンテナに上限があるときだけその合計、1 つでもなければ `null`。
-- `project`、`service` は Compose のラベル。Compose で作られていなければ空文字。
+- `project`、`service` は Compose のラベル。Compose で作られていなければ空文字。blue/green のアプリ（ARCHITECTURE 7.2）の公開サービスの色の付いたコンテナは、`service` を公開サービスの名前にして `color`（`blue` / `green`）を付ける。ほかのコンテナには `color` がない。
 - Docker に問い合わせられなければ `500 internal`。
 
 `POST /api/system/prune`: ボディ `{"images": true, "builder": true}`（省略時は両方）。200 で `{"output": "...", "reclaimed_bytes": 1073741824}`（コマンド出力の要約と、Docker が空けたと報告した量の合計）。コマンドが失敗したら `500 prune_failed`（`details.output` にそこまでの出力）。
@@ -310,6 +310,11 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
   "idle_sleep": false,
   "idle_sleep_minutes": 30,
   "sleeping_since": null,
+  "blue_green": false,
+  "blue_green_drain_seconds": 10,
+  "alt_host_port": null,
+  "web_color": null,
+  "blue_green_problems": [],
   "review": null,
   "review_apps_allowed": false,
   "review_apps": { "count": 0, "failed": 0, "deploying": 0 },
@@ -337,6 +342,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 - `promote_from` は昇格元の staging アプリの slug（ARCHITECTURE 9.7）。空なら組み合わせなし。`PATCH` で設定できるのは、自分が `production`（同じリクエストで変える値を含む）で、相手が同じリポジトリの `staging` アプリのときだけ。違えば 422 `validation_failed`（`details.promote_from`）。空文字で外す。
 - 自動デプロイ（ARCHITECTURE 5.2）: `auto_deploy` が `true` なら、GitHub に `auto_deploy_branch`（空なら `default_branch`）が push されたとき、そのコミットをデプロイする。既定は `false` と空。`true` にできるのは GitHub App で取得するアプリ（`repo_full_name` があり `repo_url` が空）だけで、ほかは `422 validation_failed`（`details.auto_deploy`）。`repo_url` に切り替えるときは先に `false` にする。`auto_deploy_branch` の書式は `default_branch` と同じ（違えば `details.auto_deploy_branch`）。
 - アクセスがない間の休止（ARCHITECTURE 8.4）: `idle_sleep` が `true` なら、`idle_sleep_minutes` 分のあいだ Caddy を通るリクエストがなければ koroku がアプリのコンテナを止め（休止）、次のリクエストで起こす。既定は `false` と `30`。`idle_sleep_minutes` は 10〜1440 で、外れると `422 validation_failed`（`details.idle_sleep_minutes`）。`GET /api/system` の `idle_sleep.available` が `false` のホストで `false` から `true` にすると `422 validation_failed`（`details.idle_sleep`）。変えられるのは管理以上のロールで、再ログインは要らない。`sleeping_since` は休止した時刻で、起きていれば `null`（読み取り専用。`desired_state` は `running` のまま）。起動・停止は休止を解く。休止中のアプリの再起動は、起こすのと同じ。
+- 公開サービスの無停止デプロイ（blue/green。ARCHITECTURE 7.2）: `blue_green` が `true` なら、デプロイは新しい版の公開サービスを動いている版と並べて起動し、確認が通ってから Caddy の転送先を切り替える。既定は `false`。`blue_green_drain_seconds` は切り替えのあと旧色を止めるまでの待ち時間（0〜300 秒、既定 10）で、外れると `422 validation_failed`（`details.blue_green_drain_seconds`）。変えられるのは管理以上のロールで、再ログインは要らない（本番で有効にするときの確認は画面のダイアログで行う）。設定の変更は次のデプロイから効く。初めて `true` にしたときに 2 つ目のポートを割り当て、`alt_host_port` に返す（それまでは `null`。無効にしても返さない）。空きがなければ `422 validation_failed`（`details.blue_green`）。アプリの作成（`POST /api/apps`）では `true` にできない（`details.blue_green`）。`web_color` はいま利用者のリクエストを受けている色（`blue` は `host_port`、`green` は `alt_host_port`。公開サービスが 7 章の形で動いていれば `null`。読み取り専用）。`blue_green_problems` は稼働中のリリースの Compose ファイルが有効にする条件を満たさない理由（ポリシー検査の違反と同じ形 `{"service", "rule": "blue_green", "message", "relaxable": false}` の配列。満たしていれば空配列。未デプロイか、検査を記録する前のリリースなら `null`）。`include` した別ファイルにある公開サービスは、有効にしてデプロイするまで分からない。
 - 先に待つワークフロー（ARCHITECTURE 5.2）: `auto_deploy_workflow` はワークフローのファイルのパス（例 `.github/workflows/image.yml`）。空（既定）なら push の直後にデプロイする。設定すると push ではデプロイせず、そのワークフローの実行がこのブランチの最新のコミットで成功したとき（Webhook の `workflow_run`）にデプロイする。`.github/workflows/` の直下の `.yml` か `.yaml`（255 文字まで）でなければ `422 validation_failed`（`details.auto_deploy_workflow`）。前後の空白は除く。
 - バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。
 
@@ -349,7 +355,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 | `DELETE /api/apps/{slug}?volumes=true` | コンテナを止めて削除。`volumes=true` なら named volume も消す。204。オーナーだけ（レビューアプリは管理以上で、volume は常に消す）。レビューアプリが残っていれば `409 has_review_apps` |
 | `POST /api/apps/{slug}/start`、`/stop`、`/restart` | 起動制御。完了まで待って 200 でアプリ。一度もデプロイしていなければ `409 not_deployed`、デプロイ中やほかの操作の実行中なら `409 busy`（削除も同じ）。起動時にリリースのファイルがポリシー検査を通らなくなっていたら `422 policy_violation`（`details` は違反の一覧。再デプロイで直る）。起動でイメージの取得がレジストリに拒否されたら `502 registry_denied`（アプリのコンテナレジストリの認証を確かめる） |
 | `POST /api/apps/{slug}/wake` | 休止中のアプリを起こす（ARCHITECTURE 8.4）。起きるまで（コンテナの起動と HTTP の確認、最長 10 分）待って 200 でアプリ。休止中でなければ何もせず 200 でアプリ。起こせなければ `502 wake_failed`（理由はサーバーログ）。ロールはデプロイ以上 |
-| `GET /api/apps/{slug}/services` | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）、`memory_limit_bytes`（上限。無制限なら 0）、`cpu_percent`（`docker stats` の CPU。1 コアを 100% とする値）も付く。止まっているサービスや、取得できないときは `null`。`memory_reservation_bytes` は稼働中のリリースがそのサービスに付けたメモリの予約（ARCHITECTURE 6.2。予約がなければ `null`。止まっていても出る）。`next_memory_reservation_bytes` は保存済みの設定で次のデプロイが付ける予約（予約しないなら `0`。稼働中のリリースが形を記録していないか、そのリリースにないサービスなら `null`） |
+| `GET /api/apps/{slug}/services` | `{"services": [{"name": "web", "state": "running", "status": "Up 2 hours", "health": "healthy"}]}`。`health` はヘルスチェックがなければ空文字。各サービスに `memory_bytes`（現在の使用量）、`memory_limit_bytes`（上限。無制限なら 0）、`cpu_percent`（`docker stats` の CPU。1 コアを 100% とする値）も付く。止まっているサービスや、取得できないときは `null`。`memory_reservation_bytes` は稼働中のリリースがそのサービスに付けたメモリの予約（ARCHITECTURE 6.2。予約がなければ `null`。止まっていても出る）。`next_memory_reservation_bytes` は保存済みの設定で次のデプロイが付ける予約（予約しないなら `0`。稼働中のリリースが形を記録していないか、そのリリースにないサービスなら `null`）。blue/green のアプリ（ARCHITECTURE 7.2）の公開サービスの色の付いたコンテナは、`name` を公開サービスの名前にして `color`（`blue` / `green`）を付ける（ほかの行には `color` がない）。デプロイで 2 つの色が並んでいる間は、公開サービスの行が色ごとに 2 つある |
 
 - 作成時の環境変数（ARCHITECTURE 9.8）: `POST /api/apps` の `env` は `PUT /api/apps/{slug}/env` の `vars` と同じ形と検査（key の形式、`KOROKU_` で始まらない、重複なし、500 件まで、値は 64 KiB まで）。不正なら `422 validation_failed`（`details.env`）で、アプリも作らない。空でない `env` は環境変数の保存なので、直近 10 分以内のログインでなければ `403 reauth_required`（アプリは作らない）。`PATCH` では受け付けない（`400 invalid_json`）。
 
@@ -466,7 +472,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 - `image_digest` はレジストリのダイジェスト（`RepoDigests` の最初）。ホストでビルドしたイメージでは `null`。
 - メモリと `oom_score_adj` は Docker が付けている値（`HostConfig`）。0 は「なし」。`expected` は稼働中のリリースの値で、比べていないときとリリースにないサービスでは `null`。
 - `started_at` と `finished_at` は、まだ起動・停止していなければ `null`。
-- `mismatches` の値: `outdated`（設定が稼働中のリリースと違う）、`orphan`（リリースにないサービス）、`memory_limit`、`memory_reservation`、`oom_score_adj`（`expected` と違う）、`oom_killed`、`restarting`、`restarted`（`restart_count` が 1 以上）、`unhealthy`、`exited`（0 以外の終了コードで停止）。
+- `mismatches` の値: `outdated`（設定が稼働中のリリースと違う）、`orphan`（リリースにないサービス。blue/green のアプリでデプロイの外に残った、`web_color` でない色のコンテナも）、`memory_limit`、`memory_reservation`、`oom_score_adj`（`expected` と違う）、`oom_killed`、`restarting`、`restarted`（`restart_count` が 1 以上）、`unhealthy`、`exited`（0 以外の終了コードで停止）。
 - 環境変数（`Config.Env`）とラベルは返さない。
 
 ### 操作の記録
@@ -620,7 +626,9 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
   "actor": {"id": 1, "login": "octo"},
   "trigger": "manual",
   "pusher": "",
-  "containers_replaced": true
+  "containers_replaced": true,
+  "web_color": "green",
+  "switched_at": "2026-11-18T03:01:02Z"
 }
 ```
 
@@ -631,6 +639,8 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 `trigger` は何がデプロイを始めたか（ARCHITECTURE 5.2）。`manual`（管理 UI か API。ロールバックと昇格を含む）か `push`（GitHub への push による自動デプロイ。待つワークフローの成功で始まったものも `push`）。`pusher` は `push` のとき push した GitHub の login（ワークフローを待ったものは実行の `actor`）、それ以外は空文字。`push` のデプロイの `ref` は push されたブランチ名。
 
 `containers_replaced` は、デプロイの実行が稼働中のコンテナに触れたか（起動の手順に入ったか。ARCHITECTURE 9.5）。成功したデプロイは `true`、起動より前に失敗したものは `false`。まだ終わっていないもの、実行の前に取り消されたもの、実行の途中で koroku が止まったもの、記録する前の古いデプロイは `null`。`true` の `failed` と `canceled` は、新しい版を一度起動してから直前のリリースへ戻している。
+
+`web_color` はそのデプロイが起動した公開サービスの色（`blue` / `green`。ARCHITECTURE 7.2）。公開サービスを 7 章の形で起動したデプロイと、起動の前に終わったものは `null`。`switched_at` は利用者のリクエストをその色へ切り替えた時刻で、切り替えていない（並べる相手がなく全サービスを一度に起動した、切り替えの前に失敗した、切り替えたあと失敗して旧色に戻した）なら `null`。
 
 `promoted_from` は昇格（ARCHITECTURE 9.7）で積んだデプロイのとき `{"deployment_id": 12, "app_slug": "blog-staging"}`、それ以外（ロールバックの記録を含む）と、昇格元のアプリを削除したあとは `null`。
 
@@ -658,9 +668,11 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | `POST /api/deployments/{id}/cancel` | 202 でその時点のデプロイ。実行中のものは非同期に止まる。終了済みは `409 not_cancelable` |
 | `GET /api/deployments/{id}/logs` | デプロイログの SSE（下記）。`?format=text` を付けると、その時点までの全文を `text/plain` で返す |
 
-**ロールバックのログ**: `rollback_to` で作ったデプロイは `Queued rollback to deployment #<id> (<sha>).` で始まり、手順は `prepare` `validate` `start` `route` `check` `done`（取得、ビルド、pull はない）。
+**ロールバックのログ**: `rollback_to` で作ったデプロイは `Queued rollback to deployment #<id> (<sha>).` で始まり、手順は `prepare` `validate` `start` `route` `check` `done`（取得、ビルド、pull はない）。blue/green のアプリで戻す先も blue/green の形なら、`start` からは下の blue/green の手順になる。
 
 **手順の見出し行**: デプロイログのうち `==> ` で始まる行は手順の区切りで、`==> <RFC 3339 の時刻> <キー> <表題>` の形をしている（例: `==> 2026-11-18T03:00:01Z build Building images`）。キーは `fetch` `prepare` `validate` `reuse`（昇格でのイメージの再利用、下記） `build` `pull` `backup` `start` `route` `check` `done`、成功後の後片付けの `cleanup`、失敗時は `failed`（表題に最終状態と理由）と `rollback`。UI はこの行でログを手順に分け、次の見出しまでをその手順の所要時間とする。ビルドも pull も不要なアプリではその手順の行は出ない。
+
+blue/green のアプリ（ARCHITECTURE 7.2）では、`start` 以降が `start`（表題 `Starting <新色> on port <ポート>`）→ `check`（新色のポート）→ `switch`（`Switching traffic from <旧色> to <新色>`。旧色が 7 章の形の公開サービスなら旧色はそのサービス名）→ `services`（`Recreating the other services`）→ `drain`（`Stopping <旧色>`）→ `done` になり、`route` はない。公開サービスが動いていない（初回、停止中、休止中）ときは `start`（`Starting <色> on port <ポート>`）→ `route` → `check` → `done` で、切り替えはない。
 
 **失敗とロールバックの行**: 専用の API は持たず、UI は同じログから「旧版に戻ったか」を読み取る。次の行は UI が解釈するので、変えるときは `web/app/utils/deploy-steps.ts` と同時に直す。
 
@@ -673,11 +685,16 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 | `Rollback failed: ...` / `Rollback is not possible: ...` | 戻せなかった |
 | `==> <時刻> rollback No previous release; removing the failed containers` | 初回デプロイで戻す先がなく、起動しかけたコンテナを消した（失敗すると `Removing the containers failed: ...`） |
 | `koroku is shutting down; the previous release is not restored automatically.` | `koroku` の停止と重なり、ロールバックを実行しなかった |
+| `Not enough memory to run two <公開サービス> containers (<空き> available, <上限> needed).` | blue/green のデプロイが、新色を起動する前にメモリ不足で止まった（`start` の手順。デプロイの `error` も同じ文）。何も動かしていない |
+| `Removing <新色のサービス>; the previous release keeps serving.` | blue/green のデプロイが `start`・`check`・`switch` で失敗し、新色を消した。旧色、DB、ワーカーには触れていないので、ロールバックはない |
+| `==> <時刻> rollback Switching back and restoring the other services of deployment #<id>` | blue/green のデプロイが `services` で失敗し、旧色へ切り替え直してほかのサービスを稼働中のリリースに戻し始めた。戻せたら `Restored <サービス, ...> of deployment #<id>.`、戻せなければ `Restoring ... failed: ...` / `Restoring is not possible: ...` |
 
 次の行は UI が解釈しない案内で、手順のログの末尾に入る。
 
 | 行 | 意味 |
 | --- | --- |
+| `Recreating <サービス> because the app's environment changed; requests may fail while it restarts.` | blue/green のデプロイの `services` の手順で、アプリの環境変数が変わったため、コミットの変数を読まないサービス（DB など）も作り直す |
+| `Images that follow the commit: <サービス, ...>` | blue/green のデプロイの `prepare` の手順で、補間した `image:` がコミットの変数で変わるサービス（コミットの変数を読むので毎回作り直す） |
 | `Container registry credential: set for this app` | `prepare` の手順で、アプリのコンテナレジストリの認証（ARCHITECTURE 6.1）をこのデプロイで使うことを示す |
 | `The registry refused access (unauthorized or denied). ...` | `build`・`pull`・`start` の手順が、レジストリにイメージの取得を拒否されて失敗した。認証を設定したアプリには、レジストリ・ユーザー名・トークンの期限と `read:packages` を確かめる案内が、設定していないアプリには設定を促す案内が続く。デプロイの `error` は `the registry refused access to an image; ...` で始まる |
 | `The registry has no image with that tag (manifest unknown). ...` | `build`・`pull`・`start` の手順が、レジストリにないタグを指して失敗した。CI がコミットごとにビルドするイメージなら、まだ push されていない。ワークフローが終わってからデプロイし直す案内と、自動デプロイなら「先に待つワークフロー」（ARCHITECTURE 5.2）を設定する案内が続く。デプロイの `error` は `the registry has no image with that tag yet; ...` で始まる |
@@ -731,6 +748,8 @@ staging アプリの稼働中のリリースを、組み合わせた本番アプ
 ## ワンオフのコマンドと登録タスク
 
 ARCHITECTURE 9.6。稼働中のリリースのファイルで `docker compose run --rm --no-deps -T <service> sh -c '<command>'` を実行する。
+
+blue/green のアプリ（ARCHITECTURE 7.2）では、公開サービスの名前（`web`）で実行する。色の付いたサービス（`web-blue`、`web-green`）は、タスクの登録でも実行でも `422 validation_failed`（`details.service`）。
 
 登録タスクの形:
 
