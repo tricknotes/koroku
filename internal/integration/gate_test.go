@@ -41,6 +41,44 @@ func serveOn(t *testing.T, h http.Handler) int {
 	return l.Addr().(*net.TCPAddr).Port
 }
 
+// startCaddy runs a real Caddy in a container with a generated
+// configuration, moved off ports 80, 443 and 2019 (which a development
+// stack on this machine may hold). It returns the HTTPS port and Caddy's
+// output.
+func startCaddy(t *testing.T, image, name string, config []byte) (int, *bytes.Buffer) {
+	t.Helper()
+	httpPort, httpsPort, adminPort := freePort(t), freePort(t), freePort(t)
+	var doc map[string]any
+	if err := json.Unmarshal(config, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["admin"] = map[string]any{"listen": fmt.Sprintf("127.0.0.1:%d", adminPort)}
+	httpApp := doc["apps"].(map[string]any)["http"].(map[string]any)
+	httpApp["http_port"], httpApp["https_port"] = httpPort, httpsPort
+	servers := httpApp["servers"].(map[string]any)
+	servers["http"].(map[string]any)["listen"] = []string{fmt.Sprintf("127.0.0.1:%d", httpPort)}
+	servers["https"].(map[string]any)["listen"] = []string{fmt.Sprintf("127.0.0.1:%d", httpsPort)}
+	patched, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	container := fmt.Sprintf("koroku-%s-test-%d", name, httpsPort)
+	cmd := exec.Command("docker", "run", "--rm", "-i", "--name", container, "--network", "host", image,
+		"sh", "-c", "cat > /tmp/caddy.json && exec caddy run --config /tmp/caddy.json")
+	cmd.Stdin = bytes.NewReader(patched)
+	var caddyLog bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &caddyLog, &caddyLog
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", container).Run()
+		_ = cmd.Wait()
+	})
+	return httpsPort, &caddyLog
+}
+
 // TestAccessProtectionThroughCaddy runs a real Caddy with the generated
 // configuration in front of koroku and a stand-in app, and walks the login
 // of a protected staging app (ARCHITECTURE 8.3).
@@ -132,37 +170,7 @@ func TestAccessProtectionThroughCaddy(t *testing.T) {
 		t.Fatalf("ForceSync: %v", err)
 	}
 
-	// Move Caddy off 80, 443 and 2019, which a development stack on this
-	// machine may hold.
-	httpPort, httpsPort, adminPort := freePort(t), freePort(t), freePort(t)
-	var doc map[string]any
-	if err := json.Unmarshal(loader.config, &doc); err != nil {
-		t.Fatal(err)
-	}
-	doc["admin"] = map[string]any{"listen": fmt.Sprintf("127.0.0.1:%d", adminPort)}
-	httpApp := doc["apps"].(map[string]any)["http"].(map[string]any)
-	httpApp["http_port"], httpApp["https_port"] = httpPort, httpsPort
-	servers := httpApp["servers"].(map[string]any)
-	servers["http"].(map[string]any)["listen"] = []string{fmt.Sprintf("127.0.0.1:%d", httpPort)}
-	servers["https"].(map[string]any)["listen"] = []string{fmt.Sprintf("127.0.0.1:%d", httpsPort)}
-	patched, err := json.Marshal(doc)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	name := fmt.Sprintf("koroku-gate-test-%d", httpsPort)
-	cmd := exec.Command("docker", "run", "--rm", "-i", "--name", name, "--network", "host", image,
-		"sh", "-c", "cat > /tmp/caddy.json && exec caddy run --config /tmp/caddy.json")
-	cmd.Stdin = bytes.NewReader(patched)
-	var caddyLog bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &caddyLog, &caddyLog
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = exec.Command("docker", "rm", "-f", name).Run()
-		_ = cmd.Wait()
-	})
+	httpsPort, caddyLog := startCaddy(t, image, "gate", loader.config)
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
