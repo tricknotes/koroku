@@ -7,16 +7,17 @@
 # services, adds restart: unless-stopped, a memory limit, oom_score_adj and
 # (for production) a memory reservation, and then runs config -> build/pull
 # -> up --wait -> an HTTP check that accepts any status below 500. The policy
-# check is not reproduced here.
+# check is not reproduced here. The commit variables go to a second env file
+# (env.release) that only the services recreated on every deploy read: the
+# public service, one-shots, services with build: and services whose
+# definition follows the commit, found as koroku does by normalizing again
+# with an all-zero commit.
 #
 # With --blue-green it rehearses an app whose public service koroku swaps
 # without downtime: the override copies the public service to <service>-blue
-# and <service>-green (extends: { file: ... }), takes the original out of up
-# with a profile, and moves the commit variables to a second env file
-# (env.release) that only the services recreated on every deploy read (the
-# colours, the original, one-shots, services with build: and services whose
-# interpolated image: follows the commit, found as koroku does by normalizing
-# again with an all-zero commit). It first fails on the Compose shapes koroku refuses for blue/green, starts
+# and <service>-green (extends: { file: ... }), which read env.release too,
+# and takes the original out of up with a profile. It first fails on the
+# Compose shapes koroku refuses for blue/green, starts
 # blue with the other services, and then deploys again as koroku does: the
 # one-shot services and green with up --no-deps, an HTTP check of green, the
 # switch, the other services recreated, a drain wait, and blue stopped and
@@ -193,28 +194,25 @@ else
 fi
 # The variables koroku adds to every release (KOROKU_ is reserved): the
 # commit, the app's URL and host (here the loopback port), and a review
-# app's pull request. A blue/green app gets the commit in env.release, which
-# only the services recreated on every deploy read, so that a deploy that
-# changes no app variable leaves the database's container alone.
+# app's pull request. The commit goes to env.release, which only the
+# services recreated on every deploy read, so that a deploy that changes no
+# app variable leaves the database's container alone.
 commit="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo 0000000000000000000000000000000000000000)"
 release_env="$work/env.release"
-commit_env="$env_file"
-if [ "$blue_green" = 1 ]; then commit_env="$release_env"; fi
 echo "" >> "$env_file"
 {
   echo "KOROKU_COMMIT_SHA=$commit"
   echo "KOROKU_COMMIT_SHORT=${commit:0:7}"
-} >> "$commit_env"
+} > "$release_env"
 {
   echo "KOROKU_APP_URL=http://127.0.0.1:$host_port"
   echo "KOROKU_APP_HOST=127.0.0.1:$host_port"
   if [ -n "$pr" ]; then echo "KOROKU_PR_NUMBER=$pr"; fi
 } >> "$env_file"
-chmod 600 "$env_file" "$commit_env"
+chmod 600 "$env_file" "$release_env"
 
 # Interpolation reads both files, like koroku's --env-file.
-env_args=(--env-file "$env_file")
-if [ "$blue_green" = 1 ]; then env_args+=(--env-file "$release_env"); fi
+env_args=(--env-file "$env_file" --env-file "$release_env")
 base=(docker compose -p "$project" -f "$release/$file" "${env_args[@]}")
 override="$work/koroku.override.yaml"
 dc=("${base[@]}" -f "$override")
@@ -401,43 +399,40 @@ EOF
   echo "    (all met)"
 fi
 
-# Blue/green: the services without build: whose interpolated image follows
-# the commit (image: ...:sha-${KOROKU_COMMIT_SHORT}). koroku normalizes the
-# project once more with only the commit variables changed (an all-zero
-# commit) and compares the images; those services read env.release.
-commit_images=""
-if [ "$blue_green" = 1 ]; then
-  probe_commit=0000000000000000000000000000000000000000
-  if [ "$commit" = "$probe_commit" ]; then probe_commit=ffffffffffffffffffffffffffffffffffffffff; fi
-  probe_env="$work/env.probe"
-  printf 'KOROKU_COMMIT_SHA=%s\nKOROKU_COMMIT_SHORT=%s\n' "$probe_commit" "${probe_commit:0:7}" > "$probe_env"
-  # images_of prints "<service> <image>" from a normalized Compose.
-  images_of() {
-    awk '
-      /^services:$/ { on = 1; next }
-      /^[^ ]/ { on = 0 }
-      !on { next }
-      /^  [^ ]/ { svc = $1; sub(/:$/, "", svc); gsub(/"/, "", svc); next }
-      /^    image: / { img = $0; sub(/^    image: /, "", img); print svc " " img }'
-  }
-  probed_config="$(docker compose -p "$project" -f "$release/$file" --env-file "$env_file" --env-file "$probe_env" \
-    config --no-env-resolution 2>/dev/null)" ||
-    die "docker compose config with a probe commit failed"
-  probed="$(printf '%s\n' "$probed_config" | images_of)"
-  actual_images="$(printf '%s\n' "$normalized" | images_of)"
-  for name in $services; do
-    if has_build "$name"; then continue; fi
-    a="$(printf '%s\n' "$actual_images" | awk -v s="$name" '$1 == s { sub(/^[^ ]+ /, ""); print; exit }')"
-    b="$(printf '%s\n' "$probed" | awk -v s="$name" '$1 == s { sub(/^[^ ]+ /, ""); print; exit }')"
-    if [ "$a" != "$b" ]; then commit_images="$commit_images $name"; fi
-  done
-  commit_images="${commit_images# }"
-  if [ -n "$commit_images" ]; then
-    echo "==> Images that follow the commit: ${commit_images// /, }"
-    echo "    (they read env.release and are recreated by every deploy, as on koroku)"
-  fi
+# The services without build: whose definition follows the commit
+# (image: ...:sha-${KOROKU_COMMIT_SHORT}, environment: KOROKU_COMMIT_SHA:
+# ${KOROKU_COMMIT_SHA}). koroku normalizes the repository's project once
+# more with only the commit variables changed (an all-zero commit) and
+# compares each service's definition; those services read env.release.
+commit_services=""
+probe_commit=0000000000000000000000000000000000000000
+if [ "$commit" = "$probe_commit" ]; then probe_commit=ffffffffffffffffffffffffffffffffffffffff; fi
+probe_env="$work/env.probe"
+printf 'KOROKU_COMMIT_SHA=%s\nKOROKU_COMMIT_SHORT=%s\n' "$probe_commit" "${probe_commit:0:7}" > "$probe_env"
+# service_block <service> prints that service's part of a normalized
+# Compose read from stdin.
+service_block() {
+  awk -v s="  $1:" '
+    $0 == s { on = 1; next }
+    on && /^  [^ ]/ { on = 0 }
+    on && /^[^ ]/ { on = 0 }
+    on { print }'
+}
+probed_config="$(docker compose -p "$project" -f "$release/$file" --env-file "$env_file" --env-file "$probe_env" \
+  config --no-env-resolution 2>/dev/null)" ||
+  die "docker compose config with a probe commit failed"
+for name in $services; do
+  if has_build "$name"; then continue; fi
+  a="$(printf '%s\n' "$normalized" | service_block "$name")"
+  b="$(printf '%s\n' "$probed_config" | service_block "$name")"
+  if [ "$a" != "$b" ]; then commit_services="$commit_services $name"; fi
+done
+commit_services="${commit_services# }"
+if [ -n "$commit_services" ]; then
+  echo "==> Services that follow the commit: ${commit_services// /, }"
+  echo "    (they read env.release and are recreated by every deploy, as on koroku)"
 fi
-follows_commit() { case " $commit_images " in *" $1 "*) return 0 ;; esac; return 1; }
+follows_commit() { case " $commit_services " in *" $1 "*) return 0 ;; esac; return 1; }
 
 # The aliases the coloured services carry: the public service's name on
 # each of its networks, so that http://web:3000 reaches whichever runs.
@@ -446,7 +441,7 @@ web_networks="$(printf '%s\n' "${yaml[$service]}" | awk '
   on && /^      [^ ]/ { n = $1; sub(/:.*$/, "", n); gsub(/"/, "", n); print n; next }
   on && !/^      / { on = 0 }')"
 
-# env_lines app|release prints env_file; release adds env.release (blue/green).
+# env_lines app|release prints env_file; release adds env.release.
 env_lines() {
   echo "    env_file:"
   echo "      - \"$env_file\""
@@ -519,6 +514,13 @@ write_override() {
     echo "services:"
     for name in $services; do
       echo "  \"$name\":"
+      # env.release goes to the services every deploy recreates (the
+      # public service and its colours, one-shots, services with build:,
+      # services that follow the commit), blue/green or not.
+      env_kind=app
+      if [ "$name" = "$service" ] || is_oneshot "$name" || has_build "$name" || follows_commit "$name"; then
+        env_kind=release
+      fi
       if [ "$blue_green" = 0 ]; then
         if [ "$name" = "$service" ]; then
           echo "    ports: !override"
@@ -526,16 +528,9 @@ write_override() {
         else
           echo "    ports: !reset []"
         fi
-        env_lines app
+        env_lines "$env_kind"
         memory_lines "$name"
         continue
-      fi
-      # Blue/green: env.release goes to the services every deploy recreates
-      # (the colours, the original, one-shots, services with build:, images
-      # that follow the commit).
-      env_kind=app
-      if [ "$name" = "$service" ] || is_oneshot "$name" || has_build "$name" || follows_commit "$name"; then
-        env_kind=release
       fi
       if [ "$name" = "$service" ]; then
         # Out of up and start; run (tasks) and build still name it.

@@ -5,10 +5,10 @@ koroku の設計（`docs/ARCHITECTURE.md` の 6〜8 章と 10 章）から、デ
 ## デプロイで koroku がすること
 
 1. 指定したコミットを `git fetch --depth 1` で取得し、`.git` を消す。submodule と Git LFS のファイルは取得しない。
-2. 画面で設定した環境変数を env ファイルに書き、override を生成する。
-3. `docker compose -p koroku-<slug> -f <Compose ファイル> -f koroku.override.yaml --env-file <env ファイル> config` で正規化し、ポリシー検査をかける。
+2. 画面で設定した環境変数を env ファイルに、デプロイするコミット（`KOROKU_COMMIT_SHA`、`KOROKU_COMMIT_SHORT`）を別の env ファイル `env.release` に書き、override を生成する（下の「コミットの変数を受け取るサービス」）。
+3. `docker compose -p koroku-<slug> -f <Compose ファイル> -f koroku.override.yaml --env-file <env> --env-file <env.release> config` で正規化し、ポリシー検査をかける。
 4. `build:` を持つサービスはホスト（x86_64）でビルドし、`image:` だけのサービスは pull する。
-5. `up -d --pull missing --remove-orphans --wait --wait-timeout 300` で起動する。env ファイルの `KOROKU_COMMIT_SHA` とビルドしたイメージの名前がデプロイごとに変わるので、ふつうはワーカーや cron のコンテナも含めて全サービスを作り直す。動いていたコンテナは `SIGTERM` を受け、`stop_grace_period`（既定 10 秒）を過ぎると強制終了される（下の「デプロイのたびに止まる長いジョブ」）。
+5. `up -d --pull missing --remove-orphans --wait --wait-timeout 300` で起動する。Compose は設定かイメージが変わったサービスだけを作り直す。公開サービス、ワンショット、`build:` を持つサービス（ワーカーや cron がアプリのイメージをビルドするならそれも）、コミットの変数を参照するサービスはデプロイのたびに作り直され、DB のようなほかのサービスは、アプリの環境変数かそのサービスの定義を変えたデプロイでだけ作り直される。動いていたコンテナは `SIGTERM` を受け、`stop_grace_period`（既定 10 秒）を過ぎると強制終了される（下の「デプロイのたびに止まる長いジョブ」）。
 6. `http://127.0.0.1:<割当ポート><ヘルスチェックパス>` が 5xx 以外を返すまで最大 60 秒待つ。
 7. 手順 5 以降で失敗したら、直前に成功したリリースへ自動で戻す（DB のマイグレーションは戻さない）。
 
@@ -28,11 +28,12 @@ services:
       - "127.0.0.1:<割当ポート>:<コンテナ内ポート>"
     env_file:
       - /var/lib/koroku/apps/<slug>/env
+      - /var/lib/koroku/apps/<slug>/env.release   # コミットの変数。受け取るサービスだけ
     restart: unless-stopped  # リポジトリが restart を書いていないときだけ
     mem_limit: 512m
     oom_score_adj: -400      # staging は 500
     mem_reservation: 256m    # 本番だけ。staging はリポジトリの値も消す
-  db:                        # ほかのサービス
+  db:                        # ほかのサービス（コミットの変数は受け取らない）
     ports: !reset []
     env_file:
       - /var/lib/koroku/apps/<slug>/env
@@ -48,7 +49,7 @@ services:
 | --- | --- |
 | 公開サービス以外の `ports` は消える | サービス同士はサービス名で通信する（`DATABASE_URL=postgres://...@db:5432/...`）。ホストの `localhost:5432` を前提にしない |
 | 公開サービスの `ports` は置き換わる | アプリは `0.0.0.0` で待ち受ける（`127.0.0.1` だとコンテナの外から届かない）。ポート番号は `expose: ["3000"]` か `ports` に書いておくと、koroku の作成画面が読み取って初期値にする |
-| env ファイルは全サービスに入る | 変数名がサービス間で衝突しないようにする。`POSTGRES_PASSWORD` のような変数は web にも見えるが、それで問題ない設計にする |
+| env ファイルは全サービスに入る（`env.release` は一部だけ） | 変数名がサービス間で衝突しないようにする。`POSTGRES_PASSWORD` のような変数は web にも見えるが、それで問題ない設計にする |
 | `restart: unless-stopped` が付く | マイグレーションなど終わって欲しいワンショットのサービスには `restart: "no"` を書く（書かないと終了後に再起動を繰り返す）。さらに、そのサービスは必ず別のサービスから `depends_on: { <名前>: { condition: service_completed_successfully } }` で待たれるようにする。誰も待っていないワンショットのサービスが終了すると、終了コードが 0 でも `up --wait` が失敗し、デプロイが失敗する（下の「起動順」） |
 | メモリ上限が付く | 既定 512m。リポジトリで `mem_limit` か `deploy.resources.limits.memory` を書けば、既定値以下なら尊重される。それより大きくしたいときは koroku のアプリ設定で上げる（リポジトリに書いても既定値で頭打ちになる） |
 | `oom_score_adj` は koroku が決める | 本番アプリ（`environment = production`）は `-400`、staging は `500`。ホスト全体でメモリが尽きたとき、staging のコンテナから止まり、本番は最後になる。リポジトリに書いた値は上書きされ、ポリシー検査では拒否されない。環境を切り替えると次のデプロイから変わる |
@@ -57,13 +58,41 @@ services:
 
 ## 環境変数
 
-- 値は koroku の画面で設定する。全サービスに `env_file` で入り、`${VAR}` の補間にも使われる。
+- 値は koroku の画面で設定する。全サービスに `env_file` で入り、`${VAR}` の補間にも使われる。koroku が足す変数のうちコミットの 2 つだけは、一部のサービスにしか入らない（下の「コミットの変数を受け取るサービス」）。
 - リポジトリの `.env` は補間に使われない。`${VAR:-既定値}` は koroku に `VAR` がなければ既定値になる。必須の変数は `${VAR:?VAR is required}` にすると、未設定のときに `config` の段階で分かりやすく失敗する。
 - サービスが自分で `env_file: .env` と書いていれば、その中身はコンテナに入る（koroku の値が後ろに付くので、同じ名前なら koroku が勝つ）。ただしコミット済みの `.env` に秘密を書いてはいけない。
 - Compose の `environment:` に直書きした値は `env_file` より強い。`RAILS_ENV: development` のように書いてあると koroku の画面で変えられないので、`RAILS_ENV: ${RAILS_ENV:-production}` のように補間にする。
 - 補間をコンテナ側に遅らせたいときは `$$VAR` と書く。
 - デプロイしたコミットは、koroku が足す `KOROKU_COMMIT_SHA`（40 桁）と `KOROKU_COMMIT_SHORT`（先頭 7 桁）で分かる。補間にも使えるので、CI がコミットごとにビルドしたイメージを `image: ghcr.io/<owner>/<name>:sha-${KOROKU_COMMIT_SHORT}` のように指せる（ホストでビルドせずに pull だけで済む）。同じ Compose ファイルを koroku の外（手元など）でも使うなら、`image: ghcr.io/<owner>/<name>:${KOROKU_COMMIT_SHORT:+sha-}${KOROKU_COMMIT_SHORT:-latest}` と書くと、変数がないときは `latest` を指す（入れ子の既定値を使わないので、必要な変数の判定でも任意の変数として素直に読まれる）。タグを `docker/metadata-action` で付けるなら、`type=sha` は既定で `sha-` と 7 桁の短い SHA なので `KOROKU_COMMIT_SHORT` に、`type=sha,format=long` は 40 桁なので `KOROKU_COMMIT_SHA` に対応する（[type=sha](https://github.com/docker/metadata-action#typesha)）。例は [examples.md](examples.md) の「CI がビルドしたイメージを使う」。CI のイメージを指すサービスに `pull_policy: always` は要らない（koroku は `image:` だけのサービスをデプロイのたびに pull する）。書いてあっても、起動・ロールバックの `up` は `--pull missing` で呼ばれ、ホストにあるイメージをそのまま使う（レジストリに届かなくても前の版に戻せるようにするため）。`.git` は消えるので、ビルドや起動で `git rev-parse` などに頼らない。`KOROKU_` で始まる名前は予約されていて、画面からは設定できない。
 - アプリの URL は、koroku が足す `KOROKU_APP_URL`（例 `https://blog-staging.dev.example.com`。プライマリの独自ドメインがあればその URL）と `KOROKU_APP_HOST`（そのホスト名）で分かる。値はデプロイした時点のもの。ホスト名をリポジトリや環境変数に直書きせず、これから組み立てる（Rails の `config.hosts << ENV["KOROKU_APP_HOST"]`、メールの中のリンクの `default_url_options`、`BASE_URL` の既定値など）。レビューアプリ（下記）はホスト名が作るまで決まらないので、直書きしていると開けない（Rails の `config.hosts` で弾かれる）。
+
+### コミットの変数を受け取るサービス
+
+`KOROKU_COMMIT_SHA` と `KOROKU_COMMIT_SHORT` はデプロイのたびに変わるので、koroku はこの 2 つを別の env ファイル（`env.release`）に書き、デプロイのたびにどのみち作り直されるサービスにだけ `env_file` で渡す。全サービスに渡すと、コードだけを変えたデプロイでも DB の設定が変わり、毎回作り直されて数秒止まるため。無停止デプロイ（下記）を使うかどうかによらず同じ。
+
+受け取るのは次のサービス:
+
+- 公開サービス（無停止デプロイでは `web-blue` / `web-green` と元の `web` も）
+- ワンショットのサービス（ほかのサービスが `condition: service_completed_successfully` で待つもの）
+- `build:` を持つサービス
+- Compose の定義がコミットの変数で変わるサービス。`image: ...:sha-${KOROKU_COMMIT_SHORT}` や `environment: { KOROKU_COMMIT_SHA: ${KOROKU_COMMIT_SHA} }` のように補間で参照するもの。koroku はコミットの変数だけをすべて 0 にして Compose をもう一度正規化し、定義が変わるかで見分ける。見つかれば、デプロイログの `prepare` の手順に `Services that follow the commit: <サービス, ...>` と出る
+
+ここから分かること:
+
+- **DB、Redis などの `image:` だけのサービスは、この 2 つの変数を受け取らない**。中で読んでも空になる。代わりに、アプリの環境変数を変えていないデプロイでは作り直されない。
+- **`build:` を持たないサービスでコミットを読みたいとき**（エラー報告のリリース名を付けるサイドカー、CI のイメージを使うワーカーなど）は、`environment` で補間して参照する。`image:` に書いていればそれで足りる。
+
+  ```yaml
+  services:
+    reporter:
+      image: example/reporter:1
+      environment:
+        KOROKU_COMMIT_SHA: ${KOROKU_COMMIT_SHA}
+  ```
+
+  値は補間でコンテナに届き、上の判定にも当たるので `KOROKU_COMMIT_SHORT` も届く。そのサービスはデプロイのたびに作り直される（コミットが変わると定義が変わるので）。値は `${KOROKU_COMMIT_SHA}` の形で書く。
+- **アプリの環境変数を変えたデプロイでは、DB などのサービスも作り直す**（どのサービスがどの変数を読むかを koroku は知らないため）。デプロイログの起動の手順（無停止デプロイでは `services`）に `Recreating <サービス> because the app's env file changed (<変数の名前>, ...); requests may fail while it restarts.` と出る。並ぶのは変わった変数の名前だけ（値は出ない）。
+- koroku を更新して最初のデプロイでは、それまでコミットの変数を受け取っていた DB などが一度だけ作り直され、ログの変数の名前に `KOROKU_COMMIT_SHA` と `KOROKU_COMMIT_SHORT` が出る。
 
 ### 必要な変数の宣言（koroku が照合する）
 
@@ -90,7 +119,7 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
 ```
 
-- **アプリのコードだけが読む変数は koroku から見えない**。koroku は env ファイルで全変数を全サービスに注入するので、Compose に書かなくてもアプリには届く。そのため Compose に現れず、照合の対象にならない。必要な変数は上のように Compose に並べる（`environment:` に同じ名前で書いても、値は koroku の画面のものになる）。
+- **アプリのコードだけが読む変数は koroku から見えない**。koroku は env ファイルでアプリの全変数を全サービスに注入するので、Compose に書かなくてもアプリには届く。そのため Compose に現れず、照合の対象にならない。必要な変数は上のように Compose に並べる（`environment:` に同じ名前で書いても、値は koroku の画面のものになる）。
 - `:?` の説明は画面に出る。値の例や作り方を書き、秘密そのものは書かない。
 - 読まれるのは koroku に設定した Compose ファイル 1 つだけ。`include:` や `extends: { file: }` で別ファイルに書いた参照、`environment: [VAR]` のような値なしの受け渡し、リポジトリ内の `env_file:` の中身は読まれない。
 - YAML のコメントの中の `${VAR}` は読まれない。`$$VAR`（コンテナ側で展開させる書き方）も対象外。
@@ -167,7 +196,7 @@ staging と本番は同じリポジトリを別々の koroku アプリとして�
 
 ## デプロイのたびに止まる長いジョブ
 
-デプロイ（とロールバック、停止、再起動、アクセスがない間の休止）では、ジョブを動かすだけのサービス（supercronic などの cron、Sidekiq、Solid Queue のワーカー）も止まる。Docker はコンテナに `SIGTERM` を送り、`stop_grace_period`（書かなければ 10 秒）を過ぎたら `SIGKILL` で強制終了する。30 分かかる集計を cron のコンテナで走らせていると、その間のデプロイで途中で殺され、どこにも記録が残らない。
+デプロイ（とロールバック、停止、再起動、アクセスがない間の休止）では、ジョブを動かすだけのサービス（supercronic などの cron、Sidekiq、Solid Queue のワーカー）も止まる。アプリのイメージをビルドするワーカーは、デプロイのたびに作り直される（上の「コミットの変数を受け取るサービス」）。Docker はコンテナに `SIGTERM` を送り、`stop_grace_period`（書かなければ 10 秒）を過ぎたら `SIGKILL` で強制終了する。30 分かかる集計を cron のコンテナで走らせていると、その間のデプロイで途中で殺され、どこにも記録が残らない。
 
 - **ジョブは途中で殺されてもよいように作る**: 何度実行しても同じ結果になる（冪等）か、続きから再開できるようにする。進み具合を DB に記録し、次の回がそこから続ける。1 回のジョブは短く分ける（1 件ずつのジョブをキューに入れる、範囲を区切る）。猶予を延ばしても、ホストの再起動や OOM では止まる。
 - **走っている処理を終えてから止まれるサービスには `stop_grace_period` を付ける**:
@@ -264,7 +293,7 @@ koroku は、本番アプリの DB を staging アプリへ流し込める（コ
 
 ## 無停止デプロイ（blue/green。選んだアプリだけ）
 
-ここに書くことは、koroku のアプリ設定で「無停止デプロイ」を有効にしたアプリにだけ関係する（既定は無効。デプロイタブの「デプロイの設定」で、そのアプリの「管理」以上のロールを持つ人が切り替える）。無効のアプリは、上の各節のとおりデプロイのたびに全サービスを作り直し、数秒止まる。設定の変更は次のデプロイから効く。
+ここに書くことは、koroku のアプリ設定で「無停止デプロイ」を有効にしたアプリにだけ関係する（既定は無効。デプロイタブの「デプロイの設定」で、そのアプリの「管理」以上のロールを持つ人が切り替える）。無効のアプリは、上の各節のとおりデプロイのたびに公開サービスを作り直し、数秒止まる。設定の変更は次のデプロイから効く。
 
 有効にすると、koroku は公開サービスだけを 2 つ並べて入れ替える。
 
@@ -300,9 +329,8 @@ services:
     # web-blue と同じで、ポートだけが 2 つ目の割当ポート
 ```
 
-- `KOROKU_COMMIT_SHA` と `KOROKU_COMMIT_SHORT` は `env.release` に分かれ、デプロイのたびに作り直すサービスにだけ渡る。色の付いたサービス、元の公開サービス、ワンショット、`build:` を持つサービス、補間した `image:` がコミットの変数で変わるサービス（`image: ghcr.io/<owner>/<repo>-worker:sha-${KOROKU_COMMIT_SHORT}` など、CI がコミットごとに作るイメージ）の 5 つ。最後のものは、koroku がコミットの変数だけをすべて 0 のコミットに変えて Compose をもう一度正規化し、`image:` が変わるかで見分ける。見つかれば、デプロイログの `prepare` の手順に `Images that follow the commit: <サービス, ...>` と出る。
-- DB のように `image:` が変わらないサービスは、アプリの環境変数を変えていないデプロイでは作り直されない。DB などのサービスでこの 2 つの変数を読まない（`env.release` が渡らないので、読んでも空になる）。コミットを読むサービスは `image:` にコミットの変数を書くか、`build:` を持たせる。
-- **アプリの環境変数を変えたデプロイでは、DB などのサービスも作り直す**（どのサービスがどの変数を読むかを koroku は知らないため）。その数秒は新色も DB につながらず、エラーを返しうる。デプロイログの `services` の手順に `Recreating <サービス> because the app's environment changed; requests may fail while it restarts.` と出る。
+- `KOROKU_COMMIT_SHA` と `KOROKU_COMMIT_SHORT` は、無停止デプロイかどうかによらず `env.release` に分かれる（上の「コミットの変数を受け取るサービス」）。色の付いたサービスと元の公開サービスも受け取る。有効にするときも無効にするときも、DB などに渡る env は変わらないので、切り替えのデプロイで DB は作り直されない。
+- **アプリの環境変数を変えたデプロイでは、DB などのサービスも作り直す**。その数秒は新色も DB につながらず、エラーを返しうる。デプロイログの `services` の手順に `Recreating <サービス> because the app's env file changed (<変数の名前>, ...); requests may fail while it restarts.` と出る。
 - **ホストの空きメモリ（`MemAvailable` と `SwapFree` の合計）が公開サービスのメモリ上限 1 つ分に満たないときは、新色を起動せずにデプロイが失敗になる**（デプロイログと失敗の理由に `Not enough memory to run two <公開サービス> containers (<空き> MiB available, <上限> MiB needed).`）。アプリは旧色のまま動き続ける。その場でコンテナを作り直す形には切り替わらない。メモリを空けるか、無停止デプロイを外してからデプロイし直す。
 - 新色が起動しないか確認に通らなければ、新色を消してデプロイは失敗になり、旧色・DB・ワーカーはそのまま動き続ける（ロールバックは要らない）。ワンショットのサービスは流れたあとかもしれない。
 - 無停止にするのはデプロイと即時ロールバックだけ。**管理画面の「再起動」は、いまの色とほかのサービスの普通の再起動で、数秒の断がある**。起動、停止、アクセスがない間の休止から起こす処理、ホストの再起動も同じ（Caddy がその間のリクエストを待たせて送り直す。上の「デプロイで koroku がすること」の最後の段落）。
@@ -334,10 +362,11 @@ services:
 
 `scripts/rehearse.sh --blue-green` が、上の override と切り替えを手元の Docker でなぞる。
 
+- **`env.release`**: 無停止デプロイかどうかによらず、`rehearse.sh` は koroku と同じくコミットの変数を `env.release` に書いて、受け取るサービスにだけ渡す。コミットの変数をすべて 0 にして正規化し直し、定義がコミットに従うサービスを `Services that follow the commit:` に出す。DB などがコミットの変数を読んでいたら、ここで空になることが分かる。
 - 最初に、koroku が検証で断る形（上の表の `container_name`、依存、名前の衝突、`replicas` と `scale`、ワンショット、`include:`）を調べ、当てはまればすべて並べて失敗する。
 - blue（`--host-port`）とほかのサービスを起動して確かめたあと、もう一度デプロイする（同じビルドを次のリリースのタグで使う）。ワンショットのサービスと green（`--alt-host-port`、既定 28081）を `up --no-deps --wait` で起動し、green を確かめ、切り替え、ほかのサービスを作り直し（サービスごとに「作り直した／同じコンテナのまま」を出す）、`--drain` の秒数（既定 10）待って blue を止めて消す。
 - Caddy はないので、「いまの転送先」のポートを出す。2 回目のデプロイの間、0.2 秒ごとにそのポートへリクエストを送り、接続エラーか 5xx が 1 件でもあれば失敗にする。マイグレーションが古い版と両立しないと、ここで旧色のエラーとして出る。
-- koroku と同じくコミットの変数をすべて 0 にして正規化し直し、`image:` がコミットに従うサービスを `Images that follow the commit:` に出して `env.release` を渡す。手元では 2 回目のデプロイも同じコミットなので、そのサービスは作り直されない（koroku では新しいコミットのたびに作り直される）。
+- コミットの変数を受け取るサービスの判定は、無停止デプロイでないときと同じ（上の「`env.release`」）。手元では 2 回目のデプロイも同じコミットなので、定義がコミットに従うサービスは作り直されない（koroku では新しいコミットのたびに作り直される）。
 - `config`、`build`、`pull` には koroku と同じく `--profile koroku-disabled` を付け、元の公開サービスを含めて検証し、ビルドする。
 - 空きメモリが公開サービスの上限に満たなければ、koroku と同じく green を起動せずに `Not enough memory to run two <サービス> containers (<n> MiB available, <m> MiB needed).` で失敗する。green が起動しないか確認に通らなければ、green を消し、blue が答え続けたことを出して失敗する。
 - `--sleep` は、いまの色とほかのサービスを名前で並べて `start --wait` する（koroku が休止から起こすときと同じ）。`--task web:...` は元の `web` で動く（`--task web-green:...` は koroku と同じく断る）。
