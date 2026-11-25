@@ -65,3 +65,48 @@ func TestGitHubDeployments(t *testing.T) {
 		t.Errorf("GetGitHubDeployment after deleting the app = %v", err)
 	}
 }
+
+func TestNewestSucceededGitHubDeployment(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	app := mustCreateApp(t, s, "blog")
+	other := mustCreateApp(t, s, "shop")
+
+	if _, err := s.NewestSucceededGitHubDeployment(ctx, app.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("without deployments = %v, want ErrNotFound", err)
+	}
+	// Deployments finish one at a time; each gets a GitHub deployment and
+	// the state GitHub accepted last.
+	states := []struct {
+		appID    int64
+		githubID int64
+		state    string
+	}{
+		{app.ID, 901, "success"},
+		{other.ID, 902, "success"},
+		{app.ID, 903, "success"},
+		{app.ID, 904, "failure"},
+		{app.ID, 905, "in_progress"},
+	}
+	for _, st := range states {
+		d := enqueue(t, s, st.appID, "aaa")
+		if err := s.StartDeployment(ctx, d.ID, testNow); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.FinishDeployment(ctx, d.ID, StatusSucceeded, "", testNow); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SaveGitHubDeployment(ctx, d.ID, st.githubID, testNow); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetGitHubDeploymentState(ctx, d.ID, st.state, testNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if id, err := s.NewestSucceededGitHubDeployment(ctx, app.ID); err != nil || id != 903 {
+		t.Errorf("NewestSucceededGitHubDeployment(blog) = %d, %v, want 903", id, err)
+	}
+	if id, err := s.NewestSucceededGitHubDeployment(ctx, other.ID); err != nil || id != 902 {
+		t.Errorf("NewestSucceededGitHubDeployment(shop) = %d, %v, want 902", id, err)
+	}
+}

@@ -189,7 +189,13 @@ koroku のデプロイを、リポジトリの GitHub Deployments（`POST /repos
 - 説明文の `Deployment` は、ロールバックなら `Rollback to koroku deployment #<id>`、昇格なら `Promotion from staging` になる。英語にするのは、GitHub の画面とデプロイログに合わせるため。
 - 説明文にエラーの本文は入れない。ホストのパスやコマンドが含まれうるうえ、public リポジトリでは誰でも読めるため。詳しい理由は管理 UI で見る。
 - 各状態の `log_url` は管理 UI のデプロイ画面（`<console_url>/apps/<slug>/deploy?deployment=<id>`。そのデプロイを開いた状態で表示する）。`success` には `environment_url` としてアプリのプライマリ URL（9.1 の `primary_url` と同じ規則）を付ける。
-- 古いデプロイの片付けは GitHub の `auto_inactive` に任せる。同じ環境で新しいデプロイが `success` になると、前のものは `inactive` になる。失敗したデプロイは前の成功を `inactive` にしないので、自動ロールバックで旧版が動き続けている間は、GitHub でも旧版が動いているように見える。
+- 置き換えられたデプロイは、koroku が `inactive` にする。デプロイの `success` が GitHub に届いたら、その環境で最新の状態が `success` のデプロイ（GitHub が Active と表示するもの）を問い合わせ、koroku がそのアプリで最後に `success` を届けたデプロイより古いものすべてに `inactive`（説明文は `Replaced by a newer deployment`）を送る。環境に Active が 1 件だけ残り、「いま何が出ているか」が読めるようにするため。
+  - GitHub の `auto_inactive` には任せない。GitHub は本番の環境（`production_environment`）と消える環境（`transient_environment`）の古いデプロイを `inactive` にしないと定めていて、それ以外の環境でも、App が作ったデプロイは `success` を重ねても Active のまま残る（実機で確かめた振る舞い）。
+  - 環境の名前が同じなら、koroku が作っていないデプロイ（GitHub Actions のワークフローが作ったものなど）も `inactive` にする。同じ名前の環境に出ているものは 1 つ、という `auto_inactive` と同じ見方をとる。koroku の最後の `success` より新しいものには触れない。
+  - 問い合わせは GraphQL（`POST /graphql`）で、環境の新しい 100 件の最新の状態を 1 回で読む。REST の一覧には状態が含まれず、デプロイごとに問い合わせることになるため。
+  - 失敗したデプロイは何も `inactive` にしない。自動ロールバックで旧版が動き続けている間は、GitHub でも旧版が動いているように見える。
+  - レビューアプリ（9.9）のデプロイは `inactive` にしない。GitHub は消える環境の `inactive` を「破棄された」と表示するが、レビューアプリは次のコミットで動き続けているため。
+  - `inactive` の送信が失敗して残ったものは、そのアプリの次の `success` で片付く。
 - `queued` のまま取り消されたデプロイで、まだ GitHub に作っていないものは作らない（置き換えのたびに GitHub に `error` が並ばないように）。
 
 **デプロイを止めないこと**

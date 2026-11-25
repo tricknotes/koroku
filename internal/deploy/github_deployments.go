@@ -20,6 +20,7 @@ import (
 type GitHubDeploymentsAPI interface {
 	CreateDeployment(ctx context.Context, owner, repo string, in github.NewDeployment) (int64, error)
 	CreateDeploymentStatus(ctx context.Context, owner, repo string, id int64, in github.DeploymentStatus) error
+	LiveDeployments(ctx context.Context, owner, repo, environment string) ([]int64, error)
 }
 
 // GitHubDeploymentsOptions configure a GitHubDeployments reporter.
@@ -241,6 +242,63 @@ func (g *GitHubDeployments) sync(ctx context.Context, change StatusChange) {
 	}
 	if err := g.opts.Store.SetGitHubDeploymentState(ctx, d.ID, state, g.opts.Clock.Now()); err != nil {
 		logger.Warn("recording the GitHub deployment status failed", "error", err)
+		return
+	}
+	if state == github.DeploymentSuccess {
+		g.retireOlder(ctx, logger, app, owner, repo)
+	}
+}
+
+// retireOlder marks the deployments that an app's newest successful one
+// replaced as inactive on GitHub, so that the environment shows one live
+// deployment. GitHub does not do this itself for every environment
+// (ARCHITECTURE 5.1).
+//
+// It retires what is older than the newest success koroku reported, not what
+// is older than the status just sent: a success that reaches GitHub late
+// (resync) is itself replaced already. Whatever stays live because a request
+// failed is retired after the app's next successful deployment.
+func (g *GitHubDeployments) retireOlder(ctx context.Context, logger *slog.Logger, app store.App, owner, repo string) {
+	if _, err := g.opts.Store.GetReviewApp(ctx, app.ID); err == nil {
+		// GitHub shows an inactive deployment of a transient environment as
+		// destroyed, which a review app that is still up is not.
+		return
+	}
+	newest, err := g.opts.Store.NewestSucceededGitHubDeployment(ctx, app.ID)
+	if err != nil {
+		if ctx.Err() == nil {
+			logger.Warn("loading the newest GitHub deployment failed", "error", err)
+		}
+		return
+	}
+	var live []int64
+	err = g.call(ctx, func(ctx context.Context) error {
+		var err error
+		live, err = g.opts.Client.LiveDeployments(ctx, owner, repo, app.Slug)
+		return err
+	})
+	if err != nil {
+		g.failed(logger, app.ID, "listing the live GitHub deployments failed", err)
+		return
+	}
+	for _, id := range live {
+		// GitHub numbers deployments in the order they were created.
+		if id >= newest {
+			continue
+		}
+		err := g.call(ctx, func(ctx context.Context) error {
+			return g.opts.Client.CreateDeploymentStatus(ctx, owner, repo, id, github.DeploymentStatus{
+				State:       github.DeploymentInactive,
+				Description: "Replaced by a newer deployment",
+			})
+		})
+		switch {
+		case errors.Is(err, github.ErrNotFound):
+			// Deleted on GitHub since it was listed.
+		case err != nil:
+			g.failed(logger, app.ID, "retiring an older GitHub deployment failed", err)
+			return
+		}
 	}
 }
 

@@ -14,7 +14,9 @@ type GitHubDeployment struct {
 	DeploymentID int64
 	// GitHubID is GitHub's deployment ID.
 	GitHubID int64
-	// State is the last status GitHub accepted ("" before the first one).
+	// State is the last status of the deployment's own progress that GitHub
+	// accepted ("" before the first one). Retiring a replaced deployment on
+	// GitHub (inactive) does not change it.
 	State string
 }
 
@@ -60,6 +62,24 @@ func (s *Store) SetGitHubDeploymentState(ctx context.Context, deploymentID int64
 		return ErrNotFound
 	}
 	return nil
+}
+
+// NewestSucceededGitHubDeployment returns GitHub's ID of the app's newest
+// deployment whose success reached GitHub, or ErrNotFound when there is none.
+func (s *Store) NewestSucceededGitHubDeployment(ctx context.Context, appID int64) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT g.github_id FROM github_deployments g JOIN deployments d ON d.id = g.deployment_id
+		 WHERE d.app_id = ? AND g.state = 'success'
+		 ORDER BY d.id DESC LIMIT 1`, appID,
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get newest succeeded github deployment: %w", err)
+	}
+	return id, nil
 }
 
 // StaleGitHubDeployments lists koroku deployments that finished at or after

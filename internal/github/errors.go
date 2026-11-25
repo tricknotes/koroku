@@ -74,6 +74,31 @@ func newAPIError(resp *http.Response, body []byte, secrets []string) *APIError {
 	return &APIError{Status: resp.StatusCode, Message: msg, RateLimited: limited}
 }
 
+// graphQLError is one entry of the "errors" list of a GraphQL response.
+// GitHub answers these with HTTP 200.
+type graphQLError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// apiError expresses the error as the response the REST API gives for the
+// same cause, so that callers tell the causes apart the same way.
+func (e graphQLError) apiError(secrets []string) *APIError {
+	out := &APIError{Status: http.StatusUnprocessableEntity, Message: sanitize(e.Message, secrets)}
+	switch e.Type {
+	case "NOT_FOUND":
+		out.Status = http.StatusNotFound
+	case "FORBIDDEN", "INSUFFICIENT_SCOPES":
+		out.Status = http.StatusForbidden
+	case "RATE_LIMITED":
+		out.Status, out.RateLimited = http.StatusForbidden, true
+	}
+	if out.Message == "" {
+		out.Message = http.StatusText(out.Status)
+	}
+	return out
+}
+
 // OAuthError is an error GitHub reports for the code exchange. GitHub answers
 // these with HTTP 200 and an "error" field.
 type OAuthError struct {
