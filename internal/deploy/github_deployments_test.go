@@ -30,6 +30,10 @@ type fakeDeploymentsAPI struct {
 	// element per request; the last one repeats).
 	createErr []error
 	statusErr []error
+	// live is what LiveDeployments answers, per environment; liveErr fails it.
+	live      map[string][]int64
+	liveErr   []error
+	liveCalls []string
 }
 
 func popErr(errs *[]error) error {
@@ -62,6 +66,29 @@ func (f *fakeDeploymentsAPI) CreateDeploymentStatus(_ context.Context, owner, re
 	f.statuses = append(f.statuses, in)
 	f.ids = append(f.ids, id)
 	return popErr(&f.statusErr)
+}
+
+func (f *fakeDeploymentsAPI) LiveDeployments(_ context.Context, owner, repo, environment string) ([]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.liveCalls = append(f.liveCalls, owner+"/"+repo+" "+environment)
+	if err := popErr(&f.liveErr); err != nil {
+		return nil, err
+	}
+	return f.live[environment], nil
+}
+
+// retired lists the GitHub deployments that were sent "inactive", in order.
+func (f *fakeDeploymentsAPI) retired() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []int64
+	for i, s := range f.statuses {
+		if s.State == github.DeploymentInactive {
+			out = append(out, f.ids[i])
+		}
+	}
+	return out
 }
 
 func (f *fakeDeploymentsAPI) states() []string {
@@ -394,6 +421,144 @@ func TestGitHubDeploymentDeletedOnGitHub(t *testing.T) {
 	}
 	if got := h.link(d.ID); got.State != stateGone {
 		t.Errorf("link = %+v", got)
+	}
+}
+
+// succeed takes a deployment through the state machine, telling GitHub at
+// the end only (the earlier states are skipped, as after a backlog).
+func (h *reporterHarness) succeed(d store.Deployment) {
+	h.t.Helper()
+	ctx := context.Background()
+	if err := h.store.StartDeployment(ctx, d.ID, h.clock.Now()); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := h.store.FinishDeployment(ctx, d.ID, store.StatusSucceeded, "", h.clock.Now()); err != nil {
+		h.t.Fatal(err)
+	}
+	h.sync(d.ID, false)
+}
+
+func TestGitHubDeploymentRetiresWhatASuccessReplaced(t *testing.T) {
+	h := newReporterHarness(t)
+	app := h.app("blog", store.EnvironmentProduction)
+	h.succeed(h.enqueue(app, shaA)) // GitHub deployment 901
+	if got := h.api.retired(); len(got) != 0 {
+		t.Fatalf("retired %v after the first deployment", got)
+	}
+
+	// 700 was made by something else in the same environment; 950 is newer
+	// than koroku's newest and is not koroku's to retire.
+	h.api.live = map[string][]int64{"blog": {950, 902, 901, 700}}
+	h.succeed(h.enqueue(app, shaB)) // 902
+	if got := h.api.retired(); !slices.Equal(got, []int64{901, 700}) {
+		t.Errorf("retired = %v, want [901 700]", got)
+	}
+	if !slices.Equal(h.api.liveCalls, []string{"octo/blog blog", "octo/blog blog"}) {
+		t.Errorf("live deployments asked for %v", h.api.liveCalls)
+	}
+	last := h.api.statuses[len(h.api.statuses)-1]
+	if last.Description != "Replaced by a newer deployment" || last.EnvironmentURL != "" || last.LogURL != "" {
+		t.Errorf("inactive status = %+v", last)
+	}
+}
+
+func TestGitHubDeploymentFailureRetiresNothing(t *testing.T) {
+	h := newReporterHarness(t)
+	ctx := context.Background()
+	app := h.app("blog", store.EnvironmentStaging)
+	h.succeed(h.enqueue(app, shaA))
+	h.api.live = map[string][]int64{"blog": {901}}
+	calls := len(h.api.liveCalls)
+
+	d := h.enqueue(app, shaB)
+	if err := h.store.StartDeployment(ctx, d.ID, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.FinishDeployment(ctx, d.ID, store.StatusFailed, "boom", h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h.sync(d.ID, true)
+	if len(h.api.liveCalls) != calls || len(h.api.retired()) != 0 {
+		t.Errorf("a failure retired the release that still runs: live calls %v, retired %v",
+			h.api.liveCalls, h.api.retired())
+	}
+}
+
+func TestGitHubDeploymentLateSuccessIsRetiredItself(t *testing.T) {
+	h := newReporterHarness(t)
+	ctx := context.Background()
+	app := h.app("blog", store.EnvironmentStaging)
+	first := h.enqueue(app, shaA)
+	if err := h.store.StartDeployment(ctx, first.ID, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h.sync(first.ID, false) // 901, in_progress
+	if err := h.store.FinishDeployment(ctx, first.ID, store.StatusSucceeded, "", h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// The success of the first one has not reached GitHub when the second
+	// one succeeds.
+	h.succeed(h.enqueue(app, shaB)) // 902
+	h.api.live = map[string][]int64{"blog": {902, 901}}
+	h.sync(first.ID, false)
+	if got := h.api.retired(); !slices.Equal(got, []int64{901}) {
+		t.Errorf("retired = %v, want [901]", got)
+	}
+}
+
+func TestGitHubDeploymentRetiringSurvivesFailures(t *testing.T) {
+	h := newReporterHarness(t)
+	app := h.app("blog", store.EnvironmentStaging)
+	h.succeed(h.enqueue(app, shaA)) // 901
+	h.succeed(h.enqueue(app, shaB)) // 902
+
+	// One of the older ones was deleted on GitHub: the others are still retired.
+	h.api.live = map[string][]int64{"blog": {903, 902, 901, 700}}
+	second := h.enqueue(app, shaA) // 903
+	gone := fmt.Errorf("github: update deployment: %w", &github.APIError{Status: http.StatusNotFound, Message: "Not Found"})
+	h.api.statusErr = []error{nil, gone, nil} // success, inactive 902, inactive 901...
+	h.succeed(second)
+	if got := h.api.retired(); !slices.Equal(got, []int64{902, 901, 700}) {
+		t.Errorf("retired = %v, want [902 901 700]", got)
+	}
+	if got := h.link(second.ID); got.State != "success" {
+		t.Errorf("link = %+v", got)
+	}
+
+	// Listing fails: the deployment stays a success and nothing is retired.
+	h.api.liveErr = []error{&github.APIError{Status: http.StatusUnprocessableEntity, Message: "no"}}
+	before := len(h.api.retired())
+	third := h.enqueue(app, shaB)
+	h.succeed(third)
+	if got := h.link(third.ID); got.State != "success" {
+		t.Errorf("link = %+v", got)
+	}
+	if len(h.api.retired()) != before {
+		t.Errorf("retired %v without a listing", h.api.retired())
+	}
+	if !strings.Contains(h.logs.String(), "listing the live GitHub deployments failed") {
+		t.Errorf("logs:\n%s", h.logs)
+	}
+}
+
+func TestGitHubDeploymentReviewAppsAreNotRetired(t *testing.T) {
+	h := newReporterHarness(t)
+	ctx := context.Background()
+	parent := h.app("blog", store.EnvironmentStaging)
+	child := parent
+	child.Slug = "blog-pr-12"
+	app, err := h.store.CreateReviewApp(ctx, store.NewReviewApp{
+		App:    child,
+		Review: store.ReviewApp{ParentAppID: parent.ID, PRNumber: 12, PRTitle: "Add search", HeadBranch: "feature"},
+	}, 20000, 20999, h.clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.succeed(h.enqueue(app, shaA))
+	h.api.live = map[string][]int64{"blog-pr-12": {902, 901}}
+	h.succeed(h.enqueue(app, shaB))
+	if len(h.api.liveCalls) != 0 || len(h.api.retired()) != 0 {
+		t.Errorf("live calls %v, retired %v", h.api.liveCalls, h.api.retired())
 	}
 }
 

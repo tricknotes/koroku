@@ -16,6 +16,9 @@ const (
 	DeploymentSuccess    = "success"
 	DeploymentFailure    = "failure"
 	DeploymentError      = "error"
+	// DeploymentInactive retires a deployment that succeeded: GitHub stops
+	// showing it as the one that is live in its environment.
+	DeploymentInactive = "inactive"
 )
 
 // maxDeploymentDescription is GitHub's limit on a deployment's or a status's
@@ -101,9 +104,12 @@ func (c *Client) CreateDeployment(ctx context.Context, owner, repo string, in Ne
 	return resp.ID, nil
 }
 
-// CreateDeploymentStatus adds a status to a deployment created with
-// CreateDeployment. GitHub marks older deployments of the same environment
-// inactive when a deployment succeeds (auto_inactive).
+// CreateDeploymentStatus adds a status to a deployment of the repository.
+//
+// auto_inactive asks GitHub to retire the older deployments of the
+// environment when one succeeds, but GitHub leaves production and transient
+// environments alone and does not retire reliably elsewhere, so the caller
+// retires them itself (LiveDeployments, DeploymentInactive).
 func (c *Client) CreateDeploymentStatus(ctx context.Context, owner, repo string, id int64, in DeploymentStatus) error {
 	if err := validateRepo(owner, repo); err != nil {
 		return err
@@ -112,7 +118,8 @@ func (c *Client) CreateDeploymentStatus(ctx context.Context, owner, repo string,
 		return fmt.Errorf("%w: deployment id %d", ErrInvalidArgument, id)
 	}
 	switch in.State {
-	case DeploymentQueued, DeploymentInProgress, DeploymentSuccess, DeploymentFailure, DeploymentError:
+	case DeploymentQueued, DeploymentInProgress, DeploymentSuccess, DeploymentFailure, DeploymentError,
+		DeploymentInactive:
 	default:
 		return fmt.Errorf("%w: deployment state %q", ErrInvalidArgument, in.State)
 	}
@@ -144,6 +151,85 @@ func (c *Client) CreateDeploymentStatus(ctx context.Context, owner, repo string,
 		return fmt.Errorf("github: update deployment %d in %s/%s: %w", id, owner, repo, err)
 	}
 	return nil
+}
+
+// maxLiveDeployments is how many of an environment's newest deployments
+// LiveDeployments looks at (one page of the GraphQL API).
+const maxLiveDeployments = 100
+
+// liveDeploymentsQuery reads the latest status of an environment's newest
+// deployments in one request. The REST API lists deployments without their
+// status, which would cost one more request per deployment.
+const liveDeploymentsQuery = `query($owner: String!, $name: String!, $environments: [String!], $first: Int!) {
+  repository(owner: $owner, name: $name) {
+    deployments(environments: $environments, first: $first, orderBy: {field: CREATED_AT, direction: DESC}) {
+      nodes { databaseId latestStatus { state } }
+    }
+  }
+}`
+
+// LiveDeployments returns the IDs of the deployments GitHub shows as live in
+// an environment: those whose latest status is success. It looks at the
+// environment's newest maxLiveDeployments deployments, whoever created them,
+// and returns them newest first. The App needs the Deployments permission.
+func (c *Client) LiveDeployments(ctx context.Context, owner, repo, environment string) ([]int64, error) {
+	if err := validateRepo(owner, repo); err != nil {
+		return nil, err
+	}
+	if environment == "" {
+		return nil, fmt.Errorf("%w: an environment is required", ErrInvalidArgument)
+	}
+	if c.anonymous() {
+		return nil, ErrNotConfigured
+	}
+	tok, err := c.RepoToken(ctx, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Data struct {
+			Repository *struct {
+				Deployments struct {
+					Nodes []struct {
+						DatabaseID   int64 `json:"databaseId"`
+						LatestStatus *struct {
+							State string `json:"state"`
+						} `json:"latestStatus"`
+					} `json:"nodes"`
+				} `json:"deployments"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []graphQLError `json:"errors"`
+	}
+	_, err = c.do(ctx, call{
+		method: http.MethodPost,
+		path:   "/graphql",
+		bearer: tok.Value(),
+		body: map[string]any{
+			"query": liveDeploymentsQuery,
+			"variables": map[string]any{
+				"owner": owner, "name": repo,
+				"environments": []string{environment},
+				"first":        maxLiveDeployments,
+			},
+		},
+	}, &resp)
+	if err == nil && len(resp.Errors) > 0 {
+		err = resp.Errors[0].apiError([]string{tok.Value()})
+	}
+	if err == nil && resp.Data.Repository == nil {
+		err = ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("github: list live deployments of %s in %s/%s: %w", environment, owner, repo, err)
+	}
+	var ids []int64
+	for _, n := range resp.Data.Repository.Deployments.Nodes {
+		if n.DatabaseID > 0 && n.LatestStatus != nil && n.LatestStatus.State == "SUCCESS" {
+			ids = append(ids, n.DatabaseID)
+		}
+	}
+	return ids, nil
 }
 
 // truncateDescription cuts s to GitHub's limit without splitting a character.

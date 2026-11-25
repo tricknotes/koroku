@@ -143,6 +143,108 @@ func TestCreateDeploymentStatusRejectsUnknownStates(t *testing.T) {
 	}
 }
 
+func TestCreateDeploymentStatusRetiresADeployment(t *testing.T) {
+	f := newFakeGitHub(t).withRepo("octo/blog", 7)
+	var got map[string]any
+	f.mux.HandleFunc("POST /repos/{owner}/{repo}/deployments/{id}/statuses", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := f.installationOf(w, r); !ok {
+			return
+		}
+		got = decodeBody(t, r)
+		writeJSON(w, http.StatusCreated, map[string]any{"id": 2, "state": "inactive"})
+	})
+	if err := f.client().CreateDeploymentStatus(context.Background(), "octo", "blog", 991, DeploymentStatus{
+		State: DeploymentInactive, Description: "Replaced by a newer deployment",
+	}); err != nil {
+		t.Fatalf("CreateDeploymentStatus: %v", err)
+	}
+	if got["state"] != "inactive" || got["description"] != "Replaced by a newer deployment" {
+		t.Errorf("status = %v", got)
+	}
+}
+
+func TestLiveDeployments(t *testing.T) {
+	f := newFakeGitHub(t).withRepo("octo/blog", 7)
+	var got map[string]any
+	f.mux.HandleFunc("POST /graphql", func(w http.ResponseWriter, r *http.Request) {
+		if id, ok := f.installationOf(w, r); !ok || id != 7 {
+			return
+		}
+		got = decodeBody(t, r)
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"repository": map[string]any{
+			"deployments": map[string]any{"nodes": []map[string]any{
+				{"databaseId": 8005012065, "latestStatus": map[string]any{"state": "SUCCESS"}},
+				{"databaseId": 8005012064, "latestStatus": map[string]any{"state": "FAILURE"}},
+				{"databaseId": 8005012063, "latestStatus": map[string]any{"state": "INACTIVE"}},
+				{"databaseId": 8005012062, "latestStatus": nil},
+				{"databaseId": 8005012061, "latestStatus": map[string]any{"state": "SUCCESS"}},
+			}},
+		}}})
+	})
+	ids, err := f.client().LiveDeployments(context.Background(), "octo", "blog", "blog-staging")
+	if err != nil {
+		t.Fatalf("LiveDeployments: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 8005012065 || ids[1] != 8005012061 {
+		t.Errorf("ids = %v, want the two whose latest status is success", ids)
+	}
+	vars, _ := got["variables"].(map[string]any)
+	wantVars := `{"environments":["blog-staging"],"first":100,"name":"blog","owner":"octo"}`
+	if data, _ := json.Marshal(vars); string(data) != wantVars {
+		t.Errorf("variables = %s, want %s", data, wantVars)
+	}
+	if q, _ := got["query"].(string); !strings.Contains(q, "deployments(environments: $environments") ||
+		strings.Contains(q, "octo") || strings.Contains(q, "blog") {
+		t.Errorf("query = %q (values travel as variables)", q)
+	}
+}
+
+func TestLiveDeploymentsErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		body map[string]any
+		want error
+	}{
+		{"no permission", map[string]any{
+			"data":   map[string]any{"repository": map[string]any{"deployments": nil}},
+			"errors": []map[string]any{{"type": "FORBIDDEN", "message": "Resource not accessible by integration ghs_fake_7_1"}},
+		}, ErrUnauthorized},
+		{"no repository", map[string]any{
+			"data":   map[string]any{"repository": nil},
+			"errors": []map[string]any{{"type": "NOT_FOUND", "message": "Could not resolve to a Repository"}},
+		}, ErrNotFound},
+		{"rate limit", map[string]any{
+			"errors": []map[string]any{{"type": "RATE_LIMITED", "message": "API rate limit exceeded"}},
+		}, ErrRateLimited},
+		{"repository missing without an error", map[string]any{
+			"data": map[string]any{"repository": nil},
+		}, ErrNotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeGitHub(t).withRepo("octo/blog", 7)
+			f.mux.HandleFunc("POST /graphql", func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, http.StatusOK, tc.body)
+			})
+			_, err := f.client().LiveDeployments(context.Background(), "octo", "blog", "blog")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			assertNoLeak(t, err, "ghs_fake_7_1")
+		})
+	}
+}
+
+func TestLiveDeploymentsNeedsAnEnvironment(t *testing.T) {
+	f := newFakeGitHub(t).withRepo("octo/blog", 7)
+	if _, err := f.client().LiveDeployments(context.Background(), "octo", "blog", ""); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("err = %v, want ErrInvalidArgument", err)
+	}
+	if len(f.seen()) != 0 {
+		t.Errorf("requests were sent: %v", f.seen())
+	}
+}
+
 func TestDeploymentsNeedTheApp(t *testing.T) {
 	c, err := NewAnonymous("http://127.0.0.1:1", nil)
 	if err != nil {
@@ -155,5 +257,8 @@ func TestDeploymentsNeedTheApp(t *testing.T) {
 	}
 	if err := c.CreateDeploymentStatus(context.Background(), "octo", "blog", 1, DeploymentStatus{State: DeploymentQueued}); !errors.Is(err, ErrNotConfigured) {
 		t.Errorf("CreateDeploymentStatus err = %v", err)
+	}
+	if _, err := c.LiveDeployments(context.Background(), "octo", "blog", "blog"); !errors.Is(err, ErrNotConfigured) {
+		t.Errorf("LiveDeployments err = %v", err)
 	}
 }
