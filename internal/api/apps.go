@@ -68,6 +68,7 @@ type appJSON struct {
 	DumpHookService      string            `json:"dump_hook_service"`
 	DumpHookCommand      string            `json:"dump_hook_command"`
 	BackupBeforeDeploy   bool              `json:"backup_before_deploy"`
+	DumpIntervalHours    int               `json:"dump_interval_hours"`
 	LoadHookService      string            `json:"load_hook_service"`
 	LoadHookCommand      string            `json:"load_hook_command"`
 	PostLoadService      string            `json:"post_load_service"`
@@ -144,6 +145,7 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		DumpHookService:       app.DumpHookService,
 		DumpHookCommand:       app.DumpHookCommand,
 		BackupBeforeDeploy:    app.BackupBeforeDeploy,
+		DumpIntervalHours:     app.DumpIntervalHours,
 		LoadHookService:       app.LoadHookService,
 		LoadHookCommand:       app.LoadHookCommand,
 		PostLoadService:       app.PostLoadService,
@@ -266,6 +268,7 @@ type appInput struct {
 	DumpHookService      *string            `json:"dump_hook_service"`
 	DumpHookCommand      *string            `json:"dump_hook_command"`
 	BackupBeforeDeploy   *bool              `json:"backup_before_deploy"`
+	DumpIntervalHours    *int               `json:"dump_interval_hours"`
 	LoadHookService      *string            `json:"load_hook_service"`
 	LoadHookCommand      *string            `json:"load_hook_command"`
 	PostLoadService      *string            `json:"post_load_service"`
@@ -427,6 +430,13 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	}
 	if in.BackupBeforeDeploy != nil {
 		app.BackupBeforeDeploy = *in.BackupBeforeDeploy
+	}
+	if in.DumpIntervalHours != nil {
+		if !slices.Contains(store.AllowedDumpIntervals, *in.DumpIntervalHours) {
+			errs.add("dump_interval_hours", "must be one of 1, 2, 3, 4, 6, 8, 12 and 24")
+		} else {
+			app.DumpIntervalHours = *in.DumpIntervalHours
+		}
 	}
 	if in.LoadHookService != nil {
 		app.LoadHookService = strings.TrimSpace(*in.LoadHookService)
@@ -739,13 +749,14 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	in := body.appInput
 	app := store.App{
-		DefaultBranch:    "main",
-		ComposeSource:    store.ComposeSourceRepository,
-		WebService:       "web",
-		HealthcheckPath:  "/",
-		Environment:      store.EnvironmentStaging,
-		EnvSource:        envreq.SourceCompose,
-		IdleSleepMinutes: store.DefaultIdleSleepMinutes,
+		DefaultBranch:     "main",
+		ComposeSource:     store.ComposeSourceRepository,
+		WebService:        "web",
+		HealthcheckPath:   "/",
+		Environment:       store.EnvironmentStaging,
+		EnvSource:         envreq.SourceCompose,
+		IdleSleepMinutes:  store.DefaultIdleSleepMinutes,
+		DumpIntervalHours: store.DefaultDumpIntervalHours,
 	}
 	errs := in.apply(&app, s.cfg.Deploy.AllowFileRepos)
 	validateReservations(app, s.cfg.Deploy.DefaultMemoryLimit, errs)

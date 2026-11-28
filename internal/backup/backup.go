@@ -58,6 +58,9 @@ const (
 	TriggerScheduled Trigger = "scheduled"
 	TriggerManual    Trigger = "manual"
 	TriggerPreDeploy Trigger = "pre_deploy"
+	// TriggerInterval is a run between the daily ones that takes the dumps
+	// of the apps due at that hour, and nothing else (ARCHITECTURE 10.8).
+	TriggerInterval Trigger = "interval"
 	// TriggerPreCopy is the dump of a staging app taken before a database
 	// copy replaces its data (ARCHITECTURE 10.6). It is not recorded as a
 	// run; the copy keeps the snapshot ID.
@@ -108,6 +111,12 @@ type App struct {
 	// runs. When it fails, nothing of the command's output is kept. Nil
 	// means that the app has no values to hide.
 	OutputMasker func(ctx context.Context) (*secrets.Masker, error)
+	// DumpIntervalHours is the time between two dumps, counted from the
+	// daily run; 0 or 24 means the daily run only (ARCHITECTURE 10.8).
+	DumpIntervalHours int
+	// Sleeping is set while the app sleeps for lack of traffic: its data
+	// does not change, so no dump is taken between the daily runs.
+	Sleeping bool
 }
 
 // Recorder keeps the history of runs. The caller implements it on the
@@ -142,6 +151,8 @@ type TargetRecord struct {
 	Target string
 	Status TargetStatus
 	Error  string
+	// Duration is how long the target took.
+	Duration time.Duration
 }
 
 // AppController stops and starts an app around a volume restore.

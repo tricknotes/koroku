@@ -73,6 +73,12 @@ type backupTargetJSON struct {
 	Target string `json:"target"`
 	Status string `json:"status"`
 	Error  string `json:"error"`
+	// FinishedAt is when the run that produced this result finished: a dump
+	// taken between the daily runs is newer than the rest (ARCHITECTURE
+	// 10.8).
+	FinishedAt *time.Time `json:"finished_at"`
+	// DurationMs is how long the target took; 0 when it was not measured.
+	DurationMs int64 `json:"duration_ms"`
 }
 
 // appBackupRunJSON is the latest run that concerns one app, reduced to that
@@ -109,7 +115,8 @@ func appBackupStatus(r *http.Request, o *store.BackupOutcome) *appBackupRunJSON 
 		}
 	}
 	for _, t := range o.Targets {
-		out.Targets = append(out.Targets, backupTargetJSON{Kind: t.Kind, Target: t.Target, Status: t.Status, Error: t.Error})
+		out.Targets = append(out.Targets, backupTargetJSON{Kind: t.Kind, Target: t.Target, Status: t.Status, Error: t.Error,
+			FinishedAt: t.FinishedAt, DurationMs: t.Duration.Milliseconds()})
 		switch {
 		case t.Status == store.BackupTargetFailed:
 			out.Status = store.BackupTargetFailed
@@ -139,6 +146,11 @@ func (s *Server) handleAppBackupStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	configured := s.backups != nil
+	dumpLate, dumpSlow, err := s.dumpWarnings(r.Context(), app)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"configured":      configured,
 		"last_success_at": last,
@@ -146,7 +158,38 @@ func (s *Server) handleAppBackupStatus(w http.ResponseWriter, r *http.Request) {
 		// to be late with.
 		"warning":  configured && outcome != nil && (last == nil || s.clock.Now().Sub(*last) > backupWarningAfter),
 		"last_run": appBackupStatus(r, outcome),
+		// The dumps between the daily runs (ARCHITECTURE 10.8): none stored
+		// for twice the interval, and the last one taking more than half
+		// of it.
+		"dump_warning": configured && dumpLate,
+		"dump_slow":    configured && dumpSlow,
 	})
+}
+
+// dumpWarnings tells whether the dumps of an app with an interval shorter
+// than a day have fallen behind, and whether the last one took more than
+// half of the interval, which keeps the database under the load of a dump
+// for much of the time (ARCHITECTURE 10.8).
+func (s *Server) dumpWarnings(ctx context.Context, app store.App) (late, slow bool, err error) {
+	interval := time.Duration(app.DumpIntervalHours) * time.Hour
+	if app.DumpIntervalHours <= 0 || app.DumpIntervalHours >= 24 || app.DumpHookService == "" {
+		return false, false, nil
+	}
+	latest, err := s.store.LatestAppDump(ctx, app.ID)
+	if err != nil || latest == nil {
+		return false, false, err
+	}
+	slow = latest.Duration > interval/2
+	// A stopped or sleeping app takes no dumps between the daily runs.
+	if app.DesiredState != store.DesiredRunning || app.SleepingSince != nil {
+		return false, slow, nil
+	}
+	ok, err := s.store.LastAppDumpSuccess(ctx, app.ID)
+	if err != nil {
+		return false, false, err
+	}
+	late = ok == nil || s.clock.Now().Sub(*ok) > 2*interval
+	return late, slow, nil
 }
 
 type backupProblemJSON struct {

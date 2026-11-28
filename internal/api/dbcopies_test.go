@@ -36,6 +36,16 @@ func (f *fakeCopier) StartCopy(ctx context.Context, req deploy.CopyRequest) (sto
 	return f.store.StartDBCopy(ctx, req.Target, req.Source, req.Kind, time.Date(2026, 11, 21, 3, 0, 0, 0, time.UTC))
 }
 
+func (f *fakeCopier) StartRestore(ctx context.Context, app store.App, snapshotID string) (store.DBCopy, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.requests = append(f.requests, deploy.CopyRequest{Source: app, Target: app, Kind: store.CopySourceSnapshot, Restore: true, SnapshotID: snapshotID})
+	if f.err != nil {
+		return store.DBCopy{}, f.err
+	}
+	return f.store.StartDBRestore(ctx, app, snapshotID, time.Date(2026, 11, 21, 3, 0, 0, 0, time.UTC))
+}
+
 func (f *fakeCopier) CopyLogPath(slug string, id int64) string {
 	return filepath.Join(f.logDir, fmt.Sprintf("%s-%d.log", slug, id))
 }

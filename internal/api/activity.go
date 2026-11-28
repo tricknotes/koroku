@@ -42,6 +42,7 @@ const (
 	actDumpDownloaded   = "backup.downloaded" // {"snapshot_id"}
 	actDBCopyStarted    = "db_copy.started"   // {"copy_id", "source", "source_kind"}
 	actDBCopySent       = "db_copy.sent"      // {"source_kind"}, on the source app
+	actDBRestored       = "db.restored"       // {"copy_id", "snapshot_id"}
 	actTaskRunStarted   = "task_run.started"  // {"run_id", "task_name", "service", "command"}
 	actTasksChanged     = "tasks.changed"     // {"added", "changed", "removed": [names], "reordered"}
 	actMemberRoleSet    = "member.role_set"   // {"member": {"id", "login"}, "from", "to"}
@@ -161,6 +162,7 @@ var settingFields = []settingField{
 	{name: "dump_hook_service", get: func(a store.App) any { return a.DumpHookService }},
 	{name: "dump_hook_command", get: func(a store.App) any { return a.DumpHookCommand }},
 	{name: "backup_before_deploy", get: func(a store.App) any { return a.BackupBeforeDeploy }},
+	{name: "dump_interval_hours", get: func(a store.App) any { return a.DumpIntervalHours }},
 	{name: "load_hook_service", get: func(a store.App) any { return a.LoadHookService }},
 	{name: "load_hook_command", get: func(a store.App) any { return a.LoadHookCommand }},
 	{name: "post_load_service", get: func(a store.App) any { return a.PostLoadService }},

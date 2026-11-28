@@ -339,6 +339,7 @@ func (s *Server) apiRoutes() []route {
 		{"GET /api/apps/{slug}/db-copies", onApp(levelView), s.handleListDBCopies},
 		// The source app needs manage as well; checked in the handler.
 		{"POST /api/apps/{slug}/db-copies", onApp(levelManage), s.handleStartDBCopy},
+		{"POST /api/apps/{slug}/db-restores", onApp(levelManage), s.handleStartDBRestore},
 		{"GET /api/db-copies/{id}", onDBCopy(levelView), s.handleGetDBCopy},
 		{"GET /api/db-copies/{id}/logs", onDBCopy(levelView), s.handleDBCopyLogs},
 		{"GET /api/apps/{slug}/tasks", onApp(levelView), s.handleListTasks},

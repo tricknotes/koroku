@@ -33,6 +33,14 @@ func dumpFileName(app App) string { return app.Slug + "-" + app.DumpService + ".
 // snapshot and exit with status 3; that snapshot is removed again and the
 // backup fails, because an empty dump protects nothing.
 func (m *Manager) backupDump(ctx context.Context, app App) TargetResult {
+	started := m.opts.Clock.Now()
+	res := m.dumpOnce(ctx, app)
+	res.Duration = m.opts.Clock.Now().Sub(started)
+	return res
+}
+
+// dumpOnce is backupDump without the measuring.
+func (m *Manager) dumpOnce(ctx context.Context, app App) TargetResult {
 	ctx, cancel := context.WithTimeout(ctx, m.opts.Timeouts.Backup)
 	defer cancel()
 	if app.WithDumpService == nil {
@@ -205,6 +213,8 @@ type DumpFile struct {
 	// dashes and underscores.
 	Name string
 	Time time.Time
+	// Target is the dump hook service the dump was taken in.
+	Target string
 
 	snapshotID string
 	path       string
@@ -228,6 +238,7 @@ func (m *Manager) LookupDump(ctx context.Context, app App, snapshotID string) (D
 	return DumpFile{
 		Name:       fmt.Sprintf("%s-%s-%s.dump", app.Slug, rec.target(), rec.Time.UTC().Format(timestampLayout)),
 		Time:       rec.Time.UTC(),
+		Target:     rec.target(),
 		snapshotID: rec.ID,
 		path:       rec.Paths[0],
 	}, nil

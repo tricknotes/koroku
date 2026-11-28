@@ -85,6 +85,9 @@ type App struct {
 	DumpHookService      string
 	DumpHookCommand      string
 	BackupBeforeDeploy   bool
+	// DumpIntervalHours is the time between two dumps, counted from the
+	// daily run (ARCHITECTURE 10.8): one of AllowedDumpIntervals.
+	DumpIntervalHours int
 	// Database copy settings (ARCHITECTURE 10.6): the load hook reads a
 	// dump from stdin; the post-load command runs after a copy.
 	LoadHookService string
@@ -188,6 +191,14 @@ const (
 	ColorGreen = "green"
 )
 
+// DefaultDumpIntervalHours is the dump interval of an app that has not
+// chosen one: the daily run only (ARCHITECTURE 10.8).
+const DefaultDumpIntervalHours = 24
+
+// AllowedDumpIntervals are the values of App.DumpIntervalHours: the
+// divisors of 24, so that every dump falls on the same hours each day.
+var AllowedDumpIntervals = []int{1, 2, 3, 4, 6, 8, 12, 24}
+
 // Bounds and default of App.BlueGreenDrainSeconds (ARCHITECTURE 7.2).
 const (
 	DefaultBlueGreenDrainSeconds = 10
@@ -252,7 +263,7 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	web_service, web_port, host_port, healthcheck_path, desired_state, environment,
 	relax_policy, memory_limit, service_memory_limits, memory_reservation, service_memory_reservations,
 	current_deployment_id, created_at, updated_at,
-	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
+	backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy, dump_interval_hours,
 	env_source, env_example_path,
 	load_hook_service, load_hook_command, post_load_service, post_load_command,
 	access_protection, protection_exempt_paths, promote_from_app_id,
@@ -285,7 +296,7 @@ func scanApp(row rowScanner) (App, error) {
 		&a.WebService, &a.WebPort, &a.HostPort, &a.HealthcheckPath, &a.DesiredState, &a.Environment,
 		&a.RelaxPolicy, &a.MemoryLimit, &limitsJSON, &a.MemoryReservation, &reservationsJSON,
 		&currentID, &created, &updated,
-		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy,
+		&excludeJSON, &a.DumpHookService, &a.DumpHookCommand, &a.BackupBeforeDeploy, &a.DumpIntervalHours,
 		&a.EnvSource, &a.EnvExamplePath,
 		&a.LoadHookService, &a.LoadHookCommand, &a.PostLoadService, &a.PostLoadCommand,
 		&a.AccessProtection, &exemptJSON, &promoteFrom,
@@ -440,22 +451,25 @@ func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, 
 	if app.BlueGreenDrainSeconds == 0 {
 		app.BlueGreenDrainSeconds = DefaultBlueGreenDrainSeconds
 	}
+	if app.DumpIntervalHours == 0 {
+		app.DumpIntervalHours = DefaultDumpIntervalHours
+	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO apps (
 			slug, repo_id, repo_full_name, repo_url, default_branch, compose_path,
 			web_service, web_port, host_port, healthcheck_path, desired_state, environment,
 			relax_policy, memory_limit, service_memory_limits, memory_reservation, service_memory_reservations, created_at, updated_at,
-			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy,
+			backup_exclude_volumes, dump_hook_service, dump_hook_command, backup_before_deploy, dump_interval_hours,
 			env_source, env_example_path,
 			load_hook_service, load_hook_command, post_load_service, post_load_command,
 			access_protection, protection_exempt_paths, promote_from_app_id,
 			auto_deploy, auto_deploy_branch, auto_deploy_workflow,
 			idle_sleep, idle_sleep_minutes, blue_green_drain_seconds,
 			compose_source, compose_content)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, app.MemoryReservation, reservations, toMillis(now), toMillis(now),
-		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
+		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy, app.DumpIntervalHours,
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
@@ -590,6 +604,7 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			relax_policy = ?, memory_limit = ?, service_memory_limits = ?,
 			memory_reservation = ?, service_memory_reservations = ?, updated_at = ?,
 			backup_exclude_volumes = ?, dump_hook_service = ?, dump_hook_command = ?, backup_before_deploy = ?,
+			dump_interval_hours = ?,
 			env_source = ?, env_example_path = ?,
 			load_hook_service = ?, load_hook_command = ?, post_load_service = ?, post_load_command = ?,
 			access_protection = ?, protection_exempt_paths = ?, promote_from_app_id = ?,
@@ -603,6 +618,7 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 		app.RelaxPolicy, app.MemoryLimit, limits,
 		app.MemoryReservation, reservations, toMillis(now),
 		exclude, app.DumpHookService, app.DumpHookCommand, app.BackupBeforeDeploy,
+		app.DumpIntervalHours,
 		app.EnvSource, app.EnvExamplePath,
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),

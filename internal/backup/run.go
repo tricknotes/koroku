@@ -22,6 +22,8 @@ type TargetResult struct {
 	// Warning is set when a volume snapshot was stored although some files
 	// could not be read (they changed or vanished while the app ran).
 	Warning string
+	// Duration is how long the dump took; it is measured for dumps only.
+	Duration time.Duration
 	// Err is nil when the snapshot was stored.
 	Err error
 }
@@ -87,6 +89,9 @@ type plan struct {
 	forget bool
 	check  bool
 	trash  bool
+	// dumpOnly takes the dumps of the apps and nothing else: a run between
+	// the daily ones (ARCHITECTURE 10.8).
+	dumpOnly bool
 }
 
 // Start begins a run that backs up the system and every app, and returns as
@@ -191,9 +196,17 @@ func (m *Manager) execute(ctx context.Context, run *Run, p plan) (RunResult, err
 
 	res.RepositoryErr = m.prepare(ctx, true)
 	var apps []App
-	if res.RepositoryErr == nil {
-		if apps, res.RepositoryErr = p.apps(ctx); res.RepositoryErr != nil {
-			res.RepositoryErr = fmt.Errorf("list apps: %w", res.RepositoryErr)
+	if res.RepositoryErr == nil || p.dumpOnly {
+		var err error
+		if apps, err = p.apps(ctx); err != nil && res.RepositoryErr == nil {
+			res.RepositoryErr = fmt.Errorf("list apps: %w", err)
+		}
+	}
+	if res.RepositoryErr != nil && p.dumpOnly {
+		// A run between the daily ones concerns the apps it was to dump,
+		// not every app: their dumps failed.
+		for _, app := range apps {
+			res.Targets = append(res.Targets, TargetResult{App: app.Slug, Kind: KindDump, Target: app.DumpService, Err: res.RepositoryErr})
 		}
 	}
 	if res.RepositoryErr == nil {
@@ -201,6 +214,10 @@ func (m *Manager) execute(ctx context.Context, run *Run, p plan) (RunResult, err
 			res.Targets = append(res.Targets, m.backupSystem(ctx))
 		}
 		for _, app := range apps {
+			if p.dumpOnly {
+				res.Targets = append(res.Targets, m.backupDump(ctx, app))
+				continue
+			}
 			res.Targets = append(res.Targets, m.backupApp(ctx, app)...)
 		}
 		// Maintenance runs even when a snapshot failed: one broken app
@@ -273,7 +290,7 @@ const errorSummaryBytes = 1000
 func (m *Manager) targetRecords(res RunResult) []TargetRecord {
 	out := make([]TargetRecord, 0, len(res.Targets))
 	for _, t := range res.Targets {
-		rec := TargetRecord{App: t.App, Kind: t.Kind, Target: t.Target, Status: TargetSucceeded}
+		rec := TargetRecord{App: t.App, Kind: t.Kind, Target: t.Target, Status: TargetSucceeded, Duration: t.Duration}
 		switch {
 		case t.Err != nil:
 			rec.Status, rec.Error = TargetFailed, m.shorten(t.Err.Error())
