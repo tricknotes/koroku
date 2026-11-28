@@ -707,3 +707,13 @@ func (s *Service) record(ctx context.Context, app store.App, action string, deta
 		s.opts.Logger.Error("recording activity failed", "app", app.Slug, "action", action, "error", err)
 	}
 }
+
+// PsqlCommand is the command that runs one query in the service's
+// container, for callers outside the package.
+func PsqlCommand(query string) []string {
+	return []string{"sh", "-c", psqlScript, "sh", query}
+}
+
+// RequestBase asks for a base backup of the app at the next reading of the
+// clock: after a recovery started a new timeline (ARCHITECTURE 10.9).
+func (s *Service) RequestBase(appID int64) { s.wantBase(appID) }

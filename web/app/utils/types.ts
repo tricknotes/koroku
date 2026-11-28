@@ -962,6 +962,21 @@ export interface PitrStatus {
   gaps: PitrGap[];
 }
 
+/** One restore to a point in time (ARCHITECTURE 10.9). */
+export interface PitrRestore {
+  id: number;
+  service: string;
+  target_time: string;
+  base_snapshot_id: string;
+  /** Where the data before the restore was moved on the host. */
+  trash_path: string;
+  status: 'running' | 'succeeded' | 'failed';
+  error: string;
+  started_at: string;
+  finished_at: string | null;
+  actor?: Actor | null;
+}
+
 export interface PitrGap {
   from: string;
   /** null while it lasts. */

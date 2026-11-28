@@ -43,6 +43,7 @@ const (
 	actDBCopyStarted    = "db_copy.started"   // {"copy_id", "source", "source_kind"}
 	actDBCopySent       = "db_copy.sent"      // {"source_kind"}, on the source app
 	actDBRestored       = "db.restored"       // {"copy_id", "snapshot_id"}
+	actPITRRestored     = "db.pitr_restored"  // {"restore_id", "target_time"}
 	actTaskRunStarted   = "task_run.started"  // {"run_id", "task_name", "service", "command"}
 	actTasksChanged     = "tasks.changed"     // {"added", "changed", "removed": [names], "reordered"}
 	actMemberRoleSet    = "member.role_set"   // {"member": {"id", "login"}, "from", "to"}

@@ -72,6 +72,8 @@ type Options struct {
 	// PITR reports and turns off point-in-time recovery (ARCHITECTURE
 	// 10.9). Optional.
 	PITR PITR
+	// PITRRestorer restores to a point in time. Optional.
+	PITRRestorer PITRRestorer
 	// RouteStatus reports the last proxy configuration load. Optional.
 	RouteStatus func() RouteStatus
 	// Users resolves GitHub logins when the owner adds a member. Optional.
@@ -121,6 +123,7 @@ type Server struct {
 	compose        ComposeInspector
 	copier         DBCopier
 	pitr           PITR
+	pitrRestorer   PITRRestorer
 	users          UserLookup
 	waker          AppWaker
 	wakeHold       time.Duration
@@ -162,34 +165,35 @@ func New(opts Options) *Server {
 		presetFiles = opts.Auth.GitHub
 	}
 	return &Server{
-		envReqs:     envreq.NewReader(files, opts.PublicFiles),
-		publicFiles: opts.PublicFiles,
-		envPresets:  envpresets.NewReader(presetFiles, opts.PublicFiles),
-		cfg:         opts.Config,
-		store:       opts.Store,
-		system:      opts.System,
-		web:         opts.Web,
-		log:         logger,
-		version:     opts.Version,
-		clock:       clk,
-		box:         opts.Box,
-		deployer:    opts.Deployer,
-		promoter:    opts.Promoter,
-		refs:        opts.Refs,
-		router:      opts.Router,
-		domains:     opts.Domains,
-		auth:        opts.Auth,
-		ops:         opts.Ops,
-		tasks:       opts.Tasks,
-		logs:        opts.Logs,
-		backups:     opts.Backups,
-		volumes:     opts.Volumes,
-		compose:     opts.Compose,
-		copier:      opts.Copier,
-		pitr:        opts.PITR,
-		users:       opts.Users,
-		waker:       opts.Waker,
-		pulls:       opts.Pulls,
+		envReqs:      envreq.NewReader(files, opts.PublicFiles),
+		publicFiles:  opts.PublicFiles,
+		envPresets:   envpresets.NewReader(presetFiles, opts.PublicFiles),
+		cfg:          opts.Config,
+		store:        opts.Store,
+		system:       opts.System,
+		web:          opts.Web,
+		log:          logger,
+		version:      opts.Version,
+		clock:        clk,
+		box:          opts.Box,
+		deployer:     opts.Deployer,
+		promoter:     opts.Promoter,
+		refs:         opts.Refs,
+		router:       opts.Router,
+		domains:      opts.Domains,
+		auth:         opts.Auth,
+		ops:          opts.Ops,
+		tasks:        opts.Tasks,
+		logs:         opts.Logs,
+		backups:      opts.Backups,
+		volumes:      opts.Volumes,
+		compose:      opts.Compose,
+		copier:       opts.Copier,
+		pitr:         opts.PITR,
+		pitrRestorer: opts.PITRRestorer,
+		users:        opts.Users,
+		waker:        opts.Waker,
+		pulls:        opts.Pulls,
 
 		hostVerifier:  opts.HostVerifier,
 		reviewWatcher: opts.ReviewWatcher,
@@ -343,6 +347,10 @@ func (s *Server) apiRoutes() []route {
 
 		{"GET /api/apps/{slug}/db-copies", onApp(levelView), s.handleListDBCopies},
 		{"GET /api/apps/{slug}/pitr", onApp(levelView), s.handlePITRStatus},
+		{"GET /api/apps/{slug}/pitr/restores", onApp(levelView), s.handleListPITRRestores},
+		{"POST /api/apps/{slug}/pitr/restores", onApp(levelManage), s.handleStartPITRRestore},
+		{"GET /api/apps/{slug}/pitr/restores/{id}", onApp(levelView), s.handleGetPITRRestore},
+		{"GET /api/apps/{slug}/pitr/restores/{id}/logs", onApp(levelView), s.handlePITRRestoreLogs},
 		// The source app needs manage as well; checked in the handler.
 		{"POST /api/apps/{slug}/db-copies", onApp(levelManage), s.handleStartDBCopy},
 		{"POST /api/apps/{slug}/db-restores", onApp(levelManage), s.handleStartDBRestore},

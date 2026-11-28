@@ -3,7 +3,8 @@
 .copy-start,
 .copy-settings,
 .restore-settings,
-.pitr-settings {
+.pitr-settings,
+.pitr-restore {
   padding: var(--space-4);
 }
 
@@ -274,4 +275,52 @@
 
 .pitr-settings input {
   max-width: 20rem;
+}
+
+.pitr-restore {
+  margin: var(--space-4) 0;
+}
+
+.pitr-restore input {
+  max-width: 20rem;
+}
+
+.pitr-restore-rows {
+  --row-columns: 7rem minmax(0, 1fr) 6.5rem 4.5rem;
+}
+
+.pitr-restore-rows .row {
+  min-height: 3.25rem;
+}
+
+@media (width <= 56rem) {
+  .pitr-restore-rows > .row-list-header {
+    display: none;
+  }
+
+  .pitr-restore-rows .row {
+    grid-template:
+      "status action" auto
+      "source action" auto
+      "time action" auto / minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .pitr-restore-rows .restore-status {
+    grid-area: status;
+  }
+
+  .pitr-restore-rows .restore-source {
+    grid-area: source;
+  }
+
+  .pitr-restore-rows .restore-time {
+    grid-area: time;
+  }
+
+  .pitr-restore-rows .restore-action {
+    grid-area: action;
+    align-self: start;
+  }
 }

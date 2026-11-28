@@ -149,3 +149,100 @@ module('Acceptance | point-in-time recovery', function (hooks) {
     assert.dom('[data-test-pitr] [data-test-role-note="manage"]').exists();
   });
 });
+
+module('Acceptance | point-in-time recovery | restore', function (hooks) {
+  setupApplicationTest(hooks);
+
+  let fakes: Fakes;
+  let app: App;
+
+  hooks.beforeEach(function () {
+    fakes = installFakes(this.owner);
+    const deployment = makeDeployment();
+    app = makeApp({
+      current_deployment: deployment,
+      latest_deployment: deployment,
+      backup_exclude_volumes: [],
+      dump_hook_service: 'db',
+      dump_hook_command: 'pg_dump app',
+      backup_before_deploy: false,
+      pitr_service: 'db',
+      environment: 'production',
+    });
+    let restores: unknown[] = [];
+    fakes.api
+      .on('GET', '/api/apps', () => ({ apps: [app] }))
+      .on('GET', '/api/apps/blog', () => app)
+      .on('GET', '/api/backups', makeBackups())
+      .on('GET', '/api/apps/blog/backups/status', makeAppBackupStatus())
+      .on('GET', '/api/apps/blog/backups', { snapshots: [] })
+      .on('GET', '/api/apps/blog/volumes', { volumes: [] })
+      .on('GET', '/api/apps/blog/pitr', () =>
+        status({
+          service: 'db',
+          state: 'ready',
+          earliest_at: '2026-11-21T03:00:00Z',
+          archived_until: '2026-11-28T02:00:00Z',
+        }),
+      )
+      .on('GET', '/api/apps/blog/pitr/restores', () => ({ restores }))
+      .on('POST', '/api/apps/blog/pitr/restores', (call: FakeCall) => {
+        const body = call.body as { target_time: string };
+        restores = [
+          {
+            id: 4,
+            service: 'db',
+            target_time: body.target_time,
+            base_snapshot_id: '9fceb02d',
+            trash_path:
+              '/var/lib/koroku/restore-trash/blog-pitr-20261128T030000Z',
+            status: 'running',
+            error: '',
+            started_at: '2026-11-28T03:00:00Z',
+            finished_at: null,
+          },
+        ];
+        return restores[0];
+      });
+  });
+
+  test('a time is restored to after the slug is typed', async function (assert) {
+    await visit('/apps/blog/backups');
+    await click('[data-test-pitr-restore-start]');
+    assert
+      .dom('[data-test-field-group="target_time"]')
+      .includesText('日時を入力してください');
+    assert.dom('[data-test-dialog]').doesNotExist();
+
+    await fillIn('[data-test-field="target_time"]', '2026-11-27T10:15:30');
+    await click('[data-test-pitr-restore-start]');
+    assert
+      .dom('[data-test-pitr-restore-dialog-target]')
+      .includesText('2026/11/27 10:15 JST');
+    assert.dom('[data-test-dialog]').includesText('503').includesText('7 日間');
+    assert.dom('[data-test-dialog-confirm]').isDisabled();
+    await fillIn('[data-test-dialog-input]', 'blog');
+    await click('[data-test-dialog-confirm]');
+
+    assert.deepEqual(
+      fakes.api.callsTo('POST', '/api/apps/blog/pitr/restores')[0]?.body,
+      { target_time: '2026-11-27T01:15:30.000Z', confirm: 'blog' },
+    );
+    assert.dom('[data-test-pitr-restore="4"]').includesText('戻しています');
+    assert.ok(
+      fakes.eventSource.last.url.endsWith(
+        '/api/apps/blog/pitr/restores/4/logs',
+      ),
+    );
+  });
+
+  test('a time before the range is refused before asking', async function (assert) {
+    await visit('/apps/blog/backups');
+    await fillIn('[data-test-field="target_time"]', '2026-11-01T00:00');
+    await click('[data-test-pitr-restore-start]');
+    assert
+      .dom('[data-test-field-group="target_time"]')
+      .includesText('戻せる期間より前');
+    assert.dom('[data-test-dialog]').doesNotExist();
+  });
+});

@@ -2,6 +2,7 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
+import { fn } from '@ember/helper';
 import type Owner from '@ember/owner';
 import type ApiService from 'koroku-console/services/api';
 import type PollerService from 'koroku-console/services/poller';
@@ -12,7 +13,19 @@ import { formatDateTimeJst } from 'koroku-console/utils/format';
 import Loadable from 'koroku-console/utils/loadable';
 import { can } from 'koroku-console/utils/roles';
 import type { StatusKind } from 'koroku-console/utils/status';
-import type { App, PitrGap, PitrStatus } from 'koroku-console/utils/types';
+import {
+  isoToJstInput,
+  jstInputToIso,
+  targetProblem,
+} from 'koroku-console/utils/pitr';
+import type {
+  App,
+  PitrGap,
+  PitrRestore,
+  PitrStatus,
+} from 'koroku-console/utils/types';
+import PitrRestoreDetail from './pitr-restore-detail';
+import RowList from './row-list';
 import Banner from './banner';
 import Button from './button';
 import ConfirmDialog from './confirm-dialog';
@@ -72,6 +85,16 @@ export default class PitrPanel extends Component<Signature> {
   @service declare poller: PollerService;
 
   status = new Loadable<PitrStatus>(() => this.api.getPitr(this.slug));
+  restores = new Loadable<PitrRestore[]>(() =>
+    this.api.listPitrRestores(this.slug),
+  );
+
+  @tracked targetInput = '';
+  @tracked targetError = '';
+  @tracked restoring = false;
+  @tracked starting = false;
+  @tracked startError: unknown = null;
+  @tracked openId: number | null = null;
 
   @tracked serviceName: string;
   @tracked confirming = false;
@@ -85,6 +108,7 @@ export default class PitrPanel extends Component<Signature> {
     this.serviceName = this.app.pitr_service ?? '';
     if (!this.available) return;
     void this.status.load();
+    void this.restores.load();
     this.poller.every(this, PREPARING_INTERVAL, () => this.follow());
   }
 
@@ -122,7 +146,75 @@ export default class PitrPanel extends Component<Signature> {
     if (state === 'preparing' || state === 'waiting') {
       await this.status.load({ quiet: true });
     }
+    if (this.restores.value?.some((r) => r.status === 'running')) {
+      await this.restores.load({ quiet: true });
+    }
   }
+
+  get canRestore(): boolean {
+    return !this.readOnly && this.status.value?.state === 'ready';
+  }
+
+  get openRestore(): PitrRestore | undefined {
+    const list = this.restores.value ?? [];
+    return list.find((r) => r.id === this.openId) ?? list[0];
+  }
+
+  get targetIso(): string {
+    return jstInputToIso(this.targetInput);
+  }
+
+  setTarget = (event: Event) => {
+    this.targetInput = inputValue(event);
+    this.targetError = '';
+  };
+
+  /** Fills the input with the earliest time, as a starting point. */
+  get earliestInput(): string {
+    const earliest = this.status.value?.earliest_at;
+    return earliest ? isoToJstInput(earliest) : '';
+  }
+
+  requestRestore = () => {
+    this.startError = null;
+    this.targetError = targetProblem(
+      this.targetIso,
+      this.status.value?.earliest_at ?? null,
+      new Date(),
+    );
+    if (!this.targetError) this.restoring = true;
+  };
+
+  cancelRestore = () => {
+    this.restoring = false;
+  };
+
+  confirmRestore = async () => {
+    this.starting = true;
+    try {
+      const restore = await this.api.startPitrRestore(this.slug, {
+        target_time: this.targetIso,
+        confirm: this.slug,
+      });
+      this.restores.set([restore, ...(this.restores.value ?? [])]);
+      this.openId = restore.id;
+    } catch (error) {
+      this.startError = error;
+    } finally {
+      this.starting = false;
+      this.restoring = false;
+    }
+  };
+
+  openLog = (restore: PitrRestore) => {
+    this.openId = restore.id;
+  };
+
+  restoreEnded = async () => {
+    await this.restores.load({ quiet: true });
+    await this.status.load({ quiet: true });
+    await this.args.model.reload();
+  };
 
   setService = (event: Event) => {
     this.serviceName = inputValue(event);
@@ -261,6 +353,99 @@ export default class PitrPanel extends Component<Signature> {
           <ErrorMessage @error={{this.status.error}} />
         {{/if}}
 
+        {{#if this.canRestore}}
+          <form
+            class="box pitr-restore"
+            novalidate
+            data-test-pitr-restore-form
+            {{on "submit" (preventDefault this.requestRestore)}}
+          >
+            <FormField
+              @label="戻す日時（JST）"
+              @hint="この時刻の状態に DB を戻します。秒まで指定できます。"
+              @error={{this.targetError}}
+              data-test-field-group="target_time"
+              as |field|
+            >
+              <input
+                id={{field.id}}
+                type="datetime-local"
+                step="1"
+                min={{this.earliestInput}}
+                value={{this.targetInput}}
+                aria-describedby={{field.describedBy}}
+                data-test-field="target_time"
+                {{on "input" this.setTarget}}
+              />
+            </FormField>
+            <div aria-live="polite">
+              <ErrorMessage @error={{this.startError}} />
+            </div>
+            <div class="form-footer">
+              <Button
+                @type="submit"
+                class="button-danger-outline"
+                @busy={{this.starting}}
+                @busyLabel="始めています…"
+                data-test-pitr-restore-start
+              >この時刻に戻す</Button>
+            </div>
+          </form>
+        {{/if}}
+
+        {{#if this.restores.value.length}}
+          <h3 class="subsection-title">時点指定の復旧の履歴</h3>
+          <RowList class="pitr-restore-rows" @label="時点指定の復旧の履歴">
+            <:header>
+              <span>状態</span>
+              <span>戻した日時</span>
+              <span>開始</span>
+              <span></span>
+            </:header>
+            <:rows as |Row|>
+              {{#each this.restores.value key="id" as |restore|}}
+                <Row data-test-pitr-restore={{restore.id}}>
+                  <div class="restore-status">
+                    <StatusIndicator
+                      @kind={{restoreKind restore}}
+                      @label={{restoreLabel restore}}
+                    />
+                  </div>
+                  <div class="restore-source">
+                    <span class="cell-label">戻した日時</span>
+                    <span>{{at restore.target_time}}</span>
+                    {{#if restore.actor}}
+                      <span class="deploy-actor restore-actor">実行:
+                        {{restore.actor.login}}</span>
+                    {{/if}}
+                  </div>
+                  <div class="restore-time">
+                    <span class="cell-label">開始</span>
+                    <RelativeTime @time={{restore.started_at}} />
+                  </div>
+                  <div class="restore-action">
+                    <Button
+                      @size="small"
+                      aria-label="時点指定の復旧 #{{restore.id}} のログを表示"
+                      data-test-pitr-restore-open
+                      {{on "click" (fn this.openLog restore)}}
+                    >ログ</Button>
+                  </div>
+                </Row>
+              {{/each}}
+            </:rows>
+          </RowList>
+          {{#if this.openRestore}}
+            {{#each (single this.openRestore) key="id" as |shown|}}
+              <PitrRestoreDetail
+                @slug={{this.slug}}
+                @restore={{shown}}
+                @onLogEnd={{this.restoreEnded}}
+              />
+            {{/each}}
+          {{/if}}
+        {{/if}}
+
         {{#if this.readOnly}}
           <RoleNote @needed="manage" @what="時点指定の復旧の設定" />
         {{/if}}
@@ -315,6 +500,39 @@ export default class PitrPanel extends Component<Signature> {
         </form>
       </section>
 
+      {{#if this.restoring}}
+        <ConfirmDialog
+          @title="DB をこの時刻に戻しますか？"
+          @confirmLabel="この時刻に戻す"
+          @danger={{true}}
+          @requireText={{if @model.isProduction this.slug}}
+          @busy={{this.starting}}
+          @onConfirm={{this.confirmRestore}}
+          @onCancel={{this.cancelRestore}}
+        >
+          <p data-test-pitr-restore-dialog-target>
+            <strong>{{this.saved_service}}</strong>
+            の DB を、{{at this.targetIso}}
+            の状態に戻します。
+          </p>
+          <ul>
+            <li>
+              戻す間、{{if @model.isProduction "本番アプリ" "アプリ"}}
+              <strong>{{this.slug}}</strong>
+              は<strong>停止</strong>し、アクセスには 503 のページが返ります。
+            </li>
+            <li>
+              いまのデータは消さずにサーバー上へ<strong>退避</strong>し、7
+              日間残します。失敗したときは、そのデータに戻してから起動します。
+            </li>
+            <li>
+              戻したあとの DB
+              は新しい時系列で動き、その後の書き込みから、また時点を指定して戻せます。
+            </li>
+          </ul>
+        </ConfirmDialog>
+      {{/if}}
+
       {{#if this.confirming}}
         <ConfirmDialog
           @title={{if
@@ -350,6 +568,21 @@ export default class PitrPanel extends Component<Signature> {
       {{/if}}
     {{/if}}
   </template>
+}
+
+function restoreKind(restore: PitrRestore): StatusKind {
+  if (restore.status === 'running') return 'deploying';
+  return restore.status === 'succeeded' ? 'running' : 'failed';
+}
+
+function restoreLabel(restore: PitrRestore): string {
+  if (restore.status === 'running') return '戻しています';
+  return restore.status === 'succeeded' ? '完了' : '失敗';
+}
+
+/** `{{#each (single x) key="id"}}` re-creates its block when x changes. */
+function single<T>(item: T): T[] {
+  return [item];
 }
 
 function eqState(status: PitrStatus, state: PitrStatus['state']): boolean {

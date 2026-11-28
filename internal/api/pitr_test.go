@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/tricknotes/koroku/internal/deploy"
 	"github.com/tricknotes/koroku/internal/pitr"
 	"github.com/tricknotes/koroku/internal/store"
 )
@@ -79,5 +81,76 @@ func TestPITRStatusWithoutBackups(t *testing.T) {
 	request(t, h, http.MethodPatch, "/api/apps/blog", `{"pitr_service":"db"}`)
 	if got := decode[pitrStatusJSON](t, request(t, h, http.MethodGet, "/api/apps/blog/pitr", "")); got.State != "unavailable" {
 		t.Errorf("unavailable: %+v", got)
+	}
+}
+
+type fakeRestorer struct {
+	store   *store.Store
+	err     error
+	targets []time.Time
+}
+
+func (f *fakeRestorer) StartPITRRestore(ctx context.Context, app store.App, target time.Time) (store.PITRRestore, error) {
+	f.targets = append(f.targets, target)
+	if f.err != nil {
+		return store.PITRRestore{}, f.err
+	}
+	return f.store.StartPITRRestore(ctx, app, target, time.Date(2026, 11, 28, 3, 0, 0, 0, time.UTC))
+}
+
+func (f *fakeRestorer) PITRRestoreLogPath(slug string, id int64) string { return "/nonexistent" }
+
+func TestStartPITRRestore(t *testing.T) {
+	var restorer *fakeRestorer
+	srv := newTestServer(t, func(o *Options) {
+		restorer = &fakeRestorer{store: o.Store}
+		o.PITRRestorer = restorer
+	})
+	h := srv.Handler()
+	createApp(t, h, "blog")
+	createApp(t, h, "shop")
+	request(t, h, http.MethodPatch, "/api/apps/blog", `{"pitr_service":"db"}`)
+
+	rec := request(t, h, http.MethodPost, "/api/apps/blog/pitr/restores", `{"target_time":"2026-11-27T10:15:30+09:00"}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("start: %d %s", rec.Code, rec.Body)
+	}
+	got := decode[pitrRestoreJSON](t, rec)
+	if got.Status != "running" || got.Service != "db" || !got.TargetTime.Equal(time.Date(2026, 11, 27, 1, 15, 30, 0, time.UTC)) {
+		t.Errorf("restore = %+v", got)
+	}
+	list := decode[struct {
+		Restores []pitrRestoreJSON `json:"restores"`
+	}](t, request(t, h, http.MethodGet, "/api/apps/blog/pitr/restores", ""))
+	if len(list.Restores) != 1 {
+		t.Errorf("list = %+v", list)
+	}
+	if rec := request(t, h, http.MethodGet, fmt.Sprintf("/api/apps/blog/pitr/restores/%d", got.ID), ""); rec.Code != http.StatusOK {
+		t.Errorf("get: %d", rec.Code)
+	}
+	// Another app's restore is not found under this one.
+	if rec := request(t, h, http.MethodGet, fmt.Sprintf("/api/apps/shop/pitr/restores/%d", got.ID), ""); rec.Code != http.StatusNotFound {
+		t.Errorf("other app: %d", rec.Code)
+	}
+
+	if rec := request(t, h, http.MethodPost, "/api/apps/blog/pitr/restores", `{}`); rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("no time: %d", rec.Code)
+	}
+	request(t, h, http.MethodPatch, "/api/apps/blog", `{"environment":"production"}`)
+	if rec := request(t, h, http.MethodPost, "/api/apps/blog/pitr/restores", `{"target_time":"2026-11-27T01:00:00Z"}`); errorCode(t, rec) != "confirmation_mismatch" {
+		t.Errorf("production without the slug: %d %s", rec.Code, rec.Body)
+	}
+	for err, code := range map[error]string{
+		pitr.ErrInGap:          "target_in_gap",
+		pitr.ErrNoBase:         "target_out_of_range",
+		pitr.ErrFutureTarget:   "target_in_future",
+		deploy.ErrPITRNotReady: "pitr_not_ready",
+		deploy.ErrBusy:         "busy",
+	} {
+		restorer.err = fmt.Errorf("plan: %w", err)
+		rec := request(t, h, http.MethodPost, "/api/apps/blog/pitr/restores", `{"target_time":"2026-11-27T01:00:00Z","confirm":"blog"}`)
+		if errorCode(t, rec) != code {
+			t.Errorf("%v: %d %s", err, rec.Code, rec.Body)
+		}
 	}
 }

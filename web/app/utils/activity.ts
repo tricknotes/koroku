@@ -2,6 +2,7 @@
 // activity`, ARCHITECTURE 10.7). The server records an action and a small
 // JSON of details (docs/API.md); the console words them here.
 
+import { formatDateTimeJst } from 'koroku-console/utils/format';
 import { roleLabel } from './roles';
 import { ENVIRONMENT_LABELS } from './status';
 import { COMPOSE_SOURCE_LABELS } from './compose-source';
@@ -304,6 +305,11 @@ export function describeActivity(entry: ActivityEntry): ActivityText {
       return {
         summary: `${str(d['source'])} の DB をこのアプリへコピー`,
         details: [copyKind(d['source_kind'])],
+      };
+    case 'db.pitr_restored':
+      return {
+        summary: 'DB を時点を指定して戻した',
+        details: [`戻した日時 ${formatDateTimeJst(str(d['target_time']))}`],
       };
     case 'pitr.prepared':
       return {

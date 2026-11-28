@@ -21,6 +21,7 @@ import type {
   PullRequest,
   CopySourceKind,
   DbCopy,
+  PitrRestore,
   PitrStatus,
   Deployment,
   PendingAutoDeploy,
@@ -891,6 +892,27 @@ export default class ApiService extends Service {
 
   dbCopyLogsUrl(id: number): string {
     return `/api/db-copies/${id}/logs`;
+  }
+
+  async listPitrRestores(slug: string): Promise<PitrRestore[]> {
+    const { restores } = await this.request<{
+      restores: PitrRestore[] | null;
+    }>('GET', `/api/apps/${seg(slug)}/pitr/restores`);
+    return restores ?? [];
+  }
+
+  /** Restores the app's PostgreSQL database to a time (ARCHITECTURE 10.9). */
+  startPitrRestore(
+    slug: string,
+    body: { target_time: string; confirm: string },
+  ): Promise<PitrRestore> {
+    return this.request('POST', `/api/apps/${seg(slug)}/pitr/restores`, {
+      body,
+    });
+  }
+
+  pitrRestoreLogsUrl(slug: string, id: number): string {
+    return `/api/apps/${seg(slug)}/pitr/restores/${id}/logs`;
   }
 }
 

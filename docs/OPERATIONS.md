@@ -307,6 +307,22 @@ staging アプリの pull request ごとのレビューアプリ（ARCHITECTURE 
     restic forget --prune <ID> <ID> ...         # 一覧に出た ID を渡す
     ```
 
+### 10.6 時点指定の復旧を手で戻す
+
+時点指定の復旧（ARCHITECTURE 10.9）は、いまのデータディレクトリを `/var/lib/koroku/restore-trash/<slug>-pitr-<時刻>/` へ移してから戻し、7 日残す。失敗すれば koroku が自分で戻すが、戻すのにも失敗したとき（ログの末尾に、その旨と退避先が書いてある）や、戻したあとで前のデータに戻したくなったときは、手で入れ替える。
+
+1. 管理画面でアプリを停止する。
+2. サーバーで、DB のサービスのイメージのコンテナに、データの volume と退避先をマウントして入れ替える。`<volume>` は `koroku-<slug>_<volume 名>`、`<マウント先>` は Compose ファイルでその volume を付けたパス、`<データディレクトリ>` は `SHOW data_directory` の値（公式イメージなら 17 までは `/var/lib/postgresql/data`、18 からは `/var/lib/postgresql/18/docker`）。
+
+   ```sh
+   sudo docker run --rm --user root \
+     -v <volume>:<マウント先> \
+     -v /var/lib/koroku/restore-trash/<slug>-pitr-<時刻>:/koroku/trash:ro \
+     --entrypoint sh postgres:<版> -c 'set -e; find "$1" -mindepth 1 -delete; cp -a /koroku/trash/. "$1"/' sh <データディレクトリ>
+   ```
+
+3. 管理画面でアプリを起動する。戻した時点より後に書かれた WAL は、新しい時系列のものなので使われない。時点指定の復旧の欄の「戻せる期間」は、次のベースバックアップ（日次の実行か次のデプロイの後）から数え直しになる。
+
 ## 11. ホスト全損からの復旧
 
 ARCHITECTURE 10.2 の「ホスト全損」の手順。必要なのは 7 章で控えたもの（restic のパスワード、オブジェクトストレージの接続情報）と、`koroku` のバイナリ。
@@ -385,6 +401,8 @@ curl -sSL "<heroku pg:backups:url の出力>" | sudo docker exec -i koroku-<slug
 ```
 
 ## 検証済みの範囲
+
+- 時点指定の復旧（ARCHITECTURE 10.9）: PostgreSQL 17 と restic で、準備（設定の書き込みと 1 回の再起動、ベースバックアップ）、WAL の退避、マウントを外したリリースでの戻せない区間の記録、ある時刻への復旧（退避前の WAL も使い、その直後に消した行が戻り、その後の書き込みがない）を、結合テストで確かめた。前提にした PostgreSQL の振る舞いは 14、17、18 の公式イメージで確かめた。
 
 実機を使わずに、次の方法で確かめている。
 

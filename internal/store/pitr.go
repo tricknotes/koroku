@@ -276,3 +276,138 @@ func (s *Store) ListPITRApps(ctx context.Context) ([]App, error) {
 	}
 	return out, nil
 }
+
+// PITRRestore is one restore of a database to a point in time.
+type PITRRestore struct {
+	ID             int64
+	AppID          int64
+	Service        string
+	TargetTime     time.Time
+	BaseSnapshotID string
+	TrashPath      string
+	Status         string // running | succeeded | failed
+	Error          string
+	Actor          *Actor
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+}
+
+// PITRRestoreInterruptedError is recorded on restores that were running
+// when koroku stopped.
+const PITRRestoreInterruptedError = "interrupted: koroku restarted while the restore was running"
+
+const pitrRestoreColumns = `id, app_id, service, target_time, base_snapshot_id, trash_path, status, error,
+	actor_user_id, actor_login, started_at, finished_at`
+
+func scanPITRRestore(row rowScanner) (PITRRestore, error) {
+	var (
+		r                PITRRestore
+		target, started  int64
+		finished, userID sql.NullInt64
+		login            string
+	)
+	err := row.Scan(&r.ID, &r.AppID, &r.Service, &target, &r.BaseSnapshotID, &r.TrashPath, &r.Status, &r.Error,
+		&userID, &login, &started, &finished)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PITRRestore{}, ErrNotFound
+	}
+	if err != nil {
+		return PITRRestore{}, fmt.Errorf("scan point-in-time restore: %w", err)
+	}
+	r.TargetTime, r.StartedAt, r.FinishedAt = fromMillis(target), fromMillis(started), fromNullMillis(finished)
+	r.Actor = actorFromColumns(userID, login)
+	return r, nil
+}
+
+// StartPITRRestore records the beginning of a restore.
+func (s *Store) StartPITRRestore(ctx context.Context, app App, target, now time.Time) (PITRRestore, error) {
+	userID, login := actorColumns(ctx)
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO pitr_restores (app_id, service, target_time, actor_user_id, actor_login, started_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`, app.ID, app.PITRService, toMillis(target), userID, login, toMillis(now))
+	if err != nil {
+		return PITRRestore{}, fmt.Errorf("start point-in-time restore: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return PITRRestore{}, err
+	}
+	return s.GetPITRRestore(ctx, id)
+}
+
+// SetPITRRestoreDetails records the base backup a restore uses and where
+// it moved the data before it.
+func (s *Store) SetPITRRestoreDetails(ctx context.Context, id int64, baseSnapshotID, trashPath string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE pitr_restores SET base_snapshot_id = ?, trash_path = ? WHERE id = ?`,
+		baseSnapshotID, trashPath, id)
+	if err != nil {
+		return fmt.Errorf("record point-in-time restore: %w", err)
+	}
+	return nil
+}
+
+// FinishPITRRestore records the outcome of a running restore.
+func (s *Store) FinishPITRRestore(ctx context.Context, id int64, succeeded bool, errMsg string, now time.Time) error {
+	status := CopyFailed
+	if succeeded {
+		status = CopySucceeded
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE pitr_restores SET status = ?, error = ?, finished_at = ? WHERE id = ? AND status = 'running'`,
+		status, errMsg, toMillis(now), id)
+	if err != nil {
+		return fmt.Errorf("finish point-in-time restore: %w", err)
+	}
+	return requireOneRow(res, "finish point-in-time restore")
+}
+
+// GetPITRRestore returns one restore.
+func (s *Store) GetPITRRestore(ctx context.Context, id int64) (PITRRestore, error) {
+	return scanPITRRestore(s.db.QueryRowContext(ctx, `SELECT `+pitrRestoreColumns+` FROM pitr_restores WHERE id = ?`, id))
+}
+
+// ListPITRRestores returns the newest restores of an app.
+func (s *Store) ListPITRRestores(ctx context.Context, appID int64, limit int) ([]PITRRestore, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+pitrRestoreColumns+` FROM pitr_restores WHERE app_id = ? ORDER BY id DESC LIMIT ?`, appID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list point-in-time restores: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []PITRRestore
+	for rows.Next() {
+		r, err := scanPITRRestore(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// FailInterruptedPITRRestores marks restores left running by a previous
+// process as failed and returns them. It is called once at startup.
+func (s *Store) FailInterruptedPITRRestores(ctx context.Context, now time.Time) ([]PITRRestore, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+pitrRestoreColumns+` FROM pitr_restores WHERE status = 'running' ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("fail interrupted point-in-time restores: %w", err)
+	}
+	var list []PITRRestore
+	for rows.Next() {
+		r, err := scanPITRRestore(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		list = append(list, r)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for _, r := range list {
+		if err := s.FinishPITRRestore(ctx, r.ID, false, PITRRestoreInterruptedError, now); err != nil {
+			return nil, err
+		}
+	}
+	return list, nil
+}

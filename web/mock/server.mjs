@@ -1386,6 +1386,37 @@ route('GET', '/api/apps/:slug/pitr', (context) => {
     gaps: [],
   };
 });
+route('GET', '/api/apps/:slug/pitr/restores', (context) => {
+  const app = appOf(context);
+  return { restores: context.state.pitrRestores?.get(app.slug) ?? [] };
+});
+route('GET', '/api/apps/:slug/pitr/restores/:id/logs', (context) => {
+  const app = appOf(context);
+  const restore = (context.state.pitrRestores?.get(app.slug) ?? []).find(
+    (r) => r.id === Number(context.params.id),
+  );
+  if (!restore) throw notFound('pitr_restore_not_found');
+  const at = (s) =>
+    new Date(Date.parse(restore.started_at) + s * 1000)
+      .toISOString()
+      .replace(/\.\d+Z$/, 'Z');
+  const lines = [
+    `==> ${at(0)} check Checking ${app.slug}`,
+    `Target: ${restore.target_time}`,
+    `==> ${at(1)} stop Stopping ${app.slug}`,
+    `==> ${at(3)} move Moving the data directory aside to ${restore.trash_path}`,
+    `==> ${at(9)} base Unpacking the base backup ${restore.base_snapshot_id}`,
+    `==> ${at(15)} wal Gathering the WAL`,
+    `==> ${at(18)} recover Recovering to ${restore.target_time}`,
+    'The database left recovery and started a new timeline.',
+    `==> ${at(26)} cleanup Removing the recovery settings`,
+    `==> ${at(27)} start Starting ${app.slug}`,
+    `==> ${at(34)} done Restored db to ${restore.target_time}`,
+  ];
+  if (context.query.get('format') === 'text')
+    return { text: lines.join('\n') + '\n' };
+  return { sse: lines, end: restore.status };
+});
 route('POST', '/api/apps/:slug/db-restores', (context) => {
   const { state, body } = context;
   const app = appOf(context);

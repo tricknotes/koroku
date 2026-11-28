@@ -90,7 +90,14 @@ type Options struct {
 	// CopyBackups backs up the target of a database copy and reads dump
 	// snapshots. Optional.
 	CopyBackups CopyBackups
-	Logger      *slog.Logger
+	// PITRSnapshots and PITR serve the restores to a point in time
+	// (ARCHITECTURE 10.9). Optional.
+	PITRSnapshots PITRSnapshots
+	PITR          PITRHooks
+	// TrashDir receives the data a restore to a point in time replaced
+	// (the restore trash of the backups, ARCHITECTURE 10.2).
+	TrashDir string
+	Logger   *slog.Logger
 
 	// AppsDir holds one directory per app (releases, env file, deploy logs).
 	AppsDir string
@@ -497,6 +504,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	e.mu.Unlock()
 	now := e.opts.Clock.Now()
 	e.failInterruptedCopies(ctx, now)
+	e.failInterruptedPITRRestores(ctx, now)
 	if err := e.failInterruptedTaskRuns(ctx, now); err != nil {
 		if ctx.Err() != nil {
 			// Stopped while starting: not a failure of the worker.
