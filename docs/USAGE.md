@@ -107,6 +107,7 @@ koroku でデプロイするリポジトリには、いくつかの前提があ�
 - Compose ファイルがあり（リポジトリに置けないときは、管理画面に書いたもの。上の「Compose ファイルのないリポジトリを動かす」）、HTTP を受けるサービスが 1 つあること。ヘルスチェックのパスが 5xx 以外をすぐ返すこと
 - 本番の設定で起動すること（開発用の設定は `compose.override.yaml` に分ける）
 - 権限の強い設定（`privileged`、ホストのネットワーク、Docker ソケットのマウント、書き込める bind mount など）を使わないこと。データは named volume に置くこと
+- 静的ファイルはアプリ自身が配ること（koroku の Caddy はアプリのファイルを配りません）。CDN を使うかは、Skill がアプリの構成を見て紹介します
 - ログは標準出力に出すこと。ワンショットのサービス（マイグレーションなど）は、ほかのサービスから `service_completed_successfully` で待たれていること
 
 詳しくは [plugins/koroku/skills/prepare-app/references/requirements.md](../plugins/koroku/skills/prepare-app/references/requirements.md) にまとめてあります。
