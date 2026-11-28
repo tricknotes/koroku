@@ -21,6 +21,7 @@ import type {
   PullRequest,
   CopySourceKind,
   DbCopy,
+  PitrStatus,
   Deployment,
   PendingAutoDeploy,
   DockerUsageItem,
@@ -868,6 +869,10 @@ export default class ApiService extends Service {
     body: { source: string; source_kind: CopySourceKind; confirm: string },
   ): Promise<DbCopy> {
     return this.request('POST', `/api/apps/${seg(slug)}/db-copies`, { body });
+  }
+
+  getPitr(slug: string): Promise<PitrStatus> {
+    return this.request('GET', `/api/apps/${seg(slug)}/pitr`);
   }
 
   /** Loads one of the app's own dump snapshots into it (ARCHITECTURE 10.8). */

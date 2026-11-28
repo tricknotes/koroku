@@ -1048,6 +1048,33 @@ SHOTS.push(
     wait: SNAPSHOT,
     click: '[data-test-snapshot-restore]',
   },
+  // Point-in-time recovery of the production app (ARCHITECTURE 10.9).
+  {
+    name: 'backups-pitr',
+    path: '/apps/blog/backups?scenario=pitr',
+    wait: '[data-test-pitr-range]',
+    script: "document.querySelector('[data-test-pitr]').scrollIntoView()",
+  },
+  {
+    name: 'backups-pitr-phone',
+    path: '/apps/blog/backups?scenario=pitr',
+    wait: '[data-test-pitr-range]',
+    ...PHONE,
+    fullPage: false,
+    script: "document.querySelector('[data-test-pitr]').scrollIntoView()",
+  },
+  {
+    name: 'backups-pitr-enable-dialog',
+    path: '/apps/blog/backups?scenario=healthy',
+    wait: '[data-test-pitr-form]',
+    script: `(() => {
+      const input = document.querySelector('[data-test-field="pitr_service"]');
+      input.value = 'db';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-test-pitr-save]').click();
+    })()`,
+    then: '[data-test-dialog]',
+  },
   // Dumps between the daily runs and restoring a dump (ARCHITECTURE 10.8).
   {
     name: 'backups-dump-restore',

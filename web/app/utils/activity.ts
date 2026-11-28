@@ -41,6 +41,7 @@ const SETTING_LABELS: Record<string, string> = {
   dump_hook_command: 'ダンプフックのコマンド',
   backup_before_deploy: 'デプロイ前のバックアップ',
   dump_interval_hours: 'ダンプの間隔（時間）',
+  pitr_service: '時点指定の復旧のサービス',
   load_hook_service: 'ロードフックのサービス',
   load_hook_command: 'ロードフックのコマンド',
   post_load_service: 'コピー後のコマンドのサービス',
@@ -303,6 +304,16 @@ export function describeActivity(entry: ActivityEntry): ActivityText {
       return {
         summary: `${str(d['source'])} の DB をこのアプリへコピー`,
         details: [copyKind(d['source_kind'])],
+      };
+    case 'pitr.prepared':
+      return {
+        summary: `${str(d['service'])} の時点指定の復旧を準備した`,
+        details: [],
+      };
+    case 'pitr.failed':
+      return {
+        summary: `${str(d['service'])} の時点指定の復旧の準備に失敗した`,
+        details: [clip(str(d['error']))],
       };
     case 'db.restored':
       return {
