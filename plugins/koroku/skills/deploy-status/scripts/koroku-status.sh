@@ -250,7 +250,7 @@ status_of() {
   fi
   jq -r '
     "    environment: \(.environment), desired state: \(.desired_state), url: \(.primary_url)",
-    "    repository: \(if .repo_full_name != "" then .repo_full_name else .repo_url end) (branch \(.default_branch)), compose: \(if .compose_path != "" then .compose_path else "(auto)" end), public: \(.web_service):\(.web_port), health: \(.healthcheck_path)",
+    "    repository: \(if .repo_full_name != "" then .repo_full_name else .repo_url end) (branch \(.default_branch)), compose: \(if .compose_source == "inline" then "written in koroku (koroku.compose.yaml)" elif .compose_path != "" then .compose_path else "(auto)" end), public: \(.web_service):\(.web_port), health: \(.healthcheck_path)",
     "    running: \(if .current_deployment then "#\(.current_deployment.id) \(.current_deployment.commit_sha[0:12]) \((.current_deployment.commit_message // "") | split("\n") | .[0] // "")" else "nothing" end)",
     "    latest:  \(if .latest_deployment then "#\(.latest_deployment.id) \(.latest_deployment.status) \(.latest_deployment.ref) \(.latest_deployment.commit_sha[0:12]) \((.latest_deployment.commit_message // "") | split("\n") | .[0] // "")" else "no deployment yet" end)",
     (if .latest_deployment and .latest_deployment.error != "" then "    error:   \(.latest_deployment.error)" else empty end),

@@ -15,6 +15,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 - Compose ファイルの場所（koroku の既定は `compose.yaml`、なければ `docker-compose.yml`。別のパスも画面で指定できる）、Dockerfile、`.dockerignore`、言語とフレームワーク、DB やキャッシュなどの付属サービスを確認する。
 - `docker compose -f <file> config --no-env-resolution` で正規化した結果を読む（`--no-env-resolution` を付けると env ファイルの中身が展開されないので、秘密が出力に出にくい）。
 - Compose ファイルがなければ、作るところから始める（[references/examples.md](references/examples.md) の雛形を使う）。
+- 利用者が「Compose は koroku の管理画面に書く」と言ったとき、またはリポジトリに Compose ファイルを置けないとき（他人が管理する public リポジトリを fork せずに動かす、など）は、下の「Compose を koroku の画面に書くとき」の進め方に切り替える。
 
 ### 2. 要件と照らし合わせる
 
@@ -79,7 +80,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 
 | 項目 | 内容 |
 | --- | --- |
-| Compose ファイルのパス | 例 `compose.yaml` |
+| Compose ファイルのパス | 例 `compose.yaml`。Compose を koroku に書くなら、パスの代わりに「Compose の置き場所: koroku に書く」と、画面に貼る内容そのもの（秘密の値は含めない） |
 | 公開サービスとコンテナ内ポート | 例 `web` / `3000` |
 | ヘルスチェックパス | 5xx 以外をすぐ返すパス。例 `/up` |
 | 環境変数 | 名前と意味、必須か任意か、秘密かどうか、値の作り方（例 `openssl rand -hex 64`）。値そのものは書かない。Compose に `${VAR}` で宣言したことも書く（koroku の「設定」で照合元が「Compose ファイルの `${VAR}`」になっていれば、環境変数の画面に未設定のものが出る） |
@@ -96,3 +97,19 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 あわせて、変えたファイルと理由、リハーサルの結果（実行したコマンドと出力の要点）、確かめられなかったことを書く。リハーサルしていないものを「動く」と書かない。
 
 動くようになったあとでメモリやイメージの大きさを詰めたいときは、同じプラグインの tune-app Skill を使う（`rehearse.sh --keep` で起動したまま測れる）。
+
+## Compose を koroku の画面に書くとき
+
+koroku は、Compose ファイルをリポジトリから読む代わりに、管理画面に書いた内容でデプロイできる（アプリの「Compose の置き場所」が「koroku に書く」。[references/requirements.md](references/requirements.md) の「koroku に書く Compose」）。管理画面の「Claude Code に Compose を書かせる」が出すプロンプトは、この進め方を頼むもの。上の 1〜5 を、次の点だけ変えて進める。
+
+- **リポジトリのファイルは変えない**（Dockerfile、既存の Compose ファイル、設定ファイルを含む）。変えないと動かせないと分かったら（Dockerfile がなくビルドできない、アプリが `0.0.0.0` で待ち受けない、など）、手を付けずに利用者に伝え、公開されているイメージを `image:` で使う、起動コマンドや環境変数を Compose 側で上書きする、といったリポジトリを変えない方法を先に探す。
+- **Compose はリポジトリの直下の `koroku.compose.yaml` に書く**。koroku がデプロイのたびに置くのと同じ名前と場所なので、相対パス（`build: .` など）がそのまま合う。コミットはしない（リポジトリにあっても、koroku は画面の内容で置き換える）。
+- 要件（2 と [references/requirements.md](references/requirements.md)）はそのまま当てはまる。秘密の値は書かず、`${VAR:?説明}` か `${VAR:-既定値}` で宣言する。
+- リハーサルは `--inline` を付ける。リポジトリの Compose ファイルは使われない。
+
+  ```sh
+  <skill-dir>/scripts/rehearse.sh --inline koroku.compose.yaml --service web --port 3000 --health /up --env-file /path/to/test.env
+  ```
+
+- 報告（5）では、「Compose ファイルのパス」の代わりに、`koroku.compose.yaml` の内容をそのまま 1 つのコードブロックで出す。利用者はそれを管理画面の「Compose の内容」に貼る。公開サービスとポート、ヘルスチェックパス、環境変数などのほかの項目は同じ。
+- あとで Compose を直すときも、直した内容の全体を出して、管理画面で置き換えてもらう（置き換えられるのは koroku のオーナーだけ）。
