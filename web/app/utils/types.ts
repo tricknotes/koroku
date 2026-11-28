@@ -364,12 +364,20 @@ export interface TaskRun {
 
 export type Environment = 'production' | 'staging';
 
+/** The repository's Compose file, or one written in koroku. */
+export type ComposeSource = 'repository' | 'inline';
+
 export interface App {
   slug: string;
   repo_full_name: string;
   repo_url: string;
   default_branch: string;
   compose_path: string;
+  /** Where the Compose file comes from (ARCHITECTURE 6.3). */
+  compose_source?: ComposeSource;
+  /** The file written in koroku; null when the role may not read it. */
+  compose_content?: string | null;
+  compose_content_hidden?: boolean;
   web_service: string;
   web_port: number;
   host_port: number;
@@ -509,6 +517,9 @@ export interface CreatedReviewApp extends App {
 export interface AppPatch {
   default_branch?: string;
   compose_path?: string;
+  /** Only the owner changes these two (ARCHITECTURE 6.3). */
+  compose_source?: ComposeSource;
+  compose_content?: string;
   web_service?: string;
   web_port?: number;
   healthcheck_path?: string;
@@ -551,6 +562,8 @@ export interface NewApp {
   repo_url?: string;
   default_branch?: string;
   compose_path?: string;
+  compose_source?: ComposeSource;
+  compose_content?: string;
   web_service?: string;
   healthcheck_path?: string;
   environment?: Environment;

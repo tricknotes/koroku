@@ -4,7 +4,13 @@
 
 import { roleLabel } from './roles';
 import { ENVIRONMENT_LABELS } from './status';
-import type { ActivityEntry, AppRole, Environment } from './types';
+import { COMPOSE_SOURCE_LABELS } from './compose-source';
+import type {
+  ActivityEntry,
+  AppRole,
+  ComposeSource,
+  Environment,
+} from './types';
 
 /** What an entry says: one line, and the specifics below it. */
 export interface ActivityText {
@@ -19,6 +25,8 @@ const SETTING_LABELS: Record<string, string> = {
   repo_id: 'リポジトリの ID',
   default_branch: '既定のブランチ',
   compose_path: 'Compose ファイルのパス',
+  compose_source: 'Compose の置き場所',
+  compose_content: 'koroku に書いた Compose',
   web_service: '公開するサービス',
   web_port: 'コンテナ側のポート',
   healthcheck_path: 'ヘルスチェックのパス',
@@ -69,6 +77,9 @@ function list(value: unknown): string[] {
 function settingValue(field: string, value: unknown): string {
   if (field === 'environment' && typeof value === 'string') {
     return ENVIRONMENT_LABELS[value as Environment] ?? value;
+  }
+  if (field === 'compose_source' && typeof value === 'string') {
+    return COMPOSE_SOURCE_LABELS[value as ComposeSource] ?? value;
   }
   if (typeof value === 'boolean') return value ? '有効' : '無効';
   if (typeof value === 'number') return String(value);

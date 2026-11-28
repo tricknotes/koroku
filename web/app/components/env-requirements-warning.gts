@@ -3,6 +3,7 @@ import { LinkTo } from '@ember/routing';
 import Banner from 'koroku-console/components/banner';
 import { buttonClass } from 'koroku-console/components/button';
 import {
+  fromInlineCompose,
   keyList,
   missingVariables,
   sourceFile,
@@ -49,6 +50,11 @@ export default class EnvRequirementsWarning extends Component<Signature> {
     return Boolean(this.args.requirements?.path);
   }
 
+  get inline(): boolean {
+    const req = this.args.requirements;
+    return req ? fromInlineCompose(req) : false;
+  }
+
   <template>
     {{#if this.missing.length}}
       <Banner
@@ -60,7 +66,7 @@ export default class EnvRequirementsWarning extends Component<Signature> {
       >
         <:default>
           <p>
-            このコミットの
+            {{if this.inline "koroku に書いた Compose の" "このコミットの"}}
             <span class={{if this.hasPath "mono"}}>{{this.file}}</span>
             が必要とする
             <span class="mono" data-test-deploy-env-missing>{{this.keys}}</span>

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tricknotes/koroku/internal/compose"
 	"github.com/tricknotes/koroku/internal/envreq"
 	"github.com/tricknotes/koroku/internal/github"
 	"github.com/tricknotes/koroku/internal/gitrepo"
@@ -59,7 +60,11 @@ func (s *Server) handleEnvRequirements(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, errs)
 		return
 	}
-	if sha == "" && ref == "" {
+	if app.EnvSource == envreq.SourceCompose && app.ComposeInline() {
+		// The file written in koroku is the same for every commit
+		// (ARCHITECTURE 6.3).
+		ref, sha = "", ""
+	} else if sha == "" && ref == "" {
 		ref = app.DefaultBranch
 	}
 
@@ -97,6 +102,11 @@ func (s *Server) handleEnvRequirements(w http.ResponseWriter, r *http.Request) {
 func (s *Server) readEnvRequirements(ctx context.Context, app store.App, out *envRequirementsJSON) envreq.Result {
 	if app.EnvSource == envreq.SourceOff {
 		return envreq.Result{Status: envreq.StatusOff}
+	}
+	if app.EnvSource == envreq.SourceCompose && app.ComposeInline() {
+		// The file is in the database: nothing is read from the
+		// repository, and no commit decides it (ARCHITECTURE 6.3).
+		return envreq.FromCompose(compose.InlineFileName, []byte(app.ComposeContent))
 	}
 	owner, repo, ok := githubRepoOf(app)
 	if !ok {

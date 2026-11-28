@@ -7,6 +7,7 @@ import Banner from 'koroku-console/components/banner';
 import Button from 'koroku-console/components/button';
 import Icon from 'koroku-console/components/icon';
 import {
+  fromInlineCompose,
   missingVariables,
   reasonText,
   sourceFile,
@@ -113,6 +114,7 @@ export default class EnvRequirementsPanel extends Component<Signature> {
   get where(): string {
     const v = this.value;
     if (!v) return '';
+    if (fromInlineCompose(v)) return 'koroku に書いた Compose';
     const sha = shortSha(v.commit_sha);
     return sha ? `${v.ref || 'コミット'}（${sha}）` : v.ref;
   }

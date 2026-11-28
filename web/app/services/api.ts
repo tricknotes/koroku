@@ -702,7 +702,7 @@ export default class ApiService extends Service {
   /** Variables to prefill on the create screen; secrets come generated. */
   async getEnvPresets(
     fullName: string,
-    query: { ref?: string; path?: string },
+    query: { ref?: string; path?: string; compose_source?: string },
   ): Promise<EnvPresets> {
     const presets = await this.request<EnvPresets>(
       'GET',

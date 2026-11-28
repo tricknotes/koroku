@@ -384,6 +384,30 @@ route('PATCH', '/api/apps/:slug', (context) => {
       }
     }
   }
+  // The Compose file written in koroku is the owner's to change, with a
+  // recent login (ARCHITECTURE 6.3).
+  const composeFields = ['compose_source', 'compose_content'].filter(
+    (field) =>
+      body[field] !== undefined && body[field] !== (target[field] ?? ''),
+  );
+  if (composeFields.length > 0) {
+    if (isMember(context.scenario)) {
+      throw new HttpError(403, 'forbidden_role', {
+        required: 'owner',
+        fields: composeFields,
+      });
+    }
+    if (context.scenario === 'stale-login') {
+      throw new HttpError(403, 'reauth_required');
+    }
+  }
+  const composeSource = body.compose_source ?? target.compose_source;
+  const composeContent = body.compose_content ?? target.compose_content ?? '';
+  if (composeSource === 'inline' && composeContent.trim() === '') {
+    throw new HttpError(422, 'validation_failed', {
+      compose_content: 'is required when the Compose file is written in koroku',
+    });
+  }
   // Making a production app deploy pushes needs a recent login (10.3).
   if (
     context.scenario === 'stale-login' &&
@@ -459,7 +483,12 @@ route('PATCH', '/api/apps/:slug', (context) => {
       ([field, value]) =>
         JSON.stringify(target[field] ?? '') !== JSON.stringify(value ?? ''),
     )
-    .map(([field, to]) => ({ field, from: target[field] ?? '', to }));
+    .map(([field, to]) =>
+      // The file itself is not recorded (ARCHITECTURE 6.3).
+      field === 'compose_content'
+        ? { field, secret: true }
+        : { field, from: target[field] ?? '', to },
+    );
   if (changes.some(({ field }) => MEMORY_FIELDS.includes(field))) {
     // The running release keeps what it reserves until the next deployment.
     snapshotReservations(target);
@@ -891,6 +920,8 @@ function envRequirements(context) {
           path: app.env_example_path || '.env.example',
         });
   if (spec.status !== 'ok') return { ...head, ...spec, variables: [] };
+  // The file written in koroku is the same for every commit.
+  if (spec.inline) Object.assign(head, { ref: '', commit_sha: '' });
   const saved = new Set(savedEnv(context).map((v) => v.key));
   const listed = new Set(spec.variables.map((v) => v.key));
   return {
@@ -1370,7 +1401,11 @@ route('GET', '/api/repos/:owner/:repo/commits', ({ state }) => {
 });
 route('GET', '/api/repos/:owner/:repo/compose', () => COMPOSE);
 // Secrets are generated on every request, as koroku does.
-route('GET', '/api/repos/:owner/:repo/env-presets', ({ state, params }) => {
+route('GET', '/api/repos/:owner/:repo/env-presets', (context) => {
+  const { state, params } = context;
+  // A Compose file written in koroku: the repository's is not read, so it
+  // fixes nothing (ARCHITECTURE 6.3).
+  const inline = context.query.get('compose_source') === 'inline';
   const suggestion = ENV_PRESETS[`${params.owner}/${params.repo}`];
   if (state.github === false || !suggestion) {
     return {
@@ -1390,6 +1425,7 @@ route('GET', '/api/repos/:owner/:repo/env-presets', ({ state, params }) => {
     status: 'ok',
     reason: '',
     ...suggestion,
+    ...(inline ? { compose_path: '', skipped: [] } : {}),
     presets: suggestion.presets.map(({ secret, ...preset }) => ({
       ...preset,
       match: preset.match ?? '',
@@ -1490,7 +1526,9 @@ const RANK = { view: 1, deploy: 2, manage: 3, owner: 4 };
 
 /** The scenarios that log in as MEMBER. */
 function isMember(scenario) {
-  return scenario === 'member' || scenario === 'review-member';
+  return ['member', 'review-member', 'compose-inline-member'].includes(
+    scenario,
+  );
 }
 
 /** A review app's roles are its parent's (ARCHITECTURE 9.9). */
@@ -1606,10 +1644,18 @@ function withReview(state, app) {
 /** Adds `role` to app JSON and leaves out the apps a member has none on. */
 function withRoles(scenario, result) {
   const state = stateOf(scenario);
-  const decorate = (app) => ({
-    ...withReview(state, app),
-    role: roleOf(scenario, app.slug),
-  });
+  const decorate = (app) => {
+    const role = roleOf(scenario, app.slug);
+    // The written Compose file is for the roles that read the variables
+    // (ARCHITECTURE 6.3).
+    const hidden = role === 'view' || role === 'deploy';
+    return {
+      ...withReview(state, app),
+      compose_content: hidden ? null : (app.compose_content ?? ''),
+      compose_content_hidden: hidden,
+      role,
+    };
+  };
   if (Array.isArray(result?.apps)) {
     return {
       ...result,

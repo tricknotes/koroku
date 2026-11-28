@@ -19,6 +19,7 @@ import (
 	"github.com/tricknotes/koroku/internal/envreq"
 	"github.com/tricknotes/koroku/internal/gitrepo"
 	"github.com/tricknotes/koroku/internal/store"
+	"go.yaml.in/yaml/v3"
 )
 
 const maxBodyBytes = 1 << 20
@@ -40,11 +41,18 @@ const maxExemptPaths = 20
 var reservedSlugs = map[string]bool{"console": true, "www": true, "api": true}
 
 type appJSON struct {
-	Slug                 string            `json:"slug"`
-	RepoFullName         string            `json:"repo_full_name"`
-	RepoURL              string            `json:"repo_url"`
-	DefaultBranch        string            `json:"default_branch"`
-	ComposePath          string            `json:"compose_path"`
+	Slug          string `json:"slug"`
+	RepoFullName  string `json:"repo_full_name"`
+	RepoURL       string `json:"repo_url"`
+	DefaultBranch string `json:"default_branch"`
+	ComposePath   string `json:"compose_path"`
+	// ComposeSource is where the Compose file comes from: "repository" or
+	// "inline" (ARCHITECTURE 6.3). ComposeContent is the file written in
+	// koroku; null, with ComposeContentHidden true, for a role below
+	// manage and for an API token.
+	ComposeSource        string            `json:"compose_source"`
+	ComposeContent       *string           `json:"compose_content"`
+	ComposeContentHidden bool              `json:"compose_content_hidden"`
 	WebService           string            `json:"web_service"`
 	WebPort              int               `json:"web_port"`
 	HostPort             int               `json:"host_port"`
@@ -120,6 +128,7 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		RepoURL:               app.RepoURL,
 		DefaultBranch:         app.DefaultBranch,
 		ComposePath:           app.ComposePath,
+		ComposeSource:         app.ComposeSource,
 		WebService:            app.WebService,
 		WebPort:               app.WebPort,
 		HostPort:              app.HostPort,
@@ -174,6 +183,14 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		return appJSON{}, err
 	}
 	out.Role = lvl.String()
+	// The file may carry literal values, like the variables only these
+	// roles read (ARCHITECTURE 6.3).
+	if _, viaToken := tokenFrom(r); lvl >= levelManage && !viaToken {
+		content := app.ComposeContent
+		out.ComposeContent = &content
+	} else {
+		out.ComposeContentHidden = true
+	}
 	// The primary URL and the number of domains waiting for DNS let the app
 	// list render without one domain request per app.
 	out.PrimaryURL = out.URL
@@ -234,6 +251,8 @@ type appInput struct {
 	RepoID               *int64             `json:"repo_id"`
 	DefaultBranch        *string            `json:"default_branch"`
 	ComposePath          *string            `json:"compose_path"`
+	ComposeSource        *string            `json:"compose_source"`
+	ComposeContent       *string            `json:"compose_content"`
 	WebService           *string            `json:"web_service"`
 	WebPort              *int               `json:"web_port"`
 	HealthcheckPath      *string            `json:"healthcheck_path"`
@@ -350,6 +369,13 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	}
 	if in.ComposePath != nil {
 		app.ComposePath = strings.TrimSpace(*in.ComposePath)
+	}
+	if in.ComposeSource != nil {
+		app.ComposeSource = strings.TrimSpace(*in.ComposeSource)
+	}
+	if in.ComposeContent != nil {
+		// Textareas of some clients send CRLF line ends.
+		app.ComposeContent = strings.ReplaceAll(*in.ComposeContent, "\r\n", "\n")
 	}
 	if in.WebService != nil {
 		app.WebService = strings.TrimSpace(*in.WebService)
@@ -494,6 +520,7 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 			errs.add("compose_path", "must be a path inside the repository")
 		}
 	}
+	validateComposeSource(*app, errs)
 	if !envreq.ValidSource(app.EnvSource) {
 		errs.add("env_source", "must be compose, dotenv or off")
 	}
@@ -542,6 +569,35 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	validateHook(errs, "load_hook", app.LoadHookService, app.LoadHookCommand)
 	validateHook(errs, "post_load", app.PostLoadService, app.PostLoadCommand)
 	return errs
+}
+
+// validateComposeSource checks where the Compose file comes from and the
+// file written in koroku (ARCHITECTURE 6.3). What the file configures is
+// checked by the deployment, like a repository's file.
+func validateComposeSource(app store.App, errs fieldErrors) {
+	inline := app.ComposeSource == store.ComposeSourceInline
+	if !inline && app.ComposeSource != store.ComposeSourceRepository {
+		errs.add("compose_source", "must be repository or inline")
+	}
+	content := app.ComposeContent
+	switch {
+	case len(content) > store.MaxComposeContentBytes:
+		errs.add("compose_content", fmt.Sprintf("must be at most %d KiB", store.MaxComposeContentBytes>>10))
+	case strings.ContainsRune(content, 0):
+		errs.add("compose_content", "must be text")
+	case !inline:
+		// Kept as it is until the app deploys it.
+	case strings.TrimSpace(content) == "":
+		errs.add("compose_content", "is required when the Compose file is written in koroku")
+	default:
+		var doc map[string]any
+		if err := yaml.Unmarshal([]byte(content), &doc); err != nil {
+			// The error names the line; the text is the user's own.
+			errs.add("compose_content", "is not a YAML mapping: "+truncateForError(strings.TrimPrefix(err.Error(), "yaml: ")))
+		} else if len(doc) == 0 {
+			errs.add("compose_content", "is empty: write at least the services")
+		}
+	}
 }
 
 // validateHook checks a service and command pair (the dump hook, the load
@@ -684,6 +740,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	in := body.appInput
 	app := store.App{
 		DefaultBranch:    "main",
+		ComposeSource:    store.ComposeSourceRepository,
 		WebService:       "web",
 		HealthcheckPath:  "/",
 		Environment:      store.EnvironmentStaging,
@@ -906,6 +963,14 @@ func (s *Server) ownerOnlyChanges(r *http.Request, before, after store.App, in a
 		!sameID(before.RepoID, after.RepoID) {
 		fields = append(fields, "repository")
 	}
+	// The file decides what runs with the app's variables and volumes,
+	// like the repository does (ARCHITECTURE 6.3).
+	if before.ComposeSource != after.ComposeSource {
+		fields = append(fields, "compose_source")
+	}
+	if before.ComposeContent != after.ComposeContent {
+		fields = append(fields, "compose_content")
+	}
 	if in.PromoteFrom != nil {
 		current, err := s.promoteFromSlug(r.Context(), before)
 		if err != nil {
@@ -934,6 +999,9 @@ func touchesSafeguards(before, after store.App) bool {
 		before.RepoFullName != after.RepoFullName ||
 		before.RepoURL != after.RepoURL ||
 		!sameRepoID ||
+		// The Compose file written in koroku (ARCHITECTURE 6.3).
+		before.ComposeSource != after.ComposeSource ||
+		before.ComposeContent != after.ComposeContent ||
 		// Opening the app to everyone (ARCHITECTURE 8.3).
 		(before.AccessProtection && !after.AccessProtection) ||
 		// Handing its variables and data to pull requests (ARCHITECTURE 9.9).

@@ -35,6 +35,9 @@ type Request struct {
 	// ComposePath is the Compose file the create screen chose, empty to
 	// detect.
 	ComposePath string
+	// IgnoreCompose reads no Compose file of the repository: the app's is
+	// written in koroku (ARCHITECTURE 6.3).
+	IgnoreCompose bool
 }
 
 // Result is a Detection or the reason there is none.
@@ -86,7 +89,7 @@ func (r *Reader) Read(ctx context.Context, req Request) Result {
 		}
 		return content, err
 	}
-	detection, err := Detect(root, read, req.ComposePath)
+	detection, err := detectPresets(root, read, req.ComposePath, !req.IgnoreCompose)
 	if err != nil {
 		return Result{Status: StatusUnavailable, Reason: reasonFor(err)}
 	}

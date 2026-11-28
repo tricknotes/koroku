@@ -144,6 +144,10 @@ var settingFields = []settingField{
 	}},
 	{name: "default_branch", get: func(a store.App) any { return a.DefaultBranch }},
 	{name: "compose_path", get: func(a store.App) any { return a.ComposePath }},
+	{name: "compose_source", get: func(a store.App) any { return a.ComposeSource }},
+	// The file is long and may carry literal values; that it changed is
+	// enough (ARCHITECTURE 6.3).
+	{name: "compose_content", secret: true, get: func(a store.App) any { return a.ComposeContent }},
 	{name: "web_service", get: func(a store.App) any { return a.WebService }},
 	{name: "web_port", get: func(a store.App) any { return a.WebPort }},
 	{name: "healthcheck_path", get: func(a store.App) any { return a.HealthcheckPath }},

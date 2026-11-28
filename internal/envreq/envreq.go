@@ -212,18 +212,23 @@ func (r *Reader) fetch(ctx context.Context, req Request) Result {
 		}
 		return Unavailable(reasonFor(err), filePath)
 	}
-	var vars []Variable
 	if req.Source == SourceCompose {
-		for _, v := range compose.Variables(content) {
-			vars = append(vars, Variable{Key: v.Name, Required: v.Required, Default: v.Default, Description: v.Message})
-		}
-	} else {
-		vars = ParseExample(content)
+		return FromCompose(filePath, content)
 	}
+	vars := ParseExample(content)
 	if vars == nil {
 		vars = []Variable{}
 	}
 	return Result{Status: StatusOK, Path: filePath, Variables: vars}
+}
+
+// FromCompose returns the variables a Compose file at path references.
+func FromCompose(path string, content []byte) Result {
+	vars := []Variable{}
+	for _, v := range compose.Variables(content) {
+		vars = append(vars, Variable{Key: v.Name, Required: v.Required, Default: v.Default, Description: v.Message})
+	}
+	return Result{Status: StatusOK, Path: path, Variables: vars}
 }
 
 // reasonFor maps a GitHub client error to a reason.

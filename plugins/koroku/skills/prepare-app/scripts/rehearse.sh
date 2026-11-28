@@ -28,6 +28,11 @@
 # Usage: rehearse.sh --port <container port> [options]
 #   --file <path>        Compose file relative to the repository root
 #                        (default: compose.yaml, else docker-compose.yml)
+#   --inline <path>      a Compose file that is written in koroku's console
+#                        instead of committed (the app's "Compose の置き場所"
+#                        is "koroku に書く"): it is put at the root of the
+#                        rehearsed copy as koroku.compose.yaml, as koroku
+#                        does, and used in place of the repository's
 #   --service <name>     public service (default: web)
 #   --port <port>        container port of the public service (required)
 #   --health <path>      health-check path (default: /)
@@ -62,6 +67,7 @@
 set -euo pipefail
 
 file=""
+inline=""
 service="web"
 port=""
 health="/"
@@ -83,6 +89,7 @@ die() { echo "rehearse: $*" >&2; exit 2; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --file) file="${2:?}"; shift 2 ;;
+    --inline) inline="${2:?}"; shift 2 ;;
     --service) service="${2:?}"; shift 2 ;;
     --port) port="${2:?}"; shift 2 ;;
     --health) health="${2:?}"; shift 2 ;;
@@ -160,13 +167,18 @@ fi
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "run this inside a Git repository"
 
-if [ -z "$file" ]; then
+if [ -n "$inline" ]; then
+  [ -z "$file" ] || die "--inline replaces the repository's Compose file; do not pass --file with it"
+  [ -f "$inline" ] || die "$inline does not exist"
+  inline="$(cd "$(dirname "$inline")" && pwd -P)/$(basename "$inline")"
+  file="koroku.compose.yaml"
+elif [ -z "$file" ]; then
   if [ -f "$root/compose.yaml" ]; then file="compose.yaml"
   elif [ -f "$root/docker-compose.yml" ]; then file="docker-compose.yml"
-  else die "no compose.yaml or docker-compose.yml at the repository root; pass --file"
+  else die "no compose.yaml or docker-compose.yml at the repository root; pass --file, or --inline for a Compose file kept in koroku"
   fi
 fi
-[ -f "$root/$file" ] || die "$file does not exist in $root"
+[ -n "$inline" ] || [ -f "$root/$file" ] || die "$file does not exist in $root"
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/koroku-rehearse.XXXXXX")"
 work="$(cd "$work" && pwd -P)" # Compose resolves relative paths per file
@@ -184,6 +196,13 @@ project="koroku-rehearse-$(basename "$work" | sed 's/.*\.//' | tr '[:upper:]' '[
     done |
     tar --null -T - -cf -
 ) | (cd "$release" && tar -xf -)
+
+# koroku writes the file kept in its console to the root of the checkout,
+# replacing whatever the repository has under that name.
+if [ -n "$inline" ]; then
+  rm -f "$release/$file"
+  cp "$inline" "$release/$file"
+fi
 
 env_file="$work/env"
 if [ -n "$env_src" ]; then

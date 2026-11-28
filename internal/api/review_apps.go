@@ -454,6 +454,8 @@ func (s *Server) reviewAppSettings(parent store.App, pr github.PullRequest) stor
 		RepoFullName:          parent.RepoFullName,
 		DefaultBranch:         pr.HeadBranch,
 		ComposePath:           parent.ComposePath,
+		ComposeSource:         parent.ComposeSource,
+		ComposeContent:        parent.ComposeContent,
 		WebService:            parent.WebService,
 		WebPort:               parent.WebPort,
 		HealthcheckPath:       parent.HealthcheckPath,

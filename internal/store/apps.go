@@ -34,6 +34,14 @@ const (
 	MaxIdleSleepMinutes     = 1440
 )
 
+// Where an app's Compose file comes from (ARCHITECTURE 6.3).
+const (
+	ComposeSourceRepository = "repository"
+	ComposeSourceInline     = "inline"
+	// MaxComposeContentBytes bounds App.ComposeContent.
+	MaxComposeContentBytes = 64 << 10
+)
+
 // EnvSourceCompose is the default source of required variables for new
 // apps (ARCHITECTURE 9.4). The values are defined by package envreq.
 const EnvSourceCompose = "compose"
@@ -47,13 +55,17 @@ var (
 
 // App is one deployable Compose project.
 type App struct {
-	ID                  int64
-	Slug                string
-	RepoID              *int64
-	RepoFullName        string
-	RepoURL             string
-	DefaultBranch       string
-	ComposePath         string
+	ID            int64
+	Slug          string
+	RepoID        *int64
+	RepoFullName  string
+	RepoURL       string
+	DefaultBranch string
+	ComposePath   string
+	// ComposeSource says where the Compose file comes from: the repository
+	// (ComposePath) or ComposeContent, written in koroku (ARCHITECTURE 6.3).
+	ComposeSource       string
+	ComposeContent      string
 	WebService          string
 	WebPort             int
 	HostPort            int
@@ -126,6 +138,10 @@ type App struct {
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
+
+// ComposeInline reports whether the app deploys the Compose file written
+// in koroku instead of one of the repository (ARCHITECTURE 6.3).
+func (a App) ComposeInline() bool { return a.ComposeSource == ComposeSourceInline }
 
 // CloneURL is the URL git fetches from.
 func (a App) CloneURL() string {
@@ -242,7 +258,8 @@ const appColumns = `id, slug, repo_id, repo_full_name, repo_url, default_branch,
 	access_protection, protection_exempt_paths, promote_from_app_id,
 	auto_deploy, auto_deploy_branch, auto_deploy_workflow,
 	idle_sleep, idle_sleep_minutes, sleeping_since, review_apps_allowed,
-	blue_green, blue_green_drain_seconds, alt_host_port, web_color`
+	blue_green, blue_green_drain_seconds, alt_host_port, web_color,
+	compose_source, compose_content`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -274,7 +291,8 @@ func scanApp(row rowScanner) (App, error) {
 		&a.AccessProtection, &exemptJSON, &promoteFrom,
 		&a.AutoDeploy, &a.AutoDeployBranch, &a.AutoDeployWorkflow,
 		&a.IdleSleep, &a.IdleSleepMinutes, &sleeping, &a.ReviewAppsAllowed,
-		&a.BlueGreen, &a.BlueGreenDrainSeconds, &altPort, &webColor)
+		&a.BlueGreen, &a.BlueGreenDrainSeconds, &altPort, &webColor,
+		&a.ComposeSource, &a.ComposeContent)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -410,6 +428,9 @@ func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, 
 	if app.Environment == "" {
 		app.Environment = EnvironmentStaging
 	}
+	if app.ComposeSource == "" {
+		app.ComposeSource = ComposeSourceRepository
+	}
 	if app.EnvSource == "" {
 		app.EnvSource = EnvSourceCompose
 	}
@@ -428,8 +449,9 @@ func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, 
 			load_hook_service, load_hook_command, post_load_service, post_load_command,
 			access_protection, protection_exempt_paths, promote_from_app_id,
 			auto_deploy, auto_deploy_branch, auto_deploy_workflow,
-			idle_sleep, idle_sleep_minutes, blue_green_drain_seconds)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			idle_sleep, idle_sleep_minutes, blue_green_drain_seconds,
+			compose_source, compose_content)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		app.Slug, nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, port, app.HealthcheckPath, app.DesiredState, app.Environment,
 		app.RelaxPolicy, app.MemoryLimit, limits, app.MemoryReservation, reservations, toMillis(now), toMillis(now),
@@ -438,7 +460,8 @@ func (s *Store) createApp(ctx context.Context, app App, portStart, portEnd int, 
 		app.LoadHookService, app.LoadHookCommand, app.PostLoadService, app.PostLoadCommand,
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
 		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow,
-		app.IdleSleep, app.IdleSleepMinutes, app.BlueGreenDrainSeconds)
+		app.IdleSleep, app.IdleSleepMinutes, app.BlueGreenDrainSeconds,
+		app.ComposeSource, app.ComposeContent)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return App{}, fmt.Errorf("app %q: %w", app.Slug, ErrConflict)
@@ -572,7 +595,8 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 			access_protection = ?, protection_exempt_paths = ?, promote_from_app_id = ?,
 			auto_deploy = ?, auto_deploy_branch = ?, auto_deploy_workflow = ?,
 			idle_sleep = ?, idle_sleep_minutes = ?, review_apps_allowed = ?,
-			blue_green = ?, blue_green_drain_seconds = ?
+			blue_green = ?, blue_green_drain_seconds = ?,
+			compose_source = ?, compose_content = ?
 		WHERE id = ?`,
 		nullInt(app.RepoID), app.RepoFullName, app.RepoURL, app.DefaultBranch, app.ComposePath,
 		app.WebService, app.WebPort, app.HealthcheckPath, app.Environment,
@@ -584,7 +608,8 @@ func (s *Store) UpdateApp(ctx context.Context, app App, now time.Time) error {
 		app.AccessProtection, exempt, nullInt(app.PromoteFromAppID),
 		app.AutoDeploy, app.AutoDeployBranch, app.AutoDeployWorkflow,
 		app.IdleSleep, app.IdleSleepMinutes, app.ReviewAppsAllowed,
-		app.BlueGreen, app.BlueGreenDrainSeconds, app.ID)
+		app.BlueGreen, app.BlueGreenDrainSeconds,
+		app.ComposeSource, app.ComposeContent, app.ID)
 	if err != nil {
 		return fmt.Errorf("update app: %w", err)
 	}

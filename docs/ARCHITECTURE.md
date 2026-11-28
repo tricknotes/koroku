@@ -9,7 +9,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 **提供するもの**
 
 - GitHub リポジトリ連携（private 含む）と、UI からのブランチ／コミット指定デプロイ
-- `compose.yaml` のデプロイ。`build:` があればホストでビルド、`image:` のみなら pull
+- `compose.yaml` のデプロイ。`build:` があればホストでビルド、`image:` のみなら pull。Compose ファイルを持たないリポジトリは、koroku に書いた Compose で動かす（6.3）
 - アプリごとの `<slug>.dev.example.com` 自動割当と TLS、アプリごとの独自ドメイン追加（本番用）
 - 環境変数の管理、デプロイログと実行ログの閲覧
 - private なレジストリのイメージの取得（アプリごとのコンテナレジストリの認証。6.1）
@@ -82,7 +82,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 | `/etc/koroku/config.toml` | ベースドメイン、公開 IP、GitHub App、オブジェクトストレージなどの設定（0600） |
 | `/etc/koroku/github-app.pem`、`/etc/koroku/master.key`、`/etc/koroku/restic.key` | GitHub App 秘密鍵、環境変数暗号化のマスターキー、restic のパスワード（0600） |
 | `/var/lib/koroku/koroku.db` | SQLite |
-| `/var/lib/koroku/apps/<slug>/releases/<deploy_id>/` | チェックアウトしたソースと生成した override |
+| `/var/lib/koroku/apps/<slug>/releases/<deploy_id>/` | チェックアウトしたソースと生成した override。Compose を koroku に書いたアプリでは `koroku.compose.yaml` も（6.3） |
 | `/var/lib/koroku/apps/<slug>/env` | 展開済み環境変数ファイル（0600） |
 | `/var/lib/koroku/apps/<slug>/env.release` | デプロイのたびに変わる `KOROKU_COMMIT_SHA` と `KOROKU_COMMIT_SHORT`（0600）。デプロイのたびに作り直すサービスにだけ渡す（6 章「コミットの変数を渡すサービス」） |
 | `/var/lib/koroku/apps/<slug>/docker/config.json` | アプリのコンテナレジストリの認証を書いた Docker の設定（ディレクトリ 0700、ファイル 0600。設定したアプリだけ。6.1） |
@@ -123,6 +123,7 @@ koroku は、3〜5 個の Docker Compose アプリを、VPS 1 台の上で GitHu
 - アカウントを ID で指定するのは、login ではアカウントを特定できないため。org の名前を変えると元の名前は空き、その名前を取った別のアカウントが App をインストールできる（メンバーを ID で照合するのと同じ理由。10.7）。`[github] installation_accounts`（login の一覧、大文字小文字を区別しない）でも指定でき、どちらかの一覧にあるアカウントを使う（両方を書くと、ID の一覧と login の一覧の和になる）。login での指定は、その名前を取った別のアカウントのインストールも使ってしまう弱い形で、login で指定した既存のホストがインストール先を失わないために受け付ける。書いてあれば `koroku serve` は起動時に、ID を `installation_account_ids` に書くよう警告を出す。
 - `koroku check` は、インストール先ごとにアカウントの login と ID を表示し、使わないインストール先があれば警告する。login だけで一致しているアカウントがあれば、代わりに書く `installation_account_ids` の行を示す（10.4）。システム画面の「GitHub App」は、インストール先ごとにアカウントの ID（コピーできる）と使うかどうかを示し、login だけで一致しているインストール先にはその旨を出す。別の org を加える手順（App の設定画面とインストール画面へのリンク、`config.toml` に書く `installation_account_ids` の行）も出す。作成画面のリポジトリ欄からも、そこへ移れる。
 - 作成画面の Compose ファイルの検出（`GET /api/repos/{owner}/{repo}/compose`）は、App で読めないリポジトリ（未インストール、または使わないインストール先）を認証なしで読み直す。github.com 以外の URL は読めないので、サービスとポートを手で入れる。
+- Compose ファイルを持たないリポジトリや、持っていても koroku では動かせない形のリポジトリは、Compose を koroku に書いて動かす（6.3）。
 
 | 用途 | 方式 |
 | --- | --- |
@@ -289,11 +290,11 @@ Compose が `image:` だけで、イメージを GitHub Actions がコミット�
 
 ## 6. Compose の扱い
 
-リポジトリの `compose.yaml` は書き換えず、`koroku` が生成する override ファイルを `-f` で重ねて実行する。
+リポジトリの `compose.yaml` は書き換えず、`koroku` が生成する override ファイルを `-f` で重ねて実行する。Compose ファイルをリポジトリから読まず、koroku に書いたものを使うこともできる（6.3）。
 
 **アプリごとの設定（UI で入力）**
 
-- Compose ファイルのパス（既定 `compose.yaml`、なければ `docker-compose.yml`）
+- Compose の置き場所（リポジトリのファイルか、koroku に書いた本文。6.3）と、リポジトリのファイルのパス（既定 `compose.yaml`、なければ `docker-compose.yml`）
 - 公開するサービス名（既定 `web`）とコンテナ内ポート
 - ヘルスチェックパス（既定 `/`）
 
@@ -539,13 +540,61 @@ private なイメージ（CI がビルドして `ghcr.io/<owner>/<repo>:sha-...`
 - 合計と警告は稼働中のリリースの記録で出す（今かかっている保護を知らせるため）。保存した設定で次のデプロイの予約が変わるアプリには、内訳の行に「次のデプロイから」の値を並べ、合計の横にも、すべてのアプリをデプロイしたあとの合計を出す。今は予約がないが次のデプロイで付くアプリ（staging から本番に切り替えた、`0` から変えたなど）も内訳に出す。稼働中のリリースがサービスの形（`memory_shapes`）を記録していない本番アプリは、次のデプロイの値を計算できないので、内訳の行に「このリリースは予約の設定を計算するための情報を持っていません。保存した設定は次のデプロイから反映されます」と出す。何も出さないと、保存した設定が無視されているように見えるため。
 - 合計に余白（1GiB）を足すと RAM を超えるとき、システム画面に警告を出す。余白は `koroku`、Caddy、Docker、カーネル、ビルド、staging アプリが使う分の目安で、これを割り込むと予約どうしで回収を押し付け合い、保護が効かなくなる。
 
+### 6.3 koroku に書く Compose
+
+Compose ファイルを、リポジトリから読む代わりに koroku に書いて持てる。Compose ファイルがない、開発用の構成しかない、ポリシー検査（6 章）を通らない、というリポジトリ（App をインストールしていない public リポジトリの OSS など。5 章）を、fork せずに動かすため。fork して Compose ファイルを足せば動くが、上流を追うたびに fork を保つことになる。コードはリポジトリのコミットをそのまま取得し、Compose だけを koroku が出す。
+
+**設定**
+
+- アプリごとに「Compose の置き場所」（`compose_source`）を選ぶ。`repository`（既定。リポジトリのファイルを `compose_path` で読む）か `inline`（koroku に書く）。本文は `compose_content`。
+- 取得のしかたによらず選べる（GitHub App で取得するリポジトリでも、`repo_url` のリポジトリでも）。
+- `inline` の間、`compose_path` は使わない。`repository` に戻しても本文は残し、もう一度 `inline` にすれば同じ本文で動く。
+- 保存のときの検査は、`inline` なら本文が空でないことと YAML のマッピングとして読めること、どちらでも 64 KiB 以下であること。サービスや設定の中身は見ない（`include` でリポジトリのファイルを読み込む本文もあるので、本文だけでは決まらない）。中身の検査はデプロイが行う。
+- 本文は DB に平文で置く。秘密は本文に書かず、`${VAR}` でアプリの環境変数を参照する（補間は 6 章のとおり koroku の環境変数だけで決まる）。
+- 本文の欄（作成画面と設定タブ）には、手元の Claude Code に利用者向けの Skill（`plugins/koroku/skills/prepare-app`）で本文を作らせるための案内を置く。プラグインの導入コマンドと、Skill に「リポジトリを変えずに Compose を作り、同じ置き方でリハーサルして、貼る内容を報告する」ことを頼むプロンプトで、どちらもコピーできる。koroku 自身は本文を生成しない。リポジトリのコードを読んでビルドと起動を試す必要があり、それは取得とビルドの済んでいない作成の時点のホストではできず、利用者の手元の Docker でリハーサルするほうが、ホストに負荷も失敗したコンテナも残さないため。
+
+**デプロイ**
+
+- 手順 3（7 章）で、本文をチェックアウトの直下に `koroku.compose.yaml` として書き、これをそのリリースの Compose ファイルにする。直下に置くのは、本文の相対パス（`build: .`、`./config/app.conf:/etc/app.conf:ro`、`include` と `extends.file`）がリポジトリの直下から解決されるようにするため。Compose は相対パスを Compose ファイルのあるディレクトリから解決し、`extends.file` で写したサービスのパスは写した元のファイルの場所から解決するので、チェックアウトの外に置くと blue/green の override（7.2）で写したサービスのビルドコンテキストがずれる。
+- 書き方は override と同じ（一時ファイルに書いて rename。6 章）。リポジトリに同じ名前のファイルやシンボリックリンクがあれば置き換える。
+- リポジトリの Compose ファイルは読まない。本文が `include` か `extends.file` で名指ししたファイルだけが、リポジトリのファイルとして読まれる。
+- それより後は、リポジトリの Compose ファイルを使うアプリと同じに進む。`include` と `extends.file` の検査、正規化、override の生成、ポリシー検査、ビルドと pull の判定、blue/green の写し（`extends: { file: koroku.compose.yaml }`）、コミットの変数を渡すサービスの判定のどれも、`koroku.compose.yaml` をリポジトリの Compose ファイルとして扱う。ほかの章で「リポジトリの Compose ファイル」と書いているものは、このアプリでは `koroku.compose.yaml` を指す。
+- ポリシー検査は緩めない。本文を書くのはオーナーだが、よそから写した Compose には、ホストのパスの bind mount や `privileged` がそのまま入っていることが多い。検査を通らない本文は、リポジトリの Compose と同じ理由で直すか、「検査を緩める」フラグで許可する。
+- デプロイログの手順 3 に `Compose file: koroku.compose.yaml (written in koroku; the repository's own Compose files are not read)` と書く。
+
+**反映**
+
+- 保存した本文は、次のデプロイから使う。リリースは自分の `koroku.compose.yaml` をディレクトリに持ち、起動、ロールバック（7.1）、コマンドの実行（9.6）は、ほかのリリースのファイルと同じくそれを使う（起動前の再検査も同じ）。本文を変えても、稼働中のリリースと保持しているリリースは、デプロイした時点の本文で動く。
+- 置き場所を切り替えたときも同じ。`repository` と `inline` のどちらで作ったリリースかは、リリースの記録（`release.json` の Compose ファイル名）で決まる。
+
+**誰が見て、誰が変えるか**
+
+- 置き場所と本文を変えられるのはオーナーだけで、再ログイン（10.3）が要る。本文は、どのイメージをどのコマンドで動かし、アプリの環境変数と volume をどこにつなぐかを決めるので、リポジトリの指定を変えるのと同じ「別のコードを動かす」変更になるため（10.7）。
+- 本文を読めるのは管理以上のロール。閲覧とデプロイのロール、API トークン（10.5）には返さず、アプリの JSON の `compose_content` は `null`、`compose_content_hidden` は `true` になる（置き場所 `compose_source` は誰にでも返す）。よそから写した Compose には `POSTGRES_PASSWORD: postgres` のような値が直に書かれていることがあり、環境変数の値を見られないロールに本文を見せると、その値が見えるため。重ねた結果（9.10）は、値を伏せた形で閲覧以上に見せる。
+- 操作の記録（10.7）には、本文が変わったことだけを残し、本文は残さない。
+
+**ほかの機能との関係**
+
+| 機能 | 扱い |
+| --- | --- |
+| 必要な環境変数の照合（9.4） | 照合元が `compose` なら、保存済みの本文の `${VAR}` を読む。GitHub には問い合わせず、コミットにもよらない。github.com 以外の `repo_url` のアプリでも照合できる |
+| 作成画面（5 章、9.8） | 置き場所で `inline` を選ぶと本文の欄が出る。公開サービスとポートは本文から下書きせず、手で入れる。環境変数の初期値は、リポジトリの Compose ファイルを読まずに下書きする（使わないファイルの `environment` で「設定済み」と判定しないため） |
+| レビューアプリ（9.9） | 置き場所と本文を親から写す |
+| 昇格（9.7） | Compose は昇格先のアプリの設定で決まる。昇格先が `inline` なら、昇格元と同じコミットを昇格先の本文で動かす |
+| Compose の構成（9.10） | `-f` の 1 つ目が `koroku.compose.yaml` になる |
+
+**採らない方式**
+
+- リポジトリの Compose に重ねる（`-f` を 1 つ足す）: マージの規則（`!override`、`!reset`）を書く人に求めることになり、リポジトリの Compose が検査を通らないときに、通る形へ直しきれない。丸ごと置き換えるほうが、何が動くかを 1 つのファイルで読める。
+- リポジトリを持たないアプリ（イメージだけを動かす）: デプロイはコミットを単位にしていて（履歴、ロールバック、再デプロイ）、リポジトリなしの形を足すと、その全部に別の経路が要る。イメージだけを動かすときも、そのソフトウェアのリポジトリを指し、本文に `image:` を書く。
+
 ## 7. デプロイフロー
 
 デプロイは `queued → running → succeeded | failed | canceled` の状態を持つ 1 ジョブで、次の順に進む。
 
 1. **受付**: UI でブランチかコミットを選ぶ。API がコミット SHA と、そのコミットを出すブランチかタグ（`ref`）を確定し、`deployments` に `queued` で記録する。自動デプロイ（5.2）では、push されたコミットの SHA とブランチで同じように記録する。
 2. **取得**: installation token を発行し、リポジトリの名前がアプリのリポジトリをいまも指すこと（5 章「リポジトリは ID で確かめる」）と、コミットが `ref` からたどれること（下の「デプロイできるコミット」）を確かめてから、`releases/<deploy_id>/` に `git fetch --depth 1 origin <sha>` でチェックアウトする。
-3. **生成**: env ファイル（0600）と `koroku.override.yaml` を書き出す。
+3. **生成**: env ファイル（0600）と `koroku.override.yaml` を書き出す。Compose を koroku に書いたアプリでは、先に本文を `koroku.compose.yaml` として書き出す（6.3）。
 4. **検証**: `docker compose config --format json` を実行し、6 章のポリシー検査をかける。
 5. **ビルド／pull**: 6 章の判定に従う。
 6. **起動**: `docker compose up -d --pull missing --remove-orphans --wait --wait-timeout 300`。`--wait` はサービスが running または healthy になるまで待つ（[docker compose up](https://docs.docker.com/reference/cli/docker/compose/up/)）。`--pull missing` は、ホストにないイメージだけを取得する。Compose ファイルの `pull_policy`（`always` など）より優先されることを、手元の Compose で確かめている。pull は手順 5 で済んでいるので、起動では取得しない。ロールバック（下の「失敗時」と 7.1）と起動（10 章「起動制御と削除」）も同じ `up` を使う。リリースが持っているイメージで動かすので、レジストリに届かなくても、レジストリからタグが消えていても戻せる。ホストから消えたイメージだけは、アプリのレジストリの認証（6.1）で取得し直す。Compose は設定かイメージが変わったサービスだけを作り直す。`env.release` を受け取るサービス（公開サービス、ワンショット、ビルドするサービス、定義がコミットに従うサービス。6 章「コミットの変数を渡すサービス」）はデプロイのたびに作り直され、ジョブを動かすだけのサービス（スケジューラー、ジョブキューのワーカー）も、アプリのイメージをビルドするならここに入る。DB のようにどれにも当たらないサービスは、アプリの環境変数か、そのサービスの定義を変えたデプロイでだけ作り直す（環境変数のときはログに理由を書く。6 章）。ロールバックも同じく作り直し、停止・再起動・休止（8.4）もコンテナを止める。Docker は古いコンテナに SIGTERM を送り、猶予（`stop_grace_period`、既定 10 秒）を過ぎたら SIGKILL する。猶予の上限とタイムアウトは 6 章「停止の猶予」。
@@ -1153,7 +1202,7 @@ staging のようにたまにしか開かないアプリを、アクセスがな
 
 | テーブル | 内容 |
 | --- | --- |
-| `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、メモリの予約（`memory_reservation`、`service_memory_reservations`、6.2）、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、DB のコピーの設定（ロードフック、コピー後のコマンド。10.6）、必要な変数の読み方（`env_source`、`env_example_path`、9.4）、アクセスの保護（`access_protection`、`protection_exempt_paths`、8.3）、昇格元のアプリ（`promote_from_app_id`、9.7）、自動デプロイ（`auto_deploy`、`auto_deploy_branch`、`auto_deploy_workflow`、5.2）、アクセスがない間の休止（`idle_sleep`、`idle_sleep_minutes`、`sleeping_since`、8.4）、レビューアプリの許可（`review_apps_allowed`、9.9）、無停止デプロイ（`blue_green`、`alt_host_port`、`web_color`、7.2） |
+| `apps` | slug、リポジトリ（`repo_id`、`repo_full_name` か `repo_url`）、Compose の置き場所と本文（`compose_source`、`compose_content`、6.3）、Compose ファイルのパス、公開サービスとポート、割当ホストポート、ヘルスチェックパス、`environment`、`desired_state`、`relax_policy`、メモリ上限、メモリの予約（`memory_reservation`、`service_memory_reservations`、6.2）、稼働中のデプロイ、バックアップの設定（除外 volume、ダンプフック、デプロイ前取得）、DB のコピーの設定（ロードフック、コピー後のコマンド。10.6）、必要な変数の読み方（`env_source`、`env_example_path`、9.4）、アクセスの保護（`access_protection`、`protection_exempt_paths`、8.3）、昇格元のアプリ（`promote_from_app_id`、9.7）、自動デプロイ（`auto_deploy`、`auto_deploy_branch`、`auto_deploy_workflow`、5.2）、アクセスがない間の休止（`idle_sleep`、`idle_sleep_minutes`、`sleeping_since`、8.4）、レビューアプリの許可（`review_apps_allowed`、9.9）、無停止デプロイ（`blue_green`、`alt_host_port`、`web_color`、7.2） |
 | `review_apps` | レビューアプリの親、pull request の番号・題名・head のブランチ・状態、データのコピーの状態（9.9） |
 | `env_vars` | 環境変数。値は暗号化して保存（`app_id` + `key` で一意） |
 | `registry_credentials` | アプリのコンテナレジストリの認証（`app_id` で一意。レジストリ、ユーザー名、暗号化したトークン、更新時刻。6.1） |
@@ -1291,7 +1340,7 @@ API はすべて JSON の REST で、ログとデプロイの進行は SSE で�
 - 扱う構文は Compose の補間と同じ: `$$` はエスケープ、`${VAR}`、`$VAR`、`${VAR:-x}` `${VAR-x}` `${VAR:?x}` `${VAR?x}` `${VAR:+x}` `${VAR+x}`、既定値の中の入れ子。YAML のコメント（行頭か空白の後の `#`、引用符の外）の中は読まない。ブロックスカラー（`|`、`>`）の中の `#` はコメントではないので読む。同じ変数が何度も出たら、どこか 1 か所でも必須なら必須。
 - 結合テストで、`testdata` の Compose ファイルについて変数名・`?` の有無・既定値が `docker compose config --variables --format json` と一致することを確かめる。
 - **読まないもの**（画面にも「Compose ファイルの `${VAR}` だけを見る」と書く）:
-  - `include:`、`extends: { file: }` で参照する別ファイル。読むのは `compose_path`（未指定なら自動検出した 1 ファイル）だけ。
+  - `include:`、`extends: { file: }` で参照する別ファイル。読むのは `compose_path`（未指定なら自動検出した 1 ファイル）だけ。Compose を koroku に書いたアプリでは、保存済みの本文だけ（6.3）。
   - `environment: [VAR]` のような値なしの受け渡し、リポジトリ内の `env_file:`、アプリのコードが直接読む変数。`koroku` は env ファイルで全変数を全サービスに注入するので、コードだけが読む変数は Compose に現れない。必要なら Compose に `${VAR:?...}` として書いてもらう。
   - 補間の中の不正な構文は、その参照を読み飛ばす（デプロイ時に `config` が失敗して分かる）。
 
@@ -1525,7 +1574,8 @@ sudo koroku run [-config <path>] <slug> <サービス> [<コマンド> [<引数>
 3. 正規化したビルド定義が一致する。両方のリリースで、リポジトリの Compose ファイルだけ（override なし）を、それぞれのアプリの env ファイルで `docker compose config --format json --no-env-resolution` にかけ、サービスの `build` を比べる。
    - コンテキストの中身は、同じコミットのチェックアウトなので同じ。比べるのは定義のほうで、`context`、`dockerfile`、`target`、`additional_contexts`、`args` など `build` の全項目を見る。リリースディレクトリの絶対パス（アプリと ID で変わる）は、比べる前に相対パスに直す。
    - **`build.args` は補間したあとの値で比べる。** `args: { ASSET_HOST: ${ASSET_HOST} }` のように環境変数から渡す引数は、staging と本番で値が違えば、できるイメージも違う（Rails の `asset_host` を焼き込んだアセットなど）。値そのものは扱わず、SHA-256 にしてから比べる。違ったキーの名前だけを、デプロイログと確認画面に出す（例 `build args differ: ASSET_HOST`）。値はログに出さない（10 章）。
-   - Compose ファイルのパス（`compose_path`）が 2 つのアプリで違っても、正規化したビルド定義が同じなら再利用する。
+   - Compose ファイルのパス（`compose_path`）や置き場所（6.3）が 2 つのアプリで違っても、正規化したビルド定義が同じなら再利用する。
+   - 昇格の確認画面は、デプロイの前に同じ判定を出すため、昇格元のリリースのチェックアウトを昇格先の Compose で読む。昇格先が Compose を koroku に書いているときは、本文を昇格先のアプリのディレクトリの一時ファイルに書き、`docker compose --project-directory <昇格元のチェックアウト>` で相対パスの基準をチェックアウトにして読む。昇格元のチェックアウトには何も書かない。
 4. staging のリリースのイメージ（`koroku-<staging の slug>-<service>:r<staging の deploy_id>`）が Docker に残っている（`docker image inspect`）。
 
 - 判定と `docker tag` は手順 5 で行う。新しい手順のキー `reuse`（表題 `Reusing images of <slug> deployment #<id>`）の下に、サービスごとの結果を 1 行ずつ書く（`web: reusing koroku-shop-staging-web:r12`、`web: building (build args differ: ASSET_HOST)` など）。再利用できなかったサービスだけを `docker compose build <service>...` でビルドし、その手順は通常の `build`。全サービスを再利用できたら `build` の手順は出ない。`image:` だけのサービスは通常どおり `pull`。
@@ -1641,7 +1691,7 @@ Heroku の Review Apps に当たるもの。staging アプリ（8.2）を親に�
 
 | 項目 | 扱い |
 | --- | --- |
-| リポジトリ（名前と ID。ID のない親から作ったレビューアプリは、デプロイのときに親の ID に従う。5 章）、Compose ファイルのパス、公開サービスとポート、ヘルスチェックパス、メモリ上限、`relax_policy`、必要な変数の読み方、保護を外すパス、待つワークフロー | 親と同じ |
+| リポジトリ（名前と ID。ID のない親から作ったレビューアプリは、デプロイのときに親の ID に従う。5 章）、Compose の置き場所と本文（6.3）、Compose ファイルのパス、公開サービスとポート、ヘルスチェックパス、メモリ上限、`relax_policy`、必要な変数の読み方、保護を外すパス、待つワークフロー | 親と同じ |
 | 既定のブランチ、自動デプロイ | pull request の head のブランチ。自動デプロイ（5.2）を有効にしてそのブランチを追う |
 | 環境変数 | 親の DB の値をすべて写す（同じトランザクションで、新しいアプリの ID で暗号化し直す） |
 | コンテナレジストリの認証（6.1） | 写す（同じく暗号化し直す） |
@@ -1959,7 +2009,7 @@ Heroku の Review Apps に当たるもの。staging アプリ（8.2）を親に�
   - DB のコピー（10.6）と、レビューアプリの作成（9.9。親の環境変数とデータを写すため）
   - レビューアプリの許可（9.9）を有効にすること。pull request のコードが親の環境変数とデータを受け取れるようになるため。無効にするのは求めない
   - コンテナレジストリの認証の保存と削除（6.1）
-  - アプリ設定のうち、`environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）の変更。本番の確認ダイアログを外す、ポリシー検査を外す、別のコードを動かす、のいずれかにつながるため
+  - アプリ設定のうち、`environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、Compose の置き場所と本文（`compose_source`、`compose_content`。6.3）の変更。本番の確認ダイアログを外す、ポリシー検査を外す、別のコードを動かす、のいずれかにつながるため
   - 本番アプリで自動デプロイ（5.2）を有効にすることと、自動デプロイを有効にしたまま追うブランチ（`auto_deploy_branch`、空なら既定のブランチ）を変えること。push だけで本番が変わるようになるため。無効にするのは求めない
   - アクセスの保護（8.3）を外す変更と、保護を外すパスの一覧の変更。アプリを外へ開くことにつながるため
   - 本番アプリでのコマンドの実行と、登録タスクの変更（9.6）
@@ -2135,7 +2185,7 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 **オーナーだけの操作**
 
 - アプリの作成と削除（レビューアプリの作成と削除は親アプリの管理。9.9）。リポジトリの一覧、作成画面の Compose 検出と環境変数の初期値（作成と、リポジトリの変更のためのもの）
-- アプリ設定のうち、`environment`（本番 / staging。本番ではデプロイの前に確認が入るので、これを staging に変えると確認を外せる）、本番アプリの自動デプロイを有効にすることと、追うブランチや待つワークフローを変えること（push だけで本番に出るようになる。5.2）、`relax_policy`（ポリシー検査を緩める）、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、ほかのアプリとの組み合わせ（昇格元 `promote_from`）の変更、レビューアプリの許可（`review_apps_allowed`。9.9）。ホストを守る検査を外す、別のコードを動かす（レビューアプリの許可は、pull request のコードに親の環境変数とデータを渡す）、ほかのアプリに関わる、のいずれかで、1 つのアプリを任せる範囲を超えるため。管理のメンバーが設定の `PATCH` でこれらを今と違う値にすると `403 forbidden_role`（`details.fields` に項目名）。今と同じ値を送るのはかまわない（設定画面は全項目を送るため）
+- アプリ設定のうち、`environment`（本番 / staging。本番ではデプロイの前に確認が入るので、これを staging に変えると確認を外せる）、本番アプリの自動デプロイを有効にすることと、追うブランチや待つワークフローを変えること（push だけで本番に出るようになる。5.2）、`relax_policy`（ポリシー検査を緩める）、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、Compose の置き場所と本文（`compose_source`、`compose_content`。6.3）、ほかのアプリとの組み合わせ（昇格元 `promote_from`）の変更、レビューアプリの許可（`review_apps_allowed`。9.9）。ホストを守る検査を外す、別のコードを動かす（レビューアプリの許可は、pull request のコードに親の環境変数とデータを渡す）、ほかのアプリに関わる、のいずれかで、1 つのアプリを任せる範囲を超えるため。管理のメンバーが設定の `PATCH` でこれらを今と違う値にすると `403 forbidden_role`（`details.fields` に項目名）。今と同じ値を送るのはかまわない（設定画面は全項目を送るため）
 - 独自ドメインの強制有効化と、その解除（`PATCH /api/apps/{slug}/domains/{id}` の `force_active`。8.1）。DNS の検証を飛ばして、このホストを向いている裏付けのないホスト名を有効にするため。管理のメンバーが今と違う値を送ると `403 forbidden_role`（`details.fields` に `force_active`）。今と同じ値を送るのはかまわない
 - システムの画面（状態 / 定期処理 / 管理のタブ。ホストのリソース、Docker のディスク、コンテナの内訳、prune、ホスト全体のバックアップの実行履歴、メンバー、GitHub App。9.1）
 - メンバーとロールの管理、ほかのユーザーのセッション・ログイン履歴・API トークン
@@ -2157,7 +2207,7 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 
 - API のルートは 1 つの表（`internal/api` の `apiRoutes`）に、必要なもの（全ユーザー / オーナーだけ / `{slug}` のアプリのロールの段階 / `{id}` のデプロイ・タスクの実行・DB のコピーのアプリのロールの段階 / リポジトリ `{owner}/{repo}` から作ったアプリのロールの段階 / どれかのアプリのロールの段階）と一緒に登録する。表を経ずにルートを足せないので、権限を決め忘れたルートは生まれない。判定はハンドラーより前に 1 か所（`authorize`）で行う。テストは表の全ルートについて、オーナー専用がメンバーを断ること、アプリのルートがロールの段階どおりに断ることを確かめる。
 - レビューアプリ（9.9）では、メンバーのロールは親アプリのロールを使う。`app_roles` を引くところ（`authorize`、一覧の絞り込み、ゲート）は、すべて store の同じ関数を通り、そこでレビューアプリを親に読み替える。
-- ハンドラーの中で判定するのは、1 つのルートの中で項目ごとに権限が分かれるものだけ: 設定の `PATCH` のオーナー専用の項目、ドメインの `PATCH` の `force_active`、アプリの削除（ルートは管理で登録し、レビューアプリでないアプリはオーナーだけに絞る）、DB のコピーの送り側、環境変数の `GET` の値（管理未満には返さず `values_hidden: true`、`values_forbidden: true`）、一覧の絞り込み（アプリ、セッション、ログイン履歴、トークン）。
+- ハンドラーの中で判定するのは、1 つのルートの中で項目ごとに権限が分かれるものだけ: 設定の `PATCH` のオーナー専用の項目、ドメインの `PATCH` の `force_active`、アプリの削除（ルートは管理で登録し、レビューアプリでないアプリはオーナーだけに絞る）、DB のコピーの送り側、環境変数の `GET` の値（管理未満には返さず `values_hidden: true`、`values_forbidden: true`）、アプリの JSON の Compose の本文（管理未満と API トークンには返さない。6.3）、一覧の絞り込み（アプリ、セッション、ログイン履歴、トークン）。
 - 開いたままの応答（実行ログのライブの SSE と、デプロイ・コマンド・DB のコピーのログの SSE）は、開いたときの判定だけで読み続けさせない。15 秒ごと（SSE のハートビートの間隔）に、リクエストのときと同じ関数で、セッションか API トークンがまだ有効か（失効、期限切れ、ユーザーがログインできなくなった）と、メンバーなら `authorize` が通したアプリでそのルートの段階をまだ持つかを確かめ直す。どれかが欠けたら、`event: end` を送らずに接続を閉じる（確かめる処理が失敗したときも閉じる）。クライアントの再接続は新しいリクエストとして判定され、`401` か `404` になる。ロールを下げても、そのルートに要る段階（ログは閲覧）が残っていれば続く。ジョブのログの SSE はジョブが終われば閉じるが、コマンドは長く動かせるので、同じに扱う。
 - 再ログイン（10.3）の要求は、ロールの判定のあとに、オーナーにもメンバーにも同じに掛かる。
 - API トークン（10.5）のリクエストも、トークンのユーザーとして同じ表で判定する。トークンは読み取りの許可リストの `GET` しか使えない点は変わらない。
@@ -2173,7 +2223,7 @@ koroku はオーナー 1 人が運用する基盤で、オーナーは特定の 
 | --- | --- | --- |
 | `app.created` | アプリの作成 | 環境、一緒に保存した環境変数のキー。レビューアプリなら親の slug と pull request の番号 |
 | `review_app.created`、`review_app.deleted` | 親アプリに残す、レビューアプリの作成と削除（9.9） | レビューアプリの slug と pull request の番号 |
-| `app.settings_changed` | アプリ設定の変更（オーナー専用の項目を含む） | 変わった項目ごとに項目名と前後の値。秘密として扱う項目は項目名だけ |
+| `app.settings_changed` | アプリ設定の変更（オーナー専用の項目を含む） | 変わった項目ごとに項目名と前後の値。秘密として扱う項目と、Compose の本文（6.3）は項目名だけ |
 | `app.started`、`app.stopped`、`app.restarted` | 起動・停止・再起動 | なし |
 | `app.woken` | 休止中のアプリを管理 UI から起こした（8.4。アクセスで起きたときと、休止させたときは残さない） | なし |
 | `env.changed` | 環境変数の追加・変更・名前の変更・削除・一括置換 | キーの一覧だけ（`added`、`changed`、`removed`、`renamed`、`replaced`） |

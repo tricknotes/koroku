@@ -41,7 +41,11 @@ func (s *Server) handleEnvPresets(w http.ResponseWriter, r *http.Request) {
 	owner, repo := r.PathValue("owner"), r.PathValue("repo")
 	ref := strings.TrimSpace(r.URL.Query().Get("ref"))
 	composePath := strings.TrimSpace(r.URL.Query().Get("path"))
+	composeSource := strings.TrimSpace(r.URL.Query().Get("compose_source"))
 	errs := fieldErrors{}
+	if composeSource != "" && composeSource != store.ComposeSourceRepository && composeSource != store.ComposeSourceInline {
+		errs.add("compose_source", "must be repository or inline")
+	}
 	if _, _, err := github.SplitFullName(owner + "/" + repo); err != nil {
 		errs.add("repo", "is not a valid repository name")
 	}
@@ -64,7 +68,11 @@ func (s *Server) handleEnvPresets(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), envRequirementsTimeout)
 	defer cancel()
-	result := s.envPresets.Read(ctx, envpresets.Request{Owner: owner, Repo: repo, Ref: ref, ComposePath: composePath})
+	result := s.envPresets.Read(ctx, envpresets.Request{
+		Owner: owner, Repo: repo, Ref: ref, ComposePath: composePath,
+		// The repository's Compose file is not the one the app will run.
+		IgnoreCompose: composeSource == store.ComposeSourceInline,
+	})
 	if result.Reason == envpresets.ReasonGitHubError {
 		s.log.Warn("reading env presets failed", "repo", owner+"/"+repo)
 	}

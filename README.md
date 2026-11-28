@@ -26,6 +26,7 @@ koroku deploys the Docker Compose apps in your GitHub repositories to a single V
 - **URLs and TLS**: every app gets `https://<app>.<base domain>` with a certificate. Custom domains can be added.
 - **Data protection**: named volumes, database dumps and koroku itself are backed up daily to object storage and restorable from the console. You can recover even after losing the whole server.
 - **Fits a small server**: per-service memory limits, production kept alive first when memory runs out, and sleeping apps that get no traffic.
+- **Runs repositories without a Compose file**: a public repository that has no Compose file can be deployed with one written in the console, without forking it.
 - **Heroku-like workflow**: staging and production, review apps per pull request, environment variables, logs and one-off commands in one console.
 - **Works with AI agents**: Claude Code Skills prepare your app's repository for koroku, and read and fix the cause of a failed deploy.
 

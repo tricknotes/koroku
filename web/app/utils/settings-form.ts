@@ -3,9 +3,15 @@ import {
   DEFAULT_DRAIN_SECONDS,
   drainSecondsProblem,
 } from 'koroku-console/utils/blue-green';
+import {
+  composeContentProblem,
+  composeSourceOf,
+  normalizeCompose,
+} from 'koroku-console/utils/compose-source';
 import type {
   App,
   AppPatch,
+  ComposeSource,
   EnvSource,
   Environment,
 } from 'koroku-console/utils/types';
@@ -83,6 +89,11 @@ export function isValidReservation(value: string): boolean {
 export default class SettingsForm {
   @tracked defaultBranch: string;
   @tracked composePath: string;
+  /** The repository's Compose file or one written here (ARCHITECTURE 6.3). */
+  @tracked composeSource: ComposeSource;
+  @tracked composeContent: string;
+  /** The role is not shown the file, so it is not this form's to check. */
+  private composeHidden: boolean;
   @tracked webService: string;
   @tracked webPort: string;
   @tracked healthcheckPath: string;
@@ -110,6 +121,9 @@ export default class SettingsForm {
   constructor(app: App) {
     this.defaultBranch = app.default_branch;
     this.composePath = app.compose_path;
+    this.composeSource = composeSourceOf(app);
+    this.composeContent = app.compose_content ?? '';
+    this.composeHidden = app.compose_content_hidden === true;
     this.webService = app.web_service;
     this.webPort = String(app.web_port);
     this.healthcheckPath = app.healthcheck_path;
@@ -169,6 +183,10 @@ export default class SettingsForm {
     }
     const drain = drainSecondsProblem(this.blueGreenDrainSeconds);
     if (drain) errors['blue_green_drain_seconds'] = drain;
+    if (this.composeSource === 'inline' && !this.composeHidden) {
+      const compose = composeContentProblem(this.composeContent);
+      if (compose) errors['compose_content'] = compose;
+    }
     return errors;
   }
 
@@ -180,6 +198,16 @@ export default class SettingsForm {
     }
     const composePath = this.composePath.trim();
     if (composePath !== app.compose_path) patch.compose_path = composePath;
+    if (this.composeSource !== composeSourceOf(app)) {
+      patch.compose_source = this.composeSource;
+    }
+    // A role that is not shown the file cannot have edited it.
+    if (!app.compose_content_hidden) {
+      const content = normalizeCompose(this.composeContent);
+      if (content !== (app.compose_content ?? '')) {
+        patch.compose_content = content;
+      }
+    }
     const webService = this.webService.trim();
     if (webService !== app.web_service) patch.web_service = webService;
     const webPort = Number(this.webPort);
