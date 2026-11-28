@@ -294,7 +294,7 @@ func composeSubcommand(args []string) (sub string, merged bool) {
 	}
 	for i := 1; i < len(args); i++ {
 		switch args[i] {
-		case "-p", "--env-file", "--profile":
+		case "-p", "--env-file", "--profile", "--project-directory":
 			i++
 		case "-f":
 			i++

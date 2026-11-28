@@ -363,6 +363,12 @@ var defaultFiles = []string{"compose.yaml", "compose.yml", "docker-compose.yml",
 // configure a path, in order of preference.
 func DefaultFiles() []string { return append([]string(nil), defaultFiles...) }
 
+// InlineFileName is the name, inside a release directory, of the Compose
+// file of an app whose Compose file is written in koroku (ARCHITECTURE
+// 6.3). It sits at the root of the checkout so that its relative paths
+// resolve from there.
+const InlineFileName = "koroku.compose.yaml"
+
 // DetectFile returns the Compose file to use, relative to the release
 // directory. A configured path must stay inside the release directory.
 func DetectFile(releaseDir, configured string) (string, error) {
@@ -418,6 +424,10 @@ type Invocation struct {
 	// app's registry credential (ARCHITECTURE 6.1). Empty means the
 	// default config of the user koroku runs as.
 	DockerConfig string
+	// ProjectDir, when set, is passed with --project-directory: relative
+	// paths in Files then resolve from it instead of from the directory
+	// of the first file.
+	ProjectDir string
 }
 
 // Env returns the environment entries the call needs on top of koroku's
@@ -433,6 +443,9 @@ func (i Invocation) Env() []string {
 // Args returns the full argument list for `docker`, ending with sub.
 func (i Invocation) Args(sub ...string) []string {
 	args := []string{"compose", "-p", i.ProjectName}
+	if i.ProjectDir != "" {
+		args = append(args, "--project-directory", i.ProjectDir)
+	}
 	for _, f := range i.Files {
 		args = append(args, "-f", f)
 	}

@@ -25,7 +25,7 @@
 | 403 | `forbidden_origin` | 変更系リクエストの `Origin` が管理 UI のものではない |
 | 403 | `token_not_allowed` | API トークンでは使えない API（API トークンの節） |
 | 403 | `reauth_required` | 直近 10 分以内のログインが要る操作（ARCHITECTURE 10.3）。UI は再ログインを案内する |
-| 403 | `forbidden_role` | ユーザーのロールではできない操作（ARCHITECTURE 10.7）。`details.required` は要るもの（`view` / `deploy` / `manage` / `owner`）。設定の `PATCH` でオーナー専用の項目を変えようとしたときは `details.fields` に項目名（`relax_policy`、`repository`、`promote_from`）、ドメインの `PATCH` で強制有効化を変えようとしたときは `force_active` |
+| 403 | `forbidden_role` | ユーザーのロールではできない操作（ARCHITECTURE 10.7）。`details.required` は要るもの（`view` / `deploy` / `manage` / `owner`）。設定の `PATCH` でオーナー専用の項目を変えようとしたときは `details.fields` に項目名（`relax_policy`、`repository`、`compose_source`、`compose_content`、`promote_from`）、ドメインの `PATCH` で強制有効化を変えようとしたときは `force_active` |
 | 404 | `not_found`、`app_not_found`、`deployment_not_found`、`domain_not_found`、`task_not_found`、`task_run_not_found`、`db_copy_not_found` | 対象がない。メンバーがロールを持たないアプリ（とそのデプロイ・実行・コピー）も、存在しないものとして同じ 404 になる（`code` も `message` も、存在しないときと同じ） |
 | 409 | `slug_taken`、`no_free_port`、`not_cancelable`、`hostname_taken`、`busy`、`too_many_tokens`、`not_deployed`、`promotion_unavailable`、`promotion_stale` | 状態の衝突 |
 | 422 | `validation_failed`（`details` はフィールド名 → 理由）、`ref_unresolvable` | 入力値が不正 |
@@ -91,7 +91,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）か `auto_deploy_workflow` を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。本番アプリで `dump_hook_service`・`dump_hook_command`・`load_hook_service`・`load_hook_command`・`post_load_service`・`post_load_command` のいずれかを今と違う値にするものも同じ（アプリのコンテナの中で動くコマンドの設定のため。staging アプリでは求めない）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id`・`compose_source`・`compose_content` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）か `auto_deploy_workflow` を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。本番アプリで `dump_hook_service`・`dump_hook_command`・`load_hook_service`・`load_hook_command`・`post_load_service`・`post_load_command` のいずれかを今と違う値にするものも同じ（アプリのコンテナの中で動くコマンドの設定のため。staging アプリでは求めない）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## API トークン
 
@@ -290,6 +290,9 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
   "repo_url": "",
   "default_branch": "main",
   "compose_path": "",
+  "compose_source": "repository",
+  "compose_content": "",
+  "compose_content_hidden": false,
   "web_service": "web",
   "web_port": 3000,
   "host_port": 20000,
@@ -337,6 +340,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 - `desired_state` は `running` / `stopped`、`environment` は `production` / `staging`。
 - `current_deployment` は稼働中の（最後に成功した）デプロイ、`latest_deployment` は最新のデプロイ。どちらも「デプロイ」の形か `null`。
 - `compose_path` が空なら自動検出（`compose.yaml`、`compose.yml`、`docker-compose.yml`、`docker-compose.yaml` の順）。
+- koroku に書く Compose（ARCHITECTURE 6.3）: `compose_source` は `repository`（既定。リポジトリのファイルを `compose_path` で読む）か `inline`（`compose_content` をデプロイする）。`compose_content` は Compose ファイルの本文で、64 KiB まで。`inline` のときは空にできず、YAML のマッピングでなければならない（違えば 422 `validation_failed` の `details.compose_content`）。`repository` の間も本文は保存したまま残る。`POST` と `PATCH` で送れ、`PATCH` で今と違う値にできるのはオーナーだけ（再ログインも要る）。応答の `compose_content` は、管理以上のロールにだけ返す。閲覧・デプロイのロールと API トークンには `null` で、`compose_content_hidden` が `true` になる。保存した本文は次のデプロイから使われる。
 - `memory_limit` が空なら基盤の既定値。書式は数字 + 単位 `b` `k` `m` `g`（例 `512m`）。
 - メモリの予約（ARCHITECTURE 6.2）: `memory_reservation`（全体）と `service_memory_reservations`（サービスごと）は、`environment` が `production` のアプリにだけ効く。空なら各サービスのメモリ上限の半分、`0` なら予約しない。書式はメモリ上限と同じで、`0` 以外は 6 MiB 以上。保存の時点で分かる上限（サービスごとの上限、なければ `memory_limit`、なければ基盤の既定値）を超えると `422 validation_failed`（`details.memory_reservation` か `details.service_memory_reservations`）。サービスごとの値に空文字は使えない（既定に戻すにはキーを消す）。どちらも、環境の切り替えと同じく次のデプロイから反映される。
 - 必要な環境変数の読み取り方（ARCHITECTURE 9.4）: `env_source` は `compose`（既定。Compose ファイルの `${VAR}`）/ `dotenv`（`.env.example`）/ `off`。`env_example_path` は `dotenv` で読むファイルのパスで、空なら `.env.example`。
@@ -581,7 +585,7 @@ key は英字かアンダースコアで始まる英数字とアンダースコ�
 
 ### 必要な環境変数との照合
 
-`GET /api/apps/{slug}/env/requirements?ref=main` か `?sha=<40 桁>`: リポジトリがそのコミットで必要とする変数と、保存済みの変数との照合（ARCHITECTURE 9.4）。どちらも省くとアプリの `default_branch`。値は扱わないので、再ログインから 10 分を過ぎていても応答する。
+`GET /api/apps/{slug}/env/requirements?ref=main` か `?sha=<40 桁>`: リポジトリがそのコミットで必要とする変数と、保存済みの変数との照合（ARCHITECTURE 9.4）。どちらも省くとアプリの `default_branch`。値は扱わないので、再ログインから 10 分を過ぎていても応答する。Compose を koroku に書いたアプリ（ARCHITECTURE 6.3）で `env_source` が `compose` のときは、コミットによらず保存済みの本文と照合し、`ref` と `commit_sha` は空、`path` は `koroku.compose.yaml` になる。
 
 ```json
 {
@@ -869,7 +873,7 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 
 ### 環境変数の初期値
 
-`GET /api/repos/{owner}/{repo}/env-presets?ref=main&path=compose.yaml`: アプリの作成画面に並べる環境変数の初期値（ARCHITECTURE 9.8）。`ref` はブランチ（省くとリポジトリの既定のブランチ）、`path` は Compose ファイル（省くと直下から自動検出）。
+`GET /api/repos/{owner}/{repo}/env-presets?ref=main&path=compose.yaml`: アプリの作成画面に並べる環境変数の初期値（ARCHITECTURE 9.8）。`ref` はブランチ（省くとリポジトリの既定のブランチ）、`path` は Compose ファイル（省くと直下から自動検出）。`compose_source=inline` を付けると、リポジトリの Compose ファイルを読まない（Compose を koroku に書くアプリ。ARCHITECTURE 6.3。`skipped` は空、`compose_path` は空になる）。
 
 ```json
 {

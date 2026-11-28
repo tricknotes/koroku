@@ -64,11 +64,15 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 
 	// 3. Generate the env file and the override.
 	log.Step(StepPrepare, "Preparing environment and Compose override")
-	composeFile, err := compose.DetectFile(releaseDir, app.ComposePath)
+	composeFile, err := e.releaseComposeFile(app, releaseDir)
 	if err != nil {
 		return false, err
 	}
-	log.Printf("Compose file: %s", composeFile)
+	if app.ComposeInline() {
+		log.Printf("Compose file: %s (written in koroku; the repository's own Compose files are not read)", composeFile)
+	} else {
+		log.Printf("Compose file: %s", composeFile)
+	}
 	// A blue/green app replaces its public service side by side
 	// (ARCHITECTURE 7.2).
 	blueGreen := app.BlueGreen
@@ -400,6 +404,25 @@ func (e *Engine) renderEnvVars(ctx context.Context, app store.App, commitSHA str
 		vars[k] = v
 	}
 	return vars, fingerprints, nil
+}
+
+// releaseComposeFile returns the Compose file of a new release, relative
+// to its checkout: the repository's, or the one written in koroku, which
+// is put at the root of the checkout first (ARCHITECTURE 6.3).
+func (e *Engine) releaseComposeFile(app store.App, releaseDir string) (string, error) {
+	if !app.ComposeInline() {
+		return compose.DetectFile(releaseDir, app.ComposePath)
+	}
+	if strings.TrimSpace(app.ComposeContent) == "" {
+		return "", errors.New("the app deploys the Compose file written in koroku, but none is saved; write it in the app's settings")
+	}
+	// Like the override: the checkout is repository content, and a file of
+	// this name may be a symlink to anywhere. The rename replaces it.
+	path := filepath.Join(releaseDir, compose.InlineFileName)
+	if err := writeFileAtomic(path, []byte(app.ComposeContent), 0o644); err != nil {
+		return "", fmt.Errorf("write %s: %w", compose.InlineFileName, err)
+	}
+	return compose.InlineFileName, nil
 }
 
 // composeConfig runs `docker compose config --format json`. With

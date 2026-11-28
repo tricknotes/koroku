@@ -558,6 +558,10 @@ func TestInvocationArgs(t *testing.T) {
 	if !reflect.DeepEqual(bare, []string{"compose", "-p", "koroku-blog", "ps"}) {
 		t.Errorf("Args = %v", bare)
 	}
+	elsewhere := Invocation{ProjectName: "koroku-blog", Files: []string{"/apps/blog/c.yaml"}, ProjectDir: "/r"}.Args("config")
+	if !reflect.DeepEqual(elsewhere, []string{"compose", "-p", "koroku-blog", "--project-directory", "/r", "-f", "/apps/blog/c.yaml", "config"}) {
+		t.Errorf("Args = %v", elsewhere)
+	}
 }
 
 func TestParseMemory(t *testing.T) {

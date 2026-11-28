@@ -165,16 +165,37 @@ func (e *Engine) PreviewPromotionImages(ctx context.Context, target, src store.A
 	if err != nil {
 		return nil, err
 	}
-	composeFile, err := compose.DetectFile(dir, target.ComposePath)
-	if err != nil {
-		return nil, err
-	}
 	content, _, err := e.renderEnv(ctx, target, source.CommitSHA, secrets.NewMasker())
 	if err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(e.appDir(target.Slug), 0o700); err != nil {
 		return nil, fmt.Errorf("prepare app directory: %w", err)
+	}
+	// The target's Compose file as its deployment will have it: a file of
+	// the checkout, or the one written in koroku. The latter is read from
+	// a temporary file of the target app with the checkout as the project
+	// directory, so that nothing is written into the source's release
+	// (ARCHITECTURE 9.7).
+	inv := compose.Invocation{ProjectName: target.ProjectName()}
+	if target.ComposeInline() {
+		tmpCompose, err := os.CreateTemp(e.appDir(target.Slug), ".promotion-compose-*.yaml")
+		if err != nil {
+			return nil, fmt.Errorf("write the Compose file for the preview: %w", err)
+		}
+		defer func() { _ = os.Remove(tmpCompose.Name()) }()
+		_, writeErr := tmpCompose.WriteString(target.ComposeContent)
+		if err := errors.Join(writeErr, tmpCompose.Close()); err != nil {
+			return nil, fmt.Errorf("write the Compose file for the preview: %w", err)
+		}
+		inv.Files = []string{tmpCompose.Name()}
+		inv.ProjectDir = dir
+	} else {
+		composeFile, err := compose.DetectFile(dir, target.ComposePath)
+		if err != nil {
+			return nil, err
+		}
+		inv.Files = []string{filepath.Join(dir, composeFile)}
 	}
 	tmp, err := os.CreateTemp(e.appDir(target.Slug), ".promotion-env-*")
 	if err != nil {
@@ -185,11 +206,7 @@ func (e *Engine) PreviewPromotionImages(ctx context.Context, target, src store.A
 	if err := errors.Join(writeErr, tmp.Close()); err != nil {
 		return nil, fmt.Errorf("write env for the preview: %w", err)
 	}
-	inv := compose.Invocation{
-		ProjectName: target.ProjectName(),
-		Files:       []string{filepath.Join(dir, composeFile)},
-		EnvFile:     tmp.Name(),
-	}
+	inv.EnvFile = tmp.Name()
 	targetProject, err := e.composeConfigTo(ctx, inv, dir, io.Discard)
 	if err != nil {
 		return nil, err

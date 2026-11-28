@@ -83,14 +83,22 @@ var (
 // literal environment entries win over presets; empty means the first of
 // compose.DefaultFiles in the root.
 func Detect(root []string, read ReadFunc, composePath string) (Detection, error) {
+	return detectPresets(root, read, composePath, true)
+}
+
+// detectPresets is Detect; without useCompose no Compose file of the repository
+// is read (the app's is written in koroku, ARCHITECTURE 6.3).
+func detectPresets(root []string, read ReadFunc, composePath string, useCompose bool) (Detection, error) {
 	d := detector{root: root, read: read, seen: map[string]bool{}}
 	for _, rule := range []func() error{d.rails, d.rack, d.laravel, d.django, d.elixir, d.node} {
 		if err := rule(); err != nil {
 			return Detection{}, err
 		}
 	}
-	if err := d.applyCompose(composePath); err != nil {
-		return Detection{}, err
+	if useCompose {
+		if err := d.applyCompose(composePath); err != nil {
+			return Detection{}, err
+		}
 	}
 	if d.out.Frameworks == nil {
 		d.out.Frameworks = []string{}
