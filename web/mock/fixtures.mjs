@@ -1540,6 +1540,26 @@ export function buildScenario(name) {
           },
         ],
       ]);
+      state.pitrRestores = new Map([
+        [
+          'blog',
+          [
+            {
+              id: 3,
+              service: 'db',
+              target_time: ago(2 * DAY + 4 * HOUR),
+              base_snapshot_id: 'c41f09ab',
+              trash_path:
+                '/var/lib/koroku/restore-trash/blog-pitr-20261126T080000Z',
+              status: 'succeeded',
+              error: '',
+              started_at: ago(2 * DAY + 3 * HOUR),
+              finished_at: ago(2 * DAY + 3 * HOUR - 34 * 1000),
+              actor: { id: 1, login: 'octo' },
+            },
+          ],
+        ],
+      ]);
       return state;
     }
     case 'dump-restore': {

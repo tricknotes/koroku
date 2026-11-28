@@ -1064,6 +1064,19 @@ SHOTS.push(
     script: "document.querySelector('[data-test-pitr]').scrollIntoView()",
   },
   {
+    name: 'backups-pitr-restore-dialog',
+    path: '/apps/blog/backups?scenario=pitr',
+    wait: '[data-test-pitr-restore-form]',
+    script: `(() => {
+      const input = document.querySelector('[data-test-field="target_time"]');
+      const d = new Date(Date.now() - 26 * 3600 * 1000 + 9 * 3600 * 1000);
+      input.value = d.toISOString().slice(0, 19);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-test-pitr-restore-start]').click();
+    })()`,
+    then: '[data-test-dialog]',
+  },
+  {
     name: 'backups-pitr-enable-dialog',
     path: '/apps/blog/backups?scenario=healthy',
     wait: '[data-test-pitr-form]',

@@ -226,6 +226,7 @@ type backupManager interface {
 	// BackupStream stores the base backups and the WAL of point-in-time
 	// recovery (ARCHITECTURE 10.9).
 	BackupStream(ctx context.Context, s backup.Stream) (string, error)
+	WriteStream(ctx context.Context, app backup.App, kind backup.Kind, snapshotID string, w io.Writer) error
 }
 
 // backupService adapts the backup manager to the API and the deploy engine.
@@ -374,6 +375,17 @@ func (b *backupService) DumpByID(ctx context.Context, app store.App, snapshotID 
 			return b.manager.WriteDump(ctx, file, w)
 		},
 	}, nil
+}
+
+// WriteBase implements deploy.PITRSnapshots: a base backup of
+// point-in-time recovery (ARCHITECTURE 10.9).
+func (b *backupService) WriteBase(ctx context.Context, app store.App, snapshotID string, w io.Writer) error {
+	return b.manager.WriteStream(ctx, toBackupApp(app), backup.KindPITRBase, snapshotID, w)
+}
+
+// WriteWAL implements deploy.PITRSnapshots: a batch of WAL.
+func (b *backupService) WriteWAL(ctx context.Context, app store.App, snapshotID string, w io.Writer) error {
+	return b.manager.WriteStream(ctx, toBackupApp(app), backup.KindWAL, snapshotID, w)
 }
 
 // backupDeps are the shared dependencies of the backup service.

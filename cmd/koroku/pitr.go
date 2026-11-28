@@ -29,6 +29,13 @@ type pitrReporter struct {
 	service *pitr.Service
 }
 
+// RequestBase implements deploy.PITRHooks.
+func (r *pitrReporter) RequestBase(appID int64) {
+	if r.service != nil {
+		r.service.RequestBase(appID)
+	}
+}
+
 func (r *pitrReporter) Report(change deploy.StatusChange) {
 	if r.service == nil {
 		return

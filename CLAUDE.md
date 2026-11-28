@@ -191,8 +191,8 @@ ARCHITECTURE 10.9。M7 の上に作る。
 - [x] ベースバックアップ（`pg_basebackup -X none --no-manifest` を `restic --stdin`）と、1 時間ごとの WAL の退避（コンテナの中で `tar` にまとめて `restic --stdin`、退避したファイルの削除）。`pitr_bases`、`pitr_wal_batches`、`pitr_gaps`
 - [x] ホストの中の WAL の上限（2 GiB、ディスクの 90%）、`pg_stat_archiver` の警告、マウントの外れの記録、メジャーバージョンの変更の検出
 - [x] 世代: `kind:pitr-base` と `kind:wal` を `--keep-within 8d` で別に管理し、10.2 の `forget` に `--keep-tag` を足す
-- [ ] 復旧の手順 `check` → `stop` → `move` → `base` → `wal` → `recover` → `cleanup` → `start` → `base`、失敗時に restore-trash から戻す、`koroku` の再起動で中断したときの扱い。`pitr_restores`
-- [ ] API（`GET /api/apps/{slug}/pitr`、`POST /api/apps/{slug}/pitr/restores`）と UI（戻せる期間の帯、戻せない区間、時刻の入力、確認のダイアログ）。`docs/API.md`、`docs/USAGE.md`、`docs/OPERATIONS.md`（restore-trash から手で戻す手順）
+- [x] 復旧の手順 `check` → `stop` → `move` → `base` → `wal` → `recover` → `cleanup` → `start` → `base`、失敗時に restore-trash から戻す、`koroku` の再起動で中断したときの扱い。`pitr_restores`
+- [x] API（`GET /api/apps/{slug}/pitr`、`POST /api/apps/{slug}/pitr/restores`）と UI（戻せる期間の帯、戻せない区間、時刻の入力、確認のダイアログ）。`docs/API.md`、`docs/USAGE.md`、`docs/OPERATIONS.md`（restore-trash から手で戻す手順）
 - [x] `plugins/koroku/skills/prepare-app` の要件（PostgreSQL のデータディレクトリを named volume に置くこと）、`plugin.json` の `version`
 - [x] 実機確認: 公式の `postgres` イメージ（サポート中の各メジャーバージョン）で、`POSTGRES_USER` のローカル接続の `replication` が既定の `pg_hba.conf` で通るか、`pg_basebackup -D - -Ft -X none` の出力から回復できるか、マウントがないときの `archive_command` で DB が WAL を溜めないか。restic のスナップショットが 1 日 24 個増えたときの一覧と `forget` の時間。結果を ARCHITECTURE の 10.9 に反映
 - 完了条件: Rails + PostgreSQL のサンプルで有効にし、書き込みを続けながら、ある時刻の直後に行を消す。その時刻を指定して戻すと、消した行があり、それより後の書き込みがない。ホストの中の未退避の WAL を使って、直前 5 分以内の時刻にも戻せる。マウントを外したリリースへロールバックしても DB が止まらず、その間が戻せない区間として画面に出る

@@ -2365,6 +2365,7 @@ PostgreSQL の DB を、指定した時刻（秒の単位）の状態に戻す�
 
 - 4 から 7 で失敗したら、DB のサービスを止め、展開したデータを消し、3 で移した中身を戻してから、アプリを起動する（volume のリストアの失敗と同じ扱い）。もともと止まっていたアプリは止めたままにする。
 - 安全策: `manage`、再ログインから 10 分以内、本番アプリでは `confirm` の slug、操作のロックと restic の操作のロックの両方を取る（デプロイや別の復旧と重ねない）。全体で 2 時間で打ち切る。
+- API: 一覧と 1 件とログは `GET /api/apps/{slug}/pitr/restores`、`.../{id}`、`.../{id}/logs`（閲覧以上）。アプリのパスの下に置き、ロールの判定をアプリに揃える。
 - 記録: `pitr_restores`（`id`、`app_id`、`target_time`、使ったベースバックアップのスナップショットの ID、restore-trash のパス、`status`、`error`、`actor`、開始と終了の時刻）。ログは `/var/lib/koroku/apps/<slug>/pitr-restores/<id>.log`。`koroku` の再起動で中断した復旧は、起動時に `failed` にし、アプリは止めたままにする（ログの末尾に、restore-trash のパスと戻し方を書く）。操作の記録（10.7）は `db.pitr_restored`。
 
 **ほかの機能との関係**

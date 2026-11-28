@@ -529,6 +529,10 @@ func (f *fakeBackupManager) BackupStream(context.Context, backup.Stream) (string
 	return "", errors.New("not used")
 }
 
+func (f *fakeBackupManager) WriteStream(context.Context, backup.App, backup.Kind, string, io.Writer) error {
+	return errors.New("not used")
+}
+
 func TestBackupServiceAdapter(t *testing.T) {
 	ctx := context.Background()
 	manager := &fakeBackupManager{}

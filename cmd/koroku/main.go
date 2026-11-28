@@ -413,6 +413,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		}
 		deployOpts.Backup = backups
 		deployOpts.CopyBackups = backups
+		deployOpts.PITRSnapshots = backups
 		apiOpts.Backups = backups
 	} else {
 		logger.Warn("backups are disabled: " + reason)
@@ -420,6 +421,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 
 	pitrReports := &pitrReporter{store: st}
 	deployOpts.Status = append(statusReports, pitrReports)
+	deployOpts.PITR = pitrReports
+	deployOpts.TrashDir = filepath.Join(cfg.DataDir, "restore-trash")
 	engine := deploy.New(deployOpts)
 	controller.engine = engine
 	// Point-in-time recovery of PostgreSQL services (ARCHITECTURE 10.9):
@@ -453,6 +456,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 	apiOpts.PushDeployer = engine
 	apiOpts.Ops = engine
 	apiOpts.Copier = engine
+	apiOpts.PITRRestorer = engine
 	apiOpts.Tasks = engine
 	apiOpts.Waker = engine
 	// Review apps: the parent's data is copied after the first deployment
