@@ -28,6 +28,39 @@ module('Unit | Utility | settings-form', function () {
     assert.deepEqual(new SettingsForm(app).patch(app), {});
   });
 
+  test('a Compose file written in koroku is patched with its source', function (assert) {
+    const app = makeApp();
+    const form = new SettingsForm(app);
+
+    form.composeSource = 'inline';
+    assert.deepEqual(form.validate(), {
+      compose_content: 'Compose の内容を入力してください。',
+    });
+    form.composeContent = 'services:\r\n  web:\r\n    build: .\r\n';
+    assert.deepEqual(form.validate(), {});
+    assert.deepEqual(form.patch(app), {
+      compose_source: 'inline',
+      compose_content: 'services:\n  web:\n    build: .\n',
+    });
+
+    form.composeContent = `#${'x'.repeat(64 * 1024)}`;
+    assert.deepEqual(form.validate(), {
+      compose_content: '64 KiB 以内にしてください。',
+    });
+  });
+
+  test('a Compose file the role is not shown is never patched', function (assert) {
+    const app = makeApp({
+      compose_source: 'inline',
+      compose_content: null,
+      compose_content_hidden: true,
+    });
+    const form = new SettingsForm(app);
+
+    assert.deepEqual(form.patch(app), {});
+    assert.deepEqual(form.validate(), {}, 'nor checked');
+  });
+
   test('the patch holds only what changed', function (assert) {
     const app = makeApp({ service_memory_limits: { db: '1g' } });
     const form = new SettingsForm(app);

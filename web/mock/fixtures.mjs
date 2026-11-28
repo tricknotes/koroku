@@ -76,6 +76,10 @@ export const SCENARIOS = {
     'everything fine; blog has 20 custom domains, as many as an app can have',
   member:
     'logged in as the member mia, not the owner: deploy on blog, manage on blog-staging (with a custom domain waiting for DNS and one the owner forced active), view on shop, no role on shop-staging',
+  'compose-inline':
+    'everything fine; shop-staging is a public repository without a Compose file and deploys one written in koroku (ARCHITECTURE 6.3)',
+  'compose-inline-member':
+    'member, but blog-staging (manage) and shop (view) deploy a Compose file written in koroku: read-only for manage, not shown below',
   'webhook-unset':
     'everything fine, but blog-staging deploys on push while the webhook secret is not set in config.toml',
   'workflow-gated':
@@ -229,6 +233,8 @@ function app(slug, overrides = {}) {
     repo_url: '',
     default_branch: 'main',
     compose_path: '',
+    compose_source: 'repository',
+    compose_content: '',
     web_service: 'web',
     web_port: 3000,
     host_port: 20000,
@@ -944,6 +950,31 @@ export function pullRequestsOf(state, parent) {
   );
 }
 
+/** A Compose file as an owner would write it for a repository without one. */
+export const INLINE_COMPOSE = `services:
+  web:
+    build: .
+    ports:
+      - "3000"
+    environment:
+      DATABASE_URL: \${DATABASE_URL:?}
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_PASSWORD: \${POSTGRES_PASSWORD:?set a password for the database}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+
+volumes:
+  pgdata:
+`;
+
 /** A review app as `POST .../review-apps` would create it. */
 export function newReviewApp(state, parent, pr, copyData, hostPort) {
   let slug = `${parent.slug}-pr-${pr.number}`;
@@ -956,6 +987,8 @@ export function newReviewApp(state, parent, pr, copyData, hostPort) {
       [
         'repo_full_name',
         'compose_path',
+        'compose_source',
+        'compose_content',
         'web_service',
         'web_port',
         'healthcheck_path',
@@ -1186,10 +1219,19 @@ export function buildScenario(name) {
       state.apps.get('shop-staging').review_apps_allowed = true;
       return state;
     }
-    case 'member': {
+    case 'member':
+    case 'compose-inline-member': {
       // What the member manages has a domain that waits for DNS and one the
       // owner forced active: skipping the check is the owner's.
       const state = scenario(healthyApps());
+      if (name === 'compose-inline-member') {
+        for (const slug of ['blog-staging', 'shop']) {
+          Object.assign(state.apps.get(slug), {
+            compose_source: 'inline',
+            compose_content: INLINE_COMPOSE,
+          });
+        }
+      }
       state.apps.get('blog-staging').pending_domains = 1;
       state.domains.get('blog-staging').push(
         domain(5, 'staging.example.org', 'blog-staging', {
@@ -1398,6 +1440,42 @@ export function buildScenario(name) {
           ['blog', [{ key: 'LEGACY_FLAG', value: '1' }, ...ENV_VARS]],
         ]),
       });
+    }
+    case 'compose-inline': {
+      const state = scenario(healthyApps());
+      Object.assign(state.apps.get('shop-staging'), {
+        repo_full_name: '',
+        repo_url: 'https://github.com/octo/shop',
+        compose_source: 'inline',
+        compose_content: INLINE_COMPOSE,
+      });
+      state.requirements = new Map([
+        [
+          'shop-staging',
+          {
+            compose: {
+              status: 'ok',
+              path: 'koroku.compose.yaml',
+              inline: true,
+              variables: [
+                {
+                  key: 'DATABASE_URL',
+                  required: true,
+                  default: null,
+                  description: '',
+                },
+                {
+                  key: 'POSTGRES_PASSWORD',
+                  required: true,
+                  default: null,
+                  description: 'set a password for the database',
+                },
+              ],
+            },
+          },
+        ],
+      ]);
+      return state;
     }
     case 'memory-deploys': {
       const state = scenario(healthyApps());

@@ -8,6 +8,7 @@ import { LinkTo } from '@ember/routing';
 import type RouterService from '@ember/routing/router-service';
 import Banner from 'koroku-console/components/banner';
 import Button, { buttonClass } from 'koroku-console/components/button';
+import ComposeEditor from 'koroku-console/components/compose-editor';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import DomainList from 'koroku-console/components/domain-list';
 import ErrorMessage from 'koroku-console/components/error-message';
@@ -38,7 +39,11 @@ import {
   MAX_EXEMPT_PATHS,
   exemptPathProblem,
 } from 'koroku-console/utils/settings-form';
-import type { App, Environment } from 'koroku-console/utils/types';
+import type {
+  App,
+  ComposeSource,
+  Environment,
+} from 'koroku-console/utils/types';
 
 /** One entry of the section index (ARCHITECTURE 9.1). */
 interface SettingsSection {
@@ -219,6 +224,23 @@ export default class AppSettingsTemplate extends Component<Signature> {
     this.editor.form.environment = inputValue(event) as Environment;
   };
 
+  setComposeSource = (event: Event) => {
+    this.editor.form.composeSource = inputValue(event) as ComposeSource;
+  };
+
+  setComposeContent = (value: string) => {
+    this.editor.form.composeContent = value;
+  };
+
+  get composeInline(): boolean {
+    return this.editor.form.composeSource === 'inline';
+  }
+
+  /** The file is not sent to roles below manage (ARCHITECTURE 6.3). */
+  get composeHidden(): boolean {
+    return this.app.compose_content_hidden === true;
+  }
+
   /** Staging apps get `noindex` from the proxy even when they are public. */
   get publicStaging(): boolean {
     const form = this.editor.form;
@@ -351,7 +373,7 @@ export default class AppSettingsTemplate extends Component<Signature> {
                     id="settings-source-title"
                   >ソース</h2>
                   <p class="form-group-description">
-                    デプロイするコードと、その中の Compose ファイルです。
+                    デプロイするコードと、それを動かす Compose ファイルです。
                   </p>
                 </div>
                 <div class="form-group-body">
@@ -398,28 +420,99 @@ export default class AppSettingsTemplate extends Component<Signature> {
                       />
                     </FormField>
 
-                    <FormField
-                      class="field-wide"
-                      @label="Compose ファイルのパス"
-                      @hint="空なら compose.yaml などをリポジトリ直下から自動で探します。"
-                      @error={{this.editor.errors.compose_path}}
-                      data-test-field-group="compose_path"
-                      as |field|
-                    >
-                      <input
-                        id={{field.id}}
-                        type="text"
-                        class="mono"
-                        spellcheck="false"
-                        autocomplete="off"
-                        placeholder="自動検出"
-                        value={{this.editor.form.composePath}}
-                        aria-describedby={{field.describedBy}}
-                        aria-invalid={{field.invalid}}
-                        data-test-field="compose_path"
-                        {{on "input" (setValue this.editor.form "composePath")}}
-                      />
-                    </FormField>
+                  </div>
+
+                  <div class="compose-source" data-test-compose-source>
+                    {{#unless this.isOwner}}
+                      {{#unless this.readOnly}}
+                        <RoleNote
+                          @needed="owner"
+                          @what="Compose の置き場所と内容"
+                          data-test-compose-owner-note
+                        />
+                      {{/unless}}
+                    {{/unless}}
+                    <fieldset class="option-group">
+                      <legend>Compose の置き場所</legend>
+                      <label class="option">
+                        <input
+                          type="radio"
+                          name="compose_source"
+                          value="repository"
+                          checked={{eq
+                            this.editor.form.composeSource
+                            "repository"
+                          }}
+                          disabled={{if this.isOwner false true}}
+                          data-test-compose-source-option="repository"
+                          {{on "change" this.setComposeSource}}
+                        />
+                        <span class="option-body">
+                          <span class="option-label">リポジトリのファイル</span>
+                          <span class="option-hint">リポジトリにある Compose
+                            ファイルでデプロイします。</span>
+                        </span>
+                      </label>
+                      <label class="option">
+                        <input
+                          type="radio"
+                          name="compose_source"
+                          value="inline"
+                          checked={{eq this.editor.form.composeSource "inline"}}
+                          disabled={{if this.isOwner false true}}
+                          data-test-compose-source-option="inline"
+                          {{on "change" this.setComposeSource}}
+                        />
+                        <span class="option-body">
+                          <span class="option-label">koroku に書く</span>
+                          <span class="option-hint">
+                            リポジトリに Compose
+                            ファイルがないときや、そのままでは動かせないときに、ここに書いたものでデプロイします。リポジトリの
+                            Compose ファイルは使いません。
+                          </span>
+                        </span>
+                      </label>
+                    </fieldset>
+
+                    {{#if this.composeInline}}
+                      {{#if this.composeHidden}}
+                        <p class="role-note" data-test-compose-hidden>
+                          Compose の内容は、「管理」以上のロールで表示されます。
+                        </p>
+                      {{else}}
+                        <ComposeEditor
+                          @value={{this.editor.form.composeContent}}
+                          @error={{this.editor.errors.compose_content}}
+                          @readonly={{if this.isOwner false true}}
+                          @onInput={{this.setComposeContent}}
+                        />
+                      {{/if}}
+                    {{else}}
+                      <FormField
+                        @label="Compose ファイルのパス"
+                        @hint="空なら compose.yaml などをリポジトリ直下から自動で探します。"
+                        @error={{this.editor.errors.compose_path}}
+                        data-test-field-group="compose_path"
+                        as |field|
+                      >
+                        <input
+                          id={{field.id}}
+                          type="text"
+                          class="mono"
+                          spellcheck="false"
+                          autocomplete="off"
+                          placeholder="自動検出"
+                          value={{this.editor.form.composePath}}
+                          aria-describedby={{field.describedBy}}
+                          aria-invalid={{field.invalid}}
+                          data-test-field="compose_path"
+                          {{on
+                            "input"
+                            (setValue this.editor.form "composePath")
+                          }}
+                        />
+                      </FormField>
+                    {{/if}}
                   </div>
                 </div>
               </div>

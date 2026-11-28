@@ -2209,6 +2209,146 @@ for (const [suffix, extra] of [
 }
 
 // App creation, login, not found.
+// A Compose file written in koroku (ARCHITECTURE 6.3): the source section
+// of the settings, what a member sees of it, the create screen and the
+// comparison of the variables.
+const INLINE_OPTION = '[data-test-compose-source-option="inline"]';
+const COMPOSE_TEXT = '[data-test-field="compose_content"]';
+const TYPE_COMPOSE = `(() => {
+  const text = document.querySelector('${COMPOSE_TEXT}');
+  text.value = 'services:\\n  web:\\n    build: .\\n    ports:\\n      - "8080"\\n    environment:\\n      SECRET_KEY: \${SECRET_KEY:?}\\n';
+  text.dispatchEvent(new Event('input', { bubbles: true }));
+})()`;
+SHOTS.push(
+  {
+    name: 'compose-inline-settings',
+    width: 1280,
+    height: 1200,
+    path: '/apps/shop-staging/settings?scenario=compose-inline',
+    wait: COMPOSE_TEXT,
+  },
+  {
+    name: 'compose-inline-settings-phone',
+    path: '/apps/shop-staging/settings?scenario=compose-inline',
+    wait: COMPOSE_TEXT,
+    ...PHONE,
+    fullPage: false,
+  },
+  {
+    name: 'compose-inline-settings-choose',
+    width: 1280,
+    height: 1200,
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: INLINE_OPTION,
+    click: INLINE_OPTION,
+    then: COMPOSE_TEXT,
+    themes: ['light'],
+  },
+  {
+    name: 'compose-inline-settings-empty',
+    width: 1280,
+    height: 1200,
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: INLINE_OPTION,
+    script: `(() => {
+      document.querySelector('${INLINE_OPTION}').click();
+      setTimeout(() => document.querySelector('[data-test-settings-save]').click(), 300);
+    })()`,
+    then: '[data-test-field-group="compose_content"] [data-test-field-error]',
+    themes: ['light'],
+  },
+  {
+    name: 'compose-inline-settings-manage',
+    width: 1280,
+    height: 1200,
+    path: '/apps/blog-staging/settings?scenario=compose-inline-member',
+    wait: COMPOSE_TEXT,
+    themes: ['light'],
+  },
+  {
+    name: 'compose-inline-settings-view',
+    width: 1280,
+    height: 1200,
+    path: '/apps/shop/settings?scenario=compose-inline-member',
+    wait: '[data-test-compose-hidden]',
+    themes: ['light'],
+  },
+  {
+    name: 'compose-inline-assist',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: INLINE_OPTION,
+    script: `(() => {
+      document.querySelector('${INLINE_OPTION}').click();
+      setTimeout(() => {
+        document.querySelector('[data-test-compose-assist]').open = true;
+        document.querySelector('[data-test-compose-assist]').scrollIntoView({ block: 'center' });
+      }, 300);
+    })()`,
+    then: '[data-test-compose-assist-prompt]',
+    settle: 600,
+    width: 1280,
+    height: 1200,
+  },
+  {
+    name: 'compose-inline-assist-phone',
+    path: '/apps/blog-staging/settings?scenario=healthy',
+    wait: INLINE_OPTION,
+    script: `(() => {
+      document.querySelector('${INLINE_OPTION}').click();
+      setTimeout(() => {
+        document.querySelector('[data-test-compose-assist]').open = true;
+        document.querySelector('[data-test-compose-assist]').scrollIntoView({ block: 'start' });
+      }, 300);
+    })()`,
+    then: '[data-test-compose-assist-prompt]',
+    settle: 600,
+    ...PHONE,
+    fullPage: false,
+    themes: ['light'],
+  },
+  {
+    name: 'compose-inline-env',
+    path: '/apps/shop-staging/env?scenario=compose-inline',
+    wait: '[data-test-env-reqs-missing]',
+    themes: ['light'],
+  },
+  {
+    name: 'compose-inline-new-app',
+    path: '/apps/new?scenario=healthy',
+    wait: '[data-test-field="repo_full_name"]',
+    script: `(() => {
+      const select = document.querySelector('[data-test-field="repo_full_name"]');
+      select.value = 'octo/blog';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      setTimeout(() => {
+        document.querySelector('${INLINE_OPTION}').click();
+        setTimeout(() => ${TYPE_COMPOSE}, 300);
+      }, 500);
+    })()`,
+    then: COMPOSE_TEXT,
+    settle: 1200,
+    fullPage: true,
+  },
+  {
+    name: 'compose-inline-new-app-phone',
+    path: '/apps/new?scenario=healthy',
+    wait: '[data-test-field="repo_full_name"]',
+    script: `(() => {
+      const select = document.querySelector('[data-test-field="repo_full_name"]');
+      select.value = 'octo/blog';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      setTimeout(() => {
+        document.querySelector('${INLINE_OPTION}').click();
+        setTimeout(() => ${TYPE_COMPOSE}, 300);
+      }, 500);
+    })()`,
+    then: COMPOSE_TEXT,
+    settle: 1200,
+    ...PHONE,
+    themes: ['light'],
+  },
+);
+
 const REPOSITORY = '[data-test-field="repo_full_name"]';
 const CHOOSE_REPOSITORY = `(() => {
   const select = document.querySelector('${REPOSITORY}');

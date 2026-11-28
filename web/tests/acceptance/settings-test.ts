@@ -122,6 +122,79 @@ module('Acceptance | settings', function (hooks) {
     });
   });
 
+  test('the Compose file can be written in koroku', async function (assert) {
+    await visit('/apps/blog/settings');
+
+    assert.dom('[data-test-compose-source-option="repository"]').isChecked();
+    assert.dom('[data-test-field="compose_content"]').doesNotExist();
+
+    await click('[data-test-compose-source-option="inline"]');
+    assert
+      .dom('[data-test-field="compose_path"]')
+      .doesNotExist('the path names a file of the repository');
+    assert.dom('[data-test-field="compose_content"]').hasValue('');
+    assert
+      .dom('[data-test-compose-assist-setup]')
+      .exists({ count: 2 }, 'the plugin is installed with two commands');
+    assert
+      .dom('[data-test-compose-assist-prompt]')
+      .includesText('/koroku:prepare-app')
+      .includesText(
+        'rehearse.sh --inline',
+        'the prompt asks the Skill for a file to paste here',
+      );
+
+    await click('[data-test-settings-save]');
+    assert
+      .dom(fieldError('compose_content'))
+      .hasText('Compose の内容を入力してください。');
+    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog'), []);
+
+    await fillIn(
+      '[data-test-field="compose_content"]',
+      'services:\r\n  web:\r\n    build: .\r\n',
+    );
+    await click('[data-test-settings-save]');
+    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[0]?.body, {
+      compose_source: 'inline',
+      compose_content: 'services:\n  web:\n    build: .\n',
+    });
+    assert.dom('[data-test-settings-saved]').exists();
+    assert
+      .dom('[data-test-field="compose_content"]')
+      .hasValue('services:\n  web:\n    build: .\n');
+
+    // Back to the repository's file: what was written stays saved.
+    await click('[data-test-compose-source-option="repository"]');
+    assert.dom('[data-test-field="compose_path"]').exists();
+    await click('[data-test-settings-save]');
+    assert.deepEqual(fakes.api.callsTo('PATCH', '/api/apps/blog')[1]?.body, {
+      compose_source: 'repository',
+    });
+    await click('[data-test-compose-source-option="inline"]');
+    assert
+      .dom('[data-test-field="compose_content"]')
+      .hasValue('services:\n  web:\n    build: .\n');
+  });
+
+  test('the server’s reason for refusing the Compose file is shown at it', async function (assert) {
+    fakes.api.on('PATCH', '/api/apps/blog', () => {
+      throw apiError(422, 'validation_failed', {
+        compose_content:
+          'is not a YAML mapping: line 2: did not find expected key',
+      });
+    });
+    await visit('/apps/blog/settings');
+    await click('[data-test-compose-source-option="inline"]');
+    await fillIn('[data-test-field="compose_content"]', 'services: [');
+    await click('[data-test-settings-save]');
+
+    assert.dom(fieldError('compose_content')).includesText('YAML');
+    assert
+      .dom('[data-test-field="compose_content"]')
+      .hasAria('invalid', 'true');
+  });
+
   module('unsaved changes and deploying', function (hooks) {
     hooks.beforeEach(function () {
       fakes.api

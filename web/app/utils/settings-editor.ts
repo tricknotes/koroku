@@ -13,6 +13,8 @@ export type SettingsConfirmation =
 export const SETTINGS_TAB_FIELDS: (keyof AppPatch)[] = [
   'default_branch',
   'compose_path',
+  'compose_source',
+  'compose_content',
   'web_service',
   'web_port',
   'healthcheck_path',

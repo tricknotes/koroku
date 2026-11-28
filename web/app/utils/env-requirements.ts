@@ -1,3 +1,4 @@
+import { INLINE_COMPOSE_FILE } from 'koroku-console/utils/compose-source';
 import type {
   EnvRequirement,
   EnvRequirements,
@@ -33,6 +34,18 @@ export function reasonText(reason: EnvRequirementsReason | ''): string {
 }
 
 /** The file the list comes from, as the reader knows it. */
+/**
+ * Whether the variables were read from the Compose file written in koroku,
+ * which no commit decides (ARCHITECTURE 6.3).
+ */
+export function fromInlineCompose(req: EnvRequirements): boolean {
+  return (
+    req.source === 'compose' &&
+    req.path === INLINE_COMPOSE_FILE &&
+    !req.commit_sha
+  );
+}
+
 export function sourceFile(req: EnvRequirements): string {
   if (req.path) return req.path;
   return req.source === 'dotenv' ? '.env.example' : 'Compose ファイル';

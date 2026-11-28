@@ -257,6 +257,67 @@ module('Acceptance | create app', function (hooks) {
     assert.dom('[data-test-field="repo_url"]').doesNotExist();
   });
 
+  test('a repository without a Compose file gets one written in koroku', async function (assert) {
+    fakes.api
+      .on('GET', '/api/repos/octo/blog/compose', {
+        files: [],
+        path: '',
+        services: [],
+      })
+      .on('POST', '/api/apps', (call: FakeCall) =>
+        makeApp(call.body as { slug: string }),
+      );
+
+    await visit('/apps/new');
+    await fillIn('[data-test-field="repo_full_name"]', 'octo/blog');
+    assert.dom('[data-test-compose-missing]').exists();
+    assert.dom('[data-test-field="compose_content"]').doesNotExist();
+
+    await click('[data-test-compose-write]');
+    assert.dom('[data-test-compose-source-option="inline"]').isChecked();
+    assert
+      .dom('[data-test-compose-missing]')
+      .doesNotExist('the repository’s files do not matter any more');
+    assert.dom('[data-test-field="compose_path_input"]').doesNotExist();
+    const presets = fakes.api.callsTo(
+      'GET',
+      '/api/repos/octo/blog/env-presets',
+    );
+    assert.deepEqual(
+      presets[presets.length - 1]?.query,
+      { ref: 'main', compose_source: 'inline' },
+      'the presets do not read the repository’s Compose file',
+    );
+
+    await fillIn('[data-test-field="slug"]', 'blog-prod');
+    await fillIn('[data-test-field="web_port"]', '8080');
+    await click('[data-test-submit]');
+    assert
+      .dom(fieldError('compose_content'))
+      .hasText('Compose の内容を入力してください。');
+    assert.deepEqual(fakes.api.callsTo('POST', '/api/apps'), []);
+
+    await fillIn(
+      '[data-test-field="compose_content"]',
+      'services:\n  app:\n    build: .\n',
+    );
+    await fillIn('[data-test-field="web_service"]', 'app');
+    await click('[data-test-submit]');
+
+    assert.deepEqual(fakes.api.callsTo('POST', '/api/apps')[0]?.body, {
+      slug: 'blog-prod',
+      web_port: 8080,
+      environment: 'staging',
+      repo_full_name: 'octo/blog',
+      repo_id: 1,
+      default_branch: 'main',
+      compose_source: 'inline',
+      compose_content: 'services:\n  app:\n    build: .\n',
+      web_service: 'app',
+      healthcheck_path: '/',
+    });
+  });
+
   test('a Compose file elsewhere in the repository is typed in', async function (assert) {
     fakes.api
       .on('GET', '/api/repos/octo/blog/compose', (call: FakeCall) =>

@@ -164,6 +164,41 @@ module('Acceptance | roles', function (hooks) {
     assert.dom('[data-test-owner-only-note]').exists();
   });
 
+  test('the Compose file written in koroku is the owner’s to change', async function (assert) {
+    asMember('manage');
+    Object.assign(state.app, {
+      compose_source: 'inline',
+      compose_content: 'services:\n  web:\n    build: .\n',
+      compose_content_hidden: false,
+    });
+    await visit('/apps/blog/settings');
+
+    assert.dom('[data-test-compose-owner-note]').exists();
+    assert.dom('[data-test-compose-source-option="repository"]').isDisabled();
+    assert.dom('[data-test-compose-source-option="inline"]').isChecked();
+    assert
+      .dom('[data-test-field="compose_content"]')
+      .hasValue('services:\n  web:\n    build: .\n')
+      .hasAttribute('readonly');
+    assert
+      .dom('[data-test-compose-assist]')
+      .doesNotExist('nothing to write for a role that cannot save it');
+  });
+
+  test('the Compose file written in koroku is not shown below manage', async function (assert) {
+    asMember('view');
+    Object.assign(state.app, {
+      compose_source: 'inline',
+      compose_content: null,
+      compose_content_hidden: true,
+    });
+    await visit('/apps/blog/settings');
+
+    assert.dom('[data-test-compose-source-option="inline"]').isChecked();
+    assert.dom('[data-test-field="compose_content"]').doesNotExist();
+    assert.dom('[data-test-compose-hidden]').exists();
+  });
+
   test('the deploy history says who deployed', async function (assert) {
     state = serveConsole(fakes);
     state.deployments[0]!.actor = { id: 2, login: 'mia' };

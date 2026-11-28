@@ -9,12 +9,17 @@ import type RouterService from '@ember/routing/router-service';
 import { pageTitle } from 'ember-page-title';
 import Banner from 'koroku-console/components/banner';
 import Button, { buttonClass } from 'koroku-console/components/button';
+import ComposeEditor from 'koroku-console/components/compose-editor';
 import EnvPresetsEditor from 'koroku-console/components/env-presets-editor';
 import ErrorMessage from 'koroku-console/components/error-message';
 import FormField from 'koroku-console/components/form-field';
 import Icon from 'koroku-console/components/icon';
 import type ApiService from 'koroku-console/services/api';
 import type SessionService from 'koroku-console/services/session';
+import {
+  composeContentProblem,
+  normalizeCompose,
+} from 'koroku-console/utils/compose-source';
 import { inputValue, preventDefault, setValue } from 'koroku-console/utils/dom';
 import { EnvDraft } from 'koroku-console/utils/env-presets';
 import { errorMessage, fieldErrors } from 'koroku-console/utils/errors';
@@ -23,6 +28,7 @@ import Loadable from 'koroku-console/utils/loadable';
 import type {
   ComposeDetection,
   ComposeService,
+  ComposeSource,
   EnvPresets,
   Environment,
   NewApp,
@@ -35,6 +41,7 @@ const KNOWN_FIELDS = new Set([
   'repo_url',
   'default_branch',
   'compose_path',
+  'compose_content',
   'web_service',
   'web_port',
   'healthcheck_path',
@@ -92,7 +99,10 @@ export default class NewAppTemplate extends Component {
   presets = new Loadable<EnvPresets>(() =>
     this.api.getEnvPresets(this.detectRepo, {
       ref: this.presetsBranch,
-      path: this.requestedComposePath,
+      // A Compose file written here is the one that runs: the repository's
+      // says nothing about what it sets (ARCHITECTURE 6.3).
+      path: this.inlineCompose ? undefined : this.requestedComposePath,
+      compose_source: this.inlineCompose ? 'inline' : undefined,
     }),
   );
   draft = new EnvDraft();
@@ -113,6 +123,9 @@ export default class NewAppTemplate extends Component {
   /** The Compose file is typed in instead of picked from the candidates. */
   @tracked typingPath = false;
   @tracked typedPath = '';
+  /** The repository's Compose file, or one written here (ARCHITECTURE 6.3). */
+  @tracked composeSource: ComposeSource = 'repository';
+  @tracked composeContent = '';
   @tracked webService = '';
   @tracked webPort = '';
   @tracked slug = '';
@@ -186,12 +199,20 @@ export default class NewAppTemplate extends Component {
     return this.compose.value?.services ?? [];
   }
 
-  /** No services could be read: service and port are typed by hand. */
+  get inlineCompose(): boolean {
+    return this.composeSource === 'inline';
+  }
+
+  /**
+   * No services could be read, or the Compose file is written here (its
+   * services are not the repository's): service and port are typed by hand.
+   */
   get manualService(): boolean {
-    return this.services.length === 0;
+    return this.inlineCompose || this.services.length === 0;
   }
 
   get detectedPorts(): number[] {
+    if (this.inlineCompose) return [];
     const service = this.services.find((s) => s.name === this.webService);
     return service?.ports ?? [];
   }
@@ -291,6 +312,25 @@ export default class NewAppTemplate extends Component {
     if (!this.showsPathInput) this.requestedComposePath = '';
     void this.detect();
     void this.loadPresets();
+  };
+
+  setComposeSource = (event: Event) => {
+    this.chooseComposeSource(inputValue(event) as ComposeSource);
+  };
+
+  writeCompose = () => this.chooseComposeSource('inline');
+
+  private chooseComposeSource(source: ComposeSource): void {
+    if (source === this.composeSource) return;
+    this.composeSource = source;
+    delete this.errors['compose_content'];
+    this.errors = { ...this.errors };
+    // Which presets the Compose file already sets depends on the file.
+    if (this.detectRepo !== '') void this.loadPresets();
+  }
+
+  setComposeContent = (value: string) => {
+    this.composeContent = value;
   };
 
   selectComposePath = (event: Event) => {
@@ -415,6 +455,10 @@ export default class NewAppTemplate extends Component {
     if (!this.draft.valid) {
       errors['env'] = '環境変数のキーを直してください。';
     }
+    if (this.inlineCompose) {
+      const compose = composeContentProblem(this.composeContent);
+      if (compose) errors['compose_content'] = compose;
+    }
     return errors;
   }
 
@@ -443,8 +487,13 @@ export default class NewAppTemplate extends Component {
     if (this.defaultBranch.trim()) {
       body.default_branch = this.defaultBranch.trim();
     }
-    // With a single candidate the server's auto-detection is kept.
-    if (this.chosenComposePath) body.compose_path = this.chosenComposePath;
+    if (this.inlineCompose) {
+      body.compose_source = 'inline';
+      body.compose_content = normalizeCompose(this.composeContent);
+    } else if (this.chosenComposePath) {
+      // With a single candidate the server's auto-detection is kept.
+      body.compose_path = this.chosenComposePath;
+    }
     if (this.webService.trim()) body.web_service = this.webService.trim();
     if (this.healthcheckPath.trim()) {
       body.healthcheck_path = this.healthcheckPath.trim();
@@ -662,112 +711,165 @@ export default class NewAppTemplate extends Component {
               </p>
             </div>
             <div class="form-group-body">
-              <div aria-live="polite">
-                {{#if this.undetectableUrl}}
-                  <Banner data-test-compose-manual>
-                    GitHub 以外の URL では Compose
-                    ファイルを検出できません。公開するサービスとポートを入力してください。
-                  </Banner>
-                {{else if this.compose.loading}}
-                  <p class="new-app-progress" data-test-compose-loading>
-                    <Icon @name="spinner" />
-                    Compose ファイルを検出中…
-                  </p>
-                {{else if this.compose.unavailable}}
-                  <Banner data-test-compose-manual>
-                    Compose
-                    ファイルの検出は利用できません。公開するサービスとポートを入力してください。
-                  </Banner>
-                {{else if this.composeError}}
-                  <Banner
-                    @tone="error"
-                    @title="Compose ファイルを検出できませんでした"
-                    data-test-compose-error
-                  >
-                    {{this.composeError}}
-                  </Banner>
-                {{else if this.compose.loaded}}
-                  {{#unless this.files.length}}
-                    <Banner @tone="warning" data-test-compose-missing>
-                      {{#if this.detectedBranch}}ブランチ
-                        <span class="mono">{{this.detectedBranch}}</span>
-                        の{{/if}}リポジトリ直下に Compose
-                      ファイルが見つかりませんでした。別の場所にあれば、下にパスを入力してください。
-                    </Banner>
-                  {{/unless}}
-                  {{#if this.manualService}}
-                    <Banner data-test-compose-manual>
-                      サービスを読み取れなかったため、公開するサービスとポートを入力してください。
-                    </Banner>
-                  {{/if}}
-                {{/if}}
-              </div>
-
-              {{#if this.showsPathInput}}
-                <FormField
-                  @label="Compose ファイル"
-                  @hint="リポジトリのルートからのパスです（例: deploy/compose.production.yml）。空なら、ルートの compose.yaml などを探します。"
-                  @error={{this.errors.compose_path}}
-                  data-test-field-group="compose_path"
-                  as |field|
-                >
+              <fieldset class="option-group" data-test-compose-source>
+                <legend>Compose の置き場所</legend>
+                <label class="option">
                   <input
-                    id={{field.id}}
-                    type="text"
-                    class="mono"
-                    spellcheck="false"
-                    autocomplete="off"
-                    placeholder="deploy/compose.production.yml"
-                    value={{this.typedPath}}
-                    aria-describedby={{field.describedBy}}
-                    aria-invalid={{field.invalid}}
-                    data-test-field="compose_path_input"
-                    {{on "input" this.setTypedPath}}
-                    {{on "change" this.changeTypedPath}}
+                    type="radio"
+                    name="compose_source"
+                    value="repository"
+                    checked={{eq this.composeSource "repository"}}
+                    data-test-compose-source-option="repository"
+                    {{on "change" this.setComposeSource}}
                   />
-                </FormField>
-                {{#if this.files.length}}
-                  <p class="new-app-compose-switch">
-                    <Button
-                      @size="small"
-                      data-test-compose-use-candidates
-                      {{on "click" this.useCandidates}}
-                    >検出した候補から選ぶ</Button>
-                  </p>
-                {{/if}}
+                  <span class="option-body">
+                    <span class="option-label">リポジトリのファイル</span>
+                    <span class="option-hint">リポジトリにある Compose
+                      ファイルでデプロイします。</span>
+                  </span>
+                </label>
+                <label class="option">
+                  <input
+                    type="radio"
+                    name="compose_source"
+                    value="inline"
+                    checked={{eq this.composeSource "inline"}}
+                    data-test-compose-source-option="inline"
+                    {{on "change" this.setComposeSource}}
+                  />
+                  <span class="option-body">
+                    <span class="option-label">koroku に書く</span>
+                    <span class="option-hint">
+                      リポジトリに Compose
+                      ファイルがないときや、そのままでは動かせないときに、ここに書いたものでデプロイします。
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+
+              {{#if this.inlineCompose}}
+                <ComposeEditor
+                  @value={{this.composeContent}}
+                  @error={{this.errors.compose_content}}
+                  @onInput={{this.setComposeContent}}
+                />
               {{else}}
-                <FormField
-                  @label="Compose ファイル"
-                  @hint={{if
-                    this.detectedBranch
-                    (concat
-                      "ブランチ "
-                      this.detectedBranch
-                      " のリポジトリ直下で見つかったファイルです。"
-                    )
-                    "リポジトリ直下で見つかったファイルです。"
-                  }}
-                  @error={{this.errors.compose_path}}
-                  data-test-field-group="compose_path"
-                  as |field|
-                >
-                  <select
-                    id={{field.id}}
-                    class="mono"
-                    aria-describedby={{field.describedBy}}
-                    aria-invalid={{field.invalid}}
-                    data-test-field="compose_path"
-                    {{on "change" this.selectComposePath}}
+                <div aria-live="polite">
+                  {{#if this.undetectableUrl}}
+                    <Banner data-test-compose-manual>
+                      GitHub 以外の URL では Compose
+                      ファイルを検出できません。公開するサービスとポートを入力してください。
+                    </Banner>
+                  {{else if this.compose.loading}}
+                    <p class="new-app-progress" data-test-compose-loading>
+                      <Icon @name="spinner" />
+                      Compose ファイルを検出中…
+                    </p>
+                  {{else if this.compose.unavailable}}
+                    <Banner data-test-compose-manual>
+                      Compose
+                      ファイルの検出は利用できません。公開するサービスとポートを入力してください。
+                    </Banner>
+                  {{else if this.composeError}}
+                    <Banner
+                      @tone="error"
+                      @title="Compose ファイルを検出できませんでした"
+                      data-test-compose-error
+                    >
+                      {{this.composeError}}
+                    </Banner>
+                  {{else if this.compose.loaded}}
+                    {{#unless this.files.length}}
+                      <Banner @tone="warning" data-test-compose-missing>
+                        {{#if this.detectedBranch}}ブランチ
+                          <span class="mono">{{this.detectedBranch}}</span>
+                          の{{/if}}リポジトリ直下に Compose
+                        ファイルが見つかりませんでした。別の場所にあれば、下にパスを入力してください。リポジトリにないときは、koroku
+                        に書けます。
+                      </Banner>
+                      <p class="new-app-compose-write">
+                        <Button
+                          @size="small"
+                          data-test-compose-write
+                          {{on "click" this.writeCompose}}
+                        >koroku に Compose を書く</Button>
+                      </p>
+                    {{/unless}}
+                    {{#if this.manualService}}
+                      <Banner data-test-compose-manual>
+                        サービスを読み取れなかったため、公開するサービスとポートを入力してください。
+                      </Banner>
+                    {{/if}}
+                  {{/if}}
+                </div>
+
+                {{#if this.showsPathInput}}
+                  <FormField
+                    @label="Compose ファイル"
+                    @hint="リポジトリのルートからのパスです（例: deploy/compose.production.yml）。空なら、ルートの compose.yaml などを探します。"
+                    @error={{this.errors.compose_path}}
+                    data-test-field-group="compose_path"
+                    as |field|
                   >
-                    {{#each this.files as |file|}}
-                      <option
-                        value={{file}}
-                        selected={{eq file this.composePath}}
-                      >{{file}}</option>
-                    {{/each}}
-                    <option value={{OTHER_PATH}}>その他のパスを入力…</option>
-                  </select>
-                </FormField>
+                    <input
+                      id={{field.id}}
+                      type="text"
+                      class="mono"
+                      spellcheck="false"
+                      autocomplete="off"
+                      placeholder="deploy/compose.production.yml"
+                      value={{this.typedPath}}
+                      aria-describedby={{field.describedBy}}
+                      aria-invalid={{field.invalid}}
+                      data-test-field="compose_path_input"
+                      {{on "input" this.setTypedPath}}
+                      {{on "change" this.changeTypedPath}}
+                    />
+                  </FormField>
+                  {{#if this.files.length}}
+                    <p class="new-app-compose-switch">
+                      <Button
+                        @size="small"
+                        data-test-compose-use-candidates
+                        {{on "click" this.useCandidates}}
+                      >検出した候補から選ぶ</Button>
+                    </p>
+                  {{/if}}
+                {{else}}
+                  <FormField
+                    @label="Compose ファイル"
+                    @hint={{if
+                      this.detectedBranch
+                      (concat
+                        "ブランチ "
+                        this.detectedBranch
+                        " のリポジトリ直下で見つかったファイルです。"
+                      )
+                      "リポジトリ直下で見つかったファイルです。"
+                    }}
+                    @error={{this.errors.compose_path}}
+                    data-test-field-group="compose_path"
+                    as |field|
+                  >
+                    <select
+                      id={{field.id}}
+                      class="mono"
+                      aria-describedby={{field.describedBy}}
+                      aria-invalid={{field.invalid}}
+                      data-test-field="compose_path"
+                      {{on "change" this.selectComposePath}}
+                    >
+                      {{#each this.files as |file|}}
+                        <option
+                          value={{file}}
+                          selected={{eq file this.composePath}}
+                        >{{file}}</option>
+                      {{/each}}
+                      <option value={{OTHER_PATH}}>その他のパスを入力…</option>
+                    </select>
+                  </FormField>
+                {{/if}}
+
               {{/if}}
 
               <div class="form-grid">
