@@ -122,6 +122,10 @@ services:
 - `SECRET_KEY_BASE`（または `RAILS_MASTER_KEY`）は koroku の環境変数で渡す。`bin/rails secret` で作る。
 - `POSTGRES_PASSWORD` は URL に埋め込むので、記号を含まない値にする（`openssl rand -hex 32`）。
 - Dockerfile は Rails 7.1 以降の `rails new` が生成するもの（マルチステージ、`assets:precompile` をビルド時に実行、非 root ユーザー）がそのまま使える。
+- 静的ファイルは Rails が配る。7.1 以降は本番でも `public/` を配る（`config.public_file_server.enabled` の既定が有効）。7.0 までは `RAILS_SERVE_STATIC_FILES` を設定する（koroku の作成画面が初期値に入れる）。
+  - キャッシュのヘッダー: `config.public_file_server.headers = { "cache-control" => "public, max-age=#{1.year.to_i}, immutable" }`。`public/` の全ファイルに付くので、fingerprint のないファイル（`favicon.ico` など）を差し替えたときは、ブラウザーのキャッシュが切れるまで古いものが出る。
+  - Rails 8 の `rails new` の Dockerfile は Thruster を通して起動する（`./bin/thrust ./bin/rails server`、80 番で待ち受ける）。koroku ではコンテナ側のポートを `80` にし、`TLS_DOMAIN` は設定しない（TLS は koroku の Caddy が終端する）。Thruster は圧縮と静的ファイルの HTTP キャッシュ（既定 64MB まで）を持つ。メモリを詰めたいときは `THRUSTER_CACHE_SIZE` を小さくするか、Thruster をやめて Puma に直接配らせる（`./bin/rails server`、ポート `3000`。圧縮とキャッシュはなくなるが、ブラウザーのキャッシュが効いていれば差は小さい）。
+- CDN を使うと決めたときだけ: `config/environments/production.rb` に `config.asset_host = ENV["ASSET_HOST"].presence`（実行時に読む。`assets:precompile` の結果に URL を含めない）。フォントのために `public_file_server.headers` に `"access-control-allow-origin" => "*"` を足す。`ASSET_HOST` は本番アプリにだけ設定する。
 - ダンプフック: サービス `db`、コマンド `pg_dump -U app app`。ファイルのバックアップから `pgdata` を外す。
 
 ## CI がビルドしたイメージを使う
@@ -177,13 +181,21 @@ jobs:
 - `HOST=0.0.0.0` / `PORT` で待ち受ける。Next.js の standalone 出力なら `HOSTNAME=0.0.0.0` が要る。
 - `NODE_ENV: ${NODE_ENV:-production}`。`npm run dev` ではなく本番のビルドと起動コマンドにする。
 - `app.set("trust proxy", 1)` などで `X-Forwarded-*` を信頼する（ループバックの Caddy からしか届かない）。
+- Express で静的ファイルを配るなら、ファイル名にハッシュの付いたディレクトリ（Vite の `dist/assets` など）を `express.static(dir, { maxAge: "1y", immutable: true })` で、それ以外を短いキャッシュで配る。
+- Next.js は `/_next/static/` を長期のキャッシュのヘッダー付きで自分で配る。standalone 出力には `.next/static` と `public` が入らないので、Dockerfile で standalone の出力の隣に写す（`.next/standalone/.next/static` と `.next/standalone/public`）。
+- バンドラーが URL の土台をビルド時に決めるもの（Next.js の `assetPrefix`、Vite の `base`、webpack の `publicPath`）で CDN を使うと、値がイメージに焼き込まれる。本番にだけ CDN を使うなら、その値を `build.args` で渡すことになり、staging から本番への昇格ではイメージを使い回せずビルドし直しになる（koroku は引数の違いを見つけてビルドする）。この代償を利用者に伝えてから決めてもらう。
 
 ## Django
 
 - `ALLOWED_HOSTS` と `CSRF_TRUSTED_ORIGINS` を環境変数から組み立てる。HTTP 確認用に `127.0.0.1` も許可するか、確認用のパスを許可リストの外に置く。
 - `SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")`。
-- `runserver` ではなく gunicorn などで起動し、静的ファイルは `collectstatic` をビルド時に実行して WhiteNoise などで配信する。
+- `runserver` ではなく gunicorn などで起動し、静的ファイルは `collectstatic` をビルド時に実行して WhiteNoise で配る。
+  - `whitenoise.middleware.WhiteNoiseMiddleware` を `SecurityMiddleware` の直後に置く。
+  - `STORAGES` の `staticfiles` を `whitenoise.storage.CompressedManifestStaticFilesStorage` にすると、`collectstatic` のときにファイル名へハッシュを付け、圧縮したファイル（`Brotli` のパッケージがあれば `.br` も）を作る。ハッシュ付きのファイルには WhiteNoise が長期のキャッシュのヘッダーを付ける。
+- CDN を使うと決めたときだけ: `STATIC_URL = os.environ.get("ASSET_HOST", "") + "/static/"`（実行時に読む）。`ASSET_HOST` は本番アプリにだけ設定する。
 
 ## 静的サイト
 
 - ビルド済みのファイルを nginx や Caddy のイメージに入れる Dockerfile を書き、`web` として公開する。DB もダンプフックも要らない。
+- ハッシュ付きのファイルのディレクトリに長期のキャッシュを付け、圧縮はビルド時に `.gz` を作って配る（nginx なら `location /assets/ { add_header Cache-Control "public, max-age=31536000, immutable"; }` と `gzip_static on;`）。
+- nginx は数 MB で動くので、koroku の「リソース」タブでメモリ上限を小さく（例 `64m`）し、本番アプリなら予約も小さく（例 `16m` か `0`）する。既定のままだと上限 512m・予約 256m になる。

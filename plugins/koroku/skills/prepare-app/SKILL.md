@@ -1,6 +1,6 @@
 ---
 name: prepare-app
-description: Adapts the current repository so koroku (a self-hosted Heroku-like platform that deploys Docker Compose apps from GitHub) can deploy it, then rehearses the deploy locally. Use when the user wants to deploy, host, or run their repository on koroku, asks what koroku needs from a repository, or a koroku deploy failed with a policy violation, a health-check timeout, or a container that would not start. koroku にデプロイしたい、koroku 対応、デプロイが失敗した、などの依頼でも使う。
+description: Adapts the current repository so koroku (a self-hosted Heroku-like platform that deploys Docker Compose apps from GitHub) can deploy it, then rehearses the deploy locally. Use when the user wants to deploy, host, or run their repository on koroku, asks what koroku needs from a repository, or a koroku deploy failed with a policy violation, a health-check timeout, or a container that would not start. Also use when the user asks how an app on koroku should serve its static files or whether it should use a CDN. koroku にデプロイしたい、koroku 対応、デプロイが失敗した、静的ファイルの配り方、CDN を使うべきか、などの依頼でも使う。
 ---
 
 # リポジトリを koroku でデプロイできるようにする
@@ -13,6 +13,7 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 
 - koroku でのデプロイがすでに失敗していて、その理由を知りたいときは、同じプラグインの deploy-status Skill で koroku からデプロイログと実行ログを読む（読み取り専用の API トークンが要る）。
 - Compose ファイルの場所（koroku の既定は `compose.yaml`、なければ `docker-compose.yml`。別のパスも画面で指定できる）、Dockerfile、`.dockerignore`、言語とフレームワーク、DB やキャッシュなどの付属サービスを確認する。
+- 静的ファイルの出どころと配り方を確かめる: アセットをどこでビルドするか（Dockerfile の `assets:precompile`、`collectstatic`、`npm run build` など）、ファイル名に fingerprint が付くか、誰が配っているか（アプリのプロセスか、前に置いた nginx か、volume で共有しているか）、ビルドした静的ファイルの量（`du -sh` で見る）、利用者がアップロードしたファイルの置き場所。あわせて、本番として外へ公開するアプリか、staging や社内向けかを利用者に確かめる（CDN を紹介するかどうかの判断に使う）。
 - `docker compose -f <file> config --no-env-resolution` で正規化した結果を読む（`--no-env-resolution` を付けると env ファイルの中身が展開されないので、秘密が出力に出にくい）。
 - Compose ファイルがなければ、作るところから始める（[references/examples.md](references/examples.md) の雛形を使う）。
 - 利用者が「Compose は koroku の管理画面に書く」と言ったとき、またはリポジトリに Compose ファイルを置けないとき（他人が管理する public リポジトリを fork せずに動かす、など）は、下の「Compose を koroku の画面に書くとき」の進め方に切り替える。
@@ -31,6 +32,8 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 - **ワンショットのサービス（マイグレーションなど）は `restart: "no"` を書き、別のサービスから `condition: service_completed_successfully` で待たれるようにする**。誰も待っていないと、正常終了でも `up --wait` が失敗する。
 - **デプロイのたびに公開サービスと、アプリのイメージをビルドするサービスが作り直される**（DB などはアプリの環境変数を変えたときだけ）。cron（supercronic など）やジョブキューのワーカーも `SIGTERM` を受け、`stop_grace_period`（既定 10 秒）で強制終了される。長いジョブは途中で殺されても続きからやり直せるように作り、走っている処理を待って止まれるサービスには `stop_grace_period` を付ける（全サービスの合計で 10 分まで。[references/requirements.md](references/requirements.md) の「デプロイのたびに止まる長いジョブ」）。
 - **無停止デプロイ（blue/green）を使うなら、マイグレーションを古い版のコードと両立させる**。koroku のアプリ設定で選んだアプリだけ、公開サービスを 2 つ並べて入れ替える。マイグレーションは古い版が動いている間に流れるので、カラムの削除や名前の変更は 2 回のデプロイに分ける。公開サービスは状態を持たず、プロセス内の cron のような処理を動かさず、`container_name` を書かず、ほかのサービスから `depends_on` されないようにする。デプロイの間は公開サービスのメモリ上限 1 つ分が余分に要り、足りなければデプロイが失敗する（旧版は動き続ける）。無停止になるのはデプロイと即時ロールバックだけで、再起動は普通の再起動、アプリの環境変数を変えたデプロイでは DB も作り直す（[references/requirements.md](references/requirements.md) の「無停止デプロイ」）。
+- **静的ファイルは公開サービスのプロセス自身が配る**。koroku の Caddy はアプリのファイルを配らない。nginx をアプリの前に置くと、無停止デプロイが効かず、本番では予約されるメモリも増える。fingerprint 付きのファイルには `Cache-Control: public, max-age=31536000, immutable` を付ける（[references/requirements.md](references/requirements.md) の「静的ファイルの配り方」、フレームワークごとの設定は [references/examples.md](references/examples.md)）。
+- **CDN はアプリの構成を見て紹介する**。外へ公開する本番アプリで、静的ファイルが多いか大きく、fingerprint が付いているときだけ。形は「アセットだけを別のホスト名で CDN から、オリジンはアプリの URL、URL の土台は実行時の環境変数で本番にだけ」。サイト全体を CDN の後ろに置く形は、koroku の独自ドメインの検証と証明書の取得にぶつかるので勧めない（[references/requirements.md](references/requirements.md) の「CDN」）。CDN の契約と設定は利用者が行う。
 - **デプロイ時に取得されるのはコミット済みのファイルだけ**。`.git` は消され、submodule と Git LFS は取得されない。
 - **staging のアプリは既定で koroku のログインの後ろにある**（アクセスの保護）。ブラウザー以外の呼び出し元（Webhook、外部の死活監視、ほかのサービスからの API 呼び出し）は通れないので、受け口のパスを洗い出し、利用者に「保護を外すパス」への登録を頼む（例 `/webhooks/`）。外したパスはアプリ自身で認証する（署名の検証など）。`/.koroku/` で始まるパスは koroku が使うのでアプリには届かない。
 - **本番の設定で起動する**。koroku にアプリの開発モードはない。ホットリロードやソースの bind mount は `compose.override.yaml` に分ければ、手元の `docker compose up` では使われ、koroku では使われない（koroku は `-f` を明示するので自動で読まない）。
@@ -40,7 +43,8 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 - 変更は最小限にし、手元の開発の流れ（`docker compose up` など）を壊さない。本番専用の値は環境変数にする。
 - 秘密（パスワード、API キー、`SECRET_KEY_BASE` など）をリポジトリに書かない。必要な変数は一覧にして利用者に渡す。
 - アプリが読む環境変数（コードの `ENV["..."]`、`process.env.X`、`os.Getenv` など、フレームワークの設定ファイルを含む）を洗い出し、公開サービスの `environment:` に `${VAR:?説明}` か `${VAR:-既定値}` として並べる（[references/requirements.md](references/requirements.md) の「必要な変数の宣言」）。値は koroku の画面で入れるので、`:?` の説明には値ではなく意味や作り方を書く。
-- 方針の分かれる変更（Dockerfile の新規作成、DB の種類の変更、開発用設定の `compose.override.yaml` への移動など）は、手を付ける前に利用者に確かめる。
+- 方針の分かれる変更（Dockerfile の新規作成、DB の種類の変更、開発用設定の `compose.override.yaml` への移動、静的ファイルのためだけに前に置いた nginx を外してアプリのプロセスに配らせる、など）は、手を付ける前に利用者に確かめる。
+- 静的ファイルのキャッシュのヘッダーと圧縮は、アプリの設定で付ける（[references/examples.md](references/examples.md)）。CDN 用の設定（実行時に読むアセットの URL の土台、フォントの CORS のヘッダー）を入れるのは、利用者が CDN を使うと決めたときだけ。
 - ポリシー検査の「検査を緩める」フラグに頼る直し方は勧めない。どうしても要るなら理由と影響を説明して、利用者に判断してもらう。
 
 ### 4. 手元でリハーサルする
@@ -93,6 +97,8 @@ koroku は VPS 1 台で動く個人用の PaaS で、GitHub リポジトリの D
 | タスク | 管理画面に登録しておくと便利なコマンド（名前、サービス、コマンド。例 `マイグレーションの状態` / `web` / `bin/rails db:migrate:status`）。対話的なコマンドは使えない |
 | 無停止デプロイ | 使うなら、`rehearse.sh --blue-green` の結果（条件を満たすか、切り替えの間に失敗したリクエストの数）と、旧色を止めるまでの待ち時間（既定 10 秒で足りなければその秒数。最大 300）。koroku のデプロイタブの「デプロイの設定」で有効にする |
 | 独自ドメインを使うときの準備 | ホスト名の許可リストなど、アプリ側で設定する環境変数 |
+| 静的ファイル | 誰が配るか（アプリのプロセス、Thruster など）、fingerprint 付きのファイルのキャッシュのヘッダー、圧縮のしかた、配るプロセスのキャッシュがメモリに数えられる量（Thruster なら `THRUSTER_CACHE_SIZE`）。nginx を前に残すなら、その理由と、nginx に入れるメモリ上限と予約（例 上限 `64m`、予約 `0`） |
+| CDN | 紹介するかどうかと、その理由（アプリの構成のどこを見て決めたか）。紹介するなら、CDN 側の設定（割り当てるホスト名の例 `assets.example.com`、オリジンはアプリの URL、オリジンへの Host はオリジンのホスト名、アプリの `Cache-Control` に従う、CORS のヘッダーを保つ）と、本番アプリにだけ入れる環境変数（例 `ASSET_HOST=https://assets.example.com`。staging は空）。決めるのは利用者 |
 
 あわせて、変えたファイルと理由、リハーサルの結果（実行したコマンドと出力の要点）、確かめられなかったことを書く。リハーサルしていないものを「動く」と書かない。
 

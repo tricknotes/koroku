@@ -85,6 +85,12 @@ ENV LD_PRELOAD=/usr/local/lib/libjemalloc.so \
 - 実行時に Bundler を読み込まない: `bundle install --standalone` と `BUNDLE_BIN=... bundle binstubs <server> --standalone` で、Bundler なしで起動する binstub を作る（`bundle binstubs --path` は今の Bundler にはない）。
 - 本番の group にあって使っていない gem（以前のホスティング先専用のメトリクス、無効にした APM など）は、読み込まれるだけでメモリを使う。
 
+## 静的ファイル
+
+- fingerprint 付きのファイルに `Cache-Control: public, max-age=31536000, immutable` が付いていないと、ページを開くたびにブラウザーが問い合わせ、そのぶんワーカーと CPU を使う。まずヘッダーを確かめる（`curl -sI http://127.0.0.1:<port>/assets/<file>`）。
+- Thruster は静的ファイルの HTTP キャッシュを既定で 64MB まで持つ。ブラウザーのキャッシュが効いていれば、`THRUSTER_CACHE_SIZE` を小さくしても応答はほとんど変わらない。
+- 静的ファイルのためだけにアプリの前へ置いた nginx は、外してアプリに配らせると、コンテナ 1 つ分と、本番では予約（既定 256m）が浮く。無停止デプロイも効くようになる。外すかどうかは方針の変更なので、prepare-app と同じく利用者に確かめる（prepare-app の `references/requirements.md` の「静的ファイルの配り方」）。
+
 ## Go のサイドカー（Caddy など）
 
 - `GOGC=50` で、ある例では約 13 MiB 減った。代わりに CPU が少し増える。
