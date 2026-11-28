@@ -12,6 +12,7 @@ import Button, { buttonClass } from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import DbCopyPanel from 'koroku-console/components/db-copy-panel';
 import DumpRestorePanel from 'koroku-console/components/dump-restore-panel';
+import PitrPanel from 'koroku-console/components/pitr-panel';
 import CopyButton from 'koroku-console/components/copy-button';
 import EmptyState from 'koroku-console/components/empty-state';
 import ErrorMessage from 'koroku-console/components/error-message';
@@ -1101,6 +1102,10 @@ export default class AppBackupsTemplate extends Component<Signature> {
             >もう一度確認</Button>
           </div>
         </div>
+      {{/if}}
+
+      {{#if overview.configured}}
+        <PitrPanel @model={{@model}} />
       {{/if}}
 
       {{#if overview.configured}}

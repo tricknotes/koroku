@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"strconv"
+	"time"
 )
 
 // Forget applies the retention policy and prunes the repository. The error
@@ -50,6 +51,10 @@ func (m *Manager) forgetArgs() []string {
 	if hours := int(k.Within.Hours()); hours > 0 {
 		args = append(args, "--keep-within", strconv.Itoa(hours)+"h")
 	}
+	// The snapshots of point-in-time recovery have a retention of their own
+	// (pitrForgetArgs); the daily generations would thin the hourly WAL to
+	// one snapshot a day and break the chain.
+	args = append(args, "--keep-tag", tagKindPrefix+string(KindPITRBase), "--keep-tag", tagKindPrefix+string(KindWAL))
 	return append(args,
 		"--keep-daily", strconv.Itoa(k.Daily),
 		"--keep-weekly", strconv.Itoa(k.Weekly),
@@ -59,10 +64,34 @@ func (m *Manager) forgetArgs() []string {
 	)
 }
 
+// PITRWindow is how long point-in-time recovery reaches back, and
+// pitrKeep how long its snapshots are kept: one day more, so that a base
+// backup older than the window's start is still there (ARCHITECTURE 10.9).
+const (
+	PITRWindow = 7 * 24 * time.Hour
+	pitrKeep   = PITRWindow + 24*time.Hour
+)
+
+// pitrForgetArgs is the retention of the base backups and the WAL of
+// point-in-time recovery. The prune of forgetArgs removes their data.
+func (m *Manager) pitrForgetArgs() []string {
+	return []string{
+		"forget",
+		"--tag", tagKindPrefix + string(KindPITRBase),
+		"--tag", tagKindPrefix + string(KindWAL),
+		"--group-by", "tags",
+		"--keep-within", strconv.Itoa(int(pitrKeep.Hours())) + "h",
+		"--retry-lock", m.lockWait(),
+	}
+}
+
 // forget needs an exclusive lock, so locks of killed restic processes are
 // cleared first (see unlockStale).
 func (m *Manager) forget(ctx context.Context) error {
 	if err := m.unlockStale(ctx); err != nil {
+		return err
+	}
+	if err := m.restic(ctx, resticCall{args: m.pitrForgetArgs(), timeout: m.opts.Timeouts.Maintenance}); err != nil {
 		return err
 	}
 	return m.restic(ctx, resticCall{args: m.forgetArgs(), timeout: m.opts.Timeouts.Maintenance})

@@ -373,6 +373,12 @@ koroku の画面から、稼働中のリリースと同じイメージ・環境�
   - SQLite（アプリのコンテナにある場合）: `sqlite3 /data/app.db .dump`（イメージに `sqlite3` が要る）
 - ダンプは日次のほか、アプリ設定の「ダンプの間隔」で 1〜24 時間ごとに取れる（03:00 から数えた時刻。直近 48 時間のダンプはすべて残る）。データが毎日動く本番アプリなら、数時間ごとを勧める。間隔を短くするなら、PostgreSQL は `pg_dump -Fc -Z0 -U "$POSTGRES_USER" "$POSTGRES_DB"`（圧縮しない出力）にする。圧縮した出力は、少しの変更でもほぼ全体が別物になり、重複排除が効かない。1 回のダンプが間隔の半分を超えると画面に警告が出るので、DB が大きいアプリは間隔を長めにする。
 - 「ロードフック」（標準入力からダンプを読むコマンド。下の「本番の DB を staging にコピーする」と同じ既定値）を設定すると、画面から DB を選んだダンプの時点に戻せる。koroku は戻す前にいまのダンプを取り、ロードフックのサービス以外を止めて流し込み、失敗したら取っておいたダンプを流し込み直す。ロードフックはダンプフックと同じ形式を読むものにする（PostgreSQL の `pg_restore` は `-Fc` の出力を読む。`-Fc` なしの SQL の出力なら `psql`）。ロードフックのないアプリでは、ダウンロードしたダンプを手で流し込む。
+- PostgreSQL なら、アプリ設定の「時点指定の復旧」で WAL を退避させ、過去 7 日の任意の時刻に戻せるようにできる。リポジトリ側で次を揃える。
+  - 公式の `postgres` イメージか、同じ道具（`psql`、`pg_basebackup`、`tar`、`cmp`、`sh`）と `postgres` ユーザーを持つイメージ。PostgreSQL 14 以上。
+  - データディレクトリを named volume に置く（17 までは `/var/lib/postgresql/data`、18 からは `/var/lib/postgresql`）。bind mount だと使えない。
+  - `archive_mode`、`archive_command`、`archive_timeout` を Compose の `command`（`-c archive_mode=...`）で決めない。koroku が `ALTER SYSTEM` で書き、コマンドラインの値はそれより強いので、準備が失敗する。
+  - koroku はコンテナの中で `psql -U "$POSTGRES_USER"` と `pg_basebackup` を、ローカルのソケットで実行する。公式イメージの既定の `pg_hba.conf` なら通る。独自の `pg_hba.conf` を置くなら、`local all` と `local replication` を `POSTGRES_USER` に許す。
+  - コンテナの中の `/koroku/wal` は koroku が使う。その場所に volume を置かない。
 
 ## pull request ごとのレビューアプリ
 

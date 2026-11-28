@@ -415,6 +415,11 @@ export interface App {
    */
   dump_interval_hours?: number;
   /**
+   * The PostgreSQL service whose WAL is archived for point-in-time
+   * recovery; '' when off (ARCHITECTURE 10.9). Absent from older backends.
+   */
+  pitr_service?: string;
+  /**
    * The load hook reads a dump from stdin; the post-load command runs after
    * a copy (ARCHITECTURE 10.6). Absent from older backends.
    */
@@ -539,6 +544,7 @@ export interface AppPatch {
   dump_hook_command?: string;
   backup_before_deploy?: boolean;
   dump_interval_hours?: number;
+  pitr_service?: string;
   load_hook_service?: string;
   load_hook_command?: string;
   post_load_service?: string;
@@ -941,6 +947,26 @@ export interface DbCopy {
   finished_at: string | null;
   /** Who started it. */
   actor?: Actor | null;
+}
+
+/** Point-in-time recovery of an app (ARCHITECTURE 10.9). */
+export interface PitrStatus {
+  service: string;
+  state: 'off' | 'unavailable' | 'waiting' | 'preparing' | 'ready' | 'failed';
+  error: string;
+  warning: string;
+  /** The oldest time the database can be brought back to. */
+  earliest_at: string | null;
+  /** How far the WAL in the backups reaches. */
+  archived_until: string | null;
+  gaps: PitrGap[];
+}
+
+export interface PitrGap {
+  from: string;
+  /** null while it lasts. */
+  to: string | null;
+  reason: 'mount_missing' | 'dropped' | 'version_changed';
 }
 
 export interface Snapshot {

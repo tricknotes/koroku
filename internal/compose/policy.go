@@ -97,6 +97,10 @@ type PolicyParams struct {
 	AltHostPort int
 	// Relax waives the relaxable rules for this app.
 	Relax bool
+	// WAL is the archive directory koroku mounts into the PostgreSQL
+	// service of an app with point-in-time recovery (ARCHITECTURE 10.9):
+	// that one writable bind mount outside the checkout is koroku's own.
+	WAL *WALMount
 }
 
 // allowedBinding returns the host port a service of the merged project may
@@ -193,6 +197,9 @@ func CheckPolicy(p Project, params PolicyParams) PolicyResult {
 				continue
 			}
 			source := resolvePath(m.Source)
+			if w := params.WAL; w != nil && name == w.Service && m.Target == WALMountTarget && m.Source == w.Source {
+				continue
+			}
 			switch {
 			case isDockerSocket(m.Source) || isDockerSocket(source):
 				add(name, RuleDockerSocket, "mounting the Docker socket is not allowed", true)

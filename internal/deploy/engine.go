@@ -290,6 +290,10 @@ type releaseMeta struct {
 	// blue/green, so that its settings can warn before it is turned on
 	// (ARCHITECTURE 7.2); nil for releases from before the check.
 	BlueGreenProblems *[]compose.Violation `json:"blue_green_problems,omitempty"`
+	// WALService is the service the release mounts the archive directory
+	// of point-in-time recovery into; "" when it mounts none (ARCHITECTURE
+	// 10.9). A rollback is checked against what its release mounts.
+	WALService string `json:"wal_service,omitempty"`
 }
 
 func (e *Engine) writeMeta(slug string, id int64, meta releaseMeta) error {

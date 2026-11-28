@@ -65,7 +65,27 @@ func (m *Manager) dumpOnce(ctx context.Context, app App) TargetResult {
 
 // storeDump is backupDump once the dump service runs.
 func (m *Manager) storeDump(ctx context.Context, app App) TargetResult {
-	res := TargetResult{App: app.Slug, Kind: KindDump, Target: app.DumpService}
+	return m.storeStream(ctx, stream{
+		app: app, kind: KindDump, target: app.DumpService,
+		fileName: dumpFileName(app), args: dumpArgs(app), what: "dump command",
+	})
+}
+
+// stream is a docker command whose standard output becomes one snapshot.
+type stream struct {
+	// app gives the slug and the masker of the command's output.
+	app            App
+	kind           Kind
+	target         string
+	fileName, what string
+	args           []string
+}
+
+// storeStream runs the command and stores its standard output (see
+// backupDump for how the two processes are joined).
+func (m *Manager) storeStream(ctx context.Context, s stream) TargetResult {
+	app := s.app
+	res := TargetResult{App: app.Slug, Kind: s.kind, Target: s.target}
 
 	pr, pw, err := os.Pipe()
 	if err != nil {
@@ -87,7 +107,7 @@ func (m *Manager) storeDump(ctx context.Context, app App) TargetResult {
 	}
 	hookDone := make(chan error, 1)
 	go func() {
-		cmd := runner.Cmd{Name: "docker", Args: dumpArgs(app), Stdout: pw, Stderr: io.Discard}
+		cmd := runner.Cmd{Name: "docker", Args: s.args, Stdout: pw, Stderr: io.Discard}
 		var stderr *secrets.LineWriter
 		if keepOutput {
 			stderr = secrets.NewLineWriter(hookTail, hookMasker)
@@ -105,7 +125,7 @@ func (m *Manager) storeDump(ctx context.Context, app App) TargetResult {
 	go func() {
 		stdout := secrets.NewLineWriter(report, m.masker)
 		err := m.restic(resticCtx, resticCall{
-			args:    m.backupArgs(appTags(app.Slug, KindDump, app.DumpService), "--stdin", "--stdin-filename", dumpFileName(app)),
+			args:    m.backupArgs(appTags(app.Slug, s.kind, s.target), "--stdin", "--stdin-filename", s.fileName),
 			stdin:   pr,
 			stdout:  stdout,
 			timeout: m.opts.Timeouts.Backup,
@@ -140,13 +160,13 @@ func (m *Manager) storeDump(ctx context.Context, app App) TargetResult {
 	switch {
 	case resticFirst:
 		if resticErr == nil {
-			resticErr = errors.New("restic ended before the dump command did")
+			resticErr = fmt.Errorf("restic ended before the %s did", s.what)
 		}
 		res.Err = resticErr
 	case hookErr != nil:
-		res.Err = &commandError{Command: "dump command", Err: hookErr, Detail: hookTail.String()}
+		res.Err = &commandError{Command: s.what, Err: hookErr, Detail: hookTail.String()}
 	case exitCode(resticErr) == exitIncomplete, resticErr == nil && id != "" && report.bytes() == 0:
-		res.Err = errors.New("the dump command printed nothing")
+		res.Err = fmt.Errorf("the %s printed nothing", s.what)
 	case resticErr != nil:
 		res.Err = resticErr
 	}

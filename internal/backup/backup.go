@@ -49,6 +49,11 @@ const (
 	KindSystem Kind = "system"
 	KindVolume Kind = "volume"
 	KindDump   Kind = "dump"
+	// KindPITRBase and KindWAL hold the base backups and the WAL of a
+	// PostgreSQL service with point-in-time recovery (ARCHITECTURE 10.9).
+	// They keep their own retention and stay out of Snapshots.
+	KindPITRBase Kind = "pitr-base"
+	KindWAL      Kind = "wal"
 )
 
 // Trigger tells why a run started.
@@ -65,6 +70,9 @@ const (
 	// copy replaces its data (ARCHITECTURE 10.6). It is not recorded as a
 	// run; the copy keeps the snapshot ID.
 	TriggerPreCopy Trigger = "pre_copy"
+	// TriggerPITR stores a base backup or WAL of point-in-time recovery
+	// (ARCHITECTURE 10.9). It is not recorded as a run.
+	TriggerPITR Trigger = "pitr"
 )
 
 // RunStatus is the state of a run.

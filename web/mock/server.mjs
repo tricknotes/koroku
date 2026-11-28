@@ -433,6 +433,7 @@ route('PATCH', '/api/apps/:slug', (context) => {
       'load_hook_command',
       'post_load_service',
       'post_load_command',
+      'pitr_service',
     ].some(
       (field) =>
         body[field] !== undefined && body[field] !== (target[field] ?? ''),
@@ -1370,6 +1371,20 @@ route('POST', '/api/apps/:slug/db-copies', (context) => {
     source_kind: entry.source_kind,
   });
   return { status: 202, json: copyJson(entry) };
+});
+route('GET', '/api/apps/:slug/pitr', (context) => {
+  const app = appOf(context);
+  const known = context.state.pitr?.get(app.slug);
+  if (known && known.service === app.pitr_service) return known;
+  return {
+    service: app.pitr_service ?? '',
+    state: app.pitr_service ? 'waiting' : 'off',
+    error: '',
+    warning: '',
+    earliest_at: null,
+    archived_until: null,
+    gaps: [],
+  };
 });
 route('POST', '/api/apps/:slug/db-restores', (context) => {
   const { state, body } = context;

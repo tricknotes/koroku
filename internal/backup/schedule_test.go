@@ -149,7 +149,8 @@ func TestSchedulerRunsDailyAndChecksWeekly(t *testing.T) {
 		"restic unlock",
 		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
 		"restic unlock",
-		"restic forget --group-by tags --keep-within 48h --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
+		"restic forget --tag kind:pitr-base --tag kind:wal --group-by tags --keep-within 192h --retry-lock 1m0s",
+		"restic forget --group-by tags --keep-within 48h --keep-tag kind:pitr-base --keep-tag kind:wal --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
 	})
 	if entries, _ := readDirNames(e.m.opts.TrashDir); len(entries) != 0 {
 		t.Errorf("expired restore trash was kept: %v", entries)
@@ -168,7 +169,8 @@ func TestSchedulerRunsDailyAndChecksWeekly(t *testing.T) {
 		"restic unlock",
 		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
 		"restic unlock",
-		"restic forget --group-by tags --keep-within 48h --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
+		"restic forget --tag kind:pitr-base --tag kind:wal --group-by tags --keep-within 192h --retry-lock 1m0s",
+		"restic forget --group-by tags --keep-within 48h --keep-tag kind:pitr-base --keep-tag kind:wal --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
 		"restic unlock",
 		"restic check --retry-lock 1m0s",
 	})

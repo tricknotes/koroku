@@ -3,6 +3,7 @@ package compose
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -47,6 +48,28 @@ type OverrideParams struct {
 	// BlueGreen, when set, writes the public service as two coloured
 	// copies and disables the service itself (ARCHITECTURE 7.2).
 	BlueGreen *BlueGreenParams
+	// WAL, when set, mounts the host directory that receives the WAL of a
+	// PostgreSQL service (ARCHITECTURE 10.9).
+	WAL *WALMount
+}
+
+// WALMountTarget is where the PostgreSQL service of an app with
+// point-in-time recovery sees its archive directory (ARCHITECTURE 10.9).
+const WALMountTarget = "/koroku/wal"
+
+// WALDir is the host directory that receives the WAL of a PostgreSQL
+// service with point-in-time recovery (ARCHITECTURE 10.9).
+func WALDir(appsDir, slug, service string) string {
+	return filepath.Join(appsDir, slug, "wal", service)
+}
+
+// WALMount is the archive directory of a PostgreSQL service: a writable
+// bind mount of a host directory koroku owns, the one writable bind mount
+// a release may have.
+type WALMount struct {
+	Service string
+	// Source is the absolute host path.
+	Source string
 }
 
 // OOM score adjustments written for every service (ARCHITECTURE 6.2).
@@ -115,6 +138,14 @@ func Override(p OverrideParams) ([]byte, error) {
 	}
 	if p.EnvFile == "" {
 		return nil, fmt.Errorf("env file path is required")
+	}
+	if w := p.WAL; w != nil {
+		if _, ok := p.Project.Services[w.Service]; !ok {
+			return nil, fmt.Errorf("the point-in-time recovery service %q is not defined in the Compose file", w.Service)
+		}
+		if w.Service == p.WebService || !strings.HasPrefix(w.Source, "/") {
+			return nil, fmt.Errorf("invalid WAL mount %+v", *w)
+		}
 	}
 
 	if bg := p.BlueGreen; bg != nil {
@@ -206,6 +237,10 @@ func (p OverrideParams) writeService(b *strings.Builder, name string, svc Servic
 	b.WriteString("    env_file:\n")
 	for _, file := range form.envFiles {
 		fmt.Fprintf(b, "      - %s\n", quote(file))
+	}
+	if w := p.WAL; w != nil && w.Service == name && form.color == "" {
+		b.WriteString("    volumes:\n")
+		fmt.Fprintf(b, "      - type: bind\n        source: %s\n        target: %s\n", quote(w.Source), quote(WALMountTarget))
 	}
 	if svc.Restart == "" {
 		b.WriteString("    restart: unless-stopped\n")

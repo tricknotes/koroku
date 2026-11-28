@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -69,6 +70,7 @@ type appJSON struct {
 	DumpHookCommand      string            `json:"dump_hook_command"`
 	BackupBeforeDeploy   bool              `json:"backup_before_deploy"`
 	DumpIntervalHours    int               `json:"dump_interval_hours"`
+	PITRService          string            `json:"pitr_service"`
 	LoadHookService      string            `json:"load_hook_service"`
 	LoadHookCommand      string            `json:"load_hook_command"`
 	PostLoadService      string            `json:"post_load_service"`
@@ -146,6 +148,7 @@ func (s *Server) appToJSON(r *http.Request, app store.App) (appJSON, error) {
 		DumpHookCommand:       app.DumpHookCommand,
 		BackupBeforeDeploy:    app.BackupBeforeDeploy,
 		DumpIntervalHours:     app.DumpIntervalHours,
+		PITRService:           app.PITRService,
 		LoadHookService:       app.LoadHookService,
 		LoadHookCommand:       app.LoadHookCommand,
 		PostLoadService:       app.PostLoadService,
@@ -269,6 +272,7 @@ type appInput struct {
 	DumpHookCommand      *string            `json:"dump_hook_command"`
 	BackupBeforeDeploy   *bool              `json:"backup_before_deploy"`
 	DumpIntervalHours    *int               `json:"dump_interval_hours"`
+	PITRService          *string            `json:"pitr_service"`
 	LoadHookService      *string            `json:"load_hook_service"`
 	LoadHookCommand      *string            `json:"load_hook_command"`
 	PostLoadService      *string            `json:"post_load_service"`
@@ -430,6 +434,12 @@ func (in appInput) apply(app *store.App, allowFileRepos bool) fieldErrors {
 	}
 	if in.BackupBeforeDeploy != nil {
 		app.BackupBeforeDeploy = *in.BackupBeforeDeploy
+	}
+	if in.PITRService != nil {
+		app.PITRService = strings.TrimSpace(*in.PITRService)
+		if app.PITRService != "" && !servicePattern.MatchString(app.PITRService) {
+			errs.add("pitr_service", "is not a valid service name")
+		}
 	}
 	if in.DumpIntervalHours != nil {
 		if !slices.Contains(store.AllowedDumpIntervals, *in.DumpIntervalHours) {
@@ -927,6 +937,18 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	// Protection, exempt paths and the environment (noindex) shape the
 	// proxy configuration; an unchanged one is not reloaded.
 	s.syncRoutes(r, "app updated")
+	if old := before.PITRService; old != "" && old != app.PITRService && s.pitr != nil {
+		// The archiving of the old service is turned off before a
+		// deployment removes its mount (ARCHITECTURE 10.9). It restarts
+		// the database, so it does not hold the request.
+		go func(app store.App) {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
+			defer cancel()
+			if err := s.pitr.Disable(ctx, app, old); err != nil {
+				s.log.Error("turning point-in-time recovery off failed", "app", app.Slug, "service", old, "error", err)
+			}
+		}(before)
+	}
 	updated, err := s.store.GetAppByID(r.Context(), app.ID)
 	if err != nil {
 		s.internalError(w, r, err)
@@ -1044,6 +1066,9 @@ func changesProductionCommands(before, after store.App) bool {
 	}
 	return before.DumpHookService != after.DumpHookService ||
 		before.DumpHookCommand != after.DumpHookCommand ||
+		// Point-in-time recovery writes the settings of that service's
+		// database and restarts it (ARCHITECTURE 10.9).
+		before.PITRService != after.PITRService ||
 		before.LoadHookService != after.LoadHookService ||
 		before.LoadHookCommand != after.LoadHookCommand ||
 		before.PostLoadService != after.PostLoadService ||

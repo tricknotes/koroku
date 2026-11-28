@@ -251,6 +251,7 @@ function app(slug, overrides = {}) {
     dump_hook_command: 'pg_dump -U postgres app',
     backup_before_deploy: production,
     dump_interval_hours: 24,
+    pitr_service: '',
     // Staging apps take copies of the production database (10.5).
     load_hook_service: production ? '' : 'db',
     load_hook_command: production
@@ -1511,6 +1512,34 @@ export function buildScenario(name) {
     case 'repository-mismatch': {
       const state = scenario(healthyApps());
       refusedRepository(state, 'blog-staging');
+      return state;
+    }
+    case 'pitr': {
+      // Point-in-time recovery of the production app (ARCHITECTURE 10.9):
+      // ready, with a release that once did not mount the archive.
+      const state = scenario(healthyApps());
+      const app = state.apps.get('blog');
+      state.apps.set('blog', { ...app, pitr_service: 'db' });
+      state.pitr = new Map([
+        [
+          'blog',
+          {
+            service: 'db',
+            state: 'ready',
+            error: '',
+            warning: '',
+            earliest_at: ago(6 * DAY + 3 * HOUR),
+            archived_until: ago(40 * MINUTE),
+            gaps: [
+              {
+                from: ago(3 * DAY + 5 * HOUR),
+                to: ago(3 * DAY + 2 * HOUR),
+                reason: 'mount_missing',
+              },
+            ],
+          },
+        ],
+      ]);
       return state;
     }
     case 'dump-restore': {

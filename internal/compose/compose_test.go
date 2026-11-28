@@ -173,6 +173,18 @@ func TestOverrideGolden(t *testing.T) {
 			},
 		},
 		{
+			// Point-in-time recovery: the db service gets the archive
+			// directory (ARCHITECTURE 10.9).
+			name:   "rails-postgres",
+			golden: "rails-postgres.pitr.override.yaml",
+			params: OverrideParams{
+				WebService: "web", WebPort: 3000, HostPort: 20001,
+				EnvFile:       "/var/lib/koroku/apps/blog/env",
+				DefaultMemory: "512m",
+				WAL:           &WALMount{Service: "db", Source: "/var/lib/koroku/apps/blog/wal/db"},
+			},
+		},
+		{
 			// Staging loses the reservations the repository set.
 			name:   "reservations",
 			golden: "reservations.staging.override.yaml",
@@ -691,6 +703,48 @@ func TestOneShot(t *testing.T) {
 	for name, want := range map[string]bool{"migrate": true, "db": false, "web": false, "worker": false} {
 		if got := p.OneShot(name); got != want {
 			t.Errorf("OneShot(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// The archive directory of point-in-time recovery is the one writable bind
+// mount outside the checkout a release may have, and only as koroku writes
+// it: in its service, at its target, from its source (ARCHITECTURE 10.9).
+func TestPolicyAllowsOnlyKorokusWALMount(t *testing.T) {
+	const source = "/var/lib/koroku/apps/blog/wal/db"
+	merged := func(service, src, target string) Project {
+		p := loadProject(t, "rails-postgres")
+		web := p.Services["web"]
+		web.Ports = []Port{{HostIP: "127.0.0.1", Target: 3000, Published: "20001", Protocol: "tcp"}}
+		p.Services["web"] = web
+		db := p.Services["db"]
+		db.Ports = nil
+		p.Services["db"] = db
+		svc := p.Services[service]
+		svc.Volumes = append(svc.Volumes, Mount{Type: "bind", Source: src, Target: target})
+		p.Services[service] = svc
+		return p
+	}
+	params := PolicyParams{
+		ReleaseDir: "/var/lib/koroku/apps/blog/releases/42",
+		WebService: "web", WebPort: 3000, HostPort: 20001,
+		WAL: &WALMount{Service: "db", Source: source},
+	}
+	if result := CheckPolicy(merged("db", source, WALMountTarget), params); !result.OK() {
+		t.Errorf("koroku's own mount: %+v", result)
+	}
+	for name, p := range map[string]Project{
+		"another service":   merged("web", source, WALMountTarget),
+		"another target":    merged("db", source, "/var/lib/postgresql/data"),
+		"another source":    merged("db", "/var/lib/koroku/apps/shop/wal/db", WALMountTarget),
+		"without the mount": merged("db", source, WALMountTarget),
+	} {
+		check := params
+		if name == "without the mount" {
+			check.WAL = nil
+		}
+		if result := CheckPolicy(p, check); result.OK() {
+			t.Errorf("%s: the bind mount passed", name)
 		}
 	}
 }

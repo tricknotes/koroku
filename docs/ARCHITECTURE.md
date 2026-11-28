@@ -2310,15 +2310,16 @@ PostgreSQL の DB を、指定した時刻（秒の単位）の状態に戻す�
 **有効にする条件**
 
 - アプリ設定 `pitr_service` に PostgreSQL のサービス名を入れる（空なら無効）。本番アプリで今と違う値にするには再ログインが要る（ダンプフックと同じ。アプリのコンテナで動くコマンドを決める設定のため）。
-- サービスのイメージが、公式の `postgres` イメージと同じ道具（`psql`、`pg_basebackup`）を持ち、データディレクトリ（`SHOW data_directory`）がそのアプリの named volume の中にあること。bind mount のデータディレクトリは断る（10.2 の volume のリストアと同じ仕組みで入れ替えるため）。
+- サービスのイメージが、公式の `postgres` イメージと同じ道具（`psql`、`pg_basebackup`、`tar`、`cmp`）を持ち、データディレクトリ（`SHOW data_directory`）がそのアプリの named volume の中にあること。bind mount のデータディレクトリは断る（Compose の volume としてしか入れ替えの手順を持たないため）。データディレクトリは volume の根とは限らない。公式イメージは 17 までは volume の根（`/var/lib/postgresql/data`）がデータディレクトリで、18 からは volume（`/var/lib/postgresql`）の下の `18/docker` がデータディレクトリになる。koroku は準備のときに `SHOW data_directory` を記録し、復旧ではそのディレクトリだけを入れ替える。
 - PostgreSQL 14 以上。`recovery.signal` での回復と、目標の時刻に届かずに回復が終わったときにサーバーがエラーで止まる振る舞いを前提にする。
-- 接続は、サービスの中から `docker compose exec -T` でローカルのソケットを使い、`POSTGRES_USER` のユーザーで行う。ベースバックアップには `replication` の接続を許す `pg_hba.conf` の行が要る。満たさないときは、準備（下の「有効にする流れ」）で理由を出して止める。
+- 接続は、サービスの中から `docker compose exec -T` でローカルのソケットを使い、`POSTGRES_USER` のユーザーで行う。ベースバックアップには `replication` の接続を許す `pg_hba.conf` の行が要る。公式イメージの既定（`initdb` が作る `local replication all trust`）で通ることを、14、17、18 で確かめた。満たさないときは、準備（下の「有効にする流れ」）で理由を出して止める。
+- ファイルの操作（WAL の取り出しと受け渡し、データディレクトリの入れ替え、所有者の設定）は、ホストのパスではなく、DB のサービスのイメージのコンテナの中で行う（稼働中は `docker compose exec`、止めているときは稼働中のリリースのファイルで `docker compose run --rm --no-deps -T --entrypoint sh`）。`postgres` ユーザーの uid はイメージで違い（Alpine は 70、Debian は 999）、データディレクトリのパスもコンテナの中のものなので、同じイメージの中で操作すれば koroku がそれを知らずに済む。
 
 **WAL の受け渡し**
 
 - override が、`pitr_service` のサービスに、ホストのディレクトリ `/var/lib/koroku/apps/<slug>/wal/<service>/` を `/koroku/wal` としてマウントする。ディレクトリは 0700 で、所有者はサービスの中の `postgres` ユーザーの uid（`exec` で調べる）。WAL は DB の中身そのものなので、ほかのユーザーから読めないようにする。
 - PostgreSQL の設定は、koroku が `ALTER SYSTEM` で書く（`archive_mode = on`、`archive_command`、`archive_timeout = 300`）。値はデータディレクトリの `postgresql.auto.conf` に残るので、リポジトリの `command` を書き換えずに済み、コンテナを作り直しても消えない。`archive_mode` の変更は DB の再起動を要するので、koroku が DB のサービスを 1 回だけ再起動する（数秒、DB への接続が切れる）。
-- `archive_command` は、マウントしたディレクトリへの一時ファイルへのコピーと rename だけをする。同じ名前のファイルがあるときは、中身が同じなら成功、違えば失敗にする。**マウントがないときは何もせずに成功を返す**。ロールバックで有効にする前のリリースに戻ったときのようにマウントが外れていると、失敗を返す `archive_command` では PostgreSQL が WAL を消さずに溜め続け、ディスクが埋まれば DB が止まる。DB を止めるより、時点指定の復旧ができない区間を作るほうを選ぶ。koroku は稼働中のリリースの override にマウントがあるかを知っているので、外れている間を「戻せない区間」として記録する。
+- `archive_command` は、マウントしたディレクトリへの一時ファイルへのコピーと rename だけをする（`test -d /koroku/wal || exit 0; f=/koroku/wal/%f; if [ -f "$f" ]; then cmp -s %p "$f"; else cp %p "$f.tmp" && mv "$f.tmp" "$f"; fi`）。同じ名前のファイルがあるときは、中身が同じなら成功、違えば失敗にする。**マウントがないときは何もせずに成功を返す**。マウントを外したコンテナで WAL を切り替え続けても、アーカイブの失敗は数えられず、`pg_wal` は増えないことを確かめた。ロールバックで有効にする前のリリースに戻ったときのようにマウントが外れていると、失敗を返す `archive_command` では PostgreSQL が WAL を消さずに溜め続け、ディスクが埋まれば DB が止まる。DB を止めるより、時点指定の復旧ができない区間を作るほうを選ぶ。koroku は稼働中のリリースの override にマウントがあるかを知っているので、外れている間を「戻せない区間」として記録する。
 - `archive_timeout = 300` で、書き込みが少なくても 5 分ごとに WAL のファイルが切り替わり、アーカイブに出る。
 
 **有効にする流れ**
@@ -2332,13 +2333,14 @@ PostgreSQL の DB を、指定した時刻（秒の単位）の状態に戻す�
 
 | 対象 | 時機 | 方法 |
 | --- | --- | --- |
-| ベースバックアップ | 日次の実行（03:00）、有効にした直後、復旧の直後、メジャーバージョンが変わった後 | `docker compose exec -T <service> pg_basebackup -D - -Ft -X none --checkpoint=fast` の出力を `restic backup --stdin`（タグ `kind:pitr-base`、`target:<service>`）。WAL は含めず、回復ではアーカイブから読む |
-| WAL | 1 時間ごと（毎時 0 分。10.8 の間隔のダンプと同じロックを取る） | マウントしたディレクトリの、書き終えたファイル（一時ファイルでないもの）の一覧を決め、`restic backup --files-from`（タグ `kind:wal`、`target:<service>`）で取ってから、そのファイルを消す |
+| ベースバックアップ | 日次の実行（03:00）、有効にした直後、復旧の直後、メジャーバージョンが変わった後 | `docker compose exec -T <service> pg_basebackup -D - -Ft -X none --checkpoint=fast --no-manifest` の出力を `restic backup --stdin`（タグ `kind:pitr-base`、`target:<service>`）。WAL は含めず、回復ではアーカイブから読む。`--no-manifest` は、14 の `pg_basebackup` が標準出力の tar のあとにマニフェストを続けて書き、tar として読めなくなるため |
+| WAL | 1 時間ごと（毎時 0 分。10.8 の間隔のダンプと同じロックを取る） | マウントしたディレクトリの、書き終えたファイル（一時ファイルでないもの）の一覧を決め、`docker compose exec -T <service> tar -c` でまとめて `restic backup --stdin`（タグ `kind:wal`、`target:<service>`）で取ってから、そのファイルを消す。ファイルは `postgres` ユーザーのもの（0600）なので、コンテナの中から読む |
 
 - ベースバックアップごとに、開始と終了の時刻、開始の WAL の位置、タイムライン、`server_version_num` を `pitr_bases` に記録する。WAL のスナップショットごとに、含めたファイル名の最初と最後、最後のファイルの更新時刻を `pitr_wal_batches` に記録する。回復でどのスナップショットを読めばよいかを、restic の一覧を毎回たどらずに決めるため。戻せない区間は、開始と終了の時刻と理由（マウントの外れ、ホストの中の上限で捨てた、メジャーバージョンの変更）を `pitr_gaps` に記録する。
 - ホストの中に WAL を溜める上限を持つ。退避に失敗し続けてディレクトリが 2 GiB を超えたとき、またはデータディスクの使用率が 90% 以上（10.1 の「ログの量の上限」と同じしきい値）のときは、古いファイルから捨てて「戻せない区間」に記録し、次の日次の実行を待たずにベースバックアップを取り直す。
 - 1 時間ごとの退避のときに、`pg_stat_archiver` の `failed_count` と `last_failed_time` を読み、増えていれば警告にする。
 - 休止中（8.4）のアプリでは WAL が出ないので、退避するものはない。日次のベースバックアップは、ダンプフックと同じく DB のサービスだけを起こして取る。休止が長く続いても、戻せる期間の起点のベースバックアップを失わないため。
+- 1 時間ごとの WAL のスナップショットは、7 日の期間で 1 アプリあたり 200 ほどになる。小さなスナップショット 200 個のリポジトリで、`restic snapshots` と `restic forget --keep-within` は 1 秒かからないことを確かめた。
 - 世代は、`kind:pitr-base` と `kind:wal` を、ほかのスナップショットとは別の `restic forget --tag ... --group-by tags --keep-within 8d` で管理する。戻せる期間は 7 日で、その起点より前のベースバックアップが 1 つ残るように 1 日足す。それより前は、10.2 と 10.8 のダンプで戻す。10.2 の `forget` には `--keep-tag kind:pitr-base --keep-tag kind:wal` を足して、この 2 つを消させない。足さないと、1 時間ごとの WAL のスナップショットが日次の世代として 1 日 1 つに間引かれ、WAL がつながらなくなる。
 - メジャーバージョンを上げたデプロイ（`server_version_num` の上 2 桁が、直近のベースバックアップと違う）の後は、すぐにベースバックアップを取り、それより前の時刻は「このバージョンでは戻せない」として画面に出す。古いバージョンのベースバックアップは、新しいバージョンのサーバーでは回復できないため。
 
@@ -2352,9 +2354,9 @@ PostgreSQL の DB を、指定した時刻（秒の単位）の状態に戻す�
 
 1. `check`: `target_time` が戻せる期間の中で、戻せない区間に入らず、その前の最も新しいベースバックアップから `target_time` まで WAL がつながっていること。ベースバックアップの `server_version_num` のメジャーバージョンが、稼働中のリリースのイメージと同じであること。
 2. `stop`: アプリ全体を止める（`docker compose stop`）。
-3. `move`: データディレクトリの volume の中身を restore-trash へ移す（10.2 の volume のリストアと同じ。7 日保持）。
-4. `base`: ベースバックアップを `restic dump` で読み、volume に展開する（所有者と権限を保つ）。
-5. `wal`: 必要な WAL のスナップショットを、マウントしたディレクトリの下の `restore/` に取り出す。まだ退避していないホストの中の WAL と、3 で移した古いデータディレクトリの `pg_wal` にあって、アーカイブにないファイルも加える。誤った操作の直前の数分まで戻せるようにするため。
+3. `move`: データディレクトリの中身を restore-trash（`/var/lib/koroku/restore-trash/<slug>-pitr-<時刻>/`。7 日保持）へ移す。DB のサービスのイメージのコンテナに、データの volume と restore-trash の下のディレクトリをマウントして行う。別のマウントの間の移動なので、DB の大きさに比例して時間がかかる。
+4. `base`: ベースバックアップを `restic dump` で読み、同じ形のコンテナの `tar -x` でデータディレクトリに展開する（所有者は `postgres`、データディレクトリは 0700）。
+5. `wal`: 必要な WAL のスナップショットを `restic dump` で読み、マウントしたディレクトリの下の `restore/` に展開する。まだ退避していないホストの中の WAL と、3 で移した古いデータディレクトリの `pg_wal` にあって、アーカイブにないファイルも加える。誤った操作の直前の数分まで戻せるようにするため。
 6. `recover`: データディレクトリに `recovery.signal` を置き、`postgresql.auto.conf` に `restore_command`（`restore/` からのコピー）、`recovery_target_time`、`recovery_target_action = 'promote'` を書く。DB のサービスだけを稼働中のリリースのファイルで起動し、`pg_is_in_recovery()` が偽になるまで待つ。目標の時刻に届かずに WAL が尽きると、PostgreSQL がエラーで止まるので、失敗にする。
 7. `cleanup`: 回復の設定を `ALTER SYSTEM RESET` で消して設定を読み直させ、`restore/` を消す。
 8. `start`: アプリ全体を起動する。
