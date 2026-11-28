@@ -171,6 +171,32 @@ ARCHITECTURE 7.2。上流の再起動の間 Caddy がリクエストを待たせ
 - [x] 実機確認: 切り替えの投入で、そのアプリの処理中のリクエストが旧色で最後まで返ること。色の付いたサービスの別名（`aliases`）でほかのサービスから公開サービスに届くこと。結果を ARCHITECTURE の 7.2 に反映
 - 完了条件: Rails + PostgreSQL のサンプル（`build:` あり、マイグレーションのワンショットあり）で blue/green を有効にし、外から 0.2 秒ごとに `https://<slug>.<base>/` へリクエストを送り続けながら次を行い、どれでも 5xx と接続エラーが 0 件である。(1) コードだけを変えたコミットのデプロイ（DB のコンテナが作り直されないことを `docker ps` の作成時刻で確かめる）、(2) 足すだけのマイグレーションを含むデプロイ、(3) 起動に失敗するコミットのデプロイ（`failed` になり、旧色が応答し続け、新色のコンテナが残らない）、(4) 即時ロールバック。あわせて、デプロイ中に `koroku` を止めて起動し直すと、`web_color` でない色のコンテナが消え、`web_color` の色が応答し続けること
 
+### M7 ダンプの間隔とダンプからの復旧
+
+ARCHITECTURE 10.8。DB の種類を知らないまま、ダンプフックとロードフックで動かす。
+
+- [ ] `apps` の `dump_interval_hours`（24 を割り切る値、既定 24）。日次の実行（03:00）から数えた時刻に、そのアプリのダンプだけを取る。restic の操作のロック、停止中・休止中のアプリの扱い
+- [ ] `backup_runs` の `trigger = interval`。アプリのバックアップの状況を対象ごとの直近の結果で出す。間隔の 2 倍成功しないときの警告、ダンプの時間が間隔の半分を超えたときの警告
+- [ ] `forget` に `--keep-within-hourly 48h`。PostgreSQL のプリセットの説明に `-Z0` を勧める文
+- [ ] ダンプからの復旧: `db_copies` の `kind` と `source_snapshot_id`、手順 `check` → `backup`（必須）→ `stop` → `load` → `start`、失敗時の `reload`。本番の `confirm`、再ログイン、操作の記録 `db.restored`
+- [ ] UI: 設定の「ダンプの間隔」、バックアップタブの「この時点に戻す」とダイアログ、DB のコピーの履歴での表示。`docs/API.md`、`docs/USAGE.md`
+- [ ] `plugins/koroku/skills/prepare-app` の要件（ダンプの間隔とロードフックの勧め）、`plugin.json` の `version`
+- 完了条件: PostgreSQL のアプリで間隔を 1 時間にし、2 回以上の間隔のダンプが取れる。行を消してから、消す前のダンプに UI から戻すと行が戻り、戻す直前のダンプが残っている。ロードフックが失敗するダンプを選ぶと、戻す前の状態に流し込み直されて起動する
+
+### M8 PostgreSQL の時点指定の復旧
+
+ARCHITECTURE 10.9。M7 の上に作る。
+
+- [ ] `apps` の `pitr_service`。override でのマウント、`ALTER SYSTEM` と DB の再起動、デプロイ成功後の「準備」、無効にするときの順序
+- [ ] ベースバックアップ（`pg_basebackup -X none` を `restic --stdin`）と、1 時間ごとの WAL の退避（`--files-from`、退避したファイルの削除）。`pitr_bases`、`pitr_wal_batches`、`pitr_gaps`
+- [ ] ホストの中の WAL の上限（2 GiB、ディスクの 90%）、`pg_stat_archiver` の警告、マウントの外れの記録、メジャーバージョンの変更の検出
+- [ ] 世代: `kind:pitr-base` と `kind:wal` を `--keep-within 8d` で別に管理し、10.2 の `forget` に `--keep-tag` を足す
+- [ ] 復旧の手順 `check` → `stop` → `move` → `base` → `wal` → `recover` → `cleanup` → `start` → `base`、失敗時に restore-trash から戻す、`koroku` の再起動で中断したときの扱い。`pitr_restores`
+- [ ] API（`GET /api/apps/{slug}/pitr`、`POST /api/apps/{slug}/pitr/restores`）と UI（戻せる期間の帯、戻せない区間、時刻の入力、確認のダイアログ）。`docs/API.md`、`docs/USAGE.md`、`docs/OPERATIONS.md`（restore-trash から手で戻す手順）
+- [ ] `plugins/koroku/skills/prepare-app` の要件（PostgreSQL のデータディレクトリを named volume に置くこと）、`plugin.json` の `version`
+- [ ] 実機確認: 公式の `postgres` イメージ（サポート中の各メジャーバージョン）で、`POSTGRES_USER` のローカル接続の `replication` が既定の `pg_hba.conf` で通るか、`pg_basebackup -D - -Ft -X none` の出力から回復できるか、マウントがないときの `archive_command` で DB が WAL を溜めないか。restic のスナップショットが 1 日 24 個増えたときの一覧と `forget` の時間。結果を ARCHITECTURE の 10.9 に反映
+- 完了条件: Rails + PostgreSQL のサンプルで有効にし、書き込みを続けながら、ある時刻の直後に行を消す。その時刻を指定して戻すと、消した行があり、それより後の書き込みがない。ホストの中の未退避の WAL を使って、直前 5 分以内の時刻にも戻せる。マウントを外したリリースへロールバックしても DB が止まらず、その間が戻せない区間として画面に出る
+
 ## 受け入れシナリオ
 
 1. private リポジトリの Rails + PostgreSQL の Compose を UI からデプロイし、`https://<slug>.dev.example.com` が応答する。
