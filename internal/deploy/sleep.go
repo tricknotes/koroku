@@ -320,3 +320,16 @@ func (e *Engine) endSleep(ctx context.Context, app store.App, log *deployLog) er
 func healthURL(app store.App) string {
 	return fmt.Sprintf("http://127.0.0.1:%d%s", app.LivePort(), app.HealthcheckPath)
 }
+
+// WithAppLock runs fn under the app's operation lock, waiting for a
+// deployment or another operation to end first. The preparation of
+// point-in-time recovery restarts the database with it (ARCHITECTURE
+// 10.9). fn may call WithServiceRunning with the context it is given.
+func (e *Engine) WithAppLock(ctx context.Context, appID int64, fn func(context.Context) error) error {
+	release, err := e.lockApp(ctx, appID)
+	if err != nil {
+		return fmt.Errorf("wait for the app's other operation: %w", err)
+	}
+	defer release()
+	return fn(withHeldLock(ctx, appID))
+}

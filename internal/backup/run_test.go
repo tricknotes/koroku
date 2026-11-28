@@ -371,7 +371,8 @@ func TestScheduledRunAppliesRetention(t *testing.T) {
 		"restic unlock",
 		"docker volume ls --filter label=com.docker.compose.project=koroku-blog --format {{.Name}}",
 		"restic unlock",
-		"restic forget --group-by tags --keep-within 48h --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
+		"restic forget --tag kind:pitr-base --tag kind:wal --group-by tags --keep-within 192h --retry-lock 1m0s",
+		"restic forget --group-by tags --keep-within 48h --keep-tag kind:pitr-base --keep-tag kind:wal --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
 	})
 	e.assertCleanCommands()
 
@@ -399,7 +400,8 @@ func TestStandaloneForgetAndCheck(t *testing.T) {
 	assertLines(t, "commands", e.host.calls(), []string{
 		"restic cat config",
 		"restic unlock",
-		"restic forget --group-by tags --keep-within 48h --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
+		"restic forget --tag kind:pitr-base --tag kind:wal --group-by tags --keep-within 192h --retry-lock 1m0s",
+		"restic forget --group-by tags --keep-within 48h --keep-tag kind:pitr-base --keep-tag kind:wal --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune --retry-lock 1m0s",
 		"restic unlock",
 		"restic check --retry-lock 1m0s",
 	})
@@ -464,7 +466,8 @@ func TestLocalRepositoryEnvironment(t *testing.T) {
 	}
 	assertLines(t, "commands", e.host.calls("restic backup", "restic forget"), []string{
 		"restic backup --json --quiet --host testhost --tag app:blog --tag kind:volume --tag target:uploads --retry-lock 5m0s .",
-		"restic forget --group-by tags --keep-daily 1 --keep-weekly 2 --keep-monthly 3 --prune --retry-lock 5m0s",
+		"restic forget --tag kind:pitr-base --tag kind:wal --group-by tags --keep-within 192h --retry-lock 5m0s",
+		"restic forget --group-by tags --keep-tag kind:pitr-base --keep-tag kind:wal --keep-daily 1 --keep-weekly 2 --keep-monthly 3 --prune --retry-lock 5m0s",
 	})
 }
 

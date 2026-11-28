@@ -175,6 +175,20 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 	}
 	overrideParams.CommitServices = commitServices
 	meta.ReleaseEnvServices = overrideParams.ReleaseEnvServices()
+	if service := app.PITRService; service != "" {
+		if _, ok := repoProject.Services[service]; !ok {
+			return false, fmt.Errorf("the point-in-time recovery service %q is not defined in the Compose file; change the setting in the backups tab", service)
+		}
+		dir := compose.WALDir(e.opts.AppsDir, app.Slug, service)
+		// Docker would create a missing source as root; the PostgreSQL
+		// service is given it in the preparation (ARCHITECTURE 10.9).
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return false, fmt.Errorf("create the archive directory: %w", err)
+		}
+		overrideParams.WAL = &compose.WALMount{Service: service, Source: dir}
+		meta.WALService = service
+		log.Printf("Point-in-time recovery: the archive directory is mounted into %s", service)
+	}
 	override, err := compose.Override(overrideParams)
 	if err != nil {
 		return false, err
@@ -231,7 +245,7 @@ func (e *Engine) execute(ctx context.Context, d store.Deployment, app store.App,
 		}
 		return false, err
 	}
-	policy := compose.CheckPolicy(project, e.policyParams(app, releaseDir, blueGreen))
+	policy := compose.CheckPolicy(project, e.policyParams(app, releaseDir, blueGreen, meta.WALService))
 	for _, v := range policy.Waived {
 		log.Printf("Policy waived for this app: %s", v)
 	}
@@ -514,7 +528,8 @@ func (e *Engine) revalidatedProject(ctx context.Context, app store.App, id int64
 	if err != nil {
 		return compose.Project{}, err
 	}
-	policy := compose.CheckPolicy(project, e.policyParams(app, dir, e.releaseIsBlueGreen(app.Slug, id)))
+	meta, _ := e.readMeta(app.Slug, id)
+	policy := compose.CheckPolicy(project, e.policyParams(app, dir, meta.BlueGreen, meta.WALService))
 	if !policy.OK() {
 		return compose.Project{}, &compose.PolicyError{Violations: policy.Violations}
 	}

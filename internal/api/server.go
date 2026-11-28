@@ -69,6 +69,9 @@ type Options struct {
 	Compose ComposeInspector
 	// Copier copies databases into staging apps. Optional.
 	Copier DBCopier
+	// PITR reports and turns off point-in-time recovery (ARCHITECTURE
+	// 10.9). Optional.
+	PITR PITR
 	// RouteStatus reports the last proxy configuration load. Optional.
 	RouteStatus func() RouteStatus
 	// Users resolves GitHub logins when the owner adds a member. Optional.
@@ -117,6 +120,7 @@ type Server struct {
 	volumes        AppVolumes
 	compose        ComposeInspector
 	copier         DBCopier
+	pitr           PITR
 	users          UserLookup
 	waker          AppWaker
 	wakeHold       time.Duration
@@ -182,6 +186,7 @@ func New(opts Options) *Server {
 		volumes:     opts.Volumes,
 		compose:     opts.Compose,
 		copier:      opts.Copier,
+		pitr:        opts.PITR,
 		users:       opts.Users,
 		waker:       opts.Waker,
 		pulls:       opts.Pulls,
@@ -337,6 +342,7 @@ func (s *Server) apiRoutes() []route {
 		{"GET /api/apps/{slug}/volumes", onApp(levelView), s.handleListVolumes},
 
 		{"GET /api/apps/{slug}/db-copies", onApp(levelView), s.handleListDBCopies},
+		{"GET /api/apps/{slug}/pitr", onApp(levelView), s.handlePITRStatus},
 		// The source app needs manage as well; checked in the handler.
 		{"POST /api/apps/{slug}/db-copies", onApp(levelManage), s.handleStartDBCopy},
 		{"POST /api/apps/{slug}/db-restores", onApp(levelManage), s.handleStartDBRestore},

@@ -33,7 +33,7 @@ func (e *Engine) releaseIsBlueGreen(slug string, id int64) bool {
 }
 
 // policyParams are the policy parameters of a release of the app.
-func (e *Engine) policyParams(app store.App, releaseDir string, blueGreen bool) compose.PolicyParams {
+func (e *Engine) policyParams(app store.App, releaseDir string, blueGreen bool, walService string) compose.PolicyParams {
 	params := compose.PolicyParams{
 		ReleaseDir:  releaseDir,
 		ProjectName: app.ProjectName(),
@@ -48,6 +48,9 @@ func (e *Engine) policyParams(app store.App, releaseDir string, blueGreen bool) 
 	if blueGreen {
 		params.BlueGreen = true
 		params.AltHostPort = app.AltHostPort
+	}
+	if walService != "" {
+		params.WAL = &compose.WALMount{Service: walService, Source: compose.WALDir(e.opts.AppsDir, app.Slug, walService)}
 	}
 	return params
 }

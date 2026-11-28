@@ -27,6 +27,7 @@ import (
 	"github.com/tricknotes/koroku/internal/idle"
 	"github.com/tricknotes/koroku/internal/logs"
 	"github.com/tricknotes/koroku/internal/objstore"
+	"github.com/tricknotes/koroku/internal/pitr"
 	"github.com/tricknotes/koroku/internal/review"
 	"github.com/tricknotes/koroku/internal/routing"
 	"github.com/tricknotes/koroku/internal/runner"
@@ -231,6 +232,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		}
 		logger.Warn("AUTHENTICATION IS DISABLED (--insecure-no-auth): do not use this on a reachable host")
 	}
+	// Status changes of deployments go to GitHub and to point-in-time
+	// recovery.
+	var statusReports statusReporters
 	deployOpts := deploy.Options{
 		Store:            st,
 		Runner:           run,
@@ -366,7 +370,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 			ConsoleURL: cfg.ConsoleURL,
 			BaseDomain: cfg.BaseDomain,
 		})
-		deployOpts.Status = ghDeployments
+		statusReports = append(statusReports, ghDeployments)
 		go ghDeployments.Run(ctx)
 		if len(cfg.GitHub.InstallationAccounts) > 0 {
 			logger.Warn("github.installation_accounts matches accounts by login, and a login given up in a rename can be taken by another account: " +
@@ -414,8 +418,29 @@ func serve(ctx context.Context, args []string, stderr io.Writer, ready chan<- st
 		logger.Warn("backups are disabled: " + reason)
 	}
 
+	pitrReports := &pitrReporter{store: st}
+	deployOpts.Status = append(statusReports, pitrReports)
 	engine := deploy.New(deployOpts)
 	controller.engine = engine
+	// Point-in-time recovery of PostgreSQL services (ARCHITECTURE 10.9):
+	// its snapshots go to the backup repository, so it runs with backups.
+	if backups != nil {
+		pitrService := pitr.New(pitr.Options{
+			Store: st, Repo: backups.manager, Engine: engine, Runner: run, Clock: clk, Logger: logger,
+			AppsDir: deployOpts.AppsDir, Hour: cfg.Backup.Hour, Location: cfg.Location(),
+			DiskFull: func() bool {
+				disk, err := prober.DiskUsage()
+				return err == nil && disk.UsedPercent >= float64(cfg.LogDiskStopPercent())
+			},
+		})
+		pitrReports.service = pitrService
+		apiOpts.PITR = pitrService
+		go func() {
+			if err := pitrService.Run(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("point-in-time recovery stopped", "error", err)
+			}
+		}()
+	}
 	if backups != nil {
 		go func() {
 			if err := backups.scheduler.Run(ctx); err != nil && ctx.Err() == nil {

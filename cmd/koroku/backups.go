@@ -223,6 +223,9 @@ type backupManager interface {
 	RestoreVolume(ctx context.Context, app backup.App, snapshotID string) (backup.RestoreResult, error)
 	LookupDump(ctx context.Context, app backup.App, snapshotID string) (backup.DumpFile, error)
 	WriteDump(ctx context.Context, file backup.DumpFile, w io.Writer) error
+	// BackupStream stores the base backups and the WAL of point-in-time
+	// recovery (ARCHITECTURE 10.9).
+	BackupStream(ctx context.Context, s backup.Stream) (string, error)
 }
 
 // backupService adapts the backup manager to the API and the deploy engine.

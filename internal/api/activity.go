@@ -163,6 +163,7 @@ var settingFields = []settingField{
 	{name: "dump_hook_command", get: func(a store.App) any { return a.DumpHookCommand }},
 	{name: "backup_before_deploy", get: func(a store.App) any { return a.BackupBeforeDeploy }},
 	{name: "dump_interval_hours", get: func(a store.App) any { return a.DumpIntervalHours }},
+	{name: "pitr_service", get: func(a store.App) any { return a.PITRService }},
 	{name: "load_hook_service", get: func(a store.App) any { return a.LoadHookService }},
 	{name: "load_hook_command", get: func(a store.App) any { return a.LoadHookCommand }},
 	{name: "post_load_service", get: func(a store.App) any { return a.PostLoadService }},
