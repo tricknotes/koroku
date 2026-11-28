@@ -870,6 +870,16 @@ export default class ApiService extends Service {
     return this.request('POST', `/api/apps/${seg(slug)}/db-copies`, { body });
   }
 
+  /** Loads one of the app's own dump snapshots into it (ARCHITECTURE 10.8). */
+  startDbRestore(
+    slug: string,
+    body: { snapshot_id: string; confirm: string },
+  ): Promise<DbCopy> {
+    return this.request('POST', `/api/apps/${seg(slug)}/db-restores`, {
+      body,
+    });
+  }
+
   getDbCopy(id: number): Promise<DbCopy> {
     return this.request('GET', `/api/db-copies/${id}`);
   }

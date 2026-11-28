@@ -182,11 +182,16 @@ type System struct {
 	SkipDirs []string
 }
 
-// Retention is the number of generations kept per snapshot group.
+// Retention is the number of generations kept per snapshot group, and the
+// recent period in which every snapshot is kept.
 type Retention struct {
 	Daily   int
 	Weekly  int
 	Monthly int
+	// Within keeps every snapshot taken this long before the newest one of
+	// its group: the dumps between the daily runs (ARCHITECTURE 10.8).
+	// Zero keeps the generations only.
+	Within time.Duration
 }
 
 // Timeouts bound the external commands. Zero values get the defaults.
@@ -240,7 +245,8 @@ type Options struct {
 	// Host is recorded as the host name of every snapshot. It is fixed so
 	// that replacing the machine does not change it. Default "koroku".
 	Host string
-	// Keep defaults to 7 daily, 4 weekly and 6 monthly generations.
+	// Keep defaults to 7 daily, 4 weekly and 6 monthly generations, and
+	// every snapshot of the last 48 hours.
 	Keep     Retention
 	Timeouts Timeouts
 }
@@ -259,7 +265,7 @@ func (o *Options) applyDefaults() {
 		o.Host = "koroku"
 	}
 	if o.Keep == (Retention{}) {
-		o.Keep = Retention{Daily: 7, Weekly: 4, Monthly: 6}
+		o.Keep = Retention{Daily: 7, Weekly: 4, Monthly: 6, Within: 48 * time.Hour}
 	}
 	t := &o.Timeouts
 	if t.Command == 0 {

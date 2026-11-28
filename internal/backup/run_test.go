@@ -464,7 +464,7 @@ func TestLocalRepositoryEnvironment(t *testing.T) {
 	}
 	assertLines(t, "commands", e.host.calls("restic backup", "restic forget"), []string{
 		"restic backup --json --quiet --host testhost --tag app:blog --tag kind:volume --tag target:uploads --retry-lock 5m0s .",
-		"restic forget --group-by tags --keep-within 48h --keep-daily 1 --keep-weekly 2 --keep-monthly 3 --prune --retry-lock 5m0s",
+		"restic forget --group-by tags --keep-daily 1 --keep-weekly 2 --keep-monthly 3 --prune --retry-lock 5m0s",
 	})
 }
 

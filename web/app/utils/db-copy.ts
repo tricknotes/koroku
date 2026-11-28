@@ -189,6 +189,39 @@ export function targetProblem(target: App): string {
   return '';
 }
 
+/**
+ * What keeps an app from restoring one of its own dumps (ARCHITECTURE
+ * 10.8); '' when nothing does. The dump hook takes the current data first,
+ * the load hook reads the dump, and both run in the app's containers.
+ */
+export function restoreProblem(app: App): string {
+  if (!app.dump_hook_service || !app.dump_hook_command) {
+    return 'ダンプフックが設定されていません。戻す前のいまのデータをダンプフックで取るので、上の「バックアップの設定」で設定してください。';
+  }
+  if (!app.load_hook_service || !app.load_hook_command) {
+    return 'ロードフック（標準入力からダンプを読むコマンド）が設定されていません。';
+  }
+  if (!app.current_deployment) {
+    return 'このアプリはまだデプロイされていません。';
+  }
+  if (app.desired_state !== 'running') {
+    return 'このアプリは停止中です。起動してから戻してください。';
+  }
+  return '';
+}
+
+/** Whether the dump snapshot can be restored into the app right now. */
+export function canRestoreDump(
+  app: App,
+  snapshot: { kind: string; target: string },
+): boolean {
+  return (
+    snapshot.kind === 'dump' &&
+    snapshot.target === app.dump_hook_service &&
+    restoreProblem(app) === ''
+  );
+}
+
 /** One line of the preview of a copy. */
 export interface PlanStep {
   title: string;
@@ -265,8 +298,24 @@ const STEP_LABELS: Record<string, string> = {
   done: '完了',
 };
 
+/** The steps of a restore of the app's own dump (ARCHITECTURE 10.8). */
+const RESTORE_STEP_LABELS: Record<string, string> = {
+  ...STEP_LABELS,
+  backup: '戻す前のバックアップ',
+  load: 'ダンプの流し込み',
+  reload: '元のデータの流し込み',
+};
+
 export function copyStepLabel(key: string): string {
   return STEP_LABELS[key] ?? key;
+}
+
+export function restoreStepLabel(key: string): string {
+  return RESTORE_STEP_LABELS[key] ?? key;
+}
+
+export function isRestore(copy: Pick<DbCopy, 'kind'>): boolean {
+  return copy.kind === 'restore';
 }
 
 export interface ParsedCopyLog {
@@ -278,6 +327,7 @@ export interface ParsedCopyLog {
 }
 
 const LEFT_STOPPED = /stay stopped/;
+const RELOAD_FAILED = /^Loading the data back failed/;
 
 /**
  * Splits a copy log into its steps (docs/API.md): like a deploy log, a step
@@ -300,8 +350,19 @@ export function parseCopyLog(
     }
     if (current && current.endedAt === null) current.endedAt = headline.time;
     if (headline.key === 'failed') {
-      failure = headline.title.replace(/^Copy failed: /, '');
-      if (current) current.state = 'failed';
+      failure = headline.title.replace(/^(Copy|Restore) failed: /, '');
+      if (current?.key === 'reload') {
+        // A restore whose load failed loads the data from before it back
+        // (ARCHITECTURE 10.8): the load is what failed, and the reload
+        // only when it says so.
+        const load = steps.find((step) => step.key === 'load');
+        if (load) load.state = 'failed';
+        if (current.lines.some((entry) => RELOAD_FAILED.test(entry))) {
+          current.state = 'failed';
+        }
+      } else if (current) {
+        current.state = 'failed';
+      }
       // What follows (starting the services again) belongs to the step
       // that failed.
       continue;
@@ -318,7 +379,14 @@ export function parseCopyLog(
     steps.push(current);
   }
   const last = steps[steps.length - 1];
-  if (last && last.state === 'done' && last.key !== 'done') {
+  // Without a failed headline the log stopped short: the last step is the
+  // one that ran or broke off. With one, the steps are marked above.
+  if (
+    last &&
+    last.state === 'done' &&
+    last.key !== 'done' &&
+    failure === null
+  ) {
     if (copy.status === 'running') last.state = 'running';
     else if (copy.status === 'failed') last.state = 'failed';
   }

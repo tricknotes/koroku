@@ -386,6 +386,8 @@ func TestIntegrationRetentionKeepsGenerationsPerTarget(t *testing.T) {
 	shop := App{Slug: "shop", Project: "koroku-shop"}
 	s.volume(shop, "uploads", map[string]string{"c.txt": "1"})
 	s.apps = []App{app, shop}
+	// The generations alone: the recent period would keep every run below.
+	s.m.opts.Keep = Retention{Daily: 7, Weekly: 4, Monthly: 6}
 
 	// Three runs on the same day. Per group, restic keeps the newest one as
 	// the daily generation and, while the group is young, its oldest.
@@ -504,4 +506,64 @@ func mustOpen(t *testing.T, path string) *os.File {
 	}
 	t.Cleanup(func() { f.Close() })
 	return f
+}
+
+// Dumps between the daily runs (ARCHITECTURE 10.8): the scheduler takes the
+// app's dump at each of its slots, and the retention policy keeps every
+// dump of the last 48 hours, where the daily generations alone would keep
+// one dump a day.
+func TestIntegrationIntervalDumpsAreKept(t *testing.T) {
+	t.Parallel()
+	s := newSite(t)
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := App{Slug: "blog", Project: "koroku-blog", DumpService: "db", DumpCommand: "date +%s%N", DumpIntervalHours: 1}
+	s.apps = []App{app}
+	sched := &Scheduler{
+		Manager: s.m, Clock: s.clock, Hour: 3, Location: tokyo, PollInterval: 5 * time.Millisecond,
+		DumpApps: func(context.Context) ([]App, error) { return s.apps, nil },
+	}
+	s.clock.Set(time.Date(2026, 11, 20, 12, 30, 0, 0, tokyo))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = sched.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	// The scheduler reads the first slot when it starts: let it see 12:30.
+	time.Sleep(200 * time.Millisecond)
+
+	for i, hour := range []int{13, 14, 15} {
+		s.clock.Set(time.Date(2026, 11, 20, hour, 0, 0, 0, tokyo))
+		deadline := time.Now().Add(2 * time.Minute)
+		for len(s.rec.finishedRuns()) < i+1 {
+			if time.Now().After(deadline) {
+				t.Fatalf("the dump at %02d:00 did not run", hour)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	for _, trigger := range s.rec.startedRuns() {
+		if trigger != TriggerInterval {
+			t.Errorf("run triggered by %s", trigger)
+		}
+	}
+	if n := count(s.snapshots(app), KindDump, "db"); n != 3 {
+		t.Fatalf("%d dumps after three slots", n)
+	}
+	cancel()
+	<-done
+
+	if err := s.m.forget(testContext(t)); err != nil {
+		t.Fatalf("forget: %v", err)
+	}
+	if n := count(s.snapshots(app), KindDump, "db"); n != 3 {
+		t.Errorf("%d dumps after the retention policy, want all three of the last 48 hours", n)
+	}
 }

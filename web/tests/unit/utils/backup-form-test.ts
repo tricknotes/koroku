@@ -117,6 +117,29 @@ module('Unit | Utility | backup-form', function () {
     assert.deepEqual(form.validate(), {});
   });
 
+  test('the dump interval is sent when it changed, to a backend that knows it', function (assert) {
+    const app = makeApp({
+      backup_exclude_volumes: [],
+      dump_hook_service: 'db',
+      dump_hook_command: 'pg_dump app',
+      backup_before_deploy: false,
+      dump_interval_hours: 24,
+    });
+    const form = new BackupForm(app);
+    assert.deepEqual(form.patch(app), {}, 'unchanged');
+    form.dumpIntervalHours = 6;
+    assert.deepEqual(form.patch(app), { dump_interval_hours: 6 });
+
+    const older = makeApp({
+      backup_exclude_volumes: [],
+      backup_before_deploy: false,
+    });
+    const olderForm = new BackupForm(older);
+    assert.false(olderForm.intervalAvailable);
+    olderForm.dumpIntervalHours = 6;
+    assert.deepEqual(olderForm.patch(older), {}, 'a backend without intervals');
+  });
+
   test('parseList splits on commas and whitespace', function (assert) {
     assert.deepEqual(parseList(''), []);
     assert.deepEqual(parseList(' a, b ,,c\nd '), ['a', 'b', 'c', 'd']);

@@ -49,7 +49,13 @@ import {
 } from './fixtures.mjs';
 import { activityPage, recordActivity } from './activity.mjs';
 import { deploymentLog } from './deploy-log.mjs';
-import { copyHistory, copyLog, newCopy, settleCopies } from './db-copy.mjs';
+import {
+  copyHistory,
+  copyLog,
+  newCopy,
+  newRestore,
+  settleCopies,
+} from './db-copy.mjs';
 import { LOG_SCENARIOS, registerLogRoutes } from './logs.mjs';
 import { memoryHistory } from './memory.mjs';
 import { composeView, containerView } from './compose.mjs';
@@ -1365,6 +1371,29 @@ route('POST', '/api/apps/:slug/db-copies', (context) => {
   });
   return { status: 202, json: copyJson(entry) };
 });
+route('POST', '/api/apps/:slug/db-restores', (context) => {
+  const { state, body } = context;
+  const app = appOf(context);
+  if (app.environment === 'production' && body.confirm !== app.slug) {
+    throw new HttpError(422, 'confirmation_mismatch');
+  }
+  if (!app.load_hook_command) {
+    throw new HttpError(422, 'target_load_hook_missing');
+  }
+  if (!app.dump_hook_command) throw new HttpError(422, 'dump_hook_missing');
+  const list = state.dbCopies.get(app.slug) ?? [];
+  if (list.some((entry) => entry.status === 'running')) {
+    throw new HttpError(409, 'busy');
+  }
+  const entry = newRestore(state, app, body.snapshot_id);
+  entry.actor = userOf(context.scenario);
+  state.dbCopies.set(app.slug, [entry, ...list]);
+  record(context, app.slug, 'db.restored', {
+    copy_id: entry.id,
+    snapshot_id: body.snapshot_id,
+  });
+  return { status: 202, json: copyJson(entry) };
+});
 route('GET', '/api/db-copies/:id', ({ state, params }) =>
   copyJson(findCopy(state, params.id)),
 );
@@ -1574,7 +1603,7 @@ const ACCESS = [
   [
     'manage',
     'POST',
-    /^\/api\/apps\/([^/]+)\/(domains|task-runs|db-copies|backups\/restore)(\/.*)?$/,
+    /^\/api\/apps\/([^/]+)\/(domains|task-runs|db-copies|db-restores|backups\/restore)(\/.*)?$/,
   ],
   ['manage', 'PATCH', /^\/api\/apps\/([^/]+)\/domains\//],
   ['manage', 'DELETE', /^\/api\/apps\/([^/]+)\/domains\//],
@@ -1946,6 +1975,7 @@ const NEEDS_RECENT_LOGIN = [
   ['POST', /^\/api\/apps\/[^/]+\/backups\/restore$/],
   ['GET', /^\/api\/apps\/[^/]+\/backups\/[^/]+\/download$/],
   ['POST', /^\/api\/apps\/[^/]+\/db-copies$/],
+  ['POST', /^\/api\/apps\/[^/]+\/db-restores$/],
   // The production apps of the scenarios (blog, shop).
   ['PUT', /^\/api\/apps\/(blog|shop)\/tasks$/],
   ['POST', /^\/api\/apps\/(blog|shop)\/task-runs$/],

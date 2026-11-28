@@ -27,6 +27,8 @@ function copy(target, source, finishedAgo, overrides = {}) {
     target_app: target,
     source_app: source,
     source_kind: 'live',
+    kind: 'copy',
+    source_snapshot_id: '',
     status: 'succeeded',
     error: '',
     bytes: 18.4 * MB,
@@ -63,6 +65,28 @@ export function copyHistory(scenario) {
         status: 'failed',
         bytes: 9.1 * MB,
         error: 'the load command failed: docker compose exec: exit status 1',
+      }),
+    );
+  }
+  if (scenario === 'dump-restore') {
+    // Restores of the app's own dumps (ARCHITECTURE 10.8): one that went
+    // through, and one whose load failed and was undone.
+    blog.unshift(
+      copy('blog-staging', 'blog-staging', 40 * MINUTE, {
+        kind: 'restore',
+        source_kind: 'snapshot',
+        source_snapshot_id: 'a07d3c1e90b2f845',
+        status: 'failed',
+        bytes: 2.3 * MB,
+        backup_snapshot_id: '9a41d27c03be58f1',
+        error: 'the load command failed: docker compose exec: exit status 1',
+      }),
+      copy('blog-staging', 'blog-staging', 2 * DAY, {
+        kind: 'restore',
+        source_kind: 'snapshot',
+        source_snapshot_id: 'c41f09ab52f4d613',
+        bytes: 17.9 * MB,
+        backup_snapshot_id: '5e2b77d1a09c4f38',
       }),
     );
   }
@@ -123,6 +147,7 @@ export function settleCopies(state) {
  * post-load command does.
  */
 function script(entry, app) {
+  if (entry.kind === 'restore') return restoreScript(entry, app);
   const target = entry.target_app;
   const live = entry.source_kind === 'live';
   const lines = [
@@ -194,7 +219,73 @@ function script(entry, app) {
   return lines;
 }
 
-const STEP = /^(check|backup|stop|copy|after|start|done|failed) /;
+/** The script of a restore of the app's own dump (ARCHITECTURE 10.8). */
+function restoreScript(entry, app) {
+  const slug = entry.target_app;
+  const service = app?.load_hook_service || 'db';
+  const taken = stamp(Date.parse(entry.started_at) - 9 * HOUR);
+  return [
+    [0, `check Checking ${slug}`],
+    [
+      0,
+      `Dump to restore: snapshot ${entry.source_snapshot_id.slice(0, 8)}, taken ${taken} in service ${service}`,
+    ],
+    [
+      0,
+      `Load hook in service ${service}: ${app?.load_hook_command || 'pg_restore'}`,
+    ],
+    [1, `backup Backing up the current data of ${slug}`],
+    [
+      2,
+      `Stored the current data as snapshot ${entry.backup_snapshot_id.slice(0, 8)}.`,
+    ],
+    [3, `stop Stopping the other services of ${slug}`],
+    [4, 'Stopped: web, worker'],
+    [4, `load Loading the dump of ${taken}`],
+    ...(entry.status === 'failed'
+      ? [
+          [
+            20,
+            'load | pg_restore: error: could not read from input file: end of file',
+          ],
+          [20, `Loading the dump failed: ${entry.error}`],
+          [
+            20,
+            `reload Loading the data of ${slug} back from snapshot ${entry.backup_snapshot_id.slice(0, 8)}`,
+          ],
+          [44, 'Loaded the data before the restore back.'],
+          [44, `failed Restore failed: ${entry.error}`],
+          [45, 'Started: web, worker'],
+        ]
+      : []),
+    ...(entry.status === 'failed'
+      ? []
+      : [
+          [30, `Loaded ${(entry.bytes / MB || 18.4).toFixed(1)} MB.`],
+          [30, 'start Starting the stopped services'],
+          [33, 'Started: web, worker'],
+          [33, `done Restored the dump of ${taken}`],
+        ]),
+  ];
+}
+
+/** A restore started from the UI: it runs for a few seconds. */
+export function newRestore(state, app, snapshotId) {
+  const entry = copy(app.slug, app.slug, null, {
+    kind: 'restore',
+    source_kind: 'snapshot',
+    source_snapshot_id: snapshotId,
+    status: 'running',
+    bytes: 0,
+    backup_snapshot_id: '9a41d27c03be58f1',
+    mockFinishAt: Date.now() + 8 * SECOND,
+  });
+  entry.started_at = new Date().toISOString();
+  return entry;
+}
+
+const STEP =
+  /^(check|backup|stop|copy|load|reload|after|start|done|failed) (?!\|)/;
 
 /**
  * The log of a copy so far. A running copy written from the UI advances

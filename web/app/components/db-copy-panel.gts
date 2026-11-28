@@ -12,6 +12,7 @@ import {
   copyPlan,
   findPreset,
   HOOK_PRESETS,
+  isRestore,
   sourceChoices,
   targetProblem,
   liveProblem,
@@ -98,7 +99,10 @@ export default class DbCopyPanel extends Component<Signature> {
   @service declare poller: PollerService;
 
   apps = new Loadable<App[]>(() => this.api.listApps());
-  copies = new Loadable<DbCopy[]>(() => this.api.listDbCopies(this.slug));
+  /** Copies only: restores of the app's own dumps have their own pane. */
+  copies = new Loadable<DbCopy[]>(async () =>
+    (await this.api.listDbCopies(this.slug)).filter((copy) => !isRestore(copy)),
+  );
 
   /** Copying and its settings need manage (ARCHITECTURE 10.7). */
   get readOnly(): boolean {

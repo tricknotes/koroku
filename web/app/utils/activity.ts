@@ -40,6 +40,7 @@ const SETTING_LABELS: Record<string, string> = {
   dump_hook_service: 'ダンプフックのサービス',
   dump_hook_command: 'ダンプフックのコマンド',
   backup_before_deploy: 'デプロイ前のバックアップ',
+  dump_interval_hours: 'ダンプの間隔（時間）',
   load_hook_service: 'ロードフックのサービス',
   load_hook_command: 'ロードフックのコマンド',
   post_load_service: 'コピー後のコマンドのサービス',
@@ -302,6 +303,11 @@ export function describeActivity(entry: ActivityEntry): ActivityText {
       return {
         summary: `${str(d['source'])} の DB をこのアプリへコピー`,
         details: [copyKind(d['source_kind'])],
+      };
+    case 'db.restored':
+      return {
+        summary: 'DB をダンプから戻した',
+        details: [`スナップショット ${snapshot}`],
       };
     case 'db_copy.sent':
       return {

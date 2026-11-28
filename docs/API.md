@@ -45,7 +45,7 @@
 | オーナーだけ | `POST /api/apps`、`DELETE /api/apps/{slug}`、`GET /api/repos`、`GET /api/repos/{owner}/{repo}/compose`、`GET /api/repos/{owner}/{repo}/env-presets`、`/api/system/*`（`docker`、`containers`、`github`、`prune`）、`/api/members*` |
 | `view` | アプリと、その下の参照系（`GET /api/apps/{slug}`、`services`、`memory`、`compose`、`containers`、`activity`、`env`（キーだけ）、`env/requirements`、`registry-credential`（トークンは返さない）、`deployments`、`domains`、`logs`、`logs/history`、`logs/archives`、`logs/archives/url`、`backups`、`backups/status`、`volumes`、`db-copies`、`tasks`、`task-runs`）、`GET /api/deployments/{id}`（と `logs`）、`GET /api/task-runs/{id}`（と `logs`）、`GET /api/db-copies/{id}`（と `logs`）。`GET /api/repos/{owner}/{repo}/branches` と `commits` は、そのリポジトリ（`repo_full_name`）から作ったアプリに `view` 以上があれば使える |
 | `deploy` | `POST /api/apps/{slug}/deployments`（ロールバックと昇格を含む）、`GET /api/apps/{slug}/promotion`、`POST /api/apps/{slug}/start`・`stop`・`restart`・`wake`、`POST /api/deployments/{id}/cancel` |
-| `manage` | `PATCH /api/apps/{slug}`（オーナー専用の項目を除く）、環境変数の変更系、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、ドメインの変更系、`POST /api/apps/{slug}/backups/restore`、`GET /api/apps/{slug}/backups/{snapshot}/download`、`POST /api/apps/{slug}/db-copies`（送り側の `manage` も要る。送り側にロールがなければ `404 source_not_found`）、`PUT /api/apps/{slug}/tasks`、`POST /api/apps/{slug}/task-runs`、`POST /api/task-runs/{id}/cancel`。`POST /api/backups` は、どれかのアプリに `manage` があれば使える（実行はホスト全体の 1 回） |
+| `manage` | `PATCH /api/apps/{slug}`（オーナー専用の項目を除く）、環境変数の変更系、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、ドメインの変更系、`POST /api/apps/{slug}/backups/restore`、`GET /api/apps/{slug}/backups/{snapshot}/download`、`POST /api/apps/{slug}/db-copies`（送り側の `manage` も要る。送り側にロールがなければ `404 source_not_found`）、`POST /api/apps/{slug}/db-restores`、`PUT /api/apps/{slug}/tasks`、`POST /api/apps/{slug}/task-runs`、`POST /api/task-runs/{id}/cancel`。`POST /api/backups` は、どれかのアプリに `manage` があれば使える（実行はホスト全体の 1 回） |
 
 - 要件を満たさなければ `403 forbidden_role`。ロールのないアプリに関わるものは `404`（共通の表）。判定は再ログイン（`reauth_required`）より先に行う。
 - `PATCH /api/apps/{slug}` で `environment`、`relax_policy`、リポジトリ（`repo_full_name`、`repo_url`、`repo_id`）、`promote_from` を今と違う値にできるのはオーナーだけ。本番アプリの `auto_deploy` を有効にすること（と、有効なまま追うブランチや `auto_deploy_workflow` を変えること）もオーナーだけ（`details.fields` に `auto_deploy`）。今と同じ値を送るのはかまわない。
@@ -91,7 +91,7 @@
 
 `--insecure-no-auth` のとき、`/api/sessions` は空の一覧、`/api/login-events` は空の履歴を返し、`reauth_required` は起きない。
 
-再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id`・`compose_source`・`compose_content` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）か `auto_deploy_workflow` を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。本番アプリで `dump_hook_service`・`dump_hook_command`・`load_hook_service`・`load_hook_command`・`post_load_service`・`post_load_command` のいずれかを今と違う値にするものも同じ（アプリのコンテナの中で動くコマンドの設定のため。staging アプリでは求めない）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
+再ログイン（`403 reauth_required`）が要る操作: アプリの削除、本番アプリのデプロイ作成、`PUT /api/apps/{slug}/env`、`PUT`・`DELETE /api/apps/{slug}/env/{key}`、`PUT`・`DELETE /api/apps/{slug}/registry-credential`、volume のリストア、DB ダンプのダウンロード、DB のコピー（`POST /api/apps/{slug}/db-copies`）、ダンプからの復旧（`POST /api/apps/{slug}/db-restores`）、`PATCH /api/apps/{slug}` で `environment`・`relax_policy`・`repo_full_name`・`repo_url`・`repo_id`・`compose_source`・`compose_content` のいずれかを今と違う値にするもの、`access_protection` を `true` から `false` にするもの、`protection_exempt_paths` を今と違う一覧にするもの、本番アプリ（同じリクエストで変える値を含む）で `auto_deploy` を `true` にするものと、`auto_deploy` が `true` のまま追うブランチ（`auto_deploy_branch`、空なら `default_branch`）か `auto_deploy_workflow` を変えるもの（`POST /api/apps` で本番アプリを `auto_deploy: true` で作るのも同じ）。本番アプリで `dump_hook_service`・`dump_hook_command`・`load_hook_service`・`load_hook_command`・`post_load_service`・`post_load_command` のいずれかを今と違う値にするものも同じ（アプリのコンテナの中で動くコマンドの設定のため。staging アプリでは求めない）。`GET /api/apps/{slug}/env` は断らず、値を隠して返す（環境変数の節）。
 
 ## API トークン
 
@@ -351,7 +351,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 - アクセスがない間の休止（ARCHITECTURE 8.4）: `idle_sleep` が `true` なら、`idle_sleep_minutes` 分のあいだ Caddy を通るリクエストがなければ koroku がアプリのコンテナを止め（休止）、次のリクエストで起こす。既定は `false` と `30`。`idle_sleep_minutes` は 10〜1440 で、外れると `422 validation_failed`（`details.idle_sleep_minutes`）。`GET /api/system` の `idle_sleep.available` が `false` のホストで `false` から `true` にすると `422 validation_failed`（`details.idle_sleep`）。変えられるのは管理以上のロールで、再ログインは要らない。`sleeping_since` は休止した時刻で、起きていれば `null`（読み取り専用。`desired_state` は `running` のまま）。起動・停止は休止を解く。休止中のアプリの再起動は、起こすのと同じ。
 - 公開サービスの無停止デプロイ（blue/green。ARCHITECTURE 7.2）: `blue_green` が `true` なら、デプロイは新しい版の公開サービスを動いている版と並べて起動し、確認が通ってから Caddy の転送先を切り替える。既定は `false`。`blue_green_drain_seconds` は切り替えのあと旧色を止めるまでの待ち時間（0〜300 秒、既定 10）で、外れると `422 validation_failed`（`details.blue_green_drain_seconds`）。変えられるのは管理以上のロールで、再ログインは要らない（本番で有効にするときの確認は画面のダイアログで行う）。設定の変更は次のデプロイから効く。初めて `true` にしたときに 2 つ目のポートを割り当て、`alt_host_port` に返す（それまでは `null`。無効にしても返さない）。空きがなければ `422 validation_failed`（`details.blue_green`）。アプリの作成（`POST /api/apps`）では `true` にできない（`details.blue_green`）。`web_color` はいま利用者のリクエストを受けている色（`blue` は `host_port`、`green` は `alt_host_port`。公開サービスが 7 章の形で動いていれば `null`。読み取り専用）。`blue_green_problems` は稼働中のリリースの Compose ファイルが有効にする条件を満たさない理由（ポリシー検査の違反と同じ形 `{"service", "rule": "blue_green", "message", "relaxable": false}` の配列。満たしていれば空配列。未デプロイか、検査を記録する前のリリースなら `null`）。`include` した別ファイルにある公開サービスは、有効にしてデプロイするまで分からない。
 - 先に待つワークフロー（ARCHITECTURE 5.2）: `auto_deploy_workflow` はワークフローのファイルのパス（例 `.github/workflows/image.yml`）。空（既定）なら push の直後にデプロイする。設定すると push ではデプロイせず、そのワークフローの実行がこのブランチの最新のコミットで成功したとき（Webhook の `workflow_run`）にデプロイする。`.github/workflows/` の直下の `.yml` か `.yaml`（255 文字まで）でなければ `422 validation_failed`（`details.auto_deploy_workflow`）。前後の空白は除く。
-- バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）。本番アプリでダンプフックを今と違う値にするには、直近 10 分以内のログインが要る（`403 reauth_required`）。
+- バックアップの設定: `backup_exclude_volumes`（バックアップから外す volume 名の配列。Compose ファイルに書いた名前）、`dump_hook_service` と `dump_hook_command`（ダンプフック。両方を指定するか、両方を空にする）、`backup_before_deploy`（真偽値）、`dump_interval_hours`（ダンプの間隔。`1`、`2`、`3`、`4`、`6`、`8`、`12`、`24` のどれかで、既定 `24`。日次の実行から数えた時刻にダンプだけを取る。ARCHITECTURE 10.8。ほかの値は `422 validation_failed`（`details.dump_interval_hours`））。本番アプリでダンプフックを今と違う値にするには、直近 10 分以内のログインが要る（`403 reauth_required`）。
 
 | メソッドとパス | 内容 |
 | --- | --- |
@@ -521,6 +521,7 @@ ARCHITECTURE 8.3。管理 UI の画面からは呼ばない。ブラウザーの
 | `backup.restored`、`backup.downloaded` | `{"snapshot_id"}` |
 | `db_copy.started` | `{"copy_id", "source", "source_kind"}`（受け側のアプリ） |
 | `db_copy.sent` | `{"source_kind"}`（送り側のアプリ。受け側は書かない） |
+| `db.restored` | `{"copy_id", "snapshot_id"}`（ダンプからの復旧を始めた） |
 | `task_run.started` | `{"run_id", "task_name", "service", "command"}` |
 | `tasks.changed` | `{"added", "changed", "removed": [タスク名], "reordered"}`。予定（`schedule`）の変更も `changed` に入る |
 | `member.role_set` | `{"member": {"id", "login"}, "from", "to"}`（`from` はロールがなければ `""`） |
@@ -947,8 +948,8 @@ GitHub 側の失敗は `404 repo_not_found`（リポジトリ・ref・ファイ�
 
 | メソッドとパス | 内容 |
 | --- | --- |
-| `GET /api/backups` | 全体の状況。`{"configured": true, "running": false, "last_success_at": "2026-11-18T18:00:40Z", "warning": false, "runs": [{"id": 12, "trigger": "scheduled", "status": "succeeded", "started_at": "...", "finished_at": "...", "error": ""}]}`。`warning` は 24 時間以上成功がないとき true。`problems` は直近の取得が成功しなかったアプリ（`[{"app": "shop", "status": "failed", "whole_run": false}]`。メンバーにはロールのあるアプリだけ）、`system_failed` は基盤の直近の取得が失敗したか（オーナーだけ。メンバーには `false`）。`next_run_at` は次回の定期実行の予定時刻（未設定なら `null`）。`trigger` は `scheduled` / `manual` / `pre_deploy`、`status` は `running` / `succeeded` / `failed` |
-| `GET /api/apps/{slug}/backups/status` | そのアプリのバックアップの状況（ARCHITECTURE 10.2）。`{"configured": true, "last_success_at": "...", "warning": false, "last_run": {"id": 12, "trigger": "scheduled", "started_at": "...", "finished_at": "...", "status": "failed", "whole_run": false, "error": "", "targets": [{"kind": "dump", "target": "db", "status": "failed", "error": "..."}]}}`。`last_run` はそのアプリの対象を含む直近の実行で、`targets` はそのアプリの分だけ。`targets` の `error` は、ストレージのアクセスキーと、そのアプリの環境変数の値をマスクしてある（ダンプフックの出力の末尾を含むため）。`status` は `succeeded` / `warning` / `failed`。`whole_run` は何も取る前に失敗した実行（`targets` は空）で、`error` はそのときの実行のメッセージ（オーナーにだけ。メンバーには空）。`last_success_at` はそのアプリの対象をすべて保存できた直近の時刻、`warning` はそれが 24 時間以上前（一度も実行に含まれていなければ `false`）。未設定でも 200（`configured: false`） |
+| `GET /api/backups` | 全体の状況。`{"configured": true, "running": false, "last_success_at": "2026-11-18T18:00:40Z", "warning": false, "runs": [{"id": 12, "trigger": "scheduled", "status": "succeeded", "started_at": "...", "finished_at": "...", "error": ""}]}`。`warning` は 24 時間以上成功がないとき true。`problems` は直近の取得が成功しなかったアプリ（`[{"app": "shop", "status": "failed", "whole_run": false}]`。メンバーにはロールのあるアプリだけ）、`system_failed` は基盤の直近の取得が失敗したか（オーナーだけ。メンバーには `false`）。`next_run_at` は次回の定期実行の予定時刻（未設定なら `null`）。`trigger` は `scheduled` / `manual` / `pre_deploy`、`status` は `running` / `succeeded` / `failed`。日次の実行の間に取るダンプの実行（`trigger` が `interval`、ARCHITECTURE 10.8）は `runs` に入れない（各アプリの `backups/status` に出る） |
+| `GET /api/apps/{slug}/backups/status` | そのアプリのバックアップの状況（ARCHITECTURE 10.2）。`{"configured": true, "last_success_at": "...", "warning": false, "last_run": {"id": 12, "trigger": "scheduled", "started_at": "...", "finished_at": "...", "status": "failed", "whole_run": false, "error": "", "targets": [{"kind": "dump", "target": "db", "status": "failed", "error": "..."}]}}`。`last_run` はそのアプリの対象を含む直近の実行で、`targets` はそのアプリの分だけ。`targets` の `error` は、ストレージのアクセスキーと、そのアプリの環境変数の値をマスクしてある（ダンプフックの出力の末尾を含むため）。`status` は `succeeded` / `warning` / `failed`。`whole_run` は何も取る前に失敗した実行（`targets` は空）で、`error` はそのときの実行のメッセージ（オーナーにだけ。メンバーには空）。`last_success_at` はそのアプリの対象をすべて保存できた直近の時刻、`warning` はそれが 24 時間以上前（一度も実行に含まれていなければ `false`）。`last_run` は日次・手動・デプロイ前の実行で、そのあとに間隔のダンプ（`trigger` が `interval`）が取ったダンプの結果があれば、`targets` のダンプはそちらに置き換わる（間隔のダンプしかなければ、`last_run` はその実行）。`targets` の `finished_at` はその結果を出した実行の終了時刻、`duration_ms` はかかった時間（測っていなければ `0`）。`dump_warning` は、ダンプの間隔が 24 時間より短いアプリで、ダンプが間隔の 2 倍の時間保存されていないとき（停止中・休止中のアプリと、まだダンプのないアプリでは `false`）、`dump_slow` は直近のダンプが間隔の半分より長くかかったとき。未設定でも 200（`configured: false`） |
 | `POST /api/backups` | 手動実行。202 で実行（`runs` の 1 件と同じ形）。実行中なら `409 busy` |
 | `GET /api/apps/{slug}/backups` | そのアプリのスナップショット。`{"snapshots": [{"id": "4bba301e", "time": "2026-11-18T18:00:12Z", "kind": "volume", "target": "pgdata"}]}`。`kind` は `volume` / `dump`、`target` は volume 名かダンプフックのサービス名。`size_bytes` は restic が記録していればその処理量、なければ `null` |
 | `POST /api/apps/{slug}/backups/restore` | ボディ `{"snapshot_id": "4bba301e"}`。volume のスナップショットをリストアする（アプリ停止 → 現在の中身を退避 → 復元 → 起動）。完了まで待って 200 で `{"restored": true}` |
@@ -1028,9 +1029,9 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
 
 レビューアプリのロールは親のロールに従うので、`PUT /api/members/{id}/roles/{slug}` でレビューアプリを指すと `422 role_follows_parent`。
 
-## DB のコピー
+## DB のコピーとダンプからの復旧
 
-本番アプリの DB を staging アプリへ流し込む（ARCHITECTURE 10.6）。パスの `{slug}` は受け側（staging）のアプリ。
+本番アプリの DB を staging アプリへ流し込む（ARCHITECTURE 10.6）。パスの `{slug}` は受け側（staging）のアプリ。同じ仕組みで、アプリ自身のダンプのスナップショットをそのアプリへ流し込む（ダンプからの復旧。ARCHITECTURE 10.8）。記録とログはコピーと同じところに残る。
 
 アプリの形に次の設定が加わる（`PATCH /api/apps/{slug}` で変える。ダンプフックと同じく、サービスとコマンドは両方を指定するか両方を空にする。コマンドは 1 行 1000 文字まで。本番アプリで今と違う値にするには、直近 10 分以内のログインが要る）。
 
@@ -1049,6 +1050,8 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
   "error": "",
   "bytes": 18350080,
   "backup_snapshot_id": "4bba301e5d2c7a90",
+  "kind": "copy",
+  "source_snapshot_id": "",
   "started_at": "2026-11-21T03:00:00Z",
   "finished_at": "2026-11-21T03:01:12Z",
   "actor": {"id": 1, "login": "octo"}
@@ -1057,11 +1060,13 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
 
 - `source_app` は送り側の slug（送り側を削除したあとも残る）。`source_kind` は `live`（稼働中の送り側でダンプフックを実行）/ `snapshot`（送り側の最新のダンプのスナップショット）。
 - `status` は `running` / `succeeded` / `failed`。`bytes` は流したダンプの大きさ（実行中は 0）。`backup_snapshot_id` は流し込む前に取った受け側のダンプ（取らなかったら空文字）。
+- `kind` は `copy`（ほかのアプリからのコピー）/ `restore`（ダンプからの復旧）。`restore` では `source_app` と `target_app` がそのアプリ、`source_kind` は `snapshot`、`source_snapshot_id` は流し込んだダンプのスナップショットの ID（`copy` では空文字）。
 
 | メソッドとパス | 内容 |
 | --- | --- |
 | `GET /api/apps/{slug}/db-copies?limit=20` | そのアプリへのコピーの履歴。`{"copies": [コピー, ...]}`（新しい順、`limit` は 1〜100） |
 | `POST /api/apps/{slug}/db-copies` | ボディ `{"source": "blog", "source_kind": "live", "confirm": "blog-staging"}`。202 でコピー（バックグラウンドで進む）。`source_kind` は省略時 `live` |
+| `POST /api/apps/{slug}/db-restores` | ボディ `{"snapshot_id": "77aa00ff", "confirm": "blog"}`。202 でダンプからの復旧（`kind` が `restore` のコピー。バックグラウンドで進む）。`confirm` は本番アプリでだけ要り、アプリの slug と一致しなければ `422 confirmation_mismatch`。本番・staging のどちらにも使える |
 | `GET /api/db-copies/{id}` | コピー。なければ `404 db_copy_not_found` |
 | `GET /api/db-copies/{id}/logs` | コピーのログの SSE。形はデプロイログと同じ（`id:` はバイト位置、終わると `event: end` で最終 `status`）。`?format=text` で全文 |
 
@@ -1083,4 +1088,13 @@ staging アプリ（親）の pull request ごとのアプリ（ARCHITECTURE 9.9
 | 422 | `validation_failed` | `source` が受け側と同じ、`source_kind` が不正など |
 | 503 | `not_configured` | `snapshot` でバックアップが未設定 |
 
-**ログの見出し行**: `==> <時刻> <キー> <表題>` の形で、キーは `check` `backup` `stop` `copy` `after` `start` `done`、失敗時は `failed`。UI はデプロイログと同じ方法で手順に分ける。
+`POST .../db-restores` の断り方（上の表のほかに）:
+
+| ステータス | `code` | 意味 |
+| --- | --- | --- |
+| 404 | `snapshot_not_found` | そのアプリのダンプのスナップショットでない |
+| 422 | `snapshot_of_other_service` | いまのダンプフックとは別のサービスで取ったダンプ |
+| 422 | `dump_hook_missing` | ダンプフックがない（戻す前のいまのデータを取れない） |
+| 422 | `target_load_hook_missing` | ロードフックがない |
+
+**ログの見出し行**: `==> <時刻> <キー> <表題>` の形で、キーは `check` `backup` `stop` `copy` `after` `start` `done`、失敗時は `failed`。ダンプからの復旧では `copy` と `after` の代わりに `load`（選んだダンプの流し込み）があり、流し込みに失敗すると `reload`（戻す前に取ったダンプの流し込み直し）が続く。`failed` の表題は、コピーが `Copy failed: <理由>`、復旧が `Restore failed: <理由>`。UI はデプロイログと同じ方法で手順に分ける。
