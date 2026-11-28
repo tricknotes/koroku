@@ -78,7 +78,67 @@ func startCaddy(t *testing.T, image, name string, config []byte) (int, *bytes.Bu
 		_ = exec.Command("docker", "rm", "-f", container).Run()
 		_ = cmd.Wait()
 	})
+	waitForCertificates(t, httpsPort, configHosts(doc), &caddyLog)
 	return httpsPort, &caddyLog
+}
+
+// configHosts lists the host names the routes of a Caddy configuration
+// match, wildcards left out.
+func configHosts(node any) []string {
+	var hosts []string
+	switch v := node.(type) {
+	case map[string]any:
+		for key, child := range v {
+			if key == "host" {
+				if list, ok := child.([]any); ok {
+					for _, h := range list {
+						if name, ok := h.(string); ok && !strings.Contains(name, "*") && !slices.Contains(hosts, name) {
+							hosts = append(hosts, name)
+						}
+					}
+					continue
+				}
+			}
+			for _, h := range configHosts(child) {
+				if !slices.Contains(hosts, h) {
+					hosts = append(hosts, h)
+				}
+			}
+		}
+	case []any:
+		for _, child := range v {
+			for _, h := range configHosts(child) {
+				if !slices.Contains(hosts, h) {
+					hosts = append(hosts, h)
+				}
+			}
+		}
+	}
+	return hosts
+}
+
+// waitForCertificates waits until Caddy completes a TLS handshake for
+// every host. It obtains their certificates from its own CA at the same
+// time, and one that is not there yet fails the handshake with an internal
+// error: a test must not reach a host before its certificate exists.
+func waitForCertificates(t *testing.T, httpsPort int, hosts []string, caddyLog *bytes.Buffer) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for _, host := range hosts {
+		for {
+			conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 2 * time.Second}, "tcp",
+				fmt.Sprintf("127.0.0.1:%d", httpsPort),
+				&tls.Config{ServerName: host, InsecureSkipVerify: true}) //nolint:gosec // Caddy's local CA
+			if err == nil {
+				_ = conn.Close()
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("caddy has no certificate for %s: %v\n%s", host, err, caddyLog.String())
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 }
 
 // TestAccessProtectionThroughCaddy runs a real Caddy with the generated
