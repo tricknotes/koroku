@@ -4,6 +4,7 @@ import {
   find,
   findAll,
   focus,
+  settled,
   triggerEvent,
   triggerKeyEvent,
   visit,
@@ -86,6 +87,14 @@ function finished(
     containers_replaced: true,
     ...overrides,
   });
+}
+
+/** Lets the resize observer report and the page render what it reported. */
+async function nextFrames(): Promise<void> {
+  for (let i = 0; i < 2; i++) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+  await settled();
 }
 
 const MARKER = '[data-test-deploy-marker]';
@@ -217,6 +226,21 @@ module('Acceptance | deploy markers', function (hooks) {
     await click(button);
     await click('[data-test-memory-history] h2');
     assert.dom(`[data-test-deploy-marker-group="2"] ${POPUP}`).isNotVisible();
+  });
+
+  test('a width that keeps the groups keeps the open marker', async function (assert) {
+    await visit('/apps/blog/resources');
+    const button = `[data-test-deploy-marker-group="2"] ${MARKER}`;
+    await click(button);
+    const before = find(button);
+
+    // The track's width is first reported after the page settles, so it can
+    // land after the first tap; a resize does the same.
+    find('[data-test-deploy-markers]')!.setAttribute('style', 'width: 900px');
+    await nextFrames();
+    assert.strictEqual(find(button), before, 'the same button');
+    assert.dom(button).isFocused();
+    assert.dom(`[data-test-deploy-marker-group="2"] ${POPUP}`).isVisible();
   });
 
   test('on a narrow chart, close markers share one button', async function (assert) {
