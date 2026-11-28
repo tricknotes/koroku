@@ -100,8 +100,8 @@ interface Signature {
  */
 export default class DeployMarkers extends Component<Signature> {
   @tracked width = 0;
-  /** The index of the open group. */
-  @tracked open: number | null = null;
+  /** The key of the open group. */
+  @tracked open: string | null = null;
   /** Opened by a click or a tap: stays until dismissed. */
   @tracked pinned = false;
 
@@ -115,31 +115,31 @@ export default class DeployMarkers extends Component<Signature> {
     if (Math.abs(width - this.width) >= 1) this.width = width;
   };
 
-  popupId = (index: number): string => `${this.id}-popup-${index}`;
+  popupId = (group: MarkerGroup): string => `${this.id}-popup-${group.key}`;
 
-  isOpen = (index: number): boolean => this.open === index;
+  isOpen = (group: MarkerGroup): boolean => this.open === group.key;
 
   isLive = (marker: DeployMarker): boolean =>
     this.args.liveId === marker.deployment.id;
 
-  enter = (index: number, event: Event) => {
+  enter = (key: string, event: Event) => {
     if ((event as PointerEvent).pointerType === 'touch' || this.pinned) return;
-    this.open = index;
+    this.open = key;
   };
 
-  leave = (index: number, event: Event) => {
+  leave = (key: string, event: Event) => {
     if ((event as PointerEvent).pointerType === 'touch' || this.pinned) return;
-    if (this.open === index) this.open = null;
+    if (this.open === key) this.open = null;
   };
 
-  focusIn = (index: number) => {
-    if (this.open !== index) {
-      this.open = index;
+  focusIn = (key: string) => {
+    if (this.open !== key) {
+      this.open = key;
       this.pinned = false;
     }
   };
 
-  focusOut = (index: number, event: Event) => {
+  focusOut = (key: string, event: Event) => {
     const holder = event.currentTarget as HTMLElement;
     const next = (event as FocusEvent).relatedTarget;
     if (next instanceof Node && holder.contains(next)) return;
@@ -148,19 +148,19 @@ export default class DeployMarkers extends Component<Signature> {
     // eslint-disable-next-line ember/no-runloop
     schedule('afterRender', () => {
       if (this.isDestroying || this.isDestroyed) return;
-      if (this.open === index) {
+      if (this.open === key) {
         this.open = null;
         this.pinned = false;
       }
     });
   };
 
-  toggle = (index: number) => {
-    if (this.open === index && this.pinned) {
+  toggle = (key: string) => {
+    if (this.open === key && this.pinned) {
       this.open = null;
       this.pinned = false;
     } else {
-      this.open = index;
+      this.open = key;
       this.pinned = true;
     }
   };
@@ -190,15 +190,15 @@ export default class DeployMarkers extends Component<Signature> {
         {{measure this.setWidth}}
         {{onDismiss this.dismiss}}
       >
-        {{#each this.groups as |group index|}}
+        {{#each this.groups key="key" as |group index|}}
           <li
             class="deploy-marker-holder"
             data-test-deploy-marker-group={{index}}
             {{listen
-              pointerenter=(fn this.enter index)
-              pointerleave=(fn this.leave index)
-              focusin=(fn this.focusIn index)
-              focusout=(fn this.focusOut index)
+              pointerenter=(fn this.enter group.key)
+              pointerleave=(fn this.leave group.key)
+              focusin=(fn this.focusIn group.key)
+              focusout=(fn this.focusOut group.key)
               keydown=this.key
             }}
           >
@@ -209,10 +209,10 @@ export default class DeployMarkers extends Component<Signature> {
                 {{if (many group) 'is-group'}}"
               style={{at group.left}}
               aria-label={{groupLabel group}}
-              aria-expanded={{if (this.isOpen index) "true" "false"}}
-              aria-controls={{this.popupId index}}
+              aria-expanded={{if (this.isOpen group) "true" "false"}}
+              aria-controls={{this.popupId group}}
               data-test-deploy-marker
-              {{on "click" (fn this.toggle index)}}
+              {{on "click" (fn this.toggle group.key)}}
             >
               {{#if (many group)}}
                 <span class="deploy-marker-count">{{count group}}</span>
@@ -225,10 +225,10 @@ export default class DeployMarkers extends Component<Signature> {
               {{/if}}
             </button>
             <div
-              id={{this.popupId index}}
+              id={{this.popupId group}}
               class="deploy-marker-popup {{side group.left}}"
               style={{at group.left}}
-              hidden={{if (this.isOpen index) false true}}
+              hidden={{if (this.isOpen group) false true}}
               data-test-deploy-marker-popup
             >
               <ul class="deploy-marker-list">

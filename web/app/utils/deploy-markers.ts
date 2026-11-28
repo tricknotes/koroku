@@ -23,6 +23,11 @@ export interface DeployMarker {
 }
 
 export interface MarkerGroup {
+  /**
+   * Names the group by its deployments, so a width that keeps the same
+   * groups keeps their elements (and the focus and open popup in them).
+   */
+  key: string;
   /** Newest first. */
   markers: DeployMarker[];
   /** Where the group's button sits, in percent of the range. */
@@ -125,6 +130,7 @@ export function groupMarkers(
     const first = run[0]!;
     const last = run[run.length - 1]!;
     return {
+      key: run.map((m) => m.deployment.id).join('-'),
       markers: [...run].reverse(),
       left: round((first.left + last.left) / 2),
       kind: run.every((m) => m.kind === 'reverted') ? 'reverted' : 'deploy',
