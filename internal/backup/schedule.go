@@ -56,6 +56,43 @@ type Scheduler struct {
 	// starts at most that much late.
 	PollInterval time.Duration
 	Logger       *slog.Logger
+	// DumpApps lists the apps whose dumps may be due between the daily
+	// runs (ARCHITECTURE 10.8). Nil means none: every dump waits for the
+	// daily run.
+	DumpApps func(ctx context.Context) ([]App, error)
+}
+
+// NextSlot returns the first instant strictly after now at which a wall
+// clock in loc shows the given minute: the hours at which the dumps between
+// the daily runs fall.
+func NextSlot(now time.Time, minute int, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.UTC
+	}
+	local := now.In(loc)
+	y, mo, d := local.Date()
+	for h := local.Hour(); ; h++ {
+		next := time.Date(y, mo, d, h, minute, 0, 0, loc)
+		if next.After(now) {
+			return next
+		}
+	}
+}
+
+// DumpDue reports whether the app's dump falls at slot, a run between the
+// daily ones: its interval counts the hours from the daily run at
+// dailyHour, which takes every dump itself. A sleeping app takes none: its
+// data does not change.
+func DumpDue(app App, slot time.Time, dailyHour int, loc *time.Location) bool {
+	interval := app.DumpIntervalHours
+	if interval <= 0 || interval >= 24 || app.DumpService == "" || app.Sleeping {
+		return false
+	}
+	if loc == nil {
+		loc = time.UTC
+	}
+	offset := ((slot.In(loc).Hour()-dailyHour)%24 + 24) % 24
+	return offset != 0 && offset%interval == 0
 }
 
 // Next returns when the next run is due after now.
@@ -91,6 +128,11 @@ func (s *Scheduler) Run(ctx context.Context) error {
 
 	next := s.Next(clk.Now())
 	log.Info("backup schedule", "next", next.UTC().Format(time.RFC3339))
+	slot := NextSlot(clk.Now(), s.Minute, s.Location)
+	// pending holds the slots whose dumps have not started yet: the
+	// repository was busy then. They are taken together, once, when it is
+	// free again; a dump is not taken twice in a row to catch up.
+	var pending []time.Time
 	timer := time.NewTimer(poll)
 	defer timer.Stop()
 	for {
@@ -98,6 +140,12 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timer.C:
+		}
+		if s.DumpApps != nil {
+			for now := clk.Now(); !now.Before(slot); slot = NextSlot(slot, s.Minute, s.Location) {
+				pending = append(pending, slot)
+			}
+			pending = s.runDumps(ctx, pending, log)
 		}
 		if !clk.Now().Before(next) {
 			run, err := s.Manager.start(ctx, TriggerScheduled, plan{
@@ -124,4 +172,47 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		}
 		timer.Reset(poll)
 	}
+}
+
+// runDumps starts the run of the dumps due at the pending slots and returns
+// the slots still pending: all of them when the repository is busy, none
+// otherwise.
+func (s *Scheduler) runDumps(ctx context.Context, pending []time.Time, log *slog.Logger) []time.Time {
+	if len(pending) == 0 {
+		return nil
+	}
+	apps, err := s.DumpApps(ctx)
+	if err != nil {
+		log.Error("listing the apps for the interval dumps failed", "error", err)
+		return nil
+	}
+	var due []App
+	for _, app := range apps {
+		for _, at := range pending {
+			if DumpDue(app, at, s.Hour, s.Location) {
+				due = append(due, app)
+				break
+			}
+		}
+	}
+	if len(due) == 0 {
+		return nil
+	}
+	run, err := s.Manager.start(ctx, TriggerInterval, plan{
+		apps:     func(context.Context) ([]App, error) { return due, nil },
+		dumpOnly: true,
+	})
+	switch {
+	case errors.Is(err, ErrBusy):
+		return pending
+	case err != nil:
+		log.Error("interval dumps could not start", "error", err)
+		return nil
+	}
+	go func() {
+		if _, err := run.Wait(); err != nil {
+			log.Error("interval dumps failed", "run", run.ID, "error", err)
+		}
+	}()
+	return nil
 }

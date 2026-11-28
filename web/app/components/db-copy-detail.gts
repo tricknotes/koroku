@@ -10,7 +10,9 @@ import type { Stream } from 'koroku-console/services/event-source';
 import DeployLogBuffer from 'koroku-console/utils/deploy-log-buffer';
 import {
   copyStepLabel,
+  isRestore,
   parseCopyLog,
+  restoreStepLabel,
   type ParsedCopyLog,
 } from 'koroku-console/utils/db-copy';
 import type { DbCopy } from 'koroku-console/utils/types';
@@ -66,9 +68,18 @@ export default class DbCopyDetail extends Component<Signature> {
     return this.args.copy.status === 'failed';
   }
 
+  /** A restore of the app's own dump, rather than a copy from another. */
+  get restore(): boolean {
+    return isRestore(this.args.copy);
+  }
+
+  get stepLabel(): (key: string) => string {
+    return this.restore ? restoreStepLabel : copyStepLabel;
+  }
+
   get failedStepText(): string {
     const step = this.log.steps.find((entry) => entry.state === 'failed');
-    return step ? `「${copyStepLabel(step.key)}」の手順で失敗しました。` : '';
+    return step ? `「${this.stepLabel(step.key)}」の手順で失敗しました。` : '';
   }
 
   get streamFailed(): boolean {
@@ -116,7 +127,8 @@ export default class DbCopyDetail extends Component<Signature> {
     <div class="deploy-detail copy-detail" data-test-copy-detail ...attributes>
       <div class="deploy-detail-bar">
         <p class="copy-detail-title">
-          コピー #{{@copy.id}}
+          {{if this.restore "ダンプからの復旧" "コピー"}}
+          #{{@copy.id}}
           {{#if this.isFailed}}
             <span class="visually-hidden">失敗</span>
           {{/if}}
@@ -135,14 +147,18 @@ export default class DbCopyDetail extends Component<Signature> {
       {{#if this.isFailed}}
         <Banner
           @tone="error"
-          @title="コピーに失敗しました"
+          @title={{if
+            this.restore
+            "ダンプから戻せませんでした"
+            "コピーに失敗しました"
+          }}
           data-test-copy-failed
         >
           {{this.failedStepText}}
           <span class="deploy-error-reason">{{@copy.error}}</span>
           {{#if @copy.backup_snapshot_id}}
             <span class="banner-detail">
-              コピー前のデータはスナップショット
+              {{if this.restore "戻す前" "コピー前"}}のデータはスナップショット
               <code>{{@copy.backup_snapshot_id}}</code>
               に保存してあります。
             </span>
@@ -156,7 +172,12 @@ export default class DbCopyDetail extends Component<Signature> {
           @title="止めたサービスは止めたままです"
           data-test-copy-left-stopped
         >
-          コピー後のコマンドが最後まで実行されなかったため、消すべき情報が残っているかもしれません。コピーをやり直すか、確認してからアプリを起動してください。
+          {{#if this.restore}}
+            元のデータを流し込み直せなかったため、DB
+            にダンプの一部だけが入っているかもしれません。戻す前のダンプをもう一度戻すか、確認してからアプリを起動してください。
+          {{else}}
+            コピー後のコマンドが最後まで実行されなかったため、消すべき情報が残っているかもしれません。コピーをやり直すか、確認してからアプリを起動してください。
+          {{/if}}
         </Banner>
       {{/if}}
 
@@ -172,13 +193,13 @@ export default class DbCopyDetail extends Component<Signature> {
       {{#if this.log.steps.length}}
         <DeploymentSteps
           @steps={{this.log.steps}}
-          @label={{copyStepLabel}}
-          @listLabel="コピーの手順"
+          @label={{this.stepLabel}}
+          @listLabel={{if this.restore "復旧の手順" "コピーの手順"}}
         />
       {{else if this.isWaiting}}
         <p class="deploy-note">ログを待っています…</p>
       {{else}}
-        <p class="deploy-note">このコピーのログは残っていません。</p>
+        <p class="deploy-note">ログは残っていません。</p>
       {{/if}}
     </div>
   </template>

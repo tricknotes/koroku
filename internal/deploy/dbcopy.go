@@ -32,6 +32,10 @@ type CopyBackups interface {
 	// LatestDump finds the app's newest dump snapshot. The error matches
 	// ErrNoDumpSnapshot when there is none.
 	LatestDump(ctx context.Context, app store.App) (DumpSnapshot, error)
+	// DumpByID finds one dump snapshot of the app. The error matches
+	// ErrDumpNotFound when the ID is unknown, belongs to another app or is
+	// no dump.
+	DumpByID(ctx context.Context, app store.App, snapshotID string) (DumpSnapshot, error)
 }
 
 // DumpSnapshot is a stored dump that can be streamed.
@@ -39,6 +43,8 @@ type DumpSnapshot struct {
 	// ID and Time describe the snapshot for the log.
 	ID   string
 	Time time.Time
+	// Target is the dump hook service the dump was taken in.
+	Target string
 	// Write streams the dump to w.
 	Write func(ctx context.Context, w io.Writer) error
 }
@@ -63,6 +69,15 @@ var (
 	// ErrBackupsNotConfigured is returned for a snapshot copy on a host
 	// without backups.
 	ErrBackupsNotConfigured = errors.New("backups are not configured")
+	// ErrDumpNotFound is returned for a restore of a snapshot that is no
+	// dump of the app.
+	ErrDumpNotFound = errors.New("no such dump snapshot of the app")
+	// ErrDumpOfOtherService is returned for a restore of a dump taken in
+	// another service than the app's dump hook names now.
+	ErrDumpOfOtherService = errors.New("the dump was taken in another service than the dump hook's")
+	// ErrRestoreNeedsDumpHook is returned for a restore of an app without
+	// a dump hook: its current data could not be kept first.
+	ErrRestoreNeedsDumpHook = errors.New("the app has no dump hook to keep its current data first")
 )
 
 // Step keys of a copy log, in addition to the deploy steps it shares
@@ -71,6 +86,11 @@ const (
 	StepStop  = "stop"
 	StepCopy  = "copy"
 	StepAfter = "after"
+	// StepLoad and StepReload are those of a restore (ARCHITECTURE 10.8):
+	// the chosen dump is loaded, and when that fails, the dump taken just
+	// before.
+	StepLoad   = "load"
+	StepReload = "reload"
 )
 
 // Defaults of the copy limits.
@@ -89,6 +109,10 @@ type CopyRequest struct {
 	// a review app that was just created has nothing to keep
 	// (ARCHITECTURE 9.9).
 	SkipBackup bool
+	// Restore loads the target's own dump snapshot SnapshotID: Source is
+	// the target (ARCHITECTURE 10.8).
+	Restore    bool
+	SnapshotID string
 }
 
 // CopyLogPath is the log of one database copy.
@@ -237,6 +261,9 @@ type copyJob struct {
 	stopped []string
 	// loadBegan is set once data may have reached the target.
 	loadBegan bool
+	// keepStopped leaves the stopped services down when the copy fails:
+	// the target holds data that must not be served.
+	keepStopped bool
 }
 
 func (j *copyJob) run(ctx context.Context) (bytes int64, err error) {
@@ -258,7 +285,10 @@ func (j *copyJob) run(ctx context.Context) (bytes int64, err error) {
 		if len(j.stopped) == 0 {
 			return
 		}
-		if err != nil && j.loadBegan && dst.PostLoadCommand != "" {
+		if err != nil && j.keepStopped {
+			return
+		}
+		if err != nil && j.loadBegan && !j.req.Restore && dst.PostLoadCommand != "" {
 			// Half-loaded production data may still hold what the
 			// post-load command was to remove: do not serve it.
 			j.log.Printf("The services stopped for the copy stay stopped, because the command after the copy did not run to the end: %s.", strings.Join(j.stopped, ", "))
@@ -321,25 +351,8 @@ func (j *copyJob) run(ctx context.Context) (bytes int64, err error) {
 	}
 
 	j.log.Step(StepStop, "Stopping the other services of %s", dst.Slug)
-	var others []string
-	for _, name := range running {
-		if name != dst.LiveService(dst.LoadHookService) {
-			others = append(others, name)
-		}
-	}
-	if len(others) == 0 {
-		j.log.Printf("No other service is running.")
-	} else {
-		stopCtx, cancel := context.WithTimeout(ctx, opTimeout)
-		err := e.composeToLog(stopCtx, j.log, "", append([]string{"compose", "-p", dst.ProjectName(), "stop"}, others...)...)
-		cancel()
-		// Some may have stopped before the command failed: start all of
-		// them again in any case.
-		j.stopped = others
-		if err != nil {
-			return 0, err
-		}
-		j.log.Printf("Stopped: %s", strings.Join(others, ", "))
+	if err := j.stopOthers(ctx, running); err != nil {
+		return 0, err
 	}
 
 	j.log.Step(StepCopy, "Copying the data")

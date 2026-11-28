@@ -1,7 +1,8 @@
 /* Backups tab of a staging app: copying another app's database into it. */
 
 .copy-start,
-.copy-settings {
+.copy-settings,
+.restore-settings {
   padding: var(--space-4);
 }
 
@@ -160,4 +161,87 @@
 
 .db-copy > .backup-note {
   margin-bottom: var(--space-4);
+}
+
+/* Restores of the app's own dumps (ARCHITECTURE 10.8), laid out like the
+   copies. */
+.restore-rows {
+  --row-columns: 7rem minmax(0, 1.4fr) 5.5rem 6.5rem 5.5rem 4.5rem;
+}
+
+.restore-rows .row {
+  min-height: 3.25rem;
+}
+
+.restore-rows .row.is-selected {
+  background: var(--color-bg-subtle);
+}
+
+.restore-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restore-actor {
+  margin-left: var(--space-2);
+}
+
+.restore-size,
+.restore-duration {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.restore-action {
+  justify-self: end;
+}
+
+.restore-settings {
+  margin-top: var(--space-4);
+}
+
+@media (width <= 56rem) {
+  .restore-rows > .row-list-header {
+    display: none;
+  }
+
+  .restore-rows .row {
+    grid-template:
+      "status source action" auto
+      "size time action" auto
+      "duration duration action" auto / auto minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .restore-status {
+    grid-area: status;
+  }
+
+  .restore-source {
+    grid-area: source;
+  }
+
+  .restore-size {
+    grid-area: size;
+  }
+
+  .restore-time {
+    grid-area: time;
+  }
+
+  .restore-duration {
+    grid-area: duration;
+  }
+
+  .restore-action {
+    grid-area: action;
+    align-self: start;
+  }
+
+  .restore-rows .cell-label {
+    margin-right: var(--space-2);
+  }
 }

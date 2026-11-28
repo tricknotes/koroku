@@ -1048,6 +1048,43 @@ SHOTS.push(
     wait: SNAPSHOT,
     click: '[data-test-snapshot-restore]',
   },
+  // Dumps between the daily runs and restoring a dump (ARCHITECTURE 10.8).
+  {
+    name: 'backups-dump-restore',
+    path: '/apps/blog-staging/backups?scenario=dump-restore',
+    wait: '[data-test-restore]',
+    fullPage: true,
+  },
+  {
+    name: 'backups-dump-restore-phone',
+    path: '/apps/blog-staging/backups?scenario=dump-restore',
+    wait: '[data-test-restore]',
+    ...PHONE,
+    fullPage: false,
+    script:
+      "document.querySelector('[data-test-snapshot-restore-dump]').scrollIntoView({ block: 'center' })",
+  },
+  {
+    name: 'backups-dump-restore-history-phone',
+    path: '/apps/blog-staging/backups?scenario=dump-restore',
+    wait: '[data-test-restore]',
+    ...PHONE,
+    fullPage: false,
+    script:
+      "document.querySelector('[data-test-dump-restore]').scrollIntoView()",
+  },
+  {
+    name: 'backups-dump-restore-dialog',
+    path: '/apps/blog-staging/backups?scenario=dump-restore',
+    wait: '[data-test-snapshot-restore-dump]',
+    click: '[data-test-snapshot-restore-dump]',
+  },
+  {
+    name: 'backups-dump-restore-production',
+    path: '/apps/blog/backups?scenario=healthy',
+    wait: '[data-test-restore-settings]',
+    fullPage: true,
+  },
   {
     name: 'backups-empty',
     path: '/apps/notes/backups?scenario=fresh',

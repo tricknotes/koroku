@@ -250,6 +250,7 @@ function app(slug, overrides = {}) {
     dump_hook_service: 'db',
     dump_hook_command: 'pg_dump -U postgres app',
     backup_before_deploy: production,
+    dump_interval_hours: 24,
     // Staging apps take copies of the production database (10.5).
     load_hook_service: production ? '' : 'db',
     load_hook_command: production
@@ -1510,6 +1511,39 @@ export function buildScenario(name) {
     case 'repository-mismatch': {
       const state = scenario(healthyApps());
       refusedRepository(state, 'blog-staging');
+      return state;
+    }
+    case 'dump-restore': {
+      // An hourly dump that fell behind and takes long (ARCHITECTURE 10.8).
+      const state = scenario(healthyApps());
+      const app = state.apps.get('blog-staging');
+      state.apps.set('blog-staging', { ...app, dump_interval_hours: 1 });
+      state.appBackupStatus = new Map([
+        [
+          'blog-staging',
+          appBackupStatus(
+            { dump_warning: true, dump_slow: true },
+            {
+              targets: [
+                {
+                  kind: 'volume',
+                  target: 'uploads',
+                  status: 'succeeded',
+                  error: '',
+                },
+                {
+                  kind: 'dump',
+                  target: 'db',
+                  status: 'succeeded',
+                  error: '',
+                  finished_at: ago(3 * HOUR),
+                  duration_ms: 38 * 60 * 1000,
+                },
+              ],
+            },
+          ),
+        ],
+      ]);
       return state;
     }
     default:

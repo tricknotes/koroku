@@ -39,17 +39,24 @@ func (m *Manager) maintain(ctx context.Context, step func(context.Context) error
 // generations to things that change for reasons unrelated to the data: the
 // host name after the machine is replaced, the staging directory of the
 // system backup, Docker's data root.
+//
+// Every snapshot of the recent period (Retention.Within, 48 hours by
+// default) is kept besides those generations: the dumps taken between the
+// daily runs (ARCHITECTURE 10.8), which is when a mistake is usually
+// noticed.
 func (m *Manager) forgetArgs() []string {
 	k := m.opts.Keep
-	return []string{
-		"forget",
-		"--group-by", "tags",
+	args := []string{"forget", "--group-by", "tags"}
+	if hours := int(k.Within.Hours()); hours > 0 {
+		args = append(args, "--keep-within", strconv.Itoa(hours)+"h")
+	}
+	return append(args,
 		"--keep-daily", strconv.Itoa(k.Daily),
 		"--keep-weekly", strconv.Itoa(k.Weekly),
 		"--keep-monthly", strconv.Itoa(k.Monthly),
 		"--prune",
 		"--retry-lock", m.lockWait(),
-	}
+	)
 }
 
 // forget needs an exclusive lock, so locks of killed restic processes are

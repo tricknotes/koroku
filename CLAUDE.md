@@ -175,12 +175,12 @@ ARCHITECTURE 7.2。上流の再起動の間 Caddy がリクエストを待たせ
 
 ARCHITECTURE 10.8。DB の種類を知らないまま、ダンプフックとロードフックで動かす。
 
-- [ ] `apps` の `dump_interval_hours`（24 を割り切る値、既定 24）。日次の実行（03:00）から数えた時刻に、そのアプリのダンプだけを取る。restic の操作のロック、停止中・休止中のアプリの扱い
-- [ ] `backup_runs` の `trigger = interval`。アプリのバックアップの状況を対象ごとの直近の結果で出す。間隔の 2 倍成功しないときの警告、ダンプの時間が間隔の半分を超えたときの警告
-- [ ] `forget` に `--keep-within-hourly 48h`。PostgreSQL のプリセットの説明に `-Z0` を勧める文
-- [ ] ダンプからの復旧: `db_copies` の `kind` と `source_snapshot_id`、手順 `check` → `backup`（必須）→ `stop` → `load` → `start`、失敗時の `reload`。本番の `confirm`、再ログイン、操作の記録 `db.restored`
-- [ ] UI: 設定の「ダンプの間隔」、バックアップタブの「この時点に戻す」とダイアログ、DB のコピーの履歴での表示。`docs/API.md`、`docs/USAGE.md`
-- [ ] `plugins/koroku/skills/prepare-app` の要件（ダンプの間隔とロードフックの勧め）、`plugin.json` の `version`
+- [x] `apps` の `dump_interval_hours`（24 を割り切る値、既定 24）。日次の実行（03:00）から数えた時刻に、そのアプリのダンプだけを取る。restic の操作のロック、停止中・休止中のアプリの扱い
+- [x] `backup_runs` の `trigger = interval`。アプリのバックアップの状況を対象ごとの直近の結果で出す。間隔の 2 倍成功しないときの警告、ダンプの時間が間隔の半分を超えたときの警告
+- [x] `forget` に `--keep-within 48h`。PostgreSQL のプリセットの説明に `-Z0` を勧める文
+- [x] ダンプからの復旧: `db_copies` の `kind` と `source_snapshot_id`、手順 `check` → `backup`（必須）→ `stop` → `load` → `start`、失敗時の `reload`。本番の `confirm`、再ログイン、操作の記録 `db.restored`
+- [x] UI: 設定の「ダンプの間隔」、バックアップタブの「この時点に戻す」とダイアログ、「ダンプから戻す」の履歴と本番アプリのロードフックの欄。`docs/API.md`、`docs/USAGE.md`
+- [x] `plugins/koroku/skills/prepare-app` の要件（ダンプの間隔とロードフックの勧め）、`plugin.json` の `version`
 - 完了条件: PostgreSQL のアプリで間隔を 1 時間にし、2 回以上の間隔のダンプが取れる。行を消してから、消す前のダンプに UI から戻すと行が戻り、戻す直前のダンプが残っている。ロードフックが失敗するダンプを選ぶと、戻す前の状態に流し込み直されて起動する
 
 ### M8 PostgreSQL の時点指定の復旧

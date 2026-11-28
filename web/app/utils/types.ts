@@ -410,6 +410,11 @@ export interface App {
   dump_hook_command?: string;
   backup_before_deploy?: boolean;
   /**
+   * Hours between two dumps, counted from the daily run (ARCHITECTURE
+   * 10.8): 1, 2, 3, 4, 6, 8, 12 or 24. Absent from older backends.
+   */
+  dump_interval_hours?: number;
+  /**
    * The load hook reads a dump from stdin; the post-load command runs after
    * a copy (ARCHITECTURE 10.6). Absent from older backends.
    */
@@ -533,6 +538,7 @@ export interface AppPatch {
   dump_hook_service?: string;
   dump_hook_command?: string;
   backup_before_deploy?: boolean;
+  dump_interval_hours?: number;
   load_hook_service?: string;
   load_hook_command?: string;
   post_load_service?: string;
@@ -832,7 +838,7 @@ export interface AppVolume {
 
 export interface BackupRun {
   id: number;
-  trigger: 'scheduled' | 'manual' | 'pre_deploy';
+  trigger: 'scheduled' | 'manual' | 'pre_deploy' | 'interval';
   status: 'running' | 'succeeded' | 'failed';
   started_at: string | null;
   finished_at: string | null;
@@ -873,6 +879,13 @@ export interface BackupTargetOutcome {
   status: BackupTargetStatus;
   /** The (masked) reason when it did not simply succeed. */
   error: string;
+  /**
+   * When the run that produced it finished: a dump taken between the daily
+   * runs is newer than the rest of the run (ARCHITECTURE 10.8).
+   */
+  finished_at?: string | null;
+  /** How long it took; 0 when it was not measured. */
+  duration_ms?: number;
 }
 
 /** The latest run that concerns one app, reduced to that app's targets. */
@@ -894,6 +907,12 @@ export interface AppBackupStatus {
   last_success_at: string | null;
   warning: boolean;
   last_run: AppBackupRun | null;
+  /**
+   * The dumps between the daily runs (ARCHITECTURE 10.8): none stored for
+   * twice the interval, and the last one taking more than half of it.
+   */
+  dump_warning?: boolean;
+  dump_slow?: boolean;
 }
 
 export type CopySourceKind = 'live' | 'snapshot';
@@ -911,6 +930,13 @@ export interface DbCopy {
   bytes: number;
   /** The target's dump taken before loading; '' when none was taken. */
   backup_snapshot_id: string;
+  /**
+   * A copy from another app, or a restore of the app's own dump
+   * `source_snapshot_id` (ARCHITECTURE 10.8). Absent from older backends,
+   * which only copy.
+   */
+  kind?: 'copy' | 'restore';
+  source_snapshot_id?: string;
   started_at: string;
   finished_at: string | null;
   /** Who started it. */

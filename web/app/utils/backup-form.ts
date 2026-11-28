@@ -61,6 +61,22 @@ export function volumeChoices(options: {
   }));
 }
 
+/**
+ * The dump intervals to choose from (ARCHITECTURE 10.8): divisors of 24,
+ * counted from the daily run, so that the dumps fall on the same hours
+ * every day.
+ */
+export const DUMP_INTERVALS: { hours: number; label: string }[] = [
+  { hours: 24, label: '1 日 1 回（日次のバックアップだけ）' },
+  { hours: 12, label: '12 時間ごと' },
+  { hours: 8, label: '8 時間ごと' },
+  { hours: 6, label: '6 時間ごと' },
+  { hours: 4, label: '4 時間ごと' },
+  { hours: 3, label: '3 時間ごと' },
+  { hours: 2, label: '2 時間ごと' },
+  { hours: 1, label: '1 時間ごと' },
+];
+
 /** `a, b` or one per line → `['a', 'b']`. */
 export function parseList(text: string): string[] {
   return text
@@ -85,9 +101,12 @@ export default class BackupForm {
   @tracked dumpHookService: string;
   @tracked dumpHookCommand: string;
   @tracked backupBeforeDeploy: boolean;
+  @tracked dumpIntervalHours: number;
 
   /** Whether the backend reports the backup fields at all. */
   readonly available: boolean;
+  /** Whether the backend takes dumps between the daily runs. */
+  readonly intervalAvailable: boolean;
 
   constructor(app: App) {
     this.available = app.backup_before_deploy !== undefined;
@@ -95,6 +114,8 @@ export default class BackupForm {
     this.dumpHookService = app.dump_hook_service ?? '';
     this.dumpHookCommand = app.dump_hook_command ?? '';
     this.backupBeforeDeploy = app.backup_before_deploy ?? false;
+    this.intervalAvailable = app.dump_interval_hours !== undefined;
+    this.dumpIntervalHours = app.dump_interval_hours ?? 24;
   }
 
   isExcluded(volume: string): boolean {
@@ -140,6 +161,12 @@ export default class BackupForm {
     }
     if (this.backupBeforeDeploy !== (app.backup_before_deploy ?? false)) {
       patch.backup_before_deploy = this.backupBeforeDeploy;
+    }
+    if (
+      this.intervalAvailable &&
+      this.dumpIntervalHours !== (app.dump_interval_hours ?? 24)
+    ) {
+      patch.dump_interval_hours = this.dumpIntervalHours;
     }
     return patch;
   }

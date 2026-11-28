@@ -65,6 +65,7 @@ func (r backupRecorder) FinishRun(ctx context.Context, id int64, status backup.R
 	for _, t := range targets {
 		out = append(out, store.BackupTarget{
 			App: t.App, Kind: string(t.Kind), Target: t.Target, Status: string(t.Status), Error: t.Error,
+			Duration: t.Duration,
 		})
 	}
 	return r.store.FinishBackupRunWithTargets(ctx, id, status == backup.StatusSucceeded, errMsg, finishedAt, out)
@@ -72,9 +73,11 @@ func (r backupRecorder) FinishRun(ctx context.Context, id int64, status backup.R
 
 func toBackupApp(app store.App) backup.App {
 	out := backup.App{
-		Slug:           app.Slug,
-		Project:        app.ProjectName(),
-		ExcludeVolumes: app.BackupExcludeVolumes,
+		Slug:              app.Slug,
+		Project:           app.ProjectName(),
+		ExcludeVolumes:    app.BackupExcludeVolumes,
+		DumpIntervalHours: app.DumpIntervalHours,
+		Sleeping:          app.SleepingSince != nil,
 	}
 	// The dump hook runs inside a container, so it only makes sense while
 	// the app is up.
@@ -339,14 +342,35 @@ func (b *backupService) LatestDump(ctx context.Context, app store.App) (deploy.D
 			return deploy.DumpSnapshot{}, err
 		}
 		return deploy.DumpSnapshot{
-			ID:   s.ID,
-			Time: s.Time,
+			ID:     s.ID,
+			Time:   s.Time,
+			Target: s.Target,
 			Write: func(ctx context.Context, w io.Writer) error {
 				return b.manager.WriteDump(ctx, file, w)
 			},
 		}, nil
 	}
 	return deploy.DumpSnapshot{}, deploy.ErrNoDumpSnapshot
+}
+
+// DumpByID implements deploy.CopyBackups: the dump a restore loads, and
+// the one taken before it.
+func (b *backupService) DumpByID(ctx context.Context, app store.App, snapshotID string) (deploy.DumpSnapshot, error) {
+	file, err := b.manager.LookupDump(ctx, toBackupApp(app), snapshotID)
+	if errors.Is(err, backup.ErrSnapshotNotFound) {
+		return deploy.DumpSnapshot{}, fmt.Errorf("%w: %w", deploy.ErrDumpNotFound, err)
+	}
+	if err != nil {
+		return deploy.DumpSnapshot{}, err
+	}
+	return deploy.DumpSnapshot{
+		ID:     snapshotID,
+		Time:   file.Time,
+		Target: file.Target,
+		Write: func(ctx context.Context, w io.Writer) error {
+			return b.manager.WriteDump(ctx, file, w)
+		},
+	}, nil
 }
 
 // backupDeps are the shared dependencies of the backup service.
@@ -388,6 +412,7 @@ func newBackupService(ctx context.Context, cfg config.Config, configDir string, 
 			Hour:     cfg.Backup.Hour,
 			Location: cfg.Location(),
 			Logger:   deps.logger,
+			DumpApps: backupApps(st, deps.controller),
 		},
 		clock:     deps.clock,
 		serverCtx: ctx,

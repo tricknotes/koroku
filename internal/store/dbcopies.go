@@ -13,6 +13,11 @@ const (
 	CopySourceLive     = "live"
 	CopySourceSnapshot = "snapshot"
 
+	// Kinds of a record: a copy from another app, or a restore of the
+	// app's own dump (ARCHITECTURE 10.8).
+	CopyKindCopy    = "copy"
+	CopyKindRestore = "restore"
+
 	CopyRunning   = "running"
 	CopySucceeded = "succeeded"
 	CopyFailed    = "failed"
@@ -36,6 +41,10 @@ type DBCopy struct {
 	// BackupSnapshotID is the dump of the target taken before loading;
 	// empty when none was taken.
 	BackupSnapshotID string
+	// Kind is CopyKindCopy or CopyKindRestore.
+	Kind string
+	// SourceSnapshotID is the dump a restore loaded; empty for a copy.
+	SourceSnapshotID string
 	StartedAt        time.Time
 	FinishedAt       *time.Time
 	// Actor is who started the copy; nil for older records.
@@ -43,7 +52,7 @@ type DBCopy struct {
 }
 
 const dbCopyColumns = `id, target_app_id, source_app_id, source_slug, source_kind, status, error,
-	bytes, backup_snapshot_id, started_at, finished_at, actor_user_id, actor_login`
+	bytes, backup_snapshot_id, started_at, finished_at, actor_user_id, actor_login, kind, source_snapshot_id`
 
 func scanDBCopy(row rowScanner) (DBCopy, error) {
 	var (
@@ -55,7 +64,7 @@ func scanDBCopy(row rowScanner) (DBCopy, error) {
 		actor    string
 	)
 	err := row.Scan(&c.ID, &c.TargetAppID, &sourceID, &c.SourceSlug, &c.SourceKind, &c.Status, &c.Error,
-		&c.Bytes, &c.BackupSnapshotID, &started, &finished, &actorID, &actor)
+		&c.Bytes, &c.BackupSnapshotID, &started, &finished, &actorID, &actor, &c.Kind, &c.SourceSnapshotID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DBCopy{}, ErrNotFound
 	}
@@ -85,6 +94,26 @@ func (s *Store) StartDBCopy(ctx context.Context, target, source App, kind string
 	id, err := res.LastInsertId()
 	if err != nil {
 		return DBCopy{}, fmt.Errorf("start database copy: %w", err)
+	}
+	return s.GetDBCopy(ctx, id)
+}
+
+// StartDBRestore records the beginning of a restore of the app's own dump
+// snapshot (ARCHITECTURE 10.8): a copy whose source and target are the app.
+func (s *Store) StartDBRestore(ctx context.Context, app App, snapshotID string, now time.Time) (DBCopy, error) {
+	actorID, actorLogin := actorColumns(ctx)
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO db_copies (target_app_id, source_app_id, source_slug, source_kind, status, started_at,
+			actor_user_id, actor_login, kind, source_snapshot_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		app.ID, app.ID, app.Slug, CopySourceSnapshot, CopyRunning, toMillis(now), actorID, actorLogin,
+		CopyKindRestore, snapshotID)
+	if err != nil {
+		return DBCopy{}, fmt.Errorf("start database restore: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return DBCopy{}, fmt.Errorf("start database restore: %w", err)
 	}
 	return s.GetDBCopy(ctx, id)
 }

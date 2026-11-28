@@ -138,6 +138,7 @@ export const BACKUP_TRIGGER_LABELS: Record<BackupRun['trigger'], string> = {
   scheduled: '定期',
   manual: '手動',
   pre_deploy: 'デプロイ前',
+  interval: '間隔のダンプ',
 };
 
 export const BACKUP_STATUS_LABELS: Record<BackupRun['status'], string> = {

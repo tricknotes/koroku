@@ -2,7 +2,7 @@ import Component from '@glimmer/component';
 import { tracked } from '@glimmer/tracking';
 import { service } from '@ember/service';
 import { on } from '@ember/modifier';
-import { fn } from '@ember/helper';
+import { eq, fn } from '@ember/helper';
 import { LinkTo } from '@ember/routing';
 import type Owner from '@ember/owner';
 import AsyncView from 'koroku-console/components/async-view';
@@ -11,6 +11,7 @@ import Banner from 'koroku-console/components/banner';
 import Button, { buttonClass } from 'koroku-console/components/button';
 import ConfirmDialog from 'koroku-console/components/confirm-dialog';
 import DbCopyPanel from 'koroku-console/components/db-copy-panel';
+import DumpRestorePanel from 'koroku-console/components/dump-restore-panel';
 import CopyButton from 'koroku-console/components/copy-button';
 import EmptyState from 'koroku-console/components/empty-state';
 import ErrorMessage from 'koroku-console/components/error-message';
@@ -26,6 +27,7 @@ import type PollerService from 'koroku-console/services/poller';
 import type SessionService from 'koroku-console/services/session';
 import type AppContext from 'koroku-console/utils/app-context';
 import BackupForm, {
+  DUMP_INTERVALS,
   parseList,
   volumeChoices,
   type VolumeChoice,
@@ -34,7 +36,11 @@ import {
   appBackupHealth,
   targetLabel,
 } from 'koroku-console/utils/backup-status';
-import { findPreset, HOOK_PRESETS } from 'koroku-console/utils/db-copy';
+import {
+  canRestoreDump,
+  findPreset,
+  HOOK_PRESETS,
+} from 'koroku-console/utils/db-copy';
 import {
   inputChecked,
   inputValue,
@@ -87,6 +93,22 @@ function downloadLabel(snapshot: Snapshot): string {
   return `${snapshot.target} のダンプをダウンロード`;
 }
 
+function restoreDumpLabel(snapshot: Snapshot): string {
+  return `${snapshot.target} の DB をこのダンプの時点に戻す`;
+}
+
+function intervalLabel(hours: number): string {
+  return (
+    DUMP_INTERVALS.find((choice) => choice.hours === hours)?.label ??
+    `${hours} 時間ごと`
+  );
+}
+
+/** "12 分" from milliseconds, rounded up to whole minutes. */
+function minutes(ms: number | undefined): string {
+  return `${Math.max(1, Math.ceil((ms ?? 0) / 60000))} 分`;
+}
+
 function triggerLabel(run: Pick<BackupRun, 'trigger'>): string {
   return BACKUP_TRIGGER_LABELS[run.trigger] ?? run.trigger;
 }
@@ -111,6 +133,9 @@ export default class AppBackupsTemplate extends Component<Signature> {
 
   @tracked starting = false;
   @tracked runError: unknown = null;
+
+  /** The dump snapshot whose restore is being confirmed (ARCHITECTURE 10.8). */
+  @tracked dumpToRestore: Snapshot | null = null;
 
   @tracked restoring: Snapshot | null = null;
   @tracked restoreBusy = false;
@@ -208,6 +233,28 @@ export default class AppBackupsTemplate extends Component<Signature> {
     });
   }
 
+  /** Whether this dump can be loaded back into the app from here. */
+  canRestore = (snapshot: Snapshot): boolean =>
+    canRestoreDump(this.app, snapshot);
+
+  /** The newest dump result, when it took longer than half its interval. */
+  get slowDump() {
+    if (!this.status.value?.dump_slow) return null;
+    return (
+      this.status.value.last_run?.targets.find(
+        (target) => target.kind === 'dump',
+      ) ?? null
+    );
+  }
+
+  get intervalText(): string {
+    return intervalLabel(this.app.dump_interval_hours ?? 24);
+  }
+
+  get lateHours(): number {
+    return (this.app.dump_interval_hours ?? 24) * 2;
+  }
+
   get restoreExample(): string {
     const service = this.app.dump_hook_service || 'db';
     return `docker compose -p koroku-${this.slug} exec -T ${service} psql -U postgres app < dump.sql`;
@@ -218,6 +265,7 @@ export default class AppBackupsTemplate extends Component<Signature> {
       'backup_exclude_volumes',
       'dump_hook_service',
       'dump_hook_command',
+      'dump_interval_hours',
     ]);
     return Object.entries(this.errors)
       .filter(([name]) => !known.has(name))
@@ -298,6 +346,19 @@ export default class AppBackupsTemplate extends Component<Signature> {
 
   cancelRestore = () => {
     this.restoring = null;
+  };
+
+  requestDumpRestore = (snapshot: Snapshot) => {
+    this.dumpToRestore = snapshot;
+  };
+
+  closeDumpRestore = () => {
+    this.dumpToRestore = null;
+  };
+
+  chooseInterval = (event: Event) => {
+    this.form.dumpIntervalHours = Number(inputValue(event));
+    this.touch();
   };
 
   confirmRestore = async () => {
@@ -466,6 +527,27 @@ export default class AppBackupsTemplate extends Component<Signature> {
               >稼働中に変わったか消えたファイルです。スナップショットは保存されています。</span>
             </Banner>
           {{/if}}
+          {{#if this.status.value.dump_warning}}
+            <Banner
+              @tone="warning"
+              @title="ダンプが {{this.lateHours}} 時間以上取れていません"
+              data-test-dump-late
+            >
+              ダンプの間隔は「{{this.intervalText}}」です。下のスナップショットと、直近の失敗の理由を確かめてください。
+            </Banner>
+          {{/if}}
+          {{#if this.slowDump}}
+            <Banner
+              @tone="warning"
+              @title="ダンプに時間がかかっています"
+              data-test-dump-slow
+            >
+              直近のダンプに約
+              {{minutes this.slowDump.duration_ms}}
+              かかりました。間隔（{{this.intervalText}}）の半分を超えていて、DB
+              にダンプの負荷がかかり続けます。間隔を長くしてください。
+            </Banner>
+          {{/if}}
           {{#if this.restored}}
             <Banner data-test-restored>
               volume
@@ -608,6 +690,18 @@ export default class AppBackupsTemplate extends Component<Signature> {
                               {{on "click" (fn this.requestRestore snapshot)}}
                             >リストア</Button>
                           {{else}}
+                            {{#if (this.canRestore snapshot)}}
+                              <Button
+                                @size="small"
+                                class="button-danger-outline"
+                                aria-label={{restoreDumpLabel snapshot}}
+                                data-test-snapshot-restore-dump
+                                {{on
+                                  "click"
+                                  (fn this.requestDumpRestore snapshot)
+                                }}
+                              >この時点に戻す</Button>
+                            {{/if}}
                             <a
                               class={{buttonClass "default" "small"}}
                               href={{this.downloadUrl snapshot}}
@@ -624,9 +718,11 @@ export default class AppBackupsTemplate extends Component<Signature> {
                 </RowList>
 
                 <details class="disclosure" data-test-dump-help>
-                  <summary>ダンプを DB に戻すには</summary>
+                  <summary>ダンプを手で DB に戻すには</summary>
                   <p>
-                    ダンプの流し込みは手動です。ダウンロードしたファイルをサーバーに置き、DB
+                    ロードフックがあれば、ダンプの行の「この時点に戻す」で
+                    koroku
+                    の中で戻せます。手で戻すときは、ダウンロードしたファイルをサーバーに置き、DB
                     のサービスへ標準入力で渡します。PostgreSQL の例:
                   </p>
                   <div class="command">
@@ -882,6 +978,32 @@ export default class AppBackupsTemplate extends Component<Signature> {
                         />
                       </FormField>
                     </div>
+                    {{#if this.form.intervalAvailable}}
+                      <FormField
+                        @label="ダンプの間隔"
+                        @hint="日次のバックアップ（03:00）から数えた時刻に、ダンプだけを取ります。直近 48 時間のダンプはすべて残ります。1 日より短くするなら、PostgreSQL は pg_dump -Fc -Z0（圧縮しない出力）が向いています。変わらない部分が重複として省かれ、保存先が増えにくくなります。"
+                        @error={{this.errors.dump_interval_hours}}
+                        data-test-field-group="dump_interval_hours"
+                        as |field|
+                      >
+                        <select
+                          id={{field.id}}
+                          aria-describedby={{field.describedBy}}
+                          data-test-field="dump_interval_hours"
+                          {{on "change" this.chooseInterval}}
+                        >
+                          {{#each DUMP_INTERVALS key="hours" as |choice|}}
+                            <option
+                              value={{choice.hours}}
+                              selected={{eq
+                                choice.hours
+                                this.form.dumpIntervalHours
+                              }}
+                            >{{choice.label}}</option>
+                          {{/each}}
+                        </select>
+                      </FormField>
+                    {{/if}}
                   </div>
                 </div>
 
@@ -979,6 +1101,14 @@ export default class AppBackupsTemplate extends Component<Signature> {
             >もう一度確認</Button>
           </div>
         </div>
+      {{/if}}
+
+      {{#if overview.configured}}
+        <DumpRestorePanel
+          @model={{@model}}
+          @requested={{this.dumpToRestore}}
+          @onClose={{this.closeDumpRestore}}
+        />
       {{/if}}
 
       {{#unless @model.isProduction}}

@@ -34,6 +34,10 @@ type copyHarness struct {
 	loaded     string
 	loadSawEOF bool
 	loadErr    error
+	// loadErrs, when not empty, end the next loads in turn instead of
+	// loadErr; loads records what each load read.
+	loadErrs []error
+	loads    []string
 	// running lists the target services `ps` reports.
 	running []string
 	// onRun fails `docker compose run` (the post-load command).
@@ -45,6 +49,17 @@ type fakeCopyBackups struct {
 	backedUp []string
 	err      error
 	latest   *DumpSnapshot
+	// dumps are the snapshots DumpByID finds.
+	dumps map[string]DumpSnapshot
+}
+
+func (f *fakeCopyBackups) DumpByID(_ context.Context, _ store.App, id string) (DumpSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if d, ok := f.dumps[id]; ok {
+		return d, nil
+	}
+	return DumpSnapshot{}, ErrDumpNotFound
 }
 
 func (f *fakeCopyBackups) BackupDump(_ context.Context, app store.App) (string, error) {
@@ -163,8 +178,14 @@ func (c *copyHarness) compose(ctx context.Context, sub string, cmd runner.Cmd) e
 			c.mu.Lock()
 			defer c.mu.Unlock()
 			c.loaded, c.loadSawEOF = data, eof
+			c.loads = append(c.loads, data)
 			if !eof {
 				return ctx.Err()
+			}
+			if len(c.loadErrs) > 0 {
+				err := c.loadErrs[0]
+				c.loadErrs = c.loadErrs[1:]
+				return err
 			}
 			return c.loadErr
 		}

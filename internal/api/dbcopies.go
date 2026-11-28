@@ -15,18 +15,25 @@ import (
 // DBCopier copies a database into a staging app (ARCHITECTURE 10.6).
 type DBCopier interface {
 	StartCopy(ctx context.Context, req deploy.CopyRequest) (store.DBCopy, error)
+	// StartRestore loads one of the app's own dump snapshots into it
+	// (ARCHITECTURE 10.8).
+	StartRestore(ctx context.Context, app store.App, snapshotID string) (store.DBCopy, error)
 	CopyLogPath(slug string, id int64) string
 }
 
 type dbCopyJSON struct {
-	ID               int64      `json:"id"`
-	TargetApp        string     `json:"target_app"`
-	SourceApp        string     `json:"source_app"`
-	SourceKind       string     `json:"source_kind"`
-	Status           string     `json:"status"`
-	Error            string     `json:"error"`
-	Bytes            int64      `json:"bytes"`
-	BackupSnapshotID string     `json:"backup_snapshot_id"`
+	ID               int64  `json:"id"`
+	TargetApp        string `json:"target_app"`
+	SourceApp        string `json:"source_app"`
+	SourceKind       string `json:"source_kind"`
+	Status           string `json:"status"`
+	Error            string `json:"error"`
+	Bytes            int64  `json:"bytes"`
+	BackupSnapshotID string `json:"backup_snapshot_id"`
+	// Kind is copy or restore; a restore loaded SourceSnapshotID, a dump
+	// of the app itself.
+	Kind             string     `json:"kind"`
+	SourceSnapshotID string     `json:"source_snapshot_id"`
 	StartedAt        time.Time  `json:"started_at"`
 	FinishedAt       *time.Time `json:"finished_at"`
 	Actor            *actorJSON `json:"actor"`
@@ -36,6 +43,7 @@ func dbCopyToJSON(c store.DBCopy, target string) dbCopyJSON {
 	return dbCopyJSON{
 		ID: c.ID, TargetApp: target, SourceApp: c.SourceSlug, SourceKind: c.SourceKind,
 		Status: c.Status, Error: c.Error, Bytes: c.Bytes, BackupSnapshotID: c.BackupSnapshotID,
+		Kind: c.Kind, SourceSnapshotID: c.SourceSnapshotID,
 		StartedAt: c.StartedAt, FinishedAt: c.FinishedAt, Actor: actorToJSON(c.Actor),
 	}
 }
@@ -149,8 +157,47 @@ func (s *Server) handleStartDBCopy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, dbCopyToJSON(c, target.Slug))
 }
 
-// writeCopyError maps the refusals of StartCopy; it reports whether one
-// was written.
+// handleStartDBRestore loads one of the app's own dump snapshots into its
+// database (ARCHITECTURE 10.8). It answers once the restore has started; the
+// record and its log follow it like a copy's.
+func (s *Server) handleStartDBRestore(w http.ResponseWriter, r *http.Request) {
+	app, ok := s.loadApp(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		SnapshotID string `json:"snapshot_id"`
+		Confirm    string `json:"confirm"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if !snapshotIDPattern.MatchString(in.SnapshotID) {
+		writeValidationError(w, fieldErrors{"snapshot_id": "is not a snapshot ID"})
+		return
+	}
+	// Replacing the data of production is confirmed like deleting the app.
+	if app.Environment == store.EnvironmentProduction && in.Confirm != app.Slug {
+		writeError(w, http.StatusUnprocessableEntity, "confirmation_mismatch", "type the slug of the app to confirm")
+		return
+	}
+	if !s.requireRecentAuth(w, r) {
+		return
+	}
+	if s.copier == nil {
+		writeError(w, http.StatusServiceUnavailable, "not_configured", "database restores are not available")
+		return
+	}
+	c, err := s.copier.StartRestore(r.Context(), app, in.SnapshotID)
+	if s.writeCopyError(w, r, err) {
+		return
+	}
+	s.recordActivity(r, app.ID, actDBRestored, map[string]any{"copy_id": c.ID, "snapshot_id": c.SourceSnapshotID})
+	writeJSON(w, http.StatusAccepted, dbCopyToJSON(c, app.Slug))
+}
+
+// writeCopyError maps the refusals of StartCopy and StartRestore; it
+// reports whether one was written.
 func (s *Server) writeCopyError(w http.ResponseWriter, r *http.Request, err error) bool {
 	type refusal struct {
 		status  int
@@ -168,6 +215,9 @@ func (s *Server) writeCopyError(w http.ResponseWriter, r *http.Request, err erro
 		deploy.ErrNoDumpHook:           {http.StatusUnprocessableEntity, "source_dump_hook_missing", "the source app has no dump hook"},
 		deploy.ErrNoLoadHook:           {http.StatusUnprocessableEntity, "target_load_hook_missing", "the target app has no load hook"},
 		deploy.ErrBackupsNotConfigured: {http.StatusServiceUnavailable, "not_configured", "backups are not configured"},
+		deploy.ErrDumpNotFound:         {http.StatusNotFound, "snapshot_not_found", "no such dump snapshot for this app"},
+		deploy.ErrDumpOfOtherService:   {http.StatusUnprocessableEntity, "snapshot_of_other_service", "the dump was taken in another service than the dump hook's"},
+		deploy.ErrRestoreNeedsDumpHook: {http.StatusUnprocessableEntity, "dump_hook_missing", "the app needs a dump hook, so that its current data is kept first"},
 	}
 	if err == nil {
 		return false
